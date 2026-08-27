@@ -1,0 +1,150 @@
+@import 'tailwindcss';
+
+/*
+ * Semantic color tokens (`--paper`, `--ink`, ...) rather than raw Tailwind
+ * grays. Components use `bg-paper`, `text-ink`, `border-line`.
+ */
+:root {
+  --paper: #faf6ee;
+  --paper-raised: #fffcf7;
+  --paper-inset: #e8dccf;
+  --sidebar: #f5efe5;
+  --ink: #1c1612;
+  --ink-muted: #6f6156;
+  --line: #eadfce;
+  --accent: #c26d3a;
+  --accent-ink: #ffffff;
+  --success: #2d8a5e;
+  --success-bg: #e2f0e8;
+  --danger: #dc2626;
+}
+
+:root.dark {
+  --paper: #1a1614;
+  --paper-raised: #241e1b;
+  --paper-inset: #2e2825;
+  --sidebar: #161210;
+  --ink: #f2ece0;
+  --ink-muted: #a49a86;
+  --line: #3a3327;
+  --accent: #e18a58;
+  --accent-ink: #1a1614;
+  --success: #5db88a;
+  --success-bg: #1e3a2c;
+  --danger: #e5695c;
+}
+
+@theme {
+  --color-paper: var(--paper);
+  --color-paper-raised: var(--paper-raised);
+  --color-paper-inset: var(--paper-inset);
+  --color-sidebar: var(--sidebar);
+  --color-ink: var(--ink);
+  --color-muted: var(--ink-muted);
+  --color-ink-muted: var(--ink-muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-success: var(--success);
+  --color-success-bg: var(--success-bg);
+  --color-danger: var(--danger);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family:
+    'Segoe UI',
+    'Microsoft YaHei',
+    'Microsoft YaHei UI',
+    'PingFang SC',
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  user-select: none;
+}
+
+input,
+textarea,
+pre,
+.markdown {
+  user-select: text;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.titlebar {
+  -webkit-app-region: drag;
+}
+
+.titlebar-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 999px;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 1.1em 0 0.4em;
+}
+
+.markdown h1 {
+  font-size: 1.6em;
+}
+
+.markdown h2 {
+  font-size: 1.25em;
+}
+
+.markdown p {
+  margin: 0 0 0.6em;
+}
+
+.markdown p:last-child {
+  margin-bottom: 0;
+}
+
+.markdown pre {
+  background: var(--paper-raised);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  overflow-x: auto;
+}
+
+.markdown code {
+  font-family:
+    ui-monospace, 'Cascadia Code', 'SF Mono', 'Consolas', 'Microsoft YaHei UI', monospace;
+  font-size: 0.9em;
+}
+
+.markdown :not(pre) > code {
+  background: var(--paper-raised);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+}
+
+.markdown ul,
+.markdown ol {
+  padding-left: 1.4em;
+}

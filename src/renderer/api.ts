@@ -1,0 +1,232 @@
+import type { Session, SessionSummary } from '../main/server/storage/ports';
+import type { DirEntry } from '../shared/workspace';
+import type { PublicSettings, SettingsPatch } from '../shared/settings';
+import type { Schedule, Thought } from '../shared/schedule';
+import { SCHEDULE_PRESETS } from '../shared/schedule';
+import { parseStreamLine, type ChatStreamEvent } from '../shared/stream';
+
+let originPromise: Promise<string> | null = null;
+
+function apiOrigin(): Promise<string> {
+  if (!originPromise) originPromise = window.reizo.getApiOrigin();
+  return originPromise;
+}
+
+async function api(path: string, init?: RequestInit): Promise<Response> {
+  const origin = await apiOrigin();
+  const res = await fetch(`${origin}${path}`, init);
+  if (!res.ok && res.status !== 204) {
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(body.error ?? `Request failed: ${res.status}`);
+  }
+  return res;
+}
+
+export async function listSessions(): Promise<SessionSummary[]> {
+  const res = await api('/api/sessions');
+  const { sessions } = await res.json();
+  return sessions;
+}
+
+export async function createSession(title?: string, workspacePath?: string | null): Promise<Session> {
+  const res = await api('/api/sessions', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ title, workspacePath }),
+  });
+  const { session } = await res.json();
+  return session;
+}
+
+export async function getSession(id: string): Promise<Session> {
+  const res = await api(`/api/sessions/${id}`);
+  const { session } = await res.json();
+  return session;
+}
+
+export async function renameSession(id: string, title: string): Promise<void> {
+  await api(`/api/sessions/${id}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ title }),
+  });
+}
+
+export async function deleteSession(id: string): Promise<void> {
+  await api(`/api/sessions/${id}`, { method: 'DELETE' });
+}
+
+export async function sendMessage(
+  sessionId: string,
+  text: string,
+  options: {
+    providerId?: string;
+    model?: string;
+    mentions?: string[];
+    skillId?: string;
+    attachments?: { name: string; content: string }[];
+    signal?: AbortSignal;
+    onEvent: (event: ChatStreamEvent) => void;
+  },
+): Promise<void> {
+  const origin = await apiOrigin();
+  const res = await fetch(`${origin}/api/sessions/${sessionId}/messages`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      text,
+      providerId: options.providerId,
+      model: options.model,
+      mentions: options.mentions,
+      skillId: options.skillId,
+      attachments: options.attachments,
+    }),
+    signal: options.signal,
+  });
+
+  const contentType = res.headers.get('content-type') ?? '';
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(body.error ?? `Request failed: ${res.status}`);
+  }
+  if (!contentType.includes('ndjson') && contentType.includes('json')) {
+    const body = await res.json();
+    throw new Error(body.error ?? 'Unexpected JSON response');
+  }
+
+  const reader = res.body?.getReader();
+  if (!reader) return;
+  const decoder = new TextDecoder();
+  let buffer = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      const event = parseStreamLine(line);
+      if (event) options.onEvent(event);
+    }
+  }
+  const tail = parseStreamLine(buffer);
+  if (tail) options.onEvent(tail);
+}
+
+export async function stopMessage(sessionId: string): Promise<void> {
+  await api(`/api/sessions/${sessionId}/stop`, { method: 'POST' });
+}
+
+export async function answerPermission(
+  sessionId: string,
+  id: string,
+  decision: 'allow' | 'deny' | 'allow-session',
+): Promise<void> {
+  await api(`/api/sessions/${sessionId}/permissions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id, decision }),
+  });
+}
+
+export async function answerAsk(sessionId: string, id: string, answers: Record<string, string>): Promise<void> {
+  await api(`/api/sessions/${sessionId}/ask`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id, answers }),
+  });
+}
+
+export async function listSkills(): Promise<{ id: string; name: string; description: string; source: 'bundled' | 'user' }[]> {
+  const res = await api('/api/skills');
+  const body = await res.json();
+  return body.skills ?? [];
+}
+
+export async function listSchedules(): Promise<{ schedules: Schedule[]; presets: typeof SCHEDULE_PRESETS }> {
+  const res = await api('/api/schedules');
+  return res.json();
+}
+
+export async function createSchedule(input: {
+  name?: string;
+  prompt: string;
+  intervalMs: number;
+  skillId?: string;
+}): Promise<Schedule> {
+  const res = await api('/api/schedules', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const body = await res.json();
+  return body.schedule;
+}
+
+export async function updateSchedule(id: string, patch: Record<string, unknown>): Promise<Schedule> {
+  const res = await api(`/api/schedules/${id}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  const body = await res.json();
+  return body.schedule;
+}
+
+export async function deleteSchedule(id: string): Promise<void> {
+  await api(`/api/schedules/${id}`, { method: 'DELETE' });
+}
+
+export async function listThoughts(): Promise<Thought[]> {
+  const res = await api('/api/schedules/thoughts');
+  const body = await res.json();
+  return body.thoughts ?? [];
+}
+
+export async function createThought(content: string): Promise<Thought> {
+  const res = await api('/api/schedules/thoughts', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ content }),
+  });
+  const body = await res.json();
+  return body.thought;
+}
+
+export async function deleteThought(id: string): Promise<void> {
+  await api(`/api/schedules/thoughts/${id}`, { method: 'DELETE' });
+}
+
+export async function getSettings(): Promise<PublicSettings> {
+  const res = await api('/api/settings');
+  return res.json();
+}
+
+export async function patchSettings(patch: SettingsPatch): Promise<PublicSettings> {
+  const res = await api('/api/settings', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  return res.json();
+}
+
+export async function setOpenAiApiKey(openaiApiKey: string): Promise<PublicSettings> {
+  return patchSettings({ provider: { id: 'openai', apiKey: openaiApiKey } });
+}
+
+export function pickFolder(): Promise<string | null> {
+  return window.reizo.pickFolder();
+}
+
+export function listWorkspace(relativePath?: string): Promise<DirEntry[]> {
+  return window.reizo.listWorkspace(relativePath);
+}
+
+export function readWorkspaceFile(relativePath: string) {
+  return window.reizo.readWorkspaceFile(relativePath);
+}
+
+export function flattenWorkspace(): Promise<DirEntry[]> {
+  return window.reizo.flattenWorkspace();
+}
