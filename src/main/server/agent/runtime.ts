@@ -49,10 +49,24 @@ export async function runChatTurn(options: {
   attachments?: { name: string; content: string }[];
   artifactStore?: ArtifactStore;
   projectStore?: ProjectStore;
+  truncateAfterId?: string;
+  regenerate?: boolean;
 }): Promise<Response> {
-  const { sessionStore, settingsStore, sessionId, userText, mentions = [], skill, attachments = [], artifactStore, projectStore } = options;
+  const {
+    sessionStore,
+    settingsStore,
+    sessionId,
+    userText,
+    mentions = [],
+    skill,
+    attachments = [],
+    artifactStore,
+    projectStore,
+    truncateAfterId,
+    regenerate = false,
+  } = options;
 
-  const session = await sessionStore.get(sessionId);
+  let session = await sessionStore.get(sessionId);
   if (!session) {
     return Response.json({ error: 'Session not found' }, { status: 404 });
   }
@@ -79,6 +93,14 @@ export async function runChatTurn(options: {
     return Response.json({ error: 'Provider is missing a base URL or model id.' }, { status: 400 });
   }
 
+  if (truncateAfterId) {
+    const idx = session.messages.findIndex((m) => m.id === truncateAfterId);
+    if (idx < 0) {
+      return Response.json({ error: 'truncateAfterId not found' }, { status: 400 });
+    }
+    session = await sessionStore.setMessages(sessionId, session.messages.slice(0, idx));
+  }
+
   const extraBlocks = [
     mentions.length > 0 ? `Referenced workspace paths:\n${mentions.map((m) => `- ${m}`).join('\n')}` : '',
     attachments.length > 0
@@ -88,15 +110,25 @@ export async function runChatTurn(options: {
     .filter(Boolean)
     .join('\n\n');
 
-  const userMessage: ChatMessage = {
-    id: nanoid(),
-    role: 'user',
-    content: extraBlocks ? `${userText}\n\n${extraBlocks}` : userText,
-    createdAt: new Date().toISOString(),
-  };
-  await sessionStore.appendMessage(sessionId, userMessage);
+  let userMessage: ChatMessage | null = null;
+  if (regenerate) {
+    const lastUser = [...session.messages].reverse().find((m) => m.role === 'user');
+    if (!lastUser) {
+      return Response.json({ error: 'No user message to regenerate' }, { status: 400 });
+    }
+    userMessage = lastUser;
+  } else {
+    userMessage = {
+      id: nanoid(),
+      role: 'user',
+      content: extraBlocks ? `${userText}\n\n${extraBlocks}` : userText,
+      createdAt: new Date().toISOString(),
+    };
+    await sessionStore.appendMessage(sessionId, userMessage);
+    session = { ...session, messages: [...session.messages, userMessage] };
+  }
 
-  if (artifactStore && attachments.length > 0) {
+  if (!regenerate && artifactStore && attachments.length > 0) {
     await Promise.all(
       attachments.map((file) =>
         artifactStore.create({
@@ -110,7 +142,7 @@ export async function runChatTurn(options: {
     );
   }
 
-  if ((session.title === 'New chat' || session.title === '新对话') && userText.trim()) {
+  if (!regenerate && (session.title === 'New chat' || session.title === '新对话') && userText.trim()) {
     const title = userText.trim().replace(/\s+/g, ' ').slice(0, 60);
     await sessionStore.rename(sessionId, title);
   }
@@ -138,7 +170,6 @@ export async function runChatTurn(options: {
   const history: ModelMessage[] = [
     { role: 'system', content: systemParts.join('\n\n') },
     ...session.messages.map((m) => ({ role: m.role, content: m.content }) as ModelMessage),
-    { role: 'user', content: userMessage.content },
   ];
 
   const previous = abortBySession.get(sessionId);

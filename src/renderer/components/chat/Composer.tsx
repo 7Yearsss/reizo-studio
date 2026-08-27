@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AtSign, FolderTree, Paperclip, Shield } from 'lucide-react';
+import { isImeComposingEvent } from '../../lib/ime';
 import PromptCard from './PromptCard';
 import ModelPicker from './ModelPicker';
 import MentionMenu, { extractMentionQuery } from './MentionMenu';
@@ -37,7 +38,7 @@ export default function Composer({
   onSend: (
     text: string,
     mentions: string[],
-    extra: { skillId?: string; attachments?: { name: string; content: string }[] },
+    extra: { skillId?: string; attachments?: { name: string; content: string }[]; replaceFromId?: string },
   ) => void;
   onStop?: () => void;
   onToggleTree?: () => void;
@@ -48,6 +49,7 @@ export default function Composer({
   const [mentions, setMentions] = useState<string[]>([]);
   const [skillId, setSkillId] = useState<string | undefined>();
   const [attachments, setAttachments] = useState<{ name: string; content: string }[]>([]);
+  const replaceFromIdRef = useRef<string | undefined>(undefined);
   const workspacePath = useSettingsStore((s) => s.settings.workspacePath);
   const permissionMode = useSettingsStore((s) => s.settings.permissionMode);
   const skills = useSkillStore().skills;
@@ -55,18 +57,27 @@ export default function Composer({
   const ask = useChatStore((s) => (sessionId ? s.askBySession[sessionId] : null)) ?? null;
   const queue = useChatStore((s) => (sessionId ? s.queueBySession[sessionId] : undefined)) ?? [];
   const todos = useChatStore((s) => (sessionId ? s.todosBySession[sessionId] : undefined)) ?? [];
+  const seed = useChatStore((s) => (sessionId ? s.composerSeedBySession[sessionId] : undefined));
   const mentionQuery = extractMentionQuery(draft);
   const slashQuery = extractSlashQuery(draft);
   const slashCommands = buildSlashCommands(skills);
   const activeSkill = skills.find((s) => s.id === skillId);
 
+  useEffect(() => {
+    if (!seed) return;
+    setDraft(seed.text);
+    replaceFromIdRef.current = seed.replaceFromId;
+  }, [seed?.nonce, seed?.text, seed?.replaceFromId]);
+
   function submit() {
     if (!draft.trim() || disabled) return;
-    onSend(draft, mentions, { skillId, attachments });
+    onSend(draft, mentions, { skillId, attachments, replaceFromId: replaceFromIdRef.current });
     setDraft('');
     setMentions([]);
     setSkillId(undefined);
     setAttachments([]);
+    replaceFromIdRef.current = undefined;
+    if (sessionId) chatStore.clearComposerSeed(sessionId);
   }
 
   useEffect(() => {
@@ -161,18 +172,15 @@ export default function Composer({
               onSubmit={submit}
               onStop={onStop}
               sending={sending}
-              placeholder="输入消息，/ 调用技能，@ 引用文件，可拖入附件…"
+              placeholder="输入消息，/ 调用技能，@ 引用文件…"
+              hint="Enter 发送 · Shift+Enter 换行 · 输入法选词时不会发送"
               disabled={disabled}
               autoFocus={autoFocus}
               rows={2}
               onKeyDown={(e) => {
+                if (isImeComposingEvent(e)) return;
                 if ((mentionQuery !== null || slashQuery !== null) && e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
-                  return;
-                }
-                if (sending && e.key === 'Enter' && !e.shiftKey && draft.trim()) {
-                  e.preventDefault();
-                  submit();
                 }
               }}
               toolbar={
@@ -194,9 +202,8 @@ export default function Composer({
                   </select>
                   <button
                     type="button"
-                    className="rounded-full p-1.5 text-ink-muted hover:bg-paper hover:text-ink"
+                    className="rounded-full p-1.5 text-ink-muted transition-colors duration-150 hover:bg-paper hover:text-ink"
                     title="附件"
-                    onClick={() => setDraft((d) => d)}
                     onMouseDown={(e) => e.preventDefault()}
                   >
                     <label className="flex cursor-pointer items-center">
@@ -215,7 +222,7 @@ export default function Composer({
                   {workspacePath && (
                     <button
                       type="button"
-                      className="rounded-full p-1.5 text-ink-muted hover:bg-paper hover:text-ink"
+                      className="rounded-full p-1.5 text-ink-muted transition-colors duration-150 hover:bg-paper hover:text-ink"
                       title="@ 引用文件"
                       onClick={() => setDraft((d) => (d.endsWith('@') ? d : `${d}@`))}
                     >
@@ -226,7 +233,7 @@ export default function Composer({
                     <button
                       type="button"
                       onClick={onToggleTree}
-                      className={`rounded-full p-1.5 hover:bg-paper ${treeOpen ? 'text-accent' : 'text-ink-muted hover:text-ink'}`}
+                      className={`rounded-full p-1.5 transition-colors duration-150 hover:bg-paper ${treeOpen ? 'text-accent' : 'text-ink-muted hover:text-ink'}`}
                       title="右侧面板"
                     >
                       <FolderTree size={14} />

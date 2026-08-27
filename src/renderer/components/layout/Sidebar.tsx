@@ -144,7 +144,7 @@ export default function Sidebar() {
                 aria-current={active ? 'page' : undefined}
                 aria-label={item.label}
                 className={cn(
-                  'flex w-full flex-col items-center gap-1 rounded-xl px-1 py-2 text-center text-[10px]',
+                  'flex w-full flex-col items-center gap-1 rounded-xl px-1 py-2 text-center text-[10px] transition-colors duration-200',
                   active ? 'bg-paper-inset/80 font-medium text-ink' : 'text-ink-muted hover:bg-paper-inset/50 hover:text-ink',
                 )}
               >
@@ -156,14 +156,14 @@ export default function Sidebar() {
         </div>
       </nav>
 
-      {!collapsed && (
-        <div className="flex w-[196px] min-w-0 flex-col">
+      <div className={cn("flex h-full min-w-0 flex-col overflow-hidden transition-[width,opacity] duration-200 ease-out", collapsed ? "w-0 opacity-0" : "w-[196px] opacity-100")} aria-hidden={collapsed}>
+        <div className="flex h-full w-[196px] min-w-0 flex-col">
           <div className="flex items-center gap-1 px-3 pt-3 pb-2">
             <span className="flex-1 truncate text-[15px] font-semibold tracking-tight">Reizo</span>
           </div>
 
           {mode === 'chat' && (
-            <>
+            <div className="anim-fade flex min-h-0 flex-1 flex-col">
               <div className="flex flex-col gap-0.5 px-2">
                 <button type="button" onClick={() => tabStore.newLauncherTab()} className={row(activeTab?.kind === 'launcher')}>
                   <CirclePlus size={15} strokeWidth={1.8} className="shrink-0" />
@@ -274,11 +274,11 @@ export default function Sidebar() {
                   </div>
                 )}
               </nav>
-            </>
+            </div>
           )}
 
           {mode === 'projects' && (
-            <>
+            <div className="anim-fade flex min-h-0 flex-1 flex-col">
               <div className="flex items-center gap-1 px-2">
                 <button
                   type="button"
@@ -377,11 +377,11 @@ export default function Sidebar() {
                   </div>
                 )}
               </nav>
-            </>
+            </div>
           )}
 
           {mode === 'skills' && (
-            <>
+            <div className="anim-fade flex min-h-0 flex-1 flex-col">
               <div className="flex items-center justify-between px-4 pt-1 pb-2">
                 <p className="text-[13px] text-ink-muted">技能</p>
                 <button type="button" onClick={() => tabStore.openPluginsTab()} className="text-[11px] text-accent">
@@ -415,11 +415,11 @@ export default function Sidebar() {
                   安装 SKILL.md
                 </button>
               </nav>
-            </>
+            </div>
           )}
 
           {mode === 'settings' && (
-            <div className="flex-1 px-4 py-2 text-sm text-ink-muted">
+            <div className="anim-fade flex-1 px-4 py-2 text-sm text-ink-muted">
               <p>在右侧打开设置页，配置模型和外观。</p>
               <button type="button" onClick={() => tabStore.openSettingsTab()} className="mt-3 text-accent">
                 打开设置
@@ -453,7 +453,7 @@ export default function Sidebar() {
             </div>
           </div>
         </div>
-      )}
+      </div>
 
       <ProjectDialog open={projectDialogOpen} onClose={() => setProjectDialogOpen(false)} />
     </aside>

@@ -77,8 +77,19 @@ export async function renameSession(id: string, title: string): Promise<void> {
   });
 }
 
+
 export async function deleteSession(id: string): Promise<void> {
   await api(`/api/sessions/${id}`, { method: 'DELETE' });
+}
+
+export async function truncateSessionMessages(id: string, truncateAfterId: string): Promise<Session> {
+  const res = await api(`/api/sessions/${id}/messages`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ truncateAfterId }),
+  });
+  const { session } = await res.json();
+  return session;
 }
 
 export async function sendMessage(
@@ -90,6 +101,8 @@ export async function sendMessage(
     mentions?: string[];
     skillId?: string;
     attachments?: { name: string; content: string }[];
+    truncateAfterId?: string;
+    regenerate?: boolean;
     signal?: AbortSignal;
     onEvent: (event: ChatStreamEvent) => void;
   },
@@ -105,6 +118,8 @@ export async function sendMessage(
       mentions: options.mentions,
       skillId: options.skillId,
       attachments: options.attachments,
+      truncateAfterId: options.truncateAfterId,
+      regenerate: options.regenerate || undefined,
     }),
     signal: options.signal,
   });
