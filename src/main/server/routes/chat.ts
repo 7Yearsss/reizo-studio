@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import type { SessionStore } from '../storage/ports';
 import type { SettingsStore } from '../storage/settingsStore';
+import type { ArtifactStore } from '../storage/artifactStore';
+import type { ProjectStore } from '../storage/projectStore';
 import { abortChatTurn, runChatTurn } from '../agent/runtime';
 import { answerAsk, answerPermission, type PermissionDecision } from '../agent/permissions';
 import { loadSkills } from '../../skills';
@@ -11,6 +13,8 @@ export function createChatRouter(
   sessionStore: SessionStore,
   settingsStore: SettingsStore,
   skillsDirs: string[] = [],
+  artifactStore?: ArtifactStore,
+  projectStore?: ProjectStore,
 ) {
   const router = new Hono();
 
@@ -49,6 +53,8 @@ export function createChatRouter(
       mentions,
       skill,
       attachments,
+      artifactStore,
+      projectStore,
     });
   });
 

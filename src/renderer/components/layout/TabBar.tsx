@@ -15,7 +15,9 @@ export default function TabBar() {
           return (
             <button
               key={tab.id}
+              type="button"
               onClick={() => tabStore.selectTab(tab.id)}
+              title={tab.title}
               className={cn(
                 'group flex max-w-[200px] min-w-[120px] items-center gap-1.5 rounded-t-md px-3 py-1.5 text-[13px]',
                 active ? 'bg-paper text-ink' : 'text-ink-muted hover:bg-paper-inset/70 hover:text-ink',
@@ -39,7 +41,7 @@ export default function TabBar() {
                   tabStore.closeTab(tab.id);
                 }}
                 className="rounded p-0.5 opacity-0 hover:bg-paper-inset group-hover:opacity-100"
-                aria-label="Close tab"
+                aria-label="关闭标签"
               >
                 <X size={11} />
               </span>
@@ -48,9 +50,11 @@ export default function TabBar() {
         })}
       </div>
       <button
+        type="button"
         className="titlebar-no-drag mr-2 rounded-md p-1.5 text-ink-muted hover:bg-paper-inset hover:text-ink"
         onClick={() => tabStore.newLauncherTab()}
-        aria-label="New tab"
+        aria-label="新建标签"
+        title="开始创作"
       >
         <Plus size={14} />
       </button>

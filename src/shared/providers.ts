@@ -7,9 +7,25 @@ export interface ProviderPreset {
   models: { id: string; name: string }[];
   websiteUrl?: string;
   allowCustomBaseUrl?: boolean;
+  /** Extra settings copy shown on the provider card. */
+  description?: string;
 }
 
 export const PROVIDER_PRESETS: ProviderPreset[] = [
+  {
+    id: 'reizo',
+    name: 'Reizo (Winlume)',
+    tag: 'Reizo',
+    baseUrl: 'https://winlume.v2api.top/api/v1',
+    defaultModel: 'gpt-4o-mini',
+    description: '与网页 Studio 同一后端（Reizo BFF → new-api）',
+    models: [
+      { id: 'gpt-4o-mini', name: 'GPT-4o mini' },
+      { id: 'gpt-4o', name: 'GPT-4o' },
+      { id: 'claude-sonnet-4', name: 'Claude Sonnet 4' },
+      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+    ],
+  },
   {
     id: 'openai',
     name: 'OpenAI',

@@ -62,6 +62,20 @@ async function main() {
   }
 
   {
+    const res = await call('/api/settings');
+    const body = await res.json();
+    const reizo = body.providers.find((p: { id: string }) => p.id === 'reizo');
+    check(
+      'settings-reizo-preset',
+      reizo?.name === 'Reizo (Winlume)' &&
+        typeof reizo?.baseUrl === 'string' &&
+        reizo.baseUrl.includes('winlume.v2api.top') &&
+        reizo.hasKey === false,
+      reizo,
+    );
+  }
+
+  {
     const put = await call('/api/settings', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
@@ -144,6 +158,58 @@ async function main() {
     check('session-rename', session.title === 'Renamed');
   }
 
+  let projectId = '';
+  {
+    const created = await call('/api/projects', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Desk', description: 'Local', instructions: 'Be terse.' }),
+    });
+    const body = await created.json();
+    projectId = body.project?.id ?? '';
+    check('project-create', created.status === 201 && body.project?.name === 'Desk', body);
+  }
+  {
+    const list = await call('/api/projects');
+    const body = await list.json();
+    check('project-list', Array.isArray(body.projects) && body.projects.some((x: { id: string }) => x.id === projectId));
+  }
+  {
+    const patched = await call(`/api/sessions/${sessionId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ projectId }),
+    });
+    const { session } = await patched.json();
+    check('session-assign-project', session.projectId === projectId);
+  }
+  {
+    const list = await call(`/api/sessions?projectId=${encodeURIComponent(projectId)}`);
+    const { sessions } = await list.json();
+    check('session-list-by-project', sessions.length === 1 && sessions[0].id === sessionId, sessions);
+  }
+  let artifactId = '';
+  {
+    const created = await call(`/api/sessions/${sessionId}/artifacts`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'note.md', content: '# hi', source: 'attachment' }),
+    });
+    const body = await created.json();
+    artifactId = body.artifact?.id ?? '';
+    check('artifact-create', created.status === 201 && body.artifact?.kind === 'markdown', body);
+  }
+  {
+    const list = await call(`/api/sessions/${sessionId}/artifacts`);
+    const body = await list.json();
+    check('artifact-list', body.artifacts?.length === 1 && body.artifacts[0].id === artifactId);
+  }
+  {
+    const get = await call(`/api/artifacts/${artifactId}`);
+    const body = await get.json();
+    check('artifact-get', body.artifact?.content.includes('# hi'));
+  }
+
   {
     await call('/api/settings', {
       method: 'PUT',
@@ -165,10 +231,21 @@ async function main() {
     const { sessions } = await list.json();
     check('session-delete', del.status === 204 && sessions.length === 0);
   }
+  {
+    const list = await call(`/api/sessions/${sessionId}/artifacts`);
+    check('artifact-session-cleanup', list.status === 404, list.status);
+  }
+  {
+    const del = await call(`/api/projects/${projectId}`, { method: 'DELETE' });
+    const list = await call('/api/projects');
+    const body = await list.json();
+    check('project-delete', del.status === 204 && body.projects.length === 0, body.projects);
+  }
 
   {
-    const inside = resolveInsideWorkspace('C:\\work\\reizo', 'src\\app.ts');
-    check('workspace-inside', inside.toLowerCase().endsWith(path.join('work', 'reizo', 'src', 'app.ts').toLowerCase()), inside);
+    const root = path.resolve('work', 'reizo');
+    const inside = resolveInsideWorkspace(root, path.join('src', 'app.ts'));
+    check('workspace-inside', inside === path.join(root, 'src', 'app.ts'), inside);
     let escaped = false;
     try {
       resolveInsideWorkspace('C:\\work\\reizo', '..\\Windows\\System32');

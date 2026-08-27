@@ -8,6 +8,10 @@ import { createSkillsRouter } from './routes/skills';
 import { createSchedulesRouter } from './routes/schedules';
 import { createScheduleStore } from './storage/scheduleStore';
 import { createThoughtStore } from './storage/thoughtStore';
+import { createProjectStore } from './storage/projectStore';
+import { createArtifactStore } from './storage/artifactStore';
+import { createProjectsRouter } from './routes/projects';
+import { createArtifactsRouter, createSessionArtifactsRouter } from './routes/artifacts';
 
 export interface CreateAppOptions {
   /** Directory the local session/settings JSON files live under. */
@@ -54,14 +58,19 @@ function originGuard(options: CreateAppOptions): MiddlewareHandler {
 export function createApp(options: CreateAppOptions) {
   const sessionStore = createFileSessionStore(options.dataRoot);
   const settingsStore = options.settingsStore ?? createSettingsStore(options.dataRoot);
+  const projectStore = createProjectStore(options.dataRoot);
+  const artifactStore = createArtifactStore(options.dataRoot);
 
   const app = new Hono();
   app.use('*', originGuard(options));
 
   app.get('/api/health', (c) => c.json({ ok: true }));
   const skillsDirs = options.skillsDirs ?? [];
-  app.route('/api/sessions', createSessionsRouter(sessionStore));
-  app.route('/api/sessions', createChatRouter(sessionStore, settingsStore, skillsDirs));
+  app.route('/api/sessions', createSessionsRouter(sessionStore, artifactStore));
+  app.route('/api/sessions', createChatRouter(sessionStore, settingsStore, skillsDirs, artifactStore, projectStore));
+  app.route('/api/sessions', createSessionArtifactsRouter(artifactStore, sessionStore));
+  app.route('/api/artifacts', createArtifactsRouter(artifactStore));
+  app.route('/api/projects', createProjectsRouter(projectStore, sessionStore));
   const scheduleStore = options.scheduleStore ?? createScheduleStore(options.dataRoot);
   const thoughtStore = options.thoughtStore ?? createThoughtStore(options.dataRoot);
   app.route('/api/settings', createSettingsRouter(settingsStore));

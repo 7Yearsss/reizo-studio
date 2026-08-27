@@ -17,7 +17,7 @@ export interface LocalSettings {
   providers: Record<string, StoredProvider>;
 }
 
-export interface PublicProvider extends Pick<ProviderPreset, 'id' | 'name' | 'tag' | 'websiteUrl' | 'allowCustomBaseUrl'> {
+export interface PublicProvider extends Pick<ProviderPreset, 'id' | 'name' | 'tag' | 'websiteUrl' | 'allowCustomBaseUrl' | 'description'> {
   hasKey: boolean;
   model: string;
   models: { id: string; name: string }[];

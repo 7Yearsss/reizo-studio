@@ -3,6 +3,8 @@ import type { ChatMessage, SessionSummary, ToolCallPart } from '../../main/serve
 import type { AskQuestion, TodoItem } from '../../shared/stream';
 import * as settingsStore from './settingsStore';
 import * as tabStore from './tabStore';
+import * as uiStore from './uiStore';
+import * as artifactStore from './artifactStore';
 import { appendTerminalLine } from './terminalStore';
 
 export interface PendingPermission {
@@ -71,11 +73,13 @@ export function getSnapshot(): ChatState {
 export async function loadSessions(): Promise<void> {
   const sessions = await api.listSessions();
   setState({ sessions, sessionsLoaded: true });
+  tabStore.pruneMissingSessions(sessions.map((s) => s.id));
 }
 
-export async function createSession(title?: string): Promise<SessionSummary> {
+export async function createSession(title?: string, projectId?: string | null): Promise<SessionSummary> {
   const workspacePath = settingsStore.getSnapshot().settings.workspacePath;
-  const session = await api.createSession(title, workspacePath);
+  const resolvedProjectId = projectId === undefined ? uiStore.getSnapshot().selectedProjectId : projectId;
+  const session = await api.createSession(title, workspacePath, resolvedProjectId);
   setState({
     sessions: [
       {
@@ -84,12 +88,20 @@ export async function createSession(title?: string): Promise<SessionSummary> {
         createdAt: session.createdAt,
         updatedAt: session.updatedAt,
         workspacePath: session.workspacePath,
+        projectId: session.projectId,
       },
       ...state.sessions,
     ],
     messagesBySession: { ...state.messagesBySession, [session.id]: session.messages },
   });
   return session;
+}
+
+export async function assignSessionProject(id: string, projectId: string | null): Promise<void> {
+  const session = await api.patchSession(id, { projectId });
+  setState({
+    sessions: state.sessions.map((s) => (s.id === id ? { ...s, projectId: session.projectId } : s)),
+  });
 }
 
 export async function renameSession(id: string, title: string): Promise<void> {
@@ -112,6 +124,7 @@ export async function deleteSession(id: string): Promise<void> {
     streamingToolsBySession,
   });
   tabStore.closeSessionTabs(id);
+  artifactStore.dropSessionArtifacts(id);
 }
 
 export async function ensureSessionMessages(id: string): Promise<void> {
@@ -270,7 +283,7 @@ async function dispatchTurn(
     const session = await api.getSession(sessionId);
     const sessions = state.sessions.map((s) =>
       s.id === sessionId
-        ? { id: session.id, title: session.title, createdAt: session.createdAt, updatedAt: session.updatedAt, workspacePath: session.workspacePath }
+        ? { id: session.id, title: session.title, createdAt: session.createdAt, updatedAt: session.updatedAt, workspacePath: session.workspacePath, projectId: session.projectId }
         : s,
     );
     setState({
@@ -282,6 +295,7 @@ async function dispatchTurn(
       askBySession: { ...state.askBySession, [sessionId]: null },
     });
     tabStore.renameChatTab(sessionId, session.title);
+    void artifactStore.loadSessionArtifacts(sessionId);
     notifyIfHidden(session.title);
   } catch (err) {
     if ((err as Error).name === 'AbortError') return;
