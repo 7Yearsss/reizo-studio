@@ -7,11 +7,18 @@ export interface SkillSummary {
   source: 'bundled' | 'user';
 }
 
+export interface SkillState {
+  skills: SkillSummary[];
+  loaded: boolean;
+}
+
 let skills: SkillSummary[] = [];
 let loaded = false;
+let snapshot: SkillState = { skills, loaded };
 const listeners = new Set<() => void>();
 
 function notify(): void {
+  snapshot = { skills, loaded };
   listeners.forEach((l) => l());
 }
 
@@ -20,8 +27,8 @@ export function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-export function getSnapshot(): { skills: SkillSummary[]; loaded: boolean } {
-  return { skills, loaded };
+export function getSnapshot(): SkillState {
+  return snapshot;
 }
 
 export async function loadSkills(): Promise<SkillSummary[]> {
