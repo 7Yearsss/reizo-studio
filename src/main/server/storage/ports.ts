@@ -46,6 +46,7 @@ export interface SessionStore {
   get(id: string): Promise<Session | null>;
   create(title?: string, workspacePath?: string | null, projectId?: string | null): Promise<Session>;
   appendMessage(id: string, message: ChatMessage): Promise<Session>;
+  setMessages(id: string, messages: ChatMessage[]): Promise<Session>;
   rename(id: string, title: string): Promise<Session>;
   update(id: string, patch: SessionPatch): Promise<Session>;
   remove(id: string): Promise<void>;

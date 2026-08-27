@@ -18,6 +18,22 @@ export function createChatRouter(
 ) {
   const router = new Hono();
 
+  router.patch('/:id/messages', async (c) => {
+    const body = await c.req.json().catch((): null => null);
+    if (typeof body?.truncateAfterId !== 'string' || !body.truncateAfterId.trim()) {
+      return c.json({ error: 'truncateAfterId is required' }, 400);
+    }
+    const session = await sessionStore.get(c.req.param('id'));
+    if (!session) return c.json({ error: 'Session not found' }, 404);
+    const idx = session.messages.findIndex((m) => m.id === body.truncateAfterId);
+    if (idx < 0) return c.json({ error: 'truncateAfterId not found' }, 404);
+    const updated = await sessionStore.setMessages(
+      session.id,
+      session.messages.slice(0, idx),
+    );
+    return c.json({ session: updated });
+  });
+
   router.post('/:id/messages', async (c) => {
     const body = await c.req.json().catch((): null => null);
     if (typeof body?.text !== 'string' || !body.text.trim()) {
@@ -55,6 +71,8 @@ export function createChatRouter(
       attachments,
       artifactStore,
       projectStore,
+      truncateAfterId: typeof body.truncateAfterId === 'string' ? body.truncateAfterId : undefined,
+      regenerate: body.regenerate === true,
     });
   });
 

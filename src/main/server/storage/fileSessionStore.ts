@@ -80,6 +80,15 @@ export function createFileSessionStore(root: string): SessionStore {
       return session;
     },
 
+    async setMessages(id: string, messages: ChatMessage[]) {
+      const session = await readSession(id);
+      if (!session) throw new Error(`Session not found: ${id}`);
+      session.messages = messages;
+      session.updatedAt = new Date().toISOString();
+      await writeSession(session);
+      return session;
+    },
+
     async update(id: string, patch: SessionPatch) {
       const session = await readSession(id);
       if (!session) throw new Error(`Session not found: ${id}`);

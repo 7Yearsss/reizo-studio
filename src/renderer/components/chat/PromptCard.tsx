@@ -1,6 +1,7 @@
-import type { ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { Send, Square } from 'lucide-react';
 import { cn } from '../../lib/cn';
+import { isImeComposingEvent } from '../../lib/ime';
 
 export default function PromptCard({
   value,
@@ -15,6 +16,7 @@ export default function PromptCard({
   className,
   toolbar,
   onKeyDown,
+  hint,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -28,8 +30,10 @@ export default function PromptCard({
   className?: string;
   toolbar?: ReactNode;
   onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+  hint?: string;
 }) {
   const canSend = !disabled && Boolean(value.trim());
+  const composingRef = useRef(false);
 
   return (
     <div
@@ -41,18 +45,26 @@ export default function PromptCard({
       <textarea
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onCompositionStart={() => {
+          composingRef.current = true;
+        }}
+        onCompositionEnd={() => {
+          composingRef.current = false;
+        }}
         onKeyDown={(e) => {
           onKeyDown?.(e);
           if (e.defaultPrevented) return;
-          if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            if (canSend) onSubmit();
-          }
+          if (e.key !== 'Enter') return;
+          if (isImeComposingEvent(e, composingRef.current)) return;
+          if (e.shiftKey) return;
+          e.preventDefault();
+          if (canSend) onSubmit();
         }}
         placeholder={placeholder}
         disabled={disabled}
         rows={rows}
         autoFocus={autoFocus}
+        title={hint ?? 'Enter 发送 · Shift+Enter 换行'}
         className="w-full resize-none bg-transparent text-[15px] leading-relaxed text-ink placeholder:text-ink-muted focus:outline-none disabled:opacity-60"
       />
       <div className="mt-3 flex items-center gap-2">
@@ -71,8 +83,8 @@ export default function PromptCard({
             <button
               type="button"
               onClick={onStop}
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-ink text-paper-raised hover:opacity-90"
-              aria-label="Stop"
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-ink text-paper-raised transition-opacity duration-200 hover:opacity-90"
+              aria-label="停止"
             >
               <Square size={12} fill="currentColor" />
             </button>
@@ -83,15 +95,17 @@ export default function PromptCard({
             onClick={onSubmit}
             disabled={!canSend}
             className={cn(
-              'flex h-9 w-9 items-center justify-center rounded-full transition-colors',
+              'flex h-9 w-9 items-center justify-center rounded-full transition-colors duration-200',
               canSend ? 'bg-accent text-accent-ink hover:opacity-90' : 'bg-paper text-ink-muted',
             )}
-            aria-label="Send"
+            aria-label="发送"
+            title="Enter 发送 · Shift+Enter 换行"
           >
             <Send size={15} />
           </button>
         )}
       </div>
+      {hint && <p className="mt-2 px-0.5 text-[10px] leading-none text-ink-muted">{hint}</p>}
     </div>
   );
 }

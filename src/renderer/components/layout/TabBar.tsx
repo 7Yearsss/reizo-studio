@@ -19,7 +19,7 @@ export default function TabBar() {
               onClick={() => tabStore.selectTab(tab.id)}
               title={tab.title}
               className={cn(
-                'group flex max-w-[200px] min-w-[120px] items-center gap-1.5 rounded-t-md px-3 py-1.5 text-[13px]',
+                'group relative flex max-w-[200px] min-w-[120px] items-center gap-1.5 rounded-t-md px-3 py-1.5 text-[13px] transition-colors duration-200',
                 active ? 'bg-paper text-ink' : 'text-ink-muted hover:bg-paper-inset/70 hover:text-ink',
               )}
             >
@@ -45,6 +45,9 @@ export default function TabBar() {
               >
                 <X size={11} />
               </span>
+              {active && (
+                <span className="pointer-events-none absolute inset-x-4 bottom-0 h-[2px] rounded-full bg-accent/80" />
+              )}
             </button>
           );
         })}

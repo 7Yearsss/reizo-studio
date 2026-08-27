@@ -22,7 +22,13 @@ export interface QueuedTurn {
   id: string;
   text: string;
   mentions: string[];
-  extra: { skillId?: string; attachments?: { name: string; content: string }[] };
+  extra: { skillId?: string; attachments?: { name: string; content: string }[]; replaceFromId?: string };
+}
+
+export interface ComposerSeed {
+  text: string;
+  nonce: number;
+  replaceFromId?: string;
 }
 
 export interface ChatState {
@@ -37,6 +43,7 @@ export interface ChatState {
   askBySession: Record<string, PendingAsk | null>;
   todosBySession: Record<string, TodoItem[]>;
   queueBySession: Record<string, QueuedTurn[]>;
+  composerSeedBySession: Record<string, ComposerSeed | undefined>;
 }
 
 let state: ChatState = {
@@ -51,6 +58,7 @@ let state: ChatState = {
   askBySession: {},
   todosBySession: {},
   queueBySession: {},
+  composerSeedBySession: {},
 };
 
 const abortBySession = new Map<string, AbortController>();
@@ -133,11 +141,39 @@ export async function ensureSessionMessages(id: string): Promise<void> {
   setState({ messagesBySession: { ...state.messagesBySession, [id]: session.messages } });
 }
 
+export function seedComposer(
+  sessionId: string,
+  text: string,
+  extra: { replaceFromId?: string } = {},
+): void {
+  const prev = state.composerSeedBySession[sessionId];
+  setState({
+    composerSeedBySession: {
+      ...state.composerSeedBySession,
+      [sessionId]: {
+        text,
+        nonce: (prev?.nonce ?? 0) + 1,
+        replaceFromId: extra.replaceFromId,
+      },
+    },
+  });
+}
+
+export function clearComposerSeed(sessionId: string): void {
+  if (!state.composerSeedBySession[sessionId]) return;
+  const { [sessionId]: _removed, ...composerSeedBySession } = state.composerSeedBySession;
+  setState({ composerSeedBySession });
+}
+
 export async function sendMessage(
   sessionId: string,
   text: string,
   mentions: string[] = [],
-  extra: { skillId?: string; attachments?: { name: string; content: string }[] } = {},
+  extra: {
+    skillId?: string;
+    attachments?: { name: string; content: string }[];
+    replaceFromId?: string;
+  } = {},
 ): Promise<void> {
   if (state.sendingBySession[sessionId]) {
     const queued: QueuedTurn = { id: `q-${Date.now()}`, text, mentions, extra };
@@ -149,7 +185,9 @@ export async function sendMessage(
     });
     return;
   }
-  await dispatchTurn(sessionId, text, mentions, extra);
+  await dispatchTurn(sessionId, text, mentions, extra, {
+    truncateAfterId: extra.replaceFromId,
+  });
 }
 
 export function removeQueuedTurn(sessionId: string, id: string): void {
@@ -170,7 +208,38 @@ export async function continueQueue(sessionId: string): Promise<void> {
       [sessionId]: (state.queueBySession[sessionId] ?? []).slice(1),
     },
   });
-  await dispatchTurn(sessionId, next.text, next.mentions, next.extra);
+  await dispatchTurn(sessionId, next.text, next.mentions, next.extra, {
+    truncateAfterId: next.extra.replaceFromId,
+  });
+}
+
+export async function retryLastAssistant(sessionId: string): Promise<void> {
+  if (state.sendingBySession[sessionId]) return;
+  const messages = state.messagesBySession[sessionId] ?? [];
+  let lastAssistant: ChatMessage | undefined;
+  let lastUser: ChatMessage | undefined;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (!lastAssistant && msg.role === 'assistant') lastAssistant = msg;
+    if (!lastUser && msg.role === 'user') lastUser = msg;
+    if (lastAssistant && lastUser) break;
+  }
+  if (!lastAssistant || !lastUser) return;
+  const cut = messages.findIndex((m) => m.id === lastAssistant.id);
+  if (cut < 0) return;
+  await dispatchTurn(sessionId, lastUser.content, [], {}, {
+    truncateAfterId: lastAssistant.id,
+    regenerate: true,
+    optimisticMessages: messages.slice(0, cut),
+  });
+}
+
+export function editLastUserMessage(sessionId: string): void {
+  if (state.sendingBySession[sessionId]) return;
+  const messages = state.messagesBySession[sessionId] ?? [];
+  const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+  if (!lastUser) return;
+  seedComposer(sessionId, lastUser.content, { replaceFromId: lastUser.id });
 }
 
 function notifyIfHidden(title: string): void {
@@ -188,19 +257,32 @@ async function dispatchTurn(
   text: string,
   mentions: string[] = [],
   extra: { skillId?: string; attachments?: { name: string; content: string }[] } = {},
+  turn: {
+    truncateAfterId?: string;
+    regenerate?: boolean;
+    optimisticMessages?: ChatMessage[];
+  } = {},
 ): Promise<void> {
-  const userMessage: ChatMessage = {
-    id: `local-${Date.now()}`,
-    role: 'user',
-    content: text,
-    createdAt: new Date().toISOString(),
-  };
-  const existing = state.messagesBySession[sessionId] ?? [];
+  const existing = turn.optimisticMessages ?? (() => {
+    const current = state.messagesBySession[sessionId] ?? [];
+    if (!turn.truncateAfterId) return current;
+    const idx = current.findIndex((m) => m.id === turn.truncateAfterId);
+    return idx < 0 ? current : current.slice(0, idx);
+  })();
+  const userMessage: ChatMessage | null = turn.regenerate
+    ? null
+    : {
+        id: `local-${Date.now()}`,
+        role: 'user',
+        content: text,
+        createdAt: new Date().toISOString(),
+      };
+  const nextMessages = userMessage ? [...existing, userMessage] : existing;
   const abort = new AbortController();
   abortBySession.set(sessionId, abort);
 
   setState({
-    messagesBySession: { ...state.messagesBySession, [sessionId]: [...existing, userMessage] },
+    messagesBySession: { ...state.messagesBySession, [sessionId]: nextMessages },
     sendingBySession: { ...state.sendingBySession, [sessionId]: true },
     streamingBySession: { ...state.streamingBySession, [sessionId]: '' },
     streamingToolsBySession: { ...state.streamingToolsBySession, [sessionId]: [] },
@@ -208,6 +290,7 @@ async function dispatchTurn(
     permissionBySession: { ...state.permissionBySession, [sessionId]: null },
     askBySession: { ...state.askBySession, [sessionId]: null },
   });
+  clearComposerSeed(sessionId);
 
   const settings = settingsStore.getSnapshot().settings;
 
@@ -220,6 +303,8 @@ async function dispatchTurn(
       mentions,
       skillId: extra.skillId,
       attachments: extra.attachments,
+      truncateAfterId: turn.truncateAfterId,
+      regenerate: turn.regenerate,
       signal: abort.signal,
       onEvent: (event) => {
         if (event.type === 'text') {
@@ -299,7 +384,15 @@ async function dispatchTurn(
     notifyIfHidden(session.title);
   } catch (err) {
     if ((err as Error).name === 'AbortError') return;
-    setState({ errorBySession: { ...state.errorBySession, [sessionId]: (err as Error).message } });
+    try {
+      const session = await api.getSession(sessionId);
+      setState({
+        messagesBySession: { ...state.messagesBySession, [sessionId]: session.messages },
+        errorBySession: { ...state.errorBySession, [sessionId]: (err as Error).message },
+      });
+    } catch {
+      setState({ errorBySession: { ...state.errorBySession, [sessionId]: (err as Error).message } });
+    }
   } finally {
     if (abortBySession.get(sessionId) === abort) abortBySession.delete(sessionId);
     setState({ sendingBySession: { ...state.sendingBySession, [sessionId]: false } });

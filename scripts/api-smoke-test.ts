@@ -7,7 +7,7 @@
  *
  * Run: node --require ./scripts/electron-stub.cjs -r tsx/cjs scripts/api-smoke-test.ts
  */
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createApp } from '../src/main/server/app';
@@ -157,6 +157,65 @@ async function main() {
     const { session } = await rename.json();
     check('session-rename', session.title === 'Renamed');
   }
+  {
+    const sessionFile = path.join(dataRoot, 'sessions', `${sessionId}.json`);
+    const raw = JSON.parse(await readFile(sessionFile, 'utf8')) as {
+      messages: { id: string; role: string; content: string; createdAt: string }[];
+    };
+    const now = new Date().toISOString();
+    raw.messages = [
+      { id: 'u1', role: 'user', content: 'hello', createdAt: now },
+      { id: 'a1', role: 'assistant', content: 'hi', createdAt: now },
+      { id: 'u2', role: 'user', content: 'again', createdAt: now },
+      { id: 'a2', role: 'assistant', content: 'ok', createdAt: now },
+    ];
+    await writeFile(sessionFile, JSON.stringify(raw, null, 2), 'utf8');
+    const truncated = await call(`/api/sessions/${sessionId}/messages`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ truncateAfterId: 'u2' }),
+    });
+    const { session } = await truncated.json();
+    check(
+      'session-truncate',
+      truncated.status === 200 && session.messages.length === 2 && session.messages[1].id === 'a1',
+      session.messages?.map((m: { id: string }) => m.id),
+    );
+  }
+  {
+    const missing = await call(`/api/sessions/${sessionId}/messages`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ truncateAfterId: 'missing' }),
+    });
+    check('session-truncate-missing', missing.status === 404);
+  }
+  {
+    const res = await call(`/api/sessions/${sessionId}/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'x', truncateAfterId: 'nope', providerId: 'openai' }),
+    });
+    const body = await res.json();
+    check('chat-truncate-missing', res.status === 400 && /truncateAfterId/.test(body.error), body);
+  }
+  {
+    const created = await call('/api/sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'Empty regen' }),
+    });
+    const { session } = await created.json();
+    const res = await call(`/api/sessions/${session.id}/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'retry', regenerate: true, providerId: 'openai' }),
+    });
+    const body = await res.json();
+    check('chat-regenerate-empty', res.status === 400 && /user message/.test(body.error), body);
+    await call(`/api/sessions/${session.id}`, { method: 'DELETE' });
+  }
+
 
   let projectId = '';
   {
