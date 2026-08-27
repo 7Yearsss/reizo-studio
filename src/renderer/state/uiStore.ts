@@ -20,7 +20,8 @@ function readMode(): SidebarMode {
 let state: UiState = {
   mode: readMode(),
   selectedProjectId: typeof localStorage !== 'undefined' ? localStorage.getItem(PROJECT_KEY) : null,
-  artifactsOpen: typeof localStorage === 'undefined' ? true : localStorage.getItem(ARTIFACTS_KEY) !== '0',
+  // Default closed; only an explicit localStorage '1' opens artifacts on load.
+  artifactsOpen: typeof localStorage !== 'undefined' && localStorage.getItem(ARTIFACTS_KEY) === '1',
 };
 
 const listeners = new Set<() => void>();
