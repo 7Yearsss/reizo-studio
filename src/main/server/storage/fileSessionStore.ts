@@ -1,7 +1,7 @@
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { nanoid } from 'nanoid';
-import type { ChatMessage, Session, SessionStore, SessionSummary } from './ports';
+import type { ChatMessage, Session, SessionPatch, SessionStore, SessionSummary } from './ports';
 
 /**
  * Local-only session store: one JSON file per session under
@@ -45,8 +45,8 @@ export function createFileSessionStore(root: string): SessionStore {
           .map(async (f) => {
             const raw = await readFile(path.join(dir, f), 'utf8');
             const session = JSON.parse(raw) as Session;
-            const { id, title, createdAt, updatedAt, workspacePath } = session;
-            return { id, title, createdAt, updatedAt, workspacePath } satisfies SessionSummary;
+            const { id, title, createdAt, updatedAt, workspacePath, projectId } = session;
+            return { id, title, createdAt, updatedAt, workspacePath, projectId } satisfies SessionSummary;
           }),
       );
       return sessions.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
@@ -56,7 +56,7 @@ export function createFileSessionStore(root: string): SessionStore {
       return readSession(id);
     },
 
-    async create(title = 'New chat', workspacePath?: string | null) {
+    async create(title = '新对话', workspacePath?: string | null, projectId?: string | null) {
       const now = new Date().toISOString();
       const session: Session = {
         id: nanoid(),
@@ -64,6 +64,7 @@ export function createFileSessionStore(root: string): SessionStore {
         createdAt: now,
         updatedAt: now,
         workspacePath: workspacePath ?? null,
+        projectId: projectId ?? null,
         messages: [],
       };
       await writeSession(session);
@@ -74,6 +75,20 @@ export function createFileSessionStore(root: string): SessionStore {
       const session = await readSession(id);
       if (!session) throw new Error(`Session not found: ${id}`);
       session.messages.push(message);
+      session.updatedAt = new Date().toISOString();
+      await writeSession(session);
+      return session;
+    },
+
+    async update(id: string, patch: SessionPatch) {
+      const session = await readSession(id);
+      if (!session) throw new Error(`Session not found: ${id}`);
+      if (typeof patch.title === 'string' && patch.title.trim()) {
+        session.title = patch.title.trim();
+      }
+      if (patch.projectId !== undefined) {
+        session.projectId = patch.projectId;
+      }
       session.updatedAt = new Date().toISOString();
       await writeSession(session);
       return session;

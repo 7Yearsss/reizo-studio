@@ -14,13 +14,41 @@ export interface TabState {
   activeTabId: string;
 }
 
+const STORAGE_KEY = 'reizo:studio-workspace-tabs';
+
 function makeLauncher(): AppTab {
   return { id: nanoid(), kind: 'launcher', title: '新对话' };
 }
 
+function loadStored(): TabState | null {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as TabState;
+    if (!Array.isArray(parsed.tabs) || parsed.tabs.length === 0) return null;
+    if (!parsed.tabs.some((t) => t.id === parsed.activeTabId)) {
+      parsed.activeTabId = parsed.tabs[0].id;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function persist(next: TabState): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    /* best-effort */
+  }
+}
+
+const stored = loadStored();
 const first = makeLauncher();
 
-let state: TabState = {
+let state: TabState = stored ?? {
   tabs: [first],
   activeTabId: first.id,
 };
@@ -29,6 +57,7 @@ const listeners = new Set<() => void>();
 
 function setState(patch: Partial<TabState>): void {
   state = { ...state, ...patch };
+  persist(state);
   listeners.forEach((l) => l());
 }
 
@@ -45,12 +74,26 @@ function select(tabs: AppTab[], id: string): void {
   setState({ tabs, activeTabId: id });
 }
 
-export function newLauncherTab(): AppTab {
-  const empty = state.tabs.find((t) => t.kind === 'launcher');
-  if (empty) {
-    setState({ activeTabId: empty.id });
-    return empty;
+/** Drop chat tabs whose sessions no longer exist after a restart. */
+export function pruneMissingSessions(validSessionIds: string[]): void {
+  const valid = new Set(validSessionIds);
+  const tabs = state.tabs.filter((t) => t.kind !== 'chat' || (t.sessionId && valid.has(t.sessionId)));
+  if (tabs.length === state.tabs.length) {
+    if (!tabs.some((t) => t.id === state.activeTabId) && tabs[0]) {
+      setState({ activeTabId: tabs[0].id });
+    }
+    return;
   }
+  if (tabs.length === 0) {
+    const tab = makeLauncher();
+    select([tab], tab.id);
+    return;
+  }
+  const activeGone = !tabs.some((t) => t.id === state.activeTabId);
+  select(tabs, activeGone ? tabs[0].id : state.activeTabId);
+}
+
+export function newLauncherTab(): AppTab {
   const tab = makeLauncher();
   select([...state.tabs, tab], tab.id);
   return tab;
@@ -90,7 +133,7 @@ export function openAutomationTab(): AppTab {
 }
 
 export function openPluginsTab(): AppTab {
-  return openSingletonTab('plugins', '插件');
+  return openSingletonTab('plugins', '技能');
 }
 
 function openSingletonTab(kind: Exclude<TabKind, 'chat' | 'launcher'>, title: string): AppTab {

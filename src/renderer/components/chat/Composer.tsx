@@ -29,6 +29,7 @@ export default function Composer({
   onStop,
   onToggleTree,
   treeOpen,
+  autoFocus = false,
 }: {
   sessionId?: string;
   disabled: boolean;
@@ -41,6 +42,7 @@ export default function Composer({
   onStop?: () => void;
   onToggleTree?: () => void;
   treeOpen?: boolean;
+  autoFocus?: boolean;
 }) {
   const [draft, setDraft] = useState('');
   const [mentions, setMentions] = useState<string[]>([]);
@@ -161,6 +163,7 @@ export default function Composer({
               sending={sending}
               placeholder="输入消息，/ 调用技能，@ 引用文件，可拖入附件…"
               disabled={disabled}
+              autoFocus={autoFocus}
               rows={2}
               onKeyDown={(e) => {
                 if ((mentionQuery !== null || slashQuery !== null) && e.key === 'Enter' && !e.shiftKey) {

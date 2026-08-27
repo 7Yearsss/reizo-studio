@@ -190,7 +190,7 @@ function ProviderCard({ provider }: { provider: PublicProvider }) {
         </span>
       </div>
       <p className="mb-4 text-xs text-ink-muted">
-        {provider.models[0]?.name ?? provider.model ?? '自定义模型'}
+        {provider.description || provider.models[0]?.name || provider.model || '自定义模型'}
       </p>
 
       {provider.allowCustomBaseUrl && (
@@ -230,7 +230,7 @@ function ProviderCard({ provider }: { provider: PublicProvider }) {
             onKeyDown={(e) => {
               if (e.key === 'Enter') void handleSave();
             }}
-            placeholder="输入 API Key"
+            placeholder={provider.id === 'reizo' ? '粘贴虚拟 sk-... 密钥' : '输入 API Key'}
             className="flex-1 bg-transparent text-sm text-ink placeholder:text-ink-muted focus:outline-none"
           />
           <button

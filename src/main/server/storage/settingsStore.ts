@@ -133,6 +133,7 @@ export function createSettingsStore(root: string) {
         tag: preset.tag,
         websiteUrl: preset.websiteUrl,
         allowCustomBaseUrl: preset.allowCustomBaseUrl,
+        description: preset.description,
         hasKey: Boolean(stored.apiKey),
         model: stored.model || preset.defaultModel,
         models: preset.models,

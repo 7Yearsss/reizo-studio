@@ -9,6 +9,8 @@ import { readWorkspaceMemory } from '../../workspaceMemory';
 import type { Skill } from '../../skills';
 import type { ChatMessage, SessionStore, ToolCallPart } from '../storage/ports';
 import type { SettingsStore } from '../storage/settingsStore';
+import type { ArtifactStore } from '../storage/artifactStore';
+import type { ProjectStore } from '../storage/projectStore';
 
 const abortBySession = new Map<string, AbortController>();
 
@@ -45,8 +47,10 @@ export async function runChatTurn(options: {
   mentions?: string[];
   skill?: Skill | null;
   attachments?: { name: string; content: string }[];
+  artifactStore?: ArtifactStore;
+  projectStore?: ProjectStore;
 }): Promise<Response> {
-  const { sessionStore, settingsStore, sessionId, userText, mentions = [], skill, attachments = [] } = options;
+  const { sessionStore, settingsStore, sessionId, userText, mentions = [], skill, attachments = [], artifactStore, projectStore } = options;
 
   const session = await sessionStore.get(sessionId);
   if (!session) {
@@ -92,6 +96,20 @@ export async function runChatTurn(options: {
   };
   await sessionStore.appendMessage(sessionId, userMessage);
 
+  if (artifactStore && attachments.length > 0) {
+    await Promise.all(
+      attachments.map((file) =>
+        artifactStore.create({
+          sessionId,
+          projectId: session.projectId,
+          name: file.name,
+          content: file.content,
+          source: 'attachment',
+        }),
+      ),
+    );
+  }
+
   if ((session.title === 'New chat' || session.title === '新对话') && userText.trim()) {
     const title = userText.trim().replace(/\s+/g, ' ').slice(0, 60);
     await sessionStore.rename(sessionId, title);
@@ -99,12 +117,22 @@ export async function runChatTurn(options: {
 
   const workspacePath = settings.workspacePath;
   const memory = workspacePath ? await readWorkspaceMemory(workspacePath) : '';
+  let projectInstructions = '';
+  let projectName = '';
+  if (projectStore && session.projectId) {
+    const project = await projectStore.get(session.projectId);
+    if (project?.instructions) {
+      projectInstructions = project.instructions;
+      projectName = project.name;
+    }
+  }
   const systemParts = [
     workspacePath
       ? `You are Reizo Studio, a local desktop agent that finishes real work in the user's files. The workspace is at: ${workspacePath}. Prefer tools over guessing. Use list_dir/read_file/find_files/grep to inspect, edit_file/write_file to change files, run_command for tests and git, ask_user when you need a choice, todo_write for a visible plan, and memory_read/memory_write for durable notes in MEMORY.md.`
       : 'You are Reizo Studio, a helpful creative assistant running locally on the user\'s desktop. Use ask_user if you need the user to choose.',
     memory ? `Workspace MEMORY.md:\n${memory}` : '',
     skill ? `The user invoked skill "${skill.name}". Follow this skill:\n${skill.body}` : '',
+    projectInstructions ? `Project "${projectName}" working rules:\n${projectInstructions}` : '',
   ].filter(Boolean);
 
   const history: ModelMessage[] = [
@@ -132,6 +160,17 @@ export async function runChatTurn(options: {
         permissionMode: settings.permissionMode,
         emit: (event) => emit(event),
         todos,
+        onFileWritten: artifactStore
+          ? async (relativePath, content) => {
+              await artifactStore.create({
+                sessionId,
+                projectId: session.projectId,
+                name: relativePath.split(/[/\\]/).pop() || relativePath,
+                content,
+                source: 'generated',
+              });
+            }
+          : undefined,
       })
     : undefined;
 

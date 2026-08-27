@@ -1,4 +1,6 @@
 import type { Session, SessionSummary } from '../main/server/storage/ports';
+import type { Project } from '../shared/project';
+import type { Artifact, ArtifactWithContent } from '../shared/artifact';
 import type { DirEntry } from '../shared/workspace';
 import type { PublicSettings, SettingsPatch } from '../shared/settings';
 import type { Schedule, Thought } from '../shared/schedule';
@@ -28,11 +30,34 @@ export async function listSessions(): Promise<SessionSummary[]> {
   return sessions;
 }
 
-export async function createSession(title?: string, workspacePath?: string | null): Promise<Session> {
+export async function createSession(
+  title?: string,
+  workspacePath?: string | null,
+  projectId?: string | null,
+): Promise<Session> {
   const res = await api('/api/sessions', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ title, workspacePath }),
+    body: JSON.stringify({ title, workspacePath, projectId }),
+  });
+  const { session } = await res.json();
+  return session;
+}
+
+export async function listSessionsByProject(projectId: string): Promise<SessionSummary[]> {
+  const res = await api(`/api/sessions?projectId=${encodeURIComponent(projectId)}`);
+  const { sessions } = await res.json();
+  return sessions;
+}
+
+export async function patchSession(
+  id: string,
+  patch: { title?: string; projectId?: string | null },
+): Promise<Session> {
+  const res = await api(`/api/sessions/${id}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
   });
   const { session } = await res.json();
   return session;
@@ -229,4 +254,76 @@ export function readWorkspaceFile(relativePath: string) {
 
 export function flattenWorkspace(): Promise<DirEntry[]> {
   return window.reizo.flattenWorkspace();
+}
+
+export async function listProjects(): Promise<Project[]> {
+  const res = await api('/api/projects');
+  const { projects } = await res.json();
+  return projects;
+}
+
+export async function createProject(input: {
+  name: string;
+  description?: string;
+  instructions?: string;
+}): Promise<Project> {
+  const res = await api('/api/projects', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const { project } = await res.json();
+  return project;
+}
+
+export async function getProject(id: string): Promise<Project> {
+  const res = await api(`/api/projects/${id}`);
+  const { project } = await res.json();
+  return project;
+}
+
+export async function patchProject(
+  id: string,
+  patch: { name?: string; description?: string | null; instructions?: string | null },
+): Promise<Project> {
+  const res = await api(`/api/projects/${id}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  const { project } = await res.json();
+  return project;
+}
+
+export async function deleteProject(id: string): Promise<void> {
+  await api(`/api/projects/${id}`, { method: 'DELETE' });
+}
+
+export async function listSessionArtifacts(sessionId: string): Promise<Artifact[]> {
+  const res = await api(`/api/sessions/${sessionId}/artifacts`);
+  const { artifacts } = await res.json();
+  return artifacts;
+}
+
+export async function createSessionArtifact(
+  sessionId: string,
+  input: { name: string; content: string; source?: 'attachment' | 'generated'; mimeType?: string },
+): Promise<ArtifactWithContent> {
+  const res = await api(`/api/sessions/${sessionId}/artifacts`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const { artifact } = await res.json();
+  return artifact;
+}
+
+export async function getArtifact(id: string): Promise<ArtifactWithContent> {
+  const res = await api(`/api/artifacts/${id}`);
+  const { artifact } = await res.json();
+  return artifact;
+}
+
+export async function deleteArtifact(id: string): Promise<void> {
+  await api(`/api/artifacts/${id}`, { method: 'DELETE' });
 }

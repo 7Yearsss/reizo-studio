@@ -23,6 +23,7 @@ export interface SessionSummary {
   createdAt: string;
   updatedAt: string;
   workspacePath?: string | null;
+  projectId?: string | null;
 }
 
 export interface Session extends SessionSummary {
@@ -35,11 +36,17 @@ export interface Session extends SessionSummary {
  * A future adapter (e.g. cloud sync) can implement this without touching
  * route/agent code.
  */
+export interface SessionPatch {
+  title?: string;
+  projectId?: string | null;
+}
+
 export interface SessionStore {
   list(): Promise<SessionSummary[]>;
   get(id: string): Promise<Session | null>;
-  create(title?: string, workspacePath?: string | null): Promise<Session>;
+  create(title?: string, workspacePath?: string | null, projectId?: string | null): Promise<Session>;
   appendMessage(id: string, message: ChatMessage): Promise<Session>;
   rename(id: string, title: string): Promise<Session>;
+  update(id: string, patch: SessionPatch): Promise<Session>;
   remove(id: string): Promise<void>;
 }

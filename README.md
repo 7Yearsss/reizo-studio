@@ -6,40 +6,41 @@ Local-first desktop agent for Reizo. Chat, workspace files, skills, and schedule
 
 - Electron Forge + Vite (main / preload / renderer)
 - React renderer, not a wrapped website
-- In-process Hono API on loopback (`API_BASE_PORT` in `src/shared/constants.ts`)
-- Sessions and settings as JSON under `app.getPath('userData')/data`
-- API keys encrypted with Electron `safeStorage`
+- In-process Hono on loopback
+
+- JSON under userData/data
 
 ## Run
+See package.json scripts: start, lint, test:api
 
-```bash
-npm install
-npm start
-```
+### Add the Reizo (Winlume) provider
 
-Open Settings → 模型供应商 and paste an API key. Bind a workspace if you want the agent to read, edit, and run commands. Type `/` for skills (`review-code`, `explain`, `commit-message`, `fix-bug`). Drop files onto the composer to attach them.
+1. Open Settings, then Providers (left rail Settings).
+2. Choose Reizo (Winlume). Copy: same backend as web Studio (Reizo BFF to new-api).
+3. Paste a virtual key from the web Studio console. Do not commit secrets.
+4. Base URL is the Winlume OpenAI-compatible endpoint. Pick a model and chat.
 
-Permission modes: 每次询问 / 工作区可写 / 全部允许.
+Other OpenAI-compatible providers stay available.
 
-Global shortcut: `Ctrl/⌘+Shift+Space` brings the window back.
+### Workspace tabs
 
-## Test the API without a GUI
+Chrome-style tabs live in the custom title bar. Plus opens a blank new-chat tab. Open chats stay mounted while you switch, so draft, scroll, and in-flight streams survive. Chat tabs restore on restart if those sessions still exist.
 
-```bash
-npm run test:api
-```
+### Projects
+
+Left rail Projects: create a project, select it, and see its chats. New conversations pick up the selected project. Data is local JSON under userData/data/projects. Optional working rules go into the agent system prompt.
+
+## Test
+
+package.json script: test:api (headless Hono smoke test).
 
 ## Features
 
-- Tabbed sessions, custom title bar, sidebar (new / automation / plugins / search / tasks)
-- Multi-provider OpenAI-compatible catalog
+- Keep-alive workspace tabs, custom title bar, mode rail (Chat / Projects / Skills / Settings)
+- Session artifacts panel (attachments and generated files)
+- Multi-provider catalog including Reizo (Winlume)
 - Workspace file tree, Git status, terminal
-- `@` file mentions, `/` skills, attachments
-- Tools: list/read/find/grep, write/edit, shell, todos, ask-user, MEMORY.md
-- Permission prompts, message queue, jump-to-bottom
-- Ideas + interval automations
-- Skill install from `SKILL.md`
-- Tray resident process, light/dark appearance
+- Mentions, skills, attachments, permission prompts, automations
 
 ## License
 

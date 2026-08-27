@@ -40,8 +40,9 @@ export function createWorkspaceTools(options: {
   permissionMode: PermissionMode;
   emit: (event: ChatStreamEvent) => void;
   todos: TodoItem[];
+  onFileWritten?: (relativePath: string, content: string) => Promise<void>;
 }) {
-  const { sessionId, workspacePath, permissionMode, emit, todos } = options;
+  const { sessionId, workspacePath, permissionMode, emit, todos, onFileWritten } = options;
 
   return {
     list_dir: tool({
@@ -84,6 +85,7 @@ export function createWorkspaceTools(options: {
       execute: async (input, toolOptions) => {
         await approve(sessionId, 'write_file', input, permissionMode, toolOptions);
         const result = await writeWorkspaceFile(workspacePath, input.path, input.content);
+        if (onFileWritten) await onFileWritten(input.path, input.content);
         return { ...result, diff: previewDiff('', input.content) };
       },
     }),
@@ -104,6 +106,7 @@ export function createWorkspaceTools(options: {
           input.newString,
           input.replaceAll,
         );
+        if (onFileWritten) await onFileWritten(input.path, result.after);
         return {
           path: result.path,
           replacements: result.replacements,
