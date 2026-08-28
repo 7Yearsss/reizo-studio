@@ -61,13 +61,25 @@ function toSummary(row: SessionRowRaw): SessionSummary {
   };
 }
 
-function decodeContent(raw: string): { text: string; parts?: ToolCallPart[] } {
+function decodeContent(raw: string): {
+  text: string;
+  parts?: ToolCallPart[];
+  reasoning?: string;
+  reasoningMs?: number;
+} {
   try {
-    const parsed = JSON.parse(raw) as { text?: unknown; parts?: unknown };
+    const parsed = JSON.parse(raw) as {
+      text?: unknown;
+      parts?: unknown;
+      reasoning?: unknown;
+      reasoningMs?: unknown;
+    };
     if (parsed && typeof parsed === 'object' && 'text' in parsed) {
       return {
         text: typeof parsed.text === 'string' ? parsed.text : '',
         parts: Array.isArray(parsed.parts) ? (parsed.parts as ToolCallPart[]) : undefined,
+        reasoning: typeof parsed.reasoning === 'string' ? parsed.reasoning : undefined,
+        reasoningMs: typeof parsed.reasoningMs === 'number' ? parsed.reasoningMs : undefined,
       };
     }
   } catch {
@@ -77,16 +89,23 @@ function decodeContent(raw: string): { text: string; parts?: ToolCallPart[] } {
 }
 
 function encodeContent(message: ChatMessage): string {
-  return JSON.stringify({ text: message.content, parts: message.parts ?? null });
+  return JSON.stringify({
+    text: message.content,
+    parts: message.parts ?? null,
+    reasoning: message.reasoning ?? null,
+    reasoningMs: message.reasoningMs ?? null,
+  });
 }
 
 function toMessage(row: MessageRowRaw): ChatMessage {
-  const { text, parts } = decodeContent(row.content);
+  const { text, parts, reasoning, reasoningMs } = decodeContent(row.content);
   return {
     id: row.id,
     role: row.role as ChatRole,
     content: text,
     parts: parts && parts.length ? parts : undefined,
+    reasoning: reasoning || undefined,
+    reasoningMs,
     createdAt: new Date(row.created_at).toISOString(),
     clientId: row.client_id ?? undefined,
     toolUseId: row.tool_use_id ?? undefined,

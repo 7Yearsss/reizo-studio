@@ -32,6 +32,29 @@ export interface CreateAppOptions {
 }
 
 /**
+ * `localhost` and `127.0.0.1` are the same loopback host but distinct origins.
+ * Vite may report one while Electron's window loads the other (or a stale main
+ * process keeps the old one after a renderer-only restart), so accept both
+ * forms of the dev server origin rather than 403-ing every renderer fetch.
+ */
+function loopbackOriginVariants(origin: string): string[] {
+  try {
+    const url = new URL(origin);
+    const variants = new Set([url.origin]);
+    if (url.hostname === 'localhost') {
+      url.hostname = '127.0.0.1';
+      variants.add(url.origin);
+    } else if (url.hostname === '127.0.0.1') {
+      url.hostname = 'localhost';
+      variants.add(url.origin);
+    }
+    return [...variants];
+  } catch {
+    return [origin];
+  }
+}
+
+/**
  * Loopback-only guard against DNS rebinding: reject any request whose Host
  * header isn't exactly this server's own 127.0.0.1:<port>, and any request
  * whose Origin isn't the app's own renderer (dev server in dev, `null` for
@@ -41,7 +64,11 @@ export interface CreateAppOptions {
 function originGuard(options: CreateAppOptions): MiddlewareHandler {
   const expectedHost = `127.0.0.1:${options.port}`;
   const allowedOrigins = new Set<string>(['null']);
-  if (options.devServerOrigin) allowedOrigins.add(options.devServerOrigin);
+  if (options.devServerOrigin) {
+    for (const variant of loopbackOriginVariants(options.devServerOrigin)) {
+      allowedOrigins.add(variant);
+    }
+  }
 
   return async (c, next) => {
     const host = c.req.header('host');
@@ -52,11 +79,36 @@ function originGuard(options: CreateAppOptions): MiddlewareHandler {
     if (origin !== undefined && !allowedOrigins.has(origin)) {
       return c.json({ error: 'Forbidden' }, 403);
     }
-    if (origin !== undefined) {
-      c.header('Access-Control-Allow-Origin', origin);
-      c.header('Vary', 'Origin');
+
+    // The renderer runs on the Vite dev server origin, a different port from
+    // this API, so every JSON POST/PATCH/DELETE is cross-origin and the
+    // browser sends a preflight OPTIONS first. Answer it here or the fetch
+    // fails with "Failed to fetch" before the real request is ever sent.
+    if (c.req.method === 'OPTIONS') {
+      const headers: Record<string, string> = {
+        'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
+        'Access-Control-Allow-Headers':
+          c.req.header('access-control-request-headers') ?? 'content-type',
+        'Access-Control-Max-Age': '600',
+      };
+      if (origin !== undefined) {
+        headers['Access-Control-Allow-Origin'] = origin;
+        headers['Vary'] = 'Origin';
+      }
+      return c.body(null, 204, headers);
     }
+
     await next();
+
+    // Set CORS headers on the *final* response after the handler runs. The
+    // chat/stream routes return a raw `Response` (NDJSON ReadableStream),
+    // which Hono does not merge `c.header(...)` into — so the streamed
+    // assistant reply would be blocked by the browser as a CORS error and
+    // only surface after a reload. Mutating `c.res.headers` covers it.
+    if (origin !== undefined) {
+      c.res.headers.set('Access-Control-Allow-Origin', origin);
+      c.res.headers.append('Vary', 'Origin');
+    }
   };
 }
 

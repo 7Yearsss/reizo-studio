@@ -6,6 +6,7 @@ import {
   type AgentErrorData,
   type AgentEvent,
   type AgentTextData,
+  type AgentThinkingData,
   type AgentToolResultData,
   type AgentToolUseData,
 } from '../../../shared/agentEvent';
@@ -204,6 +205,8 @@ class AgentSession {
     const feedPersister = (event: AgentEvent) => {
       if (event.type === 'text') {
         persister.onText((event.data as AgentTextData).delta);
+      } else if (event.type === 'thinking') {
+        persister.onReasoning((event.data as AgentThinkingData).delta);
       } else if (event.type === 'tool_use') {
         const d = event.data as AgentToolUseData;
         persister.onToolPart({ type: 'tool', id: d.id, name: d.name, args: d.args });
@@ -400,6 +403,8 @@ function agentEventToStreamEvent(event: AgentEvent): ChatStreamEvent | null {
   switch (event.type) {
     case 'text':
       return { type: 'text', delta: (event.data as AgentTextData).delta };
+    case 'thinking':
+      return { type: 'reasoning', delta: (event.data as AgentThinkingData).delta };
     case 'tool_result': {
       const d = event.data as AgentToolResultData;
       return { type: 'tool', id: d.id, name: d.name, args: d.args, result: d.result, error: d.error };

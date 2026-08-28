@@ -90,3 +90,8 @@ typings/
 
 # Electron-Forge
 out/
+
+# Agent skill tooling (local, per-developer)
+.agents/
+.claude/
+skills-lock.json

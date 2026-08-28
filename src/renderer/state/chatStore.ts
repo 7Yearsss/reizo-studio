@@ -44,6 +44,9 @@ export interface ChatState {
   sessionsLoaded: boolean;
   messagesBySession: Record<string, ChatMessage[]>;
   streamingBySession: Record<string, string>;
+  streamingReasoningBySession: Record<string, string>;
+  /** Wall-clock ms when the first reasoning delta of the live turn arrived. */
+  reasoningStartedAtBySession: Record<string, number | undefined>;
   streamingToolsBySession: Record<string, ToolCallPart[]>;
   sendingBySession: Record<string, boolean>;
   errorBySession: Record<string, string | null>;
@@ -60,6 +63,8 @@ let state: ChatState = {
   sessionsLoaded: false,
   messagesBySession: {},
   streamingBySession: {},
+  streamingReasoningBySession: {},
+  reasoningStartedAtBySession: {},
   streamingToolsBySession: {},
   sendingBySession: {},
   errorBySession: {},
@@ -149,6 +154,8 @@ export async function deleteSession(id: string): Promise<void> {
   const { [id]: _removedMessages, ...messagesBySession } = state.messagesBySession;
   const { [id]: _removedStreaming, ...streamingBySession } = state.streamingBySession;
   const { [id]: _removedTools, ...streamingToolsBySession } = state.streamingToolsBySession;
+  const { [id]: _removedReasoning, ...streamingReasoningBySession } = state.streamingReasoningBySession;
+  const { [id]: _removedReasoningAt, ...reasoningStartedAtBySession } = state.reasoningStartedAtBySession;
   fenceBySession.delete(id);
   streamMetaBySession.delete(id);
   revealBySession.get(id)?.reset();
@@ -158,6 +165,8 @@ export async function deleteSession(id: string): Promise<void> {
     messagesBySession,
     streamingBySession,
     streamingToolsBySession,
+    streamingReasoningBySession,
+    reasoningStartedAtBySession,
   });
   tabStore.closeSessionTabs(id);
   artifactStore.dropSessionArtifacts(id);
@@ -383,6 +392,24 @@ function makeEventFolder(sessionId: string, acc: { text: string; tools: ToolCall
         getReveal(sessionId).push(acc.text);
         break;
       }
+      case 'reasoning': {
+        const prev = state.streamingReasoningBySession[sessionId] ?? '';
+        setState({
+          streamingReasoningBySession: {
+            ...state.streamingReasoningBySession,
+            [sessionId]: prev + event.delta,
+          },
+          ...(prev
+            ? {}
+            : {
+                reasoningStartedAtBySession: {
+                  ...state.reasoningStartedAtBySession,
+                  [sessionId]: Date.now(),
+                },
+              }),
+        });
+        break;
+      }
       case 'tool': {
         const next = acc.tools.filter((t) => t.id !== event.id);
         next.push({
@@ -454,6 +481,8 @@ async function reconcileAfterTurn(sessionId: string): Promise<void> {
     sessions: state.sessions.map((s) => (s.id === sessionId ? { ...s, ...summaryOf(session) } : s)),
     messagesBySession: { ...state.messagesBySession, [sessionId]: session.messages },
     streamingBySession: { ...state.streamingBySession, [sessionId]: '' },
+    streamingReasoningBySession: { ...state.streamingReasoningBySession, [sessionId]: '' },
+    reasoningStartedAtBySession: { ...state.reasoningStartedAtBySession, [sessionId]: undefined },
     streamingToolsBySession: { ...state.streamingToolsBySession, [sessionId]: [] },
     interactionBySession: { ...state.interactionBySession, [sessionId]: null },
   });
@@ -498,6 +527,8 @@ async function dispatchTurn(
     messagesBySession: { ...state.messagesBySession, [sessionId]: nextMessages },
     sendingBySession: { ...state.sendingBySession, [sessionId]: true },
     streamingBySession: { ...state.streamingBySession, [sessionId]: '' },
+    streamingReasoningBySession: { ...state.streamingReasoningBySession, [sessionId]: '' },
+    reasoningStartedAtBySession: { ...state.reasoningStartedAtBySession, [sessionId]: undefined },
     streamingToolsBySession: { ...state.streamingToolsBySession, [sessionId]: [] },
     errorBySession: { ...state.errorBySession, [sessionId]: null },
     interactionBySession: { ...state.interactionBySession, [sessionId]: null },
@@ -554,6 +585,8 @@ export async function resumeInterruptedTurn(sessionId: string): Promise<void> {
   setState({
     sendingBySession: { ...state.sendingBySession, [sessionId]: true },
     streamingBySession: { ...state.streamingBySession, [sessionId]: '' },
+    streamingReasoningBySession: { ...state.streamingReasoningBySession, [sessionId]: '' },
+    reasoningStartedAtBySession: { ...state.reasoningStartedAtBySession, [sessionId]: undefined },
     streamingToolsBySession: { ...state.streamingToolsBySession, [sessionId]: [] },
     errorBySession: { ...state.errorBySession, [sessionId]: null },
   });

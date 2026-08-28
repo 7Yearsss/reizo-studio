@@ -30,6 +30,7 @@ const commitChains = new Map<string, Promise<unknown>>();
 export interface TurnPersister {
   readonly clientId: string;
   onText(delta: string): void;
+  onReasoning(delta: string): void;
   onToolPart(part: ToolCallPart): void;
   hasContent(): boolean;
   /** Serialized append of the assistant row. No-op when aborted / empty. */
@@ -46,6 +47,9 @@ export function createTurnPersister(deps: {
   const { sessionStore, sessionId, turnId, generation, largeValues } = deps;
   const clientId = nanoid();
   let text = '';
+  let reasoning = '';
+  let reasoningStartedAt = 0;
+  let reasoningEndedAt = 0;
   const parts: ToolCallPart[] = [];
 
   function onToolPart(part: ToolCallPart): void {
@@ -79,6 +83,9 @@ export function createTurnPersister(deps: {
       role: 'assistant',
       content: spillField(largeValues, text),
       parts: spilledParts,
+      ...(reasoning
+        ? { reasoning, reasoningMs: Math.max(0, reasoningEndedAt - reasoningStartedAt) }
+        : {}),
       createdAt: new Date().toISOString(),
       turnId,
       generation,
@@ -93,6 +100,11 @@ export function createTurnPersister(deps: {
     clientId,
     onText: (delta) => {
       text += delta;
+    },
+    onReasoning: (delta) => {
+      if (!reasoning) reasoningStartedAt = Date.now();
+      reasoning += delta;
+      reasoningEndedAt = Date.now();
     },
     onToolPart,
     hasContent,

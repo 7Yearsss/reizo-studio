@@ -42,6 +42,10 @@ export interface ChatMessage {
   role: ChatRole;
   content: string;
   parts?: ToolCallPart[];
+  /** Model reasoning ("thinking") captured for this assistant row, if any. */
+  reasoning?: string;
+  /** Wall-clock ms the model spent reasoning, frozen once the turn ends. */
+  reasoningMs?: number;
   createdAt: string;
   /**
    * Backend-allocated stable id for an assistant row, stamped into the live
