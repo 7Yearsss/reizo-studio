@@ -39,7 +39,7 @@ export default function SlashPalette({
   if (filtered.length === 0) return null;
 
   return (
-    <div className="absolute right-0 bottom-full left-0 mb-2 overflow-hidden rounded-2xl border border-line bg-paper-raised shadow-[0_8px_30px_rgba(28,22,18,0.08)]">
+    <div className="pop-in absolute right-0 bottom-full left-0 mb-2 overflow-hidden rounded-2xl border border-line bg-paper-raised shadow-[0_8px_30px_rgba(28,22,18,0.08)]">
       {filtered.slice(0, 10).map((cmd) => (
         <button
           key={cmd.id}

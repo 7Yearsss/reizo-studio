@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import {
   ChevronRight,
   CirclePlus,
-  Flame,
   FolderKanban,
   LayoutGrid,
   PanelLeftClose,
@@ -149,26 +148,29 @@ export default function Sidebar() {
   const foldRow =
     'flex min-w-0 flex-1 items-center gap-1 rounded-xl px-3 py-2 text-left text-[13px] text-ink-muted outline-none transition-colors hover:text-ink';
 
-  if (collapsed) {
-    return (
-      <aside className="flex h-full w-10 shrink-0 flex-col items-center border-r border-line/70 bg-sidebar py-3">
-        <button
-          type="button"
-          onClick={toggleCollapsed}
-          title="展开侧栏"
-          aria-label="展开侧栏"
-          aria-expanded={false}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-paper-inset/70 hover:text-ink"
-        >
-          <PanelLeftOpen size={16} />
-        </button>
-        <ProjectDialog open={projectDialogOpen} onClose={() => setProjectDialogOpen(false)} />
-      </aside>
-    );
-  }
-
   return (
-    <aside className="flex h-full w-[248px] shrink-0 flex-col border-r border-line/70 bg-sidebar px-3 py-3">
+    <aside
+      className="relative flex h-full shrink-0 flex-col overflow-hidden border-r border-line/70 bg-sidebar transition-[width] duration-[var(--duration-base)] ease-[var(--ease-drawer)] motion-reduce:transition-none"
+      style={{ width: collapsed ? 40 : 248 }}
+    >
+      {collapsed && (
+        <div className="anim-fade flex flex-col items-center py-3">
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            title="展开侧栏"
+            aria-label="展开侧栏"
+            aria-expanded={false}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-paper-inset/70 hover:text-ink"
+          >
+            <PanelLeftOpen size={16} />
+          </button>
+        </div>
+      )}
+      <div
+        className="anim-fade flex h-full w-[248px] flex-col px-3 py-3"
+        style={collapsed ? { display: 'none' } : undefined}
+      >
       <div className="mb-3 flex items-center gap-1 px-1">
         <span className="flex-1 truncate px-2 text-[15px] font-semibold tracking-tight text-ink">Reizo</span>
         <button
@@ -207,10 +209,9 @@ export default function Sidebar() {
         <button type="button" onClick={() => setSearchOpen(true)} className={cn(navRow(false), 'mb-2')}>
           <Search size={18} className="shrink-0" strokeWidth={1.8} />
           快速搜索
-          <kbd className="ml-auto inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-[5px] border border-line/80 bg-paper px-1 text-[10.5px] font-medium text-ink-muted">
-            /
+          <kbd className="ml-auto inline-flex h-[18px] items-center justify-center rounded-[5px] border border-line/80 bg-paper px-1.5 text-[10.5px] font-medium text-ink-muted">
+            {searchModHint}
           </kbd>
-          <span className="text-[10px] text-ink-muted">{searchModHint}</span>
         </button>
       )}
 
@@ -266,7 +267,10 @@ export default function Sidebar() {
             <button type="button" onClick={toggleProjectsOpen} className={foldRow} aria-expanded={projectsOpen}>
               <ChevronRight
                 size={14}
-                className={cn('shrink-0 transition-transform', projectsOpen && 'rotate-90')}
+                className={cn(
+                  'shrink-0 transition-transform duration-150 ease-[var(--ease-out)] motion-reduce:transition-none',
+                  projectsOpen && 'rotate-90',
+                )}
               />
               项目
             </button>
@@ -281,7 +285,7 @@ export default function Sidebar() {
             </button>
           </div>
           {projectsOpen && (
-            <div className="min-h-0 overflow-y-auto px-1 pb-2">
+            <div className="anim-fade min-h-0 overflow-y-auto px-1 pb-2">
               {projects.length === 0 && (
                 <button
                   type="button"
@@ -348,8 +352,9 @@ export default function Sidebar() {
                   })}
                   <button
                     type="button"
-                    className="mt-2 px-3 text-[11px] text-danger"
+                    className="mt-2 px-3 text-[11px] text-ink-muted transition-colors hover:text-danger"
                     onClick={async () => {
+                      if (!window.confirm('删除这个项目？其中的对话会保留。')) return;
                       await projectStore.deleteProject(selectedProjectId);
                       uiStore.selectProject(null);
                       await chatStore.loadSessions();
@@ -365,11 +370,17 @@ export default function Sidebar() {
 
         <div className="flex min-h-0 flex-1 flex-col">
           <button type="button" onClick={toggleChatsOpen} className={cn(foldRow, 'w-full')} aria-expanded={chatsOpen}>
-            <ChevronRight size={14} className={cn('shrink-0 transition-transform', chatsOpen && 'rotate-90')} />
+            <ChevronRight
+              size={14}
+              className={cn(
+                'shrink-0 transition-transform duration-150 ease-[var(--ease-out)] motion-reduce:transition-none',
+                chatsOpen && 'rotate-90',
+              )}
+            />
             对话
           </button>
           {chatsOpen && (
-            <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-1 pb-2">
+            <nav className="anim-fade min-h-0 flex-1 space-y-0.5 overflow-y-auto px-1 pb-2">
               {visibleSessions.length === 0 && !query.trim() && (
                 <p className="px-3 py-1.5 text-xs text-ink-muted">暂无会话</p>
               )}
@@ -385,7 +396,7 @@ export default function Sidebar() {
                       active && 'bg-paper-inset/80 text-ink',
                     )}
                   >
-                    <SquarePen size={14} className="shrink-0 opacity-70" />
+                    <SquarePen size={14} className="mt-0.5 shrink-0 self-start opacity-70" />
                     {renamingId === session.id ? (
                       <input
                         autoFocus
@@ -404,14 +415,19 @@ export default function Sidebar() {
                       />
                     ) : (
                       <span
-                        className="flex-1 truncate"
+                        className="flex min-w-0 flex-1 flex-col"
                         onDoubleClick={(e) => {
                           e.stopPropagation();
                           setRenamingId(session.id);
                           setRenameValue(session.title);
                         }}
                       >
-                        {session.title}
+                        <span className="truncate">{session.title}</span>
+                        {session.listPreview && (
+                          <span className="truncate text-[11px] leading-tight text-ink-muted/80">
+                            {session.listPreview}
+                          </span>
+                        )}
                       </span>
                     )}
                     <span
@@ -422,7 +438,7 @@ export default function Sidebar() {
                         e.stopPropagation();
                         void chatStore.deleteSession(session.id);
                       }}
-                      className="hidden shrink-0 rounded p-1 text-ink-muted hover:bg-paper hover:text-danger group-hover:block"
+                      className="mt-0.5 shrink-0 self-start rounded p-1 text-ink-muted opacity-0 transition-opacity duration-[140ms] hover:bg-paper hover:text-danger group-hover:opacity-100"
                       aria-label="删除会话"
                     >
                       <Trash2 size={13} />
@@ -461,10 +477,8 @@ export default function Sidebar() {
             <div className="truncate text-xs font-medium text-ink">未登录</div>
             <div className="truncate text-[10px] text-ink-muted">本地 · {APP_VERSION}</div>
           </button>
-          <button type="button" className="rounded-full p-1 text-ink-muted hover:text-ink" title="本机">
-            <Flame size={13} />
-          </button>
         </div>
+      </div>
       </div>
 
       <ProjectDialog open={projectDialogOpen} onClose={() => setProjectDialogOpen(false)} />

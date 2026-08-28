@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ChevronRight, Wrench } from 'lucide-react';
-import type { ToolCallPart } from '../../../main/server/storage/ports';
+import type { ToolCallPart } from '../../../shared/chat';
 import { cn } from '../../lib/cn';
 
 export default function ToolCard({ part }: { part: ToolCallPart }) {

@@ -38,7 +38,7 @@ export default function PromptCard({
   return (
     <div
       className={cn(
-        'rounded-[28px] border border-line bg-paper-raised px-5 py-4 shadow-[0_8px_30px_rgba(28,22,18,0.06)]',
+        'group rounded-[28px] border border-line bg-paper-raised px-5 py-4 shadow-[0_8px_30px_rgba(28,22,18,0.06)] transition-colors duration-[140ms] focus-within:border-ink/15',
         className,
       )}
     >
@@ -105,7 +105,11 @@ export default function PromptCard({
           </button>
         )}
       </div>
-      {hint && <p className="mt-2 px-0.5 text-[10px] leading-none text-ink-muted">{hint}</p>}
+      {hint && (
+        <p className="mt-2 px-0.5 text-[10px] leading-none text-ink-muted opacity-0 transition-opacity duration-150 group-focus-within:opacity-100">
+          {hint}
+        </p>
+      )}
     </div>
   );
 }

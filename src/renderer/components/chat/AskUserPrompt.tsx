@@ -24,7 +24,7 @@ export default function AskUserPrompt({
   }
 
   return (
-    <div className="rounded-[28px] border border-line bg-paper-raised px-5 py-4 shadow-[0_8px_30px_rgba(28,22,18,0.06)]">
+    <div className="rise-in rounded-[28px] border border-line bg-paper-raised px-5 py-4 shadow-[0_8px_30px_rgba(28,22,18,0.06)]">
       <p className="text-xs text-ink-muted">
         问题 {index + 1} / {pending.questions.length}
       </p>

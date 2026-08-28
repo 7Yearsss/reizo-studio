@@ -1,53 +1,14 @@
-export type ChatRole = 'user' | 'assistant' | 'system';
-
-export interface ToolCallPart {
-  type: 'tool';
-  id: string;
-  name: string;
-  args: Record<string, unknown>;
-  result?: string;
-  error?: string;
-}
-
-export interface ChatMessage {
-  id: string;
-  role: ChatRole;
-  content: string;
-  parts?: ToolCallPart[];
-  createdAt: string;
-}
-
-export interface SessionSummary {
-  id: string;
-  title: string;
-  createdAt: string;
-  updatedAt: string;
-  workspacePath?: string | null;
-  projectId?: string | null;
-}
-
-export interface Session extends SessionSummary {
-  messages: ChatMessage[];
-}
-
 /**
- * Storage port — the same shape as winlume's SessionStore interface
- * (src/lib/host/ports.ts), reimplemented fresh for the desktop app.
- * A future adapter (e.g. cloud sync) can implement this without touching
- * route/agent code.
+ * @deprecated Import from `src/shared/chat.ts` instead. This module now
+ * re-exports the shared chat wire types for a transition period so existing
+ * `../storage/ports` imports keep working.
  */
-export interface SessionPatch {
-  title?: string;
-  projectId?: string | null;
-}
-
-export interface SessionStore {
-  list(): Promise<SessionSummary[]>;
-  get(id: string): Promise<Session | null>;
-  create(title?: string, workspacePath?: string | null, projectId?: string | null): Promise<Session>;
-  appendMessage(id: string, message: ChatMessage): Promise<Session>;
-  setMessages(id: string, messages: ChatMessage[]): Promise<Session>;
-  rename(id: string, title: string): Promise<Session>;
-  update(id: string, patch: SessionPatch): Promise<Session>;
-  remove(id: string): Promise<void>;
-}
+export type {
+  ChatRole,
+  ToolCallPart,
+  ChatMessage,
+  SessionSummary,
+  Session,
+  SessionPatch,
+  SessionStore,
+} from '../../../shared/chat';

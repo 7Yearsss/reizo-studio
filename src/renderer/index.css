@@ -17,6 +17,17 @@
   --success: #2d8a5e;
   --success-bg: #e2f0e8;
   --danger: #dc2626;
+
+  /* Zero-alpha `--paper` for gradient masks. `transparent` interpolates
+     through black in WebKit and leaves a dirty edge. */
+  --paper-a0: rgb(250 246 238 / 0);
+
+  /* Motion tokens. Built-in CSS easings are too weak for deliberate UI. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --duration-fast: 140ms;
+  --duration-base: 200ms;
 }
 
 :root.dark {
@@ -32,10 +43,13 @@
   --success: #5db88a;
   --success-bg: #1e3a2c;
   --danger: #e5695c;
+
+  --paper-a0: rgb(26 22 20 / 0);
 }
 
 @theme {
   --color-paper: var(--paper);
+  --color-paper-a0: var(--paper-a0);
   --color-paper-raised: var(--paper-raised);
   --color-paper-inset: var(--paper-inset);
   --color-sidebar: var(--sidebar);
@@ -164,23 +178,68 @@ pre,
   to { opacity: 1; transform: none; }
 }
 
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
 .anim-fade {
-  animation: fade-in 180ms ease-out;
+  animation: fade-in 180ms var(--ease-out);
 }
 
 .anim-msg {
-  animation: msg-in 180ms ease-out;
+  animation: msg-in 180ms var(--ease-out);
 }
 
 .anim-jump {
-  animation: jump-in 180ms ease-out;
+  animation: jump-in 180ms var(--ease-out);
+}
+
+/* Small card / prompt swaps: fade + a short rise. */
+.rise-in {
+  animation: rise-in var(--duration-fast) var(--ease-out);
+}
+
+/* Popovers anchored to the composer input — grow from the edge nearest it. */
+.pop-in {
+  animation: pop-in var(--duration-fast) var(--ease-out);
+  transform-origin: bottom;
+}
+
+/* Global press feedback — respond on pointer-down, Apple-style. The
+   `:has()` guard keeps a nested button from double-scaling its parent. */
+button,
+[role='button'] {
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  button:not(:disabled):not([aria-disabled='true']):active:not(:has(:is(button, [role='button']):active)),
+  [role='button']:not([aria-disabled='true']):active:not(:has(:is(button, [role='button']):active)) {
+    transform: scale(0.97);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  /* Keep the fade, drop the movement. */
   .anim-fade,
   .anim-msg,
-  .anim-jump {
-    animation: none;
+  .anim-jump,
+  .rise-in,
+  .pop-in {
+    animation: fade-in 180ms var(--ease-out);
+  }
+  button,
+  [role='button'] {
+    transition: none;
+  }
+  button:active,
+  [role='button']:active {
+    transform: none;
   }
 }
 

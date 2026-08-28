@@ -1,7 +1,7 @@
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { nanoid } from 'nanoid';
-import type { ChatMessage, Session, SessionPatch, SessionStore, SessionSummary } from './ports';
+import type { ChatMessage, Session, SessionPatch, SessionStore, SessionSummary } from '../../../shared/chat';
 
 /**
  * Local-only session store: one JSON file per session under

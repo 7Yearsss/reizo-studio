@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AtSign, FolderTree, Paperclip, Shield } from 'lucide-react';
+import { AtSign, FolderTree, Paperclip } from 'lucide-react';
 import { isImeComposingEvent } from '../../lib/ime';
 import PromptCard from './PromptCard';
 import ModelPicker from './ModelPicker';
@@ -53,8 +53,9 @@ export default function Composer({
   const workspacePath = useSettingsStore((s) => s.settings.workspacePath);
   const permissionMode = useSettingsStore((s) => s.settings.permissionMode);
   const skills = useSkillStore().skills;
-  const permission = useChatStore((s) => (sessionId ? s.permissionBySession[sessionId] : null)) ?? null;
-  const ask = useChatStore((s) => (sessionId ? s.askBySession[sessionId] : null)) ?? null;
+  const interaction = useChatStore((s) => (sessionId ? s.interactionBySession[sessionId] : null)) ?? null;
+  const permission = interaction?.kind === 'permission' ? interaction : null;
+  const ask = interaction?.kind === 'ask' ? interaction : null;
   const queue = useChatStore((s) => (sessionId ? s.queueBySession[sessionId] : undefined)) ?? [];
   const todos = useChatStore((s) => (sessionId ? s.todosBySession[sessionId] : undefined)) ?? [];
   const seed = useChatStore((s) => (sessionId ? s.composerSeedBySession[sessionId] : undefined));
@@ -106,7 +107,7 @@ export default function Composer({
   }
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-0 px-6 pt-16 pb-6 bg-gradient-to-t from-paper via-paper to-transparent">
+    <div className="pointer-events-none absolute inset-x-0 bottom-0 px-6 pt-16 pb-6 bg-gradient-to-t from-paper via-paper to-paper-a0">
       <div className="pointer-events-auto relative mx-auto max-w-3xl">
         {sessionId && <TodoCard items={todos} />}
         {sessionId && (
@@ -233,13 +234,12 @@ export default function Composer({
                     <button
                       type="button"
                       onClick={onToggleTree}
-                      className={`rounded-full p-1.5 transition-colors duration-150 hover:bg-paper ${treeOpen ? 'text-accent' : 'text-ink-muted hover:text-ink'}`}
+                      className={`ml-auto rounded-full p-1.5 transition-colors duration-150 hover:bg-paper ${treeOpen ? 'text-accent' : 'text-ink-muted hover:text-ink'}`}
                       title="右侧面板"
                     >
                       <FolderTree size={14} />
                     </button>
                   )}
-                  <Shield size={13} className="ml-auto text-ink-muted" />
                 </>
               }
             />

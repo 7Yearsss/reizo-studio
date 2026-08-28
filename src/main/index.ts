@@ -1,8 +1,12 @@
 import { app, BrowserWindow, globalShortcut, ipcMain } from 'electron';
+import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
 import { IPC } from '../shared/constants';
 import { startLocalServer, stopLocalServer, type RunningServer } from './server/listen';
+import { openDb, type DbHandle } from './server/db/client';
+import { importLegacySessions } from './server/db/importLegacySessions';
+import { createSqliteSessionStore } from './server/storage/sqliteSessionStore';
 import { createSettingsStore } from './server/storage/settingsStore';
 import { createScheduleStore } from './server/storage/scheduleStore';
 import { createThoughtStore } from './server/storage/thoughtStore';
@@ -31,6 +35,8 @@ if (process.env.REIZO_DEV_NO_SANDBOX === '1') {
 }
 
 let runningServer: RunningServer | null = null;
+let dbHandle: DbHandle | null = null;
+let freezeTurnMarkers: (() => void) | null = null;
 let stopScheduler: (() => void) | null = null;
 let shuttingDown = false;
 
@@ -41,14 +47,22 @@ function devServerOrigin(): string | undefined {
 
 async function bootstrap(): Promise<void> {
   const dataRoot = path.join(app.getPath('userData'), 'data');
+  mkdirSync(dataRoot, { recursive: true });
   const settingsStore = createSettingsStore(dataRoot);
   const scheduleStore = createScheduleStore(dataRoot);
   const thoughtStore = createThoughtStore(dataRoot);
   const skillsDirs = [path.join(process.cwd(), 'skills'), path.join(app.getAppPath(), 'skills'), path.join(dataRoot, 'skills')];
 
+  dbHandle = openDb(path.join(dataRoot, 'reizo.db'));
+  const importedCount = importLegacySessions(dataRoot, dbHandle.raw);
+  if (importedCount > 0) console.log(`[main] imported ${importedCount} legacy session(s) into SQLite`);
+  const sessionStore = createSqliteSessionStore(dbHandle);
+  freezeTurnMarkers = () => sessionStore.freezeTurnMarkers();
+
   runningServer = await startLocalServer({
     dataRoot,
     settingsStore,
+    sessionStore,
     scheduleStore,
     thoughtStore,
     skillsDirs,
@@ -71,12 +85,21 @@ async function bootstrap(): Promise<void> {
 async function shutdown(): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
+  // Synchronously, before any awaits: stop the server's shutdown path from
+  // stamping a normal `last_turn_ended_at` over a turn that was really
+  // interrupted by this quit.
+  freezeTurnMarkers?.();
+  freezeTurnMarkers = null;
   globalShortcut.unregisterAll();
   stopScheduler?.();
   stopScheduler = null;
   if (runningServer) {
     await stopLocalServer(runningServer);
     runningServer = null;
+  }
+  if (dbHandle) {
+    dbHandle.close();
+    dbHandle = null;
   }
 }
 
