@@ -1,41 +1,20 @@
 import { isStepCount, streamText, type ModelMessage } from 'ai';
 import { nanoid } from 'nanoid';
 import { getProviderPreset } from '../../../shared/providers';
-import { encodeStreamEvent, type ChatStreamEvent, type TodoItem } from '../../../shared/stream';
+import type { ChatStreamEvent, TodoItem } from '../../../shared/stream';
 import { createOpenAiModel } from './provider/openai';
 import { createWorkspaceTools } from './workspaceTools';
-import { clearPermissionSink, setPermissionSink } from './permissions';
+import { startAgentTurn } from './session';
+import { translateOpenAiChunk } from './translators/openai';
 import { readWorkspaceMemory } from '../../workspaceMemory';
 import type { Skill } from '../../skills';
-import type { ChatMessage, SessionStore, ToolCallPart } from '../storage/ports';
+import type { ChatMessage, SessionStore } from '../../../shared/chat';
 import type { SettingsStore } from '../storage/settingsStore';
 import type { ArtifactStore } from '../storage/artifactStore';
 import type { ProjectStore } from '../storage/projectStore';
+import type { LargeValueStore } from '../storage/largeValueStore';
 
-const abortBySession = new Map<string, AbortController>();
-
-export function abortChatTurn(sessionId: string): boolean {
-  const current = abortBySession.get(sessionId);
-  if (!current) return false;
-  current.abort();
-  return true;
-}
-
-function stringifyToolOutput(value: unknown): string {
-  if (typeof value === 'string') return value;
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
-  }
-  return { value };
-}
+export { abortChatTurn } from './session';
 
 export async function runChatTurn(options: {
   sessionStore: SessionStore;
@@ -51,6 +30,7 @@ export async function runChatTurn(options: {
   projectStore?: ProjectStore;
   truncateAfterId?: string;
   regenerate?: boolean;
+  largeValueStore?: LargeValueStore;
 }): Promise<Response> {
   const {
     sessionStore,
@@ -64,6 +44,7 @@ export async function runChatTurn(options: {
     projectStore,
     truncateAfterId,
     regenerate = false,
+    largeValueStore,
   } = options;
 
   let session = await sessionStore.get(sessionId);
@@ -166,23 +147,18 @@ export async function runChatTurn(options: {
     skill ? `The user invoked skill "${skill.name}". Follow this skill:\n${skill.body}` : '',
     projectInstructions ? `Project "${projectName}" working rules:\n${projectInstructions}` : '',
   ].filter(Boolean);
+  const instructions = systemParts.join('\n\n');
 
-  const history: ModelMessage[] = [
-    { role: 'system', content: systemParts.join('\n\n') },
-    ...session.messages.map((m) => ({ role: m.role, content: m.content }) as ModelMessage),
-  ];
+  // `ai` v7 rejects a `system`-role entry in `messages`; the system prompt
+  // goes to the `instructions` option. Only replayable chat roles here.
+  const history: ModelMessage[] = session.messages
+    .filter((m) => m.role === 'user' || m.role === 'assistant')
+    .map((m) => ({ role: m.role, content: m.content }) as ModelMessage);
 
-  const previous = abortBySession.get(sessionId);
-  previous?.abort();
-  const abortController = new AbortController();
-  abortBySession.set(sessionId, abortController);
-
-  const encoder = new TextEncoder();
-  const parts: ToolCallPart[] = [];
-  const todos: TodoItem[] = [];
-  let text = '';
-  let aborted = false;
+  // `emit` is bound to the live stream once `startAgentTurn` opens it; tools
+  // created here need the reference up front (todos / permission side-channel).
   let emit: (event: ChatStreamEvent) => void = () => undefined;
+  const todos: TodoItem[] = [];
 
   const tools = workspacePath
     ? createWorkspaceTools({
@@ -205,124 +181,24 @@ export async function runChatTurn(options: {
       })
     : undefined;
 
-  const result = streamText({
-    model: createOpenAiModel({ apiKey, modelId, baseUrl }),
-    messages: history,
-    tools,
-    stopWhen: tools ? isStepCount(12) : undefined,
-    abortSignal: abortController.signal,
-  });
+  const model = createOpenAiModel({ apiKey, modelId, baseUrl });
 
-  const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      const send = (event: ChatStreamEvent) => {
-        controller.enqueue(encoder.encode(encodeStreamEvent(event)));
-      };
+  return startAgentTurn({
+    sessionStore,
+    sessionId,
+    translate: translateOpenAiChunk,
+    largeValues: largeValueStore,
+    onReady: (send) => {
       emit = send;
-      setPermissionSink(sessionId, send);
-
-      try {
-        for await (const chunk of result.fullStream) {
-          if (abortController.signal.aborted) {
-            aborted = true;
-            break;
-          }
-          if (chunk.type === 'text-delta') {
-            text += chunk.text;
-            send({ type: 'text', delta: chunk.text });
-          } else if (chunk.type === 'tool-call') {
-            const existing = parts.find((p) => p.id === chunk.toolCallId);
-            if (existing) {
-              existing.name = chunk.toolName;
-              existing.args = asRecord(chunk.input);
-            } else {
-              parts.push({
-                type: 'tool',
-                id: chunk.toolCallId,
-                name: chunk.toolName,
-                args: asRecord(chunk.input),
-              });
-            }
-          } else if (chunk.type === 'tool-result') {
-            let part = parts.find((p) => p.id === chunk.toolCallId);
-            if (!part) {
-              part = {
-                type: 'tool',
-                id: chunk.toolCallId,
-                name: chunk.toolName,
-                args: asRecord(chunk.input),
-              };
-              parts.push(part);
-            }
-            part.result = stringifyToolOutput(chunk.output);
-            send({
-              type: 'tool',
-              id: part.id,
-              name: part.name,
-              args: part.args,
-              result: part.result,
-            });
-          } else if (chunk.type === 'tool-error') {
-            let part = parts.find((p) => p.id === chunk.toolCallId);
-            if (!part) {
-              part = {
-                type: 'tool',
-                id: chunk.toolCallId,
-                name: chunk.toolName,
-                args: asRecord(chunk.input),
-              };
-              parts.push(part);
-            }
-            part.error = stringifyToolOutput(chunk.error);
-            send({
-              type: 'tool',
-              id: part.id,
-              name: part.name,
-              args: part.args,
-              error: part.error,
-            });
-          } else if (chunk.type === 'abort') {
-            aborted = true;
-            break;
-          } else if (chunk.type === 'error') {
-            send({ type: 'error', error: stringifyToolOutput(chunk.error) });
-          }
-        }
-
-        if (!aborted && !abortController.signal.aborted && (text || parts.length)) {
-          await sessionStore.appendMessage(sessionId, {
-            id: nanoid(),
-            role: 'assistant',
-            content: text,
-            parts: parts.length ? parts : undefined,
-            createdAt: new Date().toISOString(),
-          });
-        }
-
-        send({ type: 'done', aborted: aborted || abortController.signal.aborted });
-        controller.close();
-      } catch (err) {
-        if (abortController.signal.aborted) {
-          send({ type: 'done', aborted: true });
-          controller.close();
-          return;
-        }
-        send({ type: 'error', error: err instanceof Error ? err.message : String(err) });
-        send({ type: 'done' });
-        controller.close();
-      } finally {
-        clearPermissionSink(sessionId);
-        if (abortBySession.get(sessionId) === abortController) {
-          abortBySession.delete(sessionId);
-        }
-      }
     },
-  });
-
-  return new Response(stream, {
-    headers: {
-      'content-type': 'application/x-ndjson; charset=utf-8',
-      'cache-control': 'no-cache',
-    },
+    createStream: (signal) =>
+      streamText({
+        model,
+        instructions,
+        messages: history,
+        tools,
+        stopWhen: tools ? isStepCount(12) : undefined,
+        abortSignal: signal,
+      }),
   });
 }

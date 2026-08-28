@@ -2,6 +2,7 @@ import { serve, type ServerType } from '@hono/node-server';
 import type { Hono } from 'hono';
 import { API_BASE_PORT, API_PORT_SCAN_ATTEMPTS } from '../../shared/constants';
 import { createApp } from './app';
+import type { SessionStore } from '../../shared/chat';
 import type { SettingsStore } from './storage/settingsStore';
 import type { ScheduleStore } from './storage/scheduleStore';
 import type { ThoughtStore } from './storage/thoughtStore';
@@ -24,6 +25,7 @@ export async function startLocalServer(options: {
   dataRoot: string;
   devServerOrigin?: string;
   settingsStore?: SettingsStore;
+  sessionStore?: SessionStore;
   skillsDirs?: string[];
   scheduleStore?: ScheduleStore;
   thoughtStore?: ThoughtStore;
@@ -32,20 +34,16 @@ export async function startLocalServer(options: {
 
   for (let attempt = 0; attempt < API_PORT_SCAN_ATTEMPTS; attempt += 1) {
     const port = API_BASE_PORT + attempt;
-    let app: Hono;
-    try {
-      app = createApp({
-        dataRoot: options.dataRoot,
-        port,
-        devServerOrigin: options.devServerOrigin,
-        settingsStore: options.settingsStore,
-        skillsDirs: options.skillsDirs,
-        scheduleStore: options.scheduleStore,
-        thoughtStore: options.thoughtStore,
-      });
-    } catch (err) {
-      throw err;
-    }
+    const app: Hono = createApp({
+      dataRoot: options.dataRoot,
+      port,
+      devServerOrigin: options.devServerOrigin,
+      settingsStore: options.settingsStore,
+      sessionStore: options.sessionStore,
+      skillsDirs: options.skillsDirs,
+      scheduleStore: options.scheduleStore,
+      thoughtStore: options.thoughtStore,
+    });
 
     try {
       const server = await new Promise<ServerType>((resolve, reject) => {

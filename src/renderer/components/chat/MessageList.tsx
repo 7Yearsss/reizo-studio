@@ -1,6 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown } from 'lucide-react';
-import type { ChatMessage, ToolCallPart } from '../../../main/server/storage/ports';
+import type { ChatMessage, ToolCallPart } from '../../../shared/chat';
+import {
+  buildRenderItems,
+  initialWindowStart,
+  snapWindowStart,
+  WINDOW_GROW_ITEMS,
+} from '../../lib/buildRenderItems';
 import UserMessage from './UserMessage';
 import AssistantMessage from './AssistantMessage';
 import EmptyChatHints from './EmptyChatHints';
@@ -8,6 +14,8 @@ import EmptyChatHints from './EmptyChatHints';
 function nearBottom(el: HTMLElement): boolean {
   return el.scrollHeight - el.scrollTop - el.clientHeight < 80;
 }
+
+const GROW_TRIGGER_PX = 160;
 
 export default function MessageList({
   messages,
@@ -40,6 +48,32 @@ export default function MessageList({
   const frozenRef = useRef(false);
   const [showJump, setShowJump] = useState(false);
 
+  const items = useMemo(() => buildRenderItems(messages), [messages]);
+  const firstKey = items[0]?.key;
+  const [windowStart, setWindowStart] = useState(() => initialWindowStart(items));
+  // Restores scroll position after the window grows upward.
+  const growAnchorRef = useRef<number | null>(null);
+
+  // Reset the window on a session switch (the first item changes).
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  useEffect(() => {
+    setWindowStart(initialWindowStart(itemsRef.current));
+  }, [firstKey]);
+
+  // Keep the window start valid if the list shrank (truncate / regenerate).
+  useEffect(() => {
+    setWindowStart((s) => Math.min(s, Math.max(0, items.length - 1)));
+  }, [items.length]);
+
+  useLayoutEffect(() => {
+    const el = scrollerRef.current;
+    if (el && growAnchorRef.current !== null) {
+      el.scrollTop += el.scrollHeight - growAnchorRef.current;
+      growAnchorRef.current = null;
+    }
+  }, [windowStart]);
+
   useEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;
@@ -64,7 +98,16 @@ export default function MessageList({
     setShowJump(true);
   }, [currentMatchId, searchQuery]);
 
+  // Search must see the whole history — widen the window to cover any match.
+  useEffect(() => {
+    if (!searchQuery?.trim() || !currentMatchId) return;
+    const idx = items.findIndex((it) => it.key === currentMatchId);
+    if (idx >= 0 && idx < windowStart) setWindowStart(snapWindowStart(items, idx));
+  }, [currentMatchId, searchQuery, items, windowStart]);
+
   const empty = messages.length === 0 && !sending;
+  const shown = items.slice(windowStart);
+  const hasOlder = windowStart > 0;
 
   return (
     <div
@@ -72,6 +115,10 @@ export default function MessageList({
       className="relative flex-1 overflow-y-auto px-8 pt-4 pb-40"
       onScroll={(e) => {
         const el = e.currentTarget;
+        if (el.scrollTop < GROW_TRIGGER_PX && windowStart > 0 && growAnchorRef.current === null) {
+          growAnchorRef.current = el.scrollHeight;
+          setWindowStart((s) => snapWindowStart(items, s - WINDOW_GROW_ITEMS));
+        }
         const atBottom = nearBottom(el);
         stickRef.current = atBottom;
         if (atBottom) {
@@ -95,7 +142,10 @@ export default function MessageList({
     >
       <div className="mx-auto max-w-3xl space-y-8">
         {empty && onPickHint ? <EmptyChatHints onPick={onPickHint} /> : null}
-        {messages.map((m) => (
+        {hasOlder && (
+          <div className="pt-2 text-center text-[11px] text-ink-muted">向上滚动加载更早的消息…</div>
+        )}
+        {shown.map(({ message: m }) => (
           <div
             key={m.id}
             data-message-id={m.id}

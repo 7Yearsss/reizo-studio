@@ -32,7 +32,7 @@ export default function PermissionPrompt({
         : JSON.stringify(permission.args, null, 2).slice(0, 400);
 
   return (
-    <div className="rounded-[28px] border border-line bg-paper-raised px-5 py-4 shadow-[0_8px_30px_rgba(28,22,18,0.06)]">
+    <div className="rise-in rounded-[28px] border border-line bg-paper-raised px-5 py-4 shadow-[0_8px_30px_rgba(28,22,18,0.06)]">
       <p className="text-sm font-medium text-ink">允许 {permission.name}？</p>
       <p className="mt-1 text-xs text-ink-muted">高风险动作会先问你，再动文件或命令。</p>
       <pre className="mt-3 max-h-40 overflow-auto rounded-xl bg-paper px-3 py-2 text-[12px] leading-relaxed text-ink">

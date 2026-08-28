@@ -14,7 +14,7 @@ export default function QueuePanel({
       {items.map((item, index) => (
         <div
           key={item.id}
-          className="flex items-center gap-2 rounded-2xl border border-line bg-paper-raised px-3 py-2 text-xs text-ink"
+          className="rise-in flex items-center gap-2 rounded-2xl border border-line bg-paper-raised px-3 py-2 text-xs text-ink"
         >
           <span className="text-ink-muted">{index === 0 ? '下一条' : `排队 ${index + 1}`}</span>
           <span className="min-w-0 flex-1 truncate">{item.text}</span>

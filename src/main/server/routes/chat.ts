@@ -1,11 +1,13 @@
 import { Hono } from 'hono';
-import type { SessionStore } from '../storage/ports';
+import type { SessionStore } from '../../../shared/chat';
 import type { SettingsStore } from '../storage/settingsStore';
 import type { ArtifactStore } from '../storage/artifactStore';
 import type { ProjectStore } from '../storage/projectStore';
 import { abortChatTurn, runChatTurn } from '../agent/runtime';
+import { resumeAgentTurn } from '../agent/session';
 import { answerAsk, answerPermission, type PermissionDecision } from '../agent/permissions';
 import { loadSkills } from '../../skills';
+import type { LargeValueStore } from '../storage/largeValueStore';
 
 const DECISIONS = new Set<PermissionDecision>(['allow', 'deny', 'allow-session']);
 
@@ -15,6 +17,7 @@ export function createChatRouter(
   skillsDirs: string[] = [],
   artifactStore?: ArtifactStore,
   projectStore?: ProjectStore,
+  largeValueStore?: LargeValueStore,
 ) {
   const router = new Hono();
 
@@ -73,6 +76,19 @@ export function createChatRouter(
       projectStore,
       truncateAfterId: typeof body.truncateAfterId === 'string' ? body.truncateAfterId : undefined,
       regenerate: body.regenerate === true,
+      largeValueStore,
+    });
+  });
+
+  // Reattach to an in-flight turn after a dropped connection / window reload.
+  // Replays ring-buffer events with rev > `after`, then tails the live turn
+  // (or sends a terminal `done` if it already finished).
+  router.get('/:id/stream/resume', (c) => {
+    const after = Number(c.req.query('after') ?? '-1');
+    const epoch = c.req.query('epoch') || undefined;
+    return resumeAgentTurn(c.req.param('id'), {
+      after: Number.isFinite(after) ? after : -1,
+      epoch,
     });
   });
 

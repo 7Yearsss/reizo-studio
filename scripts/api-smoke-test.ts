@@ -69,7 +69,7 @@ async function main() {
       'settings-reizo-preset',
       reizo?.name === 'Reizo (Winlume)' &&
         typeof reizo?.baseUrl === 'string' &&
-        reizo.baseUrl.includes('winlume.v2api.top') &&
+        reizo.baseUrl.includes('v2api.top') &&
         reizo.hasKey === false,
       reizo,
     );

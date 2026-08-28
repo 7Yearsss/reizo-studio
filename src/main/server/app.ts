@@ -1,4 +1,5 @@
 import { Hono, type MiddlewareHandler } from 'hono';
+import type { SessionStore } from '../../shared/chat';
 import { createFileSessionStore } from './storage/fileSessionStore';
 import { createSettingsStore } from './storage/settingsStore';
 import { createSessionsRouter } from './routes/sessions';
@@ -10,8 +11,10 @@ import { createScheduleStore } from './storage/scheduleStore';
 import { createThoughtStore } from './storage/thoughtStore';
 import { createProjectStore } from './storage/projectStore';
 import { createArtifactStore } from './storage/artifactStore';
+import { createLargeValueStore } from './storage/largeValueStore';
 import { createProjectsRouter } from './routes/projects';
 import { createArtifactsRouter, createSessionArtifactsRouter } from './routes/artifacts';
+import { createRefsRouter } from './routes/refs';
 
 export interface CreateAppOptions {
   /** Directory the local session/settings JSON files live under. */
@@ -21,6 +24,8 @@ export interface CreateAppOptions {
   /** Vite dev server origin in dev, so the renderer's fetches aren't rejected. */
   devServerOrigin?: string;
   settingsStore?: ReturnType<typeof createSettingsStore>;
+  /** Injected session store. Defaults to the JSON file store when omitted. */
+  sessionStore?: SessionStore;
   skillsDirs?: string[];
   scheduleStore?: ReturnType<typeof createScheduleStore>;
   thoughtStore?: ReturnType<typeof createThoughtStore>;
@@ -56,10 +61,11 @@ function originGuard(options: CreateAppOptions): MiddlewareHandler {
 }
 
 export function createApp(options: CreateAppOptions) {
-  const sessionStore = createFileSessionStore(options.dataRoot);
+  const sessionStore = options.sessionStore ?? createFileSessionStore(options.dataRoot);
   const settingsStore = options.settingsStore ?? createSettingsStore(options.dataRoot);
   const projectStore = createProjectStore(options.dataRoot);
   const artifactStore = createArtifactStore(options.dataRoot);
+  const largeValueStore = createLargeValueStore(options.dataRoot);
 
   const app = new Hono();
   app.use('*', originGuard(options));
@@ -67,9 +73,13 @@ export function createApp(options: CreateAppOptions) {
   app.get('/api/health', (c) => c.json({ ok: true }));
   const skillsDirs = options.skillsDirs ?? [];
   app.route('/api/sessions', createSessionsRouter(sessionStore, artifactStore));
-  app.route('/api/sessions', createChatRouter(sessionStore, settingsStore, skillsDirs, artifactStore, projectStore));
+  app.route(
+    '/api/sessions',
+    createChatRouter(sessionStore, settingsStore, skillsDirs, artifactStore, projectStore, largeValueStore),
+  );
   app.route('/api/sessions', createSessionArtifactsRouter(artifactStore, sessionStore));
   app.route('/api/artifacts', createArtifactsRouter(artifactStore));
+  app.route('/api/refs', createRefsRouter(largeValueStore));
   app.route('/api/projects', createProjectsRouter(projectStore, sessionStore));
   const scheduleStore = options.scheduleStore ?? createScheduleStore(options.dataRoot);
   const thoughtStore = options.thoughtStore ?? createThoughtStore(options.dataRoot);

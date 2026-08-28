@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { ProjectStore } from '../storage/projectStore';
-import type { SessionStore } from '../storage/ports';
+import type { SessionStore } from '../../../shared/chat';
 
 export function createProjectsRouter(projectStore: ProjectStore, sessionStore: SessionStore) {
   const router = new Hono();

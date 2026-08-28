@@ -1,4 +1,4 @@
-import type { Session, SessionSummary } from '../main/server/storage/ports';
+import type { Session, SessionSummary } from '../shared/chat';
 import type { Project } from '../shared/project';
 import type { Artifact, ArtifactWithContent } from '../shared/artifact';
 import type { DirEntry } from '../shared/workspace';
@@ -6,6 +6,47 @@ import type { PublicSettings, SettingsPatch } from '../shared/settings';
 import type { Schedule, Thought } from '../shared/schedule';
 import { SCHEDULE_PRESETS } from '../shared/schedule';
 import { parseStreamLine, type ChatStreamEvent } from '../shared/stream';
+import { isLiveEnvelope } from '../shared/liveRevision';
+
+export interface StreamMeta {
+  rev: number;
+  epoch: string;
+}
+export type StreamEventHandler = (event: ChatStreamEvent, meta?: StreamMeta) => void;
+
+/** Reads an NDJSON body of `LiveEnvelope` lines, handing each event + its meta to `onEvent`. */
+async function readEnvelopeStream(res: Response, onEvent: StreamEventHandler): Promise<void> {
+  const reader = res.body?.getReader();
+  if (!reader) return;
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const dispatch = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      const fallback = parseStreamLine(trimmed);
+      if (fallback) onEvent(fallback);
+      return;
+    }
+    if (isLiveEnvelope(parsed)) {
+      onEvent(parsed.event, { rev: parsed.rev, epoch: parsed.epoch });
+    } else {
+      onEvent(parsed as ChatStreamEvent);
+    }
+  };
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) dispatch(line);
+  }
+  dispatch(buffer);
+}
 
 let originPromise: Promise<string> | null = null;
 
@@ -104,7 +145,7 @@ export async function sendMessage(
     truncateAfterId?: string;
     regenerate?: boolean;
     signal?: AbortSignal;
-    onEvent: (event: ChatStreamEvent) => void;
+    onEvent: StreamEventHandler;
   },
 ): Promise<void> {
   const origin = await apiOrigin();
@@ -134,23 +175,30 @@ export async function sendMessage(
     throw new Error(body.error ?? 'Unexpected JSON response');
   }
 
-  const reader = res.body?.getReader();
-  if (!reader) return;
-  const decoder = new TextDecoder();
-  let buffer = '';
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() ?? '';
-    for (const line of lines) {
-      const event = parseStreamLine(line);
-      if (event) options.onEvent(event);
-    }
-  }
-  const tail = parseStreamLine(buffer);
-  if (tail) options.onEvent(tail);
+  await readEnvelopeStream(res, options.onEvent);
+}
+
+/**
+ * Reattach to an in-flight turn after a dropped connection / window reload.
+ * Replays buffered events with `rev > after`, then tails the live turn (or
+ * yields a terminal `done` if it already finished).
+ */
+export async function resumeTurn(
+  sessionId: string,
+  after: number,
+  epoch: string | null,
+  onEvent: StreamEventHandler,
+  signal?: AbortSignal,
+): Promise<void> {
+  const origin = await apiOrigin();
+  const params = new URLSearchParams({ after: String(after) });
+  if (epoch) params.set('epoch', epoch);
+  const res = await fetch(
+    `${origin}/api/sessions/${sessionId}/stream/resume?${params.toString()}`,
+    { signal },
+  );
+  if (!res.ok) throw new Error(`resume failed: ${res.status}`);
+  await readEnvelopeStream(res, onEvent);
 }
 
 export async function stopMessage(sessionId: string): Promise<void> {

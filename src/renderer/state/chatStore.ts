@@ -1,6 +1,9 @@
 import * as api from '../api';
-import type { ChatMessage, SessionSummary, ToolCallPart } from '../../main/server/storage/ports';
-import type { AskQuestion, TodoItem } from '../../shared/stream';
+import type { ChatMessage, SessionSummary, ToolCallPart } from '../../shared/chat';
+import type { AskQuestion, TodoItem, ChatStreamEvent } from '../../shared/stream';
+import type { StreamMeta } from '../api';
+import { completeResync, createFence, ingestEnvelope, type Fence } from './liveRevisionFence';
+import { createRevealController, type RevealController } from './revealController';
 import * as settingsStore from './settingsStore';
 import * as tabStore from './tabStore';
 import * as uiStore from './uiStore';
@@ -17,6 +20,11 @@ export interface PendingAsk {
   id: string;
   questions: AskQuestion[];
 }
+
+/** Unified interaction model — permission gate or a mid-turn question. */
+export type ChatInteraction =
+  | { kind: 'permission'; id: string; name: string; args: Record<string, unknown> }
+  | { kind: 'ask'; id: string; questions: AskQuestion[] };
 
 export interface QueuedTurn {
   id: string;
@@ -39,11 +47,12 @@ export interface ChatState {
   streamingToolsBySession: Record<string, ToolCallPart[]>;
   sendingBySession: Record<string, boolean>;
   errorBySession: Record<string, string | null>;
-  permissionBySession: Record<string, PendingPermission | null>;
-  askBySession: Record<string, PendingAsk | null>;
+  interactionBySession: Record<string, ChatInteraction | null>;
   todosBySession: Record<string, TodoItem[]>;
   queueBySession: Record<string, QueuedTurn[]>;
   composerSeedBySession: Record<string, ComposerSeed | undefined>;
+  /** Sessions where the user dismissed the "interrupted turn" banner. */
+  interruptDismissedBySession: Record<string, boolean>;
 }
 
 let state: ChatState = {
@@ -54,15 +63,30 @@ let state: ChatState = {
   streamingToolsBySession: {},
   sendingBySession: {},
   errorBySession: {},
-  permissionBySession: {},
-  askBySession: {},
+  interactionBySession: {},
   todosBySession: {},
   queueBySession: {},
   composerSeedBySession: {},
+  interruptDismissedBySession: {},
 };
 
 const abortBySession = new Map<string, AbortController>();
+/** Non-reactive: liveRevision fence + last seen stream meta, per session. */
+const fenceBySession = new Map<string, Fence>();
+const streamMetaBySession = new Map<string, StreamMeta>();
+const revealBySession = new Map<string, RevealController>();
 const listeners = new Set<() => void>();
+
+function getReveal(sessionId: string): RevealController {
+  let controller = revealBySession.get(sessionId);
+  if (!controller) {
+    controller = createRevealController((text) => {
+      setState({ streamingBySession: { ...state.streamingBySession, [sessionId]: text } });
+    });
+    revealBySession.set(sessionId, controller);
+  }
+  return controller;
+}
 
 function setState(patch: Partial<ChatState>): void {
   state = { ...state, ...patch };
@@ -125,6 +149,10 @@ export async function deleteSession(id: string): Promise<void> {
   const { [id]: _removedMessages, ...messagesBySession } = state.messagesBySession;
   const { [id]: _removedStreaming, ...streamingBySession } = state.streamingBySession;
   const { [id]: _removedTools, ...streamingToolsBySession } = state.streamingToolsBySession;
+  fenceBySession.delete(id);
+  streamMetaBySession.delete(id);
+  revealBySession.get(id)?.reset();
+  revealBySession.delete(id);
   setState({
     sessions: state.sessions.filter((s) => s.id !== id),
     messagesBySession,
@@ -135,10 +163,61 @@ export async function deleteSession(id: string): Promise<void> {
   artifactStore.dropSessionArtifacts(id);
 }
 
+function isInterrupted(summary: SessionSummary | undefined): boolean {
+  if (!summary?.activeTurnStartedAt) return false;
+  const started = Date.parse(summary.activeTurnStartedAt);
+  const ended = summary.lastTurnEndedAt ? Date.parse(summary.lastTurnEndedAt) : 0;
+  return started > ended;
+}
+
+/** Whether the "上次回复被中断" banner should show for this session. */
+export function shouldShowInterruptBanner(sessionId: string): boolean {
+  return (
+    isInterrupted(state.sessions.find((s) => s.id === sessionId)) &&
+    !state.sendingBySession[sessionId] &&
+    !state.interruptDismissedBySession[sessionId]
+  );
+}
+
+export function dismissInterrupt(sessionId: string): void {
+  setState({
+    interruptDismissedBySession: { ...state.interruptDismissedBySession, [sessionId]: true },
+  });
+}
+
 export async function ensureSessionMessages(id: string): Promise<void> {
   if (state.messagesBySession[id]) return;
   const session = await api.getSession(id);
-  setState({ messagesBySession: { ...state.messagesBySession, [id]: session.messages } });
+  setState({
+    messagesBySession: { ...state.messagesBySession, [id]: session.messages },
+    sessions: state.sessions.map((s) => (s.id === id ? { ...s, ...summaryOf(session) } : s)),
+  });
+  // A turn was in flight when we last lost the connection — try to reattach.
+  if (isInterrupted(summaryOf(session)) && !state.sendingBySession[id]) {
+    void resumeInterruptedTurn(id);
+  }
+}
+
+function summaryOf(session: {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  workspacePath?: string | null;
+  projectId?: string | null;
+  activeTurnStartedAt?: string | null;
+  lastTurnEndedAt?: string | null;
+}): SessionSummary {
+  return {
+    id: session.id,
+    title: session.title,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    workspacePath: session.workspacePath,
+    projectId: session.projectId,
+    activeTurnStartedAt: session.activeTurnStartedAt,
+    lastTurnEndedAt: session.lastTurnEndedAt,
+  };
 }
 
 export function seedComposer(
@@ -234,6 +313,26 @@ export async function retryLastAssistant(sessionId: string): Promise<void> {
   });
 }
 
+/** "继续" on the interrupted-turn banner: re-run the last user message. */
+export async function retryInterruptedTurn(sessionId: string): Promise<void> {
+  if (state.sendingBySession[sessionId]) return;
+  const messages = state.messagesBySession[sessionId] ?? [];
+  const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+  if (!lastUser) return;
+  const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+  // Drop a stale assistant reply that landed after the interrupted user turn.
+  const cutId =
+    lastAssistant && messages.indexOf(lastAssistant) > messages.indexOf(lastUser)
+      ? lastAssistant.id
+      : undefined;
+  dismissInterrupt(sessionId);
+  await dispatchTurn(sessionId, lastUser.content, [], {}, {
+    truncateAfterId: cutId,
+    regenerate: true,
+    optimisticMessages: cutId ? messages.slice(0, messages.findIndex((m) => m.id === cutId)) : messages,
+  });
+}
+
 export function editLastUserMessage(sessionId: string): void {
   if (state.sendingBySession[sessionId]) return;
   const messages = state.messagesBySession[sessionId] ?? [];
@@ -250,6 +349,117 @@ function notifyIfHidden(title: string): void {
   } catch {
     /* ignore */
   }
+}
+
+/**
+ * Fold one stream event into per-session state. Shared by a fresh turn and a
+ * resume. Envelope metadata drives the liveRevision fence so a gap/epoch
+ * change triggers a resync rather than a silent desync.
+ */
+function makeEventFolder(sessionId: string, acc: { text: string; tools: ToolCallPart[] }) {
+  return (event: ChatStreamEvent, meta?: StreamMeta): void => {
+    if (meta) {
+      const fence = fenceBySession.get(sessionId) ?? createFence(sessionId);
+      const { fence: nextFence, action } = ingestEnvelope(fence, {
+        v: 1,
+        sessionId,
+        rev: meta.rev,
+        epoch: meta.epoch,
+        event,
+      });
+      fenceBySession.set(sessionId, nextFence);
+      streamMetaBySession.set(sessionId, meta);
+      if (action === 'drop') return;
+      if (action === 'resync') {
+        // Post-stream getSession reconcile is unconditional, so folding this
+        // event and letting the tail resync is safe; just advance the fence.
+        fenceBySession.set(sessionId, completeResync(nextFence, meta.rev, meta.epoch));
+      }
+    }
+
+    switch (event.type) {
+      case 'text': {
+        acc.text += event.delta;
+        getReveal(sessionId).push(acc.text);
+        break;
+      }
+      case 'tool': {
+        const next = acc.tools.filter((t) => t.id !== event.id);
+        next.push({
+          type: 'tool',
+          id: event.id,
+          name: event.name,
+          args: event.args,
+          result: event.result,
+          error: event.error,
+        });
+        acc.tools = next;
+        setState({
+          streamingToolsBySession: { ...state.streamingToolsBySession, [sessionId]: next },
+          interactionBySession: { ...state.interactionBySession, [sessionId]: null },
+        });
+        if (event.name === 'run_command' && event.result) {
+          try {
+            const parsed = JSON.parse(event.result) as {
+              command?: string;
+              stdout?: string;
+              stderr?: string;
+              exitCode?: number;
+            };
+            appendTerminalLine({
+              command: parsed.command ?? String(event.args.command ?? ''),
+              stdout: parsed.stdout ?? '',
+              stderr: parsed.stderr ?? '',
+              exitCode: parsed.exitCode ?? 0,
+            });
+          } catch {
+            /* ignore */
+          }
+        }
+        break;
+      }
+      case 'permission':
+        setState({
+          interactionBySession: {
+            ...state.interactionBySession,
+            [sessionId]: { kind: 'permission', id: event.id, name: event.name, args: event.args },
+          },
+        });
+        break;
+      case 'ask':
+        setState({
+          interactionBySession: {
+            ...state.interactionBySession,
+            [sessionId]: { kind: 'ask', id: event.id, questions: event.questions },
+          },
+        });
+        break;
+      case 'todos':
+        setState({ todosBySession: { ...state.todosBySession, [sessionId]: event.items } });
+        break;
+      case 'error':
+        setState({ errorBySession: { ...state.errorBySession, [sessionId]: event.error } });
+        break;
+      case 'done':
+        getReveal(sessionId).flush();
+        break;
+    }
+  };
+}
+
+async function reconcileAfterTurn(sessionId: string): Promise<void> {
+  revealBySession.get(sessionId)?.reset();
+  const session = await api.getSession(sessionId);
+  setState({
+    sessions: state.sessions.map((s) => (s.id === sessionId ? { ...s, ...summaryOf(session) } : s)),
+    messagesBySession: { ...state.messagesBySession, [sessionId]: session.messages },
+    streamingBySession: { ...state.streamingBySession, [sessionId]: '' },
+    streamingToolsBySession: { ...state.streamingToolsBySession, [sessionId]: [] },
+    interactionBySession: { ...state.interactionBySession, [sessionId]: null },
+  });
+  tabStore.renameChatTab(sessionId, session.title);
+  void artifactStore.loadSessionArtifacts(sessionId);
+  notifyIfHidden(session.title);
 }
 
 async function dispatchTurn(
@@ -280,6 +490,9 @@ async function dispatchTurn(
   const nextMessages = userMessage ? [...existing, userMessage] : existing;
   const abort = new AbortController();
   abortBySession.set(sessionId, abort);
+  fenceBySession.set(sessionId, createFence(sessionId));
+  streamMetaBySession.delete(sessionId);
+  getReveal(sessionId).reset();
 
   setState({
     messagesBySession: { ...state.messagesBySession, [sessionId]: nextMessages },
@@ -287,16 +500,15 @@ async function dispatchTurn(
     streamingBySession: { ...state.streamingBySession, [sessionId]: '' },
     streamingToolsBySession: { ...state.streamingToolsBySession, [sessionId]: [] },
     errorBySession: { ...state.errorBySession, [sessionId]: null },
-    permissionBySession: { ...state.permissionBySession, [sessionId]: null },
-    askBySession: { ...state.askBySession, [sessionId]: null },
+    interactionBySession: { ...state.interactionBySession, [sessionId]: null },
+    interruptDismissedBySession: { ...state.interruptDismissedBySession, [sessionId]: false },
   });
   clearComposerSeed(sessionId);
 
   const settings = settingsStore.getSnapshot().settings;
+  const acc = { text: '', tools: [] as ToolCallPart[] };
 
   try {
-    let full = '';
-    let tools: ToolCallPart[] = [];
     await api.sendMessage(sessionId, text, {
       providerId: settings.activeProviderId,
       model: settings.providers.find((p) => p.id === settings.activeProviderId)?.model,
@@ -306,88 +518,17 @@ async function dispatchTurn(
       truncateAfterId: turn.truncateAfterId,
       regenerate: turn.regenerate,
       signal: abort.signal,
-      onEvent: (event) => {
-        if (event.type === 'text') {
-          full += event.delta;
-          setState({ streamingBySession: { ...state.streamingBySession, [sessionId]: full } });
-        } else if (event.type === 'tool') {
-          const next = tools.filter((t) => t.id !== event.id);
-          next.push({
-            type: 'tool',
-            id: event.id,
-            name: event.name,
-            args: event.args,
-            result: event.result,
-            error: event.error,
-          });
-          tools = next;
-          setState({
-            streamingToolsBySession: { ...state.streamingToolsBySession, [sessionId]: next },
-            permissionBySession: { ...state.permissionBySession, [sessionId]: null },
-          });
-          if (event.name === 'run_command' && event.result) {
-            try {
-              const parsed = JSON.parse(event.result) as {
-                command?: string;
-                stdout?: string;
-                stderr?: string;
-                exitCode?: number;
-              };
-              appendTerminalLine({
-                command: parsed.command ?? String(event.args.command ?? ''),
-                stdout: parsed.stdout ?? '',
-                stderr: parsed.stderr ?? '',
-                exitCode: parsed.exitCode ?? 0,
-              });
-            } catch {
-              /* ignore */
-            }
-          }
-        } else if (event.type === 'permission') {
-          setState({
-            permissionBySession: {
-              ...state.permissionBySession,
-              [sessionId]: { id: event.id, name: event.name, args: event.args },
-            },
-          });
-        } else if (event.type === 'ask') {
-          setState({
-            askBySession: {
-              ...state.askBySession,
-              [sessionId]: { id: event.id, questions: event.questions },
-            },
-          });
-        } else if (event.type === 'todos') {
-          setState({ todosBySession: { ...state.todosBySession, [sessionId]: event.items } });
-        } else if (event.type === 'error') {
-          setState({ errorBySession: { ...state.errorBySession, [sessionId]: event.error } });
-        }
-      },
+      onEvent: makeEventFolder(sessionId, acc),
     });
-
-    const session = await api.getSession(sessionId);
-    const sessions = state.sessions.map((s) =>
-      s.id === sessionId
-        ? { id: session.id, title: session.title, createdAt: session.createdAt, updatedAt: session.updatedAt, workspacePath: session.workspacePath, projectId: session.projectId }
-        : s,
-    );
-    setState({
-      sessions,
-      messagesBySession: { ...state.messagesBySession, [sessionId]: session.messages },
-      streamingBySession: { ...state.streamingBySession, [sessionId]: '' },
-      streamingToolsBySession: { ...state.streamingToolsBySession, [sessionId]: [] },
-      permissionBySession: { ...state.permissionBySession, [sessionId]: null },
-      askBySession: { ...state.askBySession, [sessionId]: null },
-    });
-    tabStore.renameChatTab(sessionId, session.title);
-    void artifactStore.loadSessionArtifacts(sessionId);
-    notifyIfHidden(session.title);
+    await reconcileAfterTurn(sessionId);
   } catch (err) {
     if ((err as Error).name === 'AbortError') return;
+    revealBySession.get(sessionId)?.reset();
     try {
       const session = await api.getSession(sessionId);
       setState({
         messagesBySession: { ...state.messagesBySession, [sessionId]: session.messages },
+        streamingBySession: { ...state.streamingBySession, [sessionId]: '' },
         errorBySession: { ...state.errorBySession, [sessionId]: (err as Error).message },
       });
     } catch {
@@ -401,15 +542,51 @@ async function dispatchTurn(
   }
 }
 
+/** Reattach to a turn that was streaming when the connection/app dropped. */
+export async function resumeInterruptedTurn(sessionId: string): Promise<void> {
+  if (state.sendingBySession[sessionId]) return;
+  const abort = new AbortController();
+  abortBySession.set(sessionId, abort);
+  const meta = streamMetaBySession.get(sessionId);
+  fenceBySession.set(sessionId, createFence(sessionId));
+  getReveal(sessionId).reset();
+
+  setState({
+    sendingBySession: { ...state.sendingBySession, [sessionId]: true },
+    streamingBySession: { ...state.streamingBySession, [sessionId]: '' },
+    streamingToolsBySession: { ...state.streamingToolsBySession, [sessionId]: [] },
+    errorBySession: { ...state.errorBySession, [sessionId]: null },
+  });
+
+  const acc = { text: '', tools: [] as ToolCallPart[] };
+  try {
+    await api.resumeTurn(
+      sessionId,
+      meta?.rev ?? -1,
+      meta?.epoch ?? null,
+      makeEventFolder(sessionId, acc),
+      abort.signal,
+    );
+    await reconcileAfterTurn(sessionId);
+  } catch (err) {
+    if ((err as Error).name === 'AbortError') return;
+    // Resume failing is non-fatal — leave the interrupted banner visible.
+    setState({ streamingBySession: { ...state.streamingBySession, [sessionId]: '' } });
+  } finally {
+    if (abortBySession.get(sessionId) === abort) abortBySession.delete(sessionId);
+    setState({ sendingBySession: { ...state.sendingBySession, [sessionId]: false } });
+  }
+}
+
 export async function stopMessage(sessionId: string): Promise<void> {
   abortBySession.get(sessionId)?.abort();
+  revealBySession.get(sessionId)?.reset();
   await api.stopMessage(sessionId).catch((): undefined => undefined);
   setState({
     sendingBySession: { ...state.sendingBySession, [sessionId]: false },
     streamingBySession: { ...state.streamingBySession, [sessionId]: '' },
     streamingToolsBySession: { ...state.streamingToolsBySession, [sessionId]: [] },
-    permissionBySession: { ...state.permissionBySession, [sessionId]: null },
-    askBySession: { ...state.askBySession, [sessionId]: null },
+    interactionBySession: { ...state.interactionBySession, [sessionId]: null },
   });
 }
 
@@ -417,15 +594,15 @@ export async function answerPermission(
   sessionId: string,
   decision: 'allow' | 'deny' | 'allow-session',
 ): Promise<void> {
-  const pending = state.permissionBySession[sessionId];
-  if (!pending) return;
+  const pending = state.interactionBySession[sessionId];
+  if (!pending || pending.kind !== 'permission') return;
   await api.answerPermission(sessionId, pending.id, decision);
-  setState({ permissionBySession: { ...state.permissionBySession, [sessionId]: null } });
+  setState({ interactionBySession: { ...state.interactionBySession, [sessionId]: null } });
 }
 
 export async function answerAsk(sessionId: string, answers: Record<string, string>): Promise<void> {
-  const pending = state.askBySession[sessionId];
-  if (!pending) return;
+  const pending = state.interactionBySession[sessionId];
+  if (!pending || pending.kind !== 'ask') return;
   await api.answerAsk(sessionId, pending.id, answers);
-  setState({ askBySession: { ...state.askBySession, [sessionId]: null } });
+  setState({ interactionBySession: { ...state.interactionBySession, [sessionId]: null } });
 }

@@ -6,7 +6,7 @@ export default function TodoCard({ items }: { items: TodoItem[] }) {
   const done = items.filter((item) => item.status === 'completed').length;
 
   return (
-    <div className="mx-auto mb-3 max-w-3xl rounded-2xl border border-line bg-paper-raised px-4 py-3">
+    <div className="rise-in mx-auto mb-3 max-w-3xl rounded-2xl border border-line bg-paper-raised px-4 py-3">
       <p className="mb-2 text-xs text-ink-muted">
         计划 {done} / {items.length}
       </p>

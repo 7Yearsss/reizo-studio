@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { SessionStore } from '../storage/ports';
+import type { SessionStore } from '../../../shared/chat';
 import type { ArtifactStore } from '../storage/artifactStore';
 
 export function createSessionsRouter(sessionStore: SessionStore, artifactStore?: ArtifactStore) {

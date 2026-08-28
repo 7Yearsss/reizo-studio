@@ -7,6 +7,7 @@ import { useUiStore } from '../state/useUiStore';
 import MessageList from '../components/chat/MessageList';
 import Composer from '../components/chat/Composer';
 import ChatSearchPanel from '../components/chat/ChatSearchPanel';
+import InterruptedTurnBanner from '../components/chat/InterruptedTurnBanner';
 import { collectMessageMatches } from '../lib/highlightText';
 import { cn } from '../lib/cn';
 
@@ -27,6 +28,13 @@ export default function ChatPage({
   const streamingTools = useChatStore((s) => s.streamingToolsBySession[sessionId]) ?? [];
   const sending = useChatStore((s) => s.sendingBySession[sessionId]) ?? false;
   const error = useChatStore((s) => s.errorBySession[sessionId]) ?? null;
+  const showInterruptBanner = useChatStore((s) => {
+    const summary = s.sessions.find((x) => x.id === sessionId);
+    if (!summary?.activeTurnStartedAt) return false;
+    const started = Date.parse(summary.activeTurnStartedAt);
+    const ended = summary.lastTurnEndedAt ? Date.parse(summary.lastTurnEndedAt) : 0;
+    return started > ended && !s.sendingBySession[sessionId] && !s.interruptDismissedBySession[sessionId];
+  });
   const artifactsOpen = useUiStore((s) => s.artifactsOpen);
   const [renaming, setRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState(session?.title ?? '');
@@ -160,6 +168,12 @@ export default function ChatPage({
         onRetryLastAssistant={() => void chatStore.retryLastAssistant(sessionId)}
         onPickHint={(text) => chatStore.seedComposer(sessionId, text)}
       />
+      {showInterruptBanner && (
+        <InterruptedTurnBanner
+          onRetry={() => void chatStore.retryInterruptedTurn(sessionId)}
+          onDismiss={() => chatStore.dismissInterrupt(sessionId)}
+        />
+      )}
       {error && <p className="px-8 pb-2 text-sm text-danger">{error}</p>}
       <Composer
         sessionId={sessionId}

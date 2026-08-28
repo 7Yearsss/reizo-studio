@@ -24,11 +24,26 @@ export function encodeStreamEvent(event: ChatStreamEvent): string {
   return `${JSON.stringify(event)}\n`;
 }
 
+/**
+ * Parses one NDJSON line into a `ChatStreamEvent`. Since Phase 2 the wire
+ * carries `LiveEnvelope` objects; this transparently unwraps them so
+ * existing consumers keep receiving bare events. Phase 3 reads the envelope
+ * metadata (`rev`/`epoch`) before unwrapping.
+ */
 export function parseStreamLine(line: string): ChatStreamEvent | null {
   const trimmed = line.trim();
   if (!trimmed) return null;
   try {
-    return JSON.parse(trimmed) as ChatStreamEvent;
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    if (
+      parsed &&
+      parsed.v === 1 &&
+      parsed.event &&
+      typeof (parsed.event as { type?: unknown }).type === 'string'
+    ) {
+      return parsed.event as ChatStreamEvent;
+    }
+    return parsed as unknown as ChatStreamEvent;
   } catch {
     return { type: 'text', delta: trimmed };
   }
