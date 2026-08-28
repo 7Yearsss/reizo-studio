@@ -9,6 +9,7 @@ import PermissionPrompt from './PermissionPrompt';
 import AskUserPrompt from './AskUserPrompt';
 import QueuePanel from './QueuePanel';
 import TodoCard from './TodoCard';
+import SelectField from '../ui/SelectField';
 import { useSettingsStore } from '../../state/useSettingsStore';
 import { useSkillStore } from '../../state/useSkillStore';
 import { useChatStore } from '../../state/useChatStore';
@@ -187,20 +188,19 @@ export default function Composer({
               toolbar={
                 <>
                   <ModelPicker />
-                  <select
+                  <span className="h-4 w-px shrink-0 bg-line" aria-hidden />
+                  <SelectField
+                    ariaLabel="权限模式"
                     value={permissionMode}
-                    onChange={(e) =>
-                      void settingsStore.patchSettings({ permissionMode: e.target.value as PermissionMode })
+                    options={(Object.keys(MODE_LABEL) as PermissionMode[]).map((mode) => ({
+                      value: mode,
+                      label: MODE_LABEL[mode],
+                    }))}
+                    onChange={(mode) =>
+                      void settingsStore.patchSettings({ permissionMode: mode as PermissionMode })
                     }
-                    className="max-w-[120px] truncate rounded-full bg-paper px-2 py-1 text-xs text-ink outline-none"
-                    title="权限模式"
-                  >
-                    {(Object.keys(MODE_LABEL) as PermissionMode[]).map((mode) => (
-                      <option key={mode} value={mode}>
-                        {MODE_LABEL[mode]}
-                      </option>
-                    ))}
-                  </select>
+                    className="max-w-[120px]"
+                  />
                   <button
                     type="button"
                     className="rounded-full p-1.5 text-ink-muted transition-colors duration-150 hover:bg-paper hover:text-ink"

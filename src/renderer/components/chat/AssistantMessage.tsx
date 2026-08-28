@@ -1,6 +1,7 @@
 import { RotateCcw } from 'lucide-react';
 import type { ToolCallPart } from '../../../shared/chat';
 import ToolCard from './ToolCard';
+import ThinkingCard from './ThinkingCard';
 import MarkdownContent, { CopyButton } from './MarkdownContent';
 
 function StreamingCaret() {
@@ -15,6 +16,10 @@ function StreamingCaret() {
 export default function AssistantMessage({
   content,
   parts,
+  reasoning,
+  reasoningStreaming = false,
+  reasoningStartedAt,
+  reasoningMs,
   streaming = false,
   currentMatch = false,
   canRetry = false,
@@ -22,6 +27,10 @@ export default function AssistantMessage({
 }: {
   content: string;
   parts?: ToolCallPart[];
+  reasoning?: string;
+  reasoningStreaming?: boolean;
+  reasoningStartedAt?: number;
+  reasoningMs?: number;
   streaming?: boolean;
   currentMatch?: boolean;
   canRetry?: boolean;
@@ -29,6 +38,14 @@ export default function AssistantMessage({
 }) {
   return (
     <div className={`anim-msg group space-y-3 ${currentMatch ? 'chat-search-current' : ''}`}>
+      {(reasoning || reasoningStreaming) && (
+        <ThinkingCard
+          content={reasoning ?? ''}
+          streaming={reasoningStreaming}
+          startedAt={reasoningStartedAt}
+          durationMs={reasoningMs}
+        />
+      )}
       {parts?.map((part) => (
         <ToolCard key={part.id} part={part} />
       ))}

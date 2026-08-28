@@ -12,6 +12,7 @@ import { useSettingsStore } from '../state/useSettingsStore';
 export default function HomePage() {
   const [draft, setDraft] = useState('');
   const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [mentions, setMentions] = useState<string[]>([]);
   const workspacePath = useSettingsStore((s) => s.settings.workspacePath);
   const mentionQuery = extractMentionQuery(draft);
@@ -21,10 +22,15 @@ export default function HomePage() {
   async function handleSubmit(text = draft, extra: { skillId?: string } = {}) {
     if (!text.trim() || creating) return;
     setCreating(true);
+    setError(null);
     try {
       const session = await chatStore.createSession(text.slice(0, 60));
       tabStore.openChatTab(session.id, session.title, true);
       void chatStore.sendMessage(session.id, text, mentions, extra);
+      setDraft('');
+      setMentions([]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setCreating(false);
     }
@@ -91,6 +97,11 @@ export default function HomePage() {
             </button>
           ))}
         </div>
+        {error && (
+          <p className="mt-4 text-center text-xs text-danger">
+            发送失败：{error}
+          </p>
+        )}
         {!hasAnyKey && (
           <p className="mt-4 text-center text-xs text-ink-muted">
             还没有 API Key。

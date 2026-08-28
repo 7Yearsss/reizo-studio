@@ -21,6 +21,8 @@ export default function MessageList({
   messages,
   streaming,
   streamingTools,
+  streamingReasoning,
+  reasoningStartedAt,
   sending,
   searchQuery,
   currentMatchId,
@@ -33,6 +35,8 @@ export default function MessageList({
   messages: ChatMessage[];
   streaming: string;
   streamingTools?: ToolCallPart[];
+  streamingReasoning?: string;
+  reasoningStartedAt?: number;
   sending: boolean;
   searchQuery?: string;
   currentMatchId?: string | null;
@@ -168,6 +172,8 @@ export default function MessageList({
               <AssistantMessage
                 content={m.content}
                 parts={m.parts}
+                reasoning={m.reasoning}
+                reasoningMs={m.reasoningMs}
                 currentMatch={currentMatchId === m.id}
                 canRetry={!sending && m.id === lastAssistantId}
                 onRetry={onRetryLastAssistant}
@@ -177,7 +183,14 @@ export default function MessageList({
         ))}
         {sending && (
           <div data-message-id="streaming">
-            <AssistantMessage content={streaming} parts={streamingTools} streaming />
+            <AssistantMessage
+              content={streaming}
+              parts={streamingTools}
+              reasoning={streamingReasoning || undefined}
+              reasoningStreaming={Boolean(streamingReasoning) && !streaming}
+              reasoningStartedAt={reasoningStartedAt}
+              streaming
+            />
           </div>
         )}
         <div ref={bottomRef} />

@@ -26,6 +26,8 @@ export default function ChatPage({
   const messages = useChatStore((s) => s.messagesBySession[sessionId]) ?? [];
   const streaming = useChatStore((s) => s.streamingBySession[sessionId]) ?? '';
   const streamingTools = useChatStore((s) => s.streamingToolsBySession[sessionId]) ?? [];
+  const streamingReasoning = useChatStore((s) => s.streamingReasoningBySession[sessionId]) ?? '';
+  const reasoningStartedAt = useChatStore((s) => s.reasoningStartedAtBySession[sessionId]);
   const sending = useChatStore((s) => s.sendingBySession[sessionId]) ?? false;
   const error = useChatStore((s) => s.errorBySession[sessionId]) ?? null;
   const showInterruptBanner = useChatStore((s) => {
@@ -159,6 +161,8 @@ export default function ChatPage({
         messages={messages}
         streaming={streaming}
         streamingTools={streamingTools}
+        streamingReasoning={streamingReasoning}
+        reasoningStartedAt={reasoningStartedAt}
         sending={sending}
         searchQuery={searchOpen ? searchQuery : ''}
         currentMatchId={searchOpen ? currentMatch?.messageId : null}

@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@import 'tw-animate-css';
 
 /*
  * Semantic color tokens (`--paper`, `--ink`, ...) rather than raw Tailwind
