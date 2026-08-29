@@ -325,8 +325,10 @@ class AgentSession {
           controller.close();
         };
 
+        let replayedDone = false;
         for (const envelope of this.ring) {
           if (envelope.rev > opts.replayAfter) write(envelope);
+          if (envelope.event.type === 'done' && envelope.rev > opts.replayAfter) replayedDone = true;
         }
 
         const turnLive = this.running && !this.turnDone && !staleEpoch;
@@ -356,6 +358,14 @@ class AgentSession {
           }
         };
         this.subscribers.add(sub);
+        // The turn can finish between the initial replay and subscriber
+        // registration. Re-check after subscribing so a late `done` cannot
+        // leave the renderer waiting forever.
+        if (!this.running || this.turnDone) {
+          this.subscribers.delete(sub);
+          if (this.lastDone && this.lastDone.rev > opts.replayAfter && !replayedDone) write(this.lastDone);
+          close();
+        }
       },
       cancel: () => {
         /* subscriber self-removes on done; a cancelled reader just stops reading */
@@ -408,6 +418,17 @@ function agentEventToStreamEvent(event: AgentEvent): ChatStreamEvent | null {
     case 'tool_result': {
       const d = event.data as AgentToolResultData;
       return { type: 'tool', id: d.id, name: d.name, args: d.args, result: d.result, error: d.error };
+    }
+    case 'tool_use': {
+      const d = event.data as AgentToolUseData;
+      // Surface the start boundary immediately. The renderer upserts the
+      // later tool_result by id, so the same row transitions spinner -> done.
+      return { type: 'tool', id: d.id, name: d.name, args: d.args };
+    }
+    case 'status': {
+      const d = event.data as { phase?: 'thinking' | 'tools' | 'replying'; step?: number };
+      if (!d.phase) return null;
+      return { type: 'status', phase: d.phase, step: d.step };
     }
     case 'error':
       return { type: 'error', error: (event.data as AgentErrorData).message };

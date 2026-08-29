@@ -50,6 +50,7 @@ export function createTurnPersister(deps: {
   let reasoning = '';
   let reasoningStartedAt = 0;
   let reasoningEndedAt = 0;
+  const turnStartedAt = Date.now();
   const parts: ToolCallPart[] = [];
 
   function onToolPart(part: ToolCallPart): void {
@@ -86,6 +87,7 @@ export function createTurnPersister(deps: {
       ...(reasoning
         ? { reasoning, reasoningMs: Math.max(0, reasoningEndedAt - reasoningStartedAt) }
         : {}),
+      durationMs: Math.max(0, Date.now() - turnStartedAt),
       createdAt: new Date().toISOString(),
       turnId,
       generation,

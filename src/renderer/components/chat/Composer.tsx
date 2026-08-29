@@ -9,6 +9,7 @@ import PermissionPrompt from './PermissionPrompt';
 import AskUserPrompt from './AskUserPrompt';
 import QueuePanel from './QueuePanel';
 import TodoCard from './TodoCard';
+import ReplyStatusBar, { type ReplyPhase } from './ReplyStatusBar';
 import SelectField from '../ui/SelectField';
 import { useSettingsStore } from '../../state/useSettingsStore';
 import { useSkillStore } from '../../state/useSkillStore';
@@ -32,6 +33,9 @@ export default function Composer({
   onToggleTree,
   treeOpen,
   autoFocus = false,
+  replyPhase,
+  replyStartedAt,
+  replyToolCount = 0,
 }: {
   sessionId?: string;
   disabled: boolean;
@@ -45,6 +49,9 @@ export default function Composer({
   onToggleTree?: () => void;
   treeOpen?: boolean;
   autoFocus?: boolean;
+  replyPhase?: ReplyPhase;
+  replyStartedAt?: number;
+  replyToolCount?: number;
 }) {
   const [draft, setDraft] = useState('');
   const [mentions, setMentions] = useState<string[]>([]);
@@ -110,6 +117,15 @@ export default function Composer({
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-0 px-6 pt-16 pb-6 bg-gradient-to-t from-paper via-paper to-paper-a0">
       <div className="pointer-events-auto relative mx-auto max-w-3xl">
+        {sessionId && replyPhase && (
+          <ReplyStatusBar
+            phase={replyPhase}
+            startedAt={replyStartedAt}
+            toolCount={replyToolCount}
+            todos={todos}
+            interaction={interaction}
+          />
+        )}
         {sessionId && <TodoCard items={todos} />}
         {sessionId && (
           <QueuePanel items={queue} onRemove={(id) => chatStore.removeQueuedTurn(sessionId, id)} />

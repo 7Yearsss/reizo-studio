@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown } from 'lucide-react';
-import type { ChatMessage, ToolCallPart } from '../../../shared/chat';
+import type { ChatMessage, ReplyActivity, ToolCallPart } from '../../../shared/chat';
 import {
   buildRenderItems,
   initialWindowStart,
@@ -22,6 +22,7 @@ export default function MessageList({
   streaming,
   streamingTools,
   streamingReasoning,
+  streamingActivities,
   reasoningStartedAt,
   sending,
   searchQuery,
@@ -36,6 +37,7 @@ export default function MessageList({
   streaming: string;
   streamingTools?: ToolCallPart[];
   streamingReasoning?: string;
+  streamingActivities?: ReplyActivity[];
   reasoningStartedAt?: number;
   sending: boolean;
   searchQuery?: string;
@@ -91,7 +93,7 @@ export default function MessageList({
     } else {
       setShowJump(true);
     }
-  }, [messages, streaming, streamingTools]);
+  }, [messages, streaming, streamingTools, streamingActivities]);
 
   useEffect(() => {
     if (!currentMatchId) return;
@@ -174,6 +176,7 @@ export default function MessageList({
                 parts={m.parts}
                 reasoning={m.reasoning}
                 reasoningMs={m.reasoningMs}
+                durationMs={m.durationMs}
                 currentMatch={currentMatchId === m.id}
                 canRetry={!sending && m.id === lastAssistantId}
                 onRetry={onRetryLastAssistant}
@@ -190,6 +193,7 @@ export default function MessageList({
               reasoningStreaming={Boolean(streamingReasoning) && !streaming}
               reasoningStartedAt={reasoningStartedAt}
               streaming
+              activities={streamingActivities}
             />
           </div>
         )}

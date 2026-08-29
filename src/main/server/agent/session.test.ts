@@ -77,17 +77,46 @@ describe('AgentSession.startTurn', () => {
       'Hel',
       'lo',
     ]);
-    const tool = events.find((e) => e.type === 'tool') as { name: string; result?: string } | undefined;
+    const tool = events.find((e) => e.type === 'tool' && 'result' in e) as { name: string; result?: string } | undefined;
     expect(tool).toMatchObject({ name: 'grep', result: 'found' });
     expect(events.at(-1)).toEqual({ type: 'done', aborted: false });
-    // tool-call alone is not streamed on the legacy wire.
-    expect(events.filter((e) => e.type === 'tool')).toHaveLength(1);
+    // Tool start is visible immediately; the result upserts the same id.
+    expect(events.filter((e) => e.type === 'tool')).toHaveLength(2);
+    expect(events.filter((e) => e.type === 'tool')[0]).toMatchObject({
+      id: 'c1',
+      name: 'grep',
+      args: { q: 'x' },
+    });
 
     const full = await store.get(s.id);
     const assistant = full!.messages.find((m) => m.role === 'assistant');
     expect(assistant?.content).toBe('Hello');
     expect(assistant?.parts?.[0]).toMatchObject({ id: 'c1', name: 'grep', result: 'found' });
     expect(assistant?.turnId).toBeTruthy();
+  });
+
+  it('streams lifecycle status around a tool and keeps the tool id stable', async () => {
+    const store = freshStore();
+    const s = await store.create('t');
+    const events = await collect(
+      startAgentTurn({
+        sessionStore: store,
+        sessionId: s.id,
+        translate: translateOpenAiChunk,
+        createStream: () =>
+          streamOf([
+            { type: 'start-step', step: 0 },
+            { type: 'tool-call', toolCallId: 'c1', toolName: 'read_file', input: { path: 'a.txt' } },
+            { type: 'tool-result', toolCallId: 'c1', toolName: 'read_file', input: { path: 'a.txt' }, output: 'ok' },
+            { type: 'finish-step', step: 0 },
+          ]),
+      }),
+    );
+    expect(events.map((event) => event.type)).toEqual(['status', 'tool', 'tool', 'status', 'done']);
+    expect(events[0]).toMatchObject({ type: 'status', phase: 'thinking', step: 0 });
+    expect(events[1]).toMatchObject({ type: 'tool', id: 'c1', name: 'read_file' });
+    expect(events[2]).toMatchObject({ type: 'tool', id: 'c1', result: 'ok' });
+    expect(events[3]).toMatchObject({ type: 'status', phase: 'replying', step: 0 });
   });
 
   it('abort ends the stream with aborted:true and persists nothing', async () => {

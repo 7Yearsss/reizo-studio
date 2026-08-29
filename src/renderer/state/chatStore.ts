@@ -1,6 +1,6 @@
 import * as api from '../api';
-import type { ChatMessage, SessionSummary, ToolCallPart } from '../../shared/chat';
-import type { AskQuestion, TodoItem, ChatStreamEvent } from '../../shared/stream';
+import type { ChatMessage, ReplyActivity, SessionSummary, ToolCallPart } from '../../shared/chat';
+import type { AskQuestion, ChatStreamEvent, ReplyPhase, TodoItem } from '../../shared/stream';
 import type { StreamMeta } from '../api';
 import { completeResync, createFence, ingestEnvelope, type Fence } from './liveRevisionFence';
 import { createRevealController, type RevealController } from './revealController';
@@ -48,6 +48,8 @@ export interface ChatState {
   /** Wall-clock ms when the first reasoning delta of the live turn arrived. */
   reasoningStartedAtBySession: Record<string, number | undefined>;
   streamingToolsBySession: Record<string, ToolCallPart[]>;
+  replyActivitiesBySession: Record<string, ReplyActivity[]>;
+  replyPhaseBySession: Record<string, ReplyPhase | undefined>;
   sendingBySession: Record<string, boolean>;
   errorBySession: Record<string, string | null>;
   interactionBySession: Record<string, ChatInteraction | null>;
@@ -66,6 +68,8 @@ let state: ChatState = {
   streamingReasoningBySession: {},
   reasoningStartedAtBySession: {},
   streamingToolsBySession: {},
+  replyActivitiesBySession: {},
+  replyPhaseBySession: {},
   sendingBySession: {},
   errorBySession: {},
   interactionBySession: {},
@@ -156,6 +160,8 @@ export async function deleteSession(id: string): Promise<void> {
   const { [id]: _removedTools, ...streamingToolsBySession } = state.streamingToolsBySession;
   const { [id]: _removedReasoning, ...streamingReasoningBySession } = state.streamingReasoningBySession;
   const { [id]: _removedReasoningAt, ...reasoningStartedAtBySession } = state.reasoningStartedAtBySession;
+  const { [id]: _removedActivities, ...replyActivitiesBySession } = state.replyActivitiesBySession;
+  const { [id]: _removedPhase, ...replyPhaseBySession } = state.replyPhaseBySession;
   fenceBySession.delete(id);
   streamMetaBySession.delete(id);
   revealBySession.get(id)?.reset();
@@ -167,6 +173,8 @@ export async function deleteSession(id: string): Promise<void> {
     streamingToolsBySession,
     streamingReasoningBySession,
     reasoningStartedAtBySession,
+    replyActivitiesBySession,
+    replyPhaseBySession,
   });
   tabStore.closeSessionTabs(id);
   artifactStore.dropSessionArtifacts(id);
@@ -365,7 +373,75 @@ function notifyIfHidden(title: string): void {
  * resume. Envelope metadata drives the liveRevision fence so a gap/epoch
  * change triggers a resync rather than a silent desync.
  */
-function makeEventFolder(sessionId: string, acc: { text: string; tools: ToolCallPart[] }) {
+function upsertThinkingActivity(acc: { activities: ReplyActivity[] }, delta?: string): ReplyActivity {
+  const index = acc.activities.findLastIndex((activity) => activity.kind === 'thinking' && activity.status === 'running');
+  const current = index >= 0 ? acc.activities[index] : undefined;
+  const thinkingCount = acc.activities.filter((activity) => activity.kind === 'thinking').length;
+  const next: ReplyActivity = {
+    id: current?.id ?? `thinking-${thinkingCount + 1}`,
+    kind: 'thinking',
+    status: 'running',
+    text: `${current?.text ?? ''}${delta ?? ''}`,
+    startedAt: current?.status === 'running' ? current.startedAt : Date.now(),
+    durationMs: current?.status === 'running' ? current.durationMs : undefined,
+  };
+  if (index >= 0) acc.activities[index] = next;
+  else acc.activities.push(next);
+  return next;
+}
+
+function upsertToolPart(acc: { tools: ToolCallPart[] }, event: Extract<ChatStreamEvent, { type: 'tool' }>): ToolCallPart {
+  const index = acc.tools.findIndex((part) => part.id === event.id);
+  const current = index >= 0 ? acc.tools[index] : undefined;
+  const next: ToolCallPart = {
+    type: 'tool',
+    id: event.id,
+    name: event.name || current?.name || 'tool',
+    args: Object.keys(event.args).length > 0 ? event.args : (current?.args ?? {}),
+    result: event.result ?? current?.result,
+    error: event.error ?? current?.error,
+  };
+  if (index >= 0) acc.tools[index] = next;
+  else acc.tools.push(next);
+  return next;
+}
+
+function upsertToolActivity(
+  acc: { activities: ReplyActivity[] },
+  part: ToolCallPart,
+): ReplyActivity {
+  const index = acc.activities.findIndex((activity) => activity.kind === 'tool' && activity.id === part.id);
+  const current = index >= 0 ? acc.activities[index] : undefined;
+  const finished = part.error !== undefined || part.result !== undefined;
+  const next: ReplyActivity = {
+    id: part.id,
+    kind: 'tool',
+    status: part.error !== undefined ? 'error' : finished ? 'done' : 'running',
+    startedAt: current?.startedAt ?? Date.now(),
+    durationMs: finished
+      ? current?.startedAt
+        ? Math.max(0, Date.now() - current.startedAt)
+        : current?.durationMs
+      : undefined,
+    tool: part,
+  };
+  if (index >= 0) acc.activities[index] = next;
+  else acc.activities.push(next);
+  return next;
+}
+
+function finishThinkingActivity(acc: { activities: ReplyActivity[] }): void {
+  const index = acc.activities.findLastIndex((activity) => activity.kind === 'thinking' && activity.status === 'running');
+  if (index < 0) return;
+  const current = acc.activities[index];
+  acc.activities[index] = {
+    ...current,
+    status: 'done',
+    durationMs: current.startedAt ? Math.max(0, Date.now() - current.startedAt) : current.durationMs,
+  };
+}
+
+function makeEventFolder(sessionId: string, acc: { text: string; tools: ToolCallPart[]; activities: ReplyActivity[] }) {
   return (event: ChatStreamEvent, meta?: StreamMeta): void => {
     if (meta) {
       const fence = fenceBySession.get(sessionId) ?? createFence(sessionId);
@@ -390,10 +466,16 @@ function makeEventFolder(sessionId: string, acc: { text: string; tools: ToolCall
       case 'text': {
         acc.text += event.delta;
         getReveal(sessionId).push(acc.text);
+        finishThinkingActivity(acc);
+        setState({
+          replyActivitiesBySession: { ...state.replyActivitiesBySession, [sessionId]: [...acc.activities] },
+          replyPhaseBySession: { ...state.replyPhaseBySession, [sessionId]: 'replying' },
+        });
         break;
       }
       case 'reasoning': {
         const prev = state.streamingReasoningBySession[sessionId] ?? '';
+        upsertThinkingActivity(acc, event.delta);
         setState({
           streamingReasoningBySession: {
             ...state.streamingReasoningBySession,
@@ -405,24 +487,21 @@ function makeEventFolder(sessionId: string, acc: { text: string; tools: ToolCall
                 reasoningStartedAtBySession: {
                   ...state.reasoningStartedAtBySession,
                   [sessionId]: Date.now(),
-                },
-              }),
+              },
+            }),
+          replyActivitiesBySession: { ...state.replyActivitiesBySession, [sessionId]: [...acc.activities] },
+          replyPhaseBySession: { ...state.replyPhaseBySession, [sessionId]: 'thinking' },
         });
         break;
       }
       case 'tool': {
-        const next = acc.tools.filter((t) => t.id !== event.id);
-        next.push({
-          type: 'tool',
-          id: event.id,
-          name: event.name,
-          args: event.args,
-          result: event.result,
-          error: event.error,
-        });
-        acc.tools = next;
+        finishThinkingActivity(acc);
+        const part = upsertToolPart(acc, event);
+        upsertToolActivity(acc, part);
         setState({
-          streamingToolsBySession: { ...state.streamingToolsBySession, [sessionId]: next },
+          streamingToolsBySession: { ...state.streamingToolsBySession, [sessionId]: [...acc.tools] },
+          replyActivitiesBySession: { ...state.replyActivitiesBySession, [sessionId]: [...acc.activities] },
+          replyPhaseBySession: { ...state.replyPhaseBySession, [sessionId]: 'tools' },
           interactionBySession: { ...state.interactionBySession, [sessionId]: null },
         });
         if (event.name === 'run_command' && event.result) {
@@ -467,8 +546,18 @@ function makeEventFolder(sessionId: string, acc: { text: string; tools: ToolCall
       case 'error':
         setState({ errorBySession: { ...state.errorBySession, [sessionId]: event.error } });
         break;
+      case 'status':
+        if (event.phase === 'thinking') upsertThinkingActivity(acc);
+        if (event.phase === 'tools' || event.phase === 'replying') finishThinkingActivity(acc);
+        setState({
+          replyActivitiesBySession: { ...state.replyActivitiesBySession, [sessionId]: [...acc.activities] },
+          replyPhaseBySession: { ...state.replyPhaseBySession, [sessionId]: event.phase },
+        });
+        break;
       case 'done':
         getReveal(sessionId).flush();
+        finishThinkingActivity(acc);
+        setState({ replyActivitiesBySession: { ...state.replyActivitiesBySession, [sessionId]: [...acc.activities] } });
         break;
     }
   };
@@ -484,6 +573,8 @@ async function reconcileAfterTurn(sessionId: string): Promise<void> {
     streamingReasoningBySession: { ...state.streamingReasoningBySession, [sessionId]: '' },
     reasoningStartedAtBySession: { ...state.reasoningStartedAtBySession, [sessionId]: undefined },
     streamingToolsBySession: { ...state.streamingToolsBySession, [sessionId]: [] },
+    replyActivitiesBySession: { ...state.replyActivitiesBySession, [sessionId]: [] },
+    replyPhaseBySession: { ...state.replyPhaseBySession, [sessionId]: undefined },
     interactionBySession: { ...state.interactionBySession, [sessionId]: null },
   });
   tabStore.renameChatTab(sessionId, session.title);
@@ -530,6 +621,8 @@ async function dispatchTurn(
     streamingReasoningBySession: { ...state.streamingReasoningBySession, [sessionId]: '' },
     reasoningStartedAtBySession: { ...state.reasoningStartedAtBySession, [sessionId]: undefined },
     streamingToolsBySession: { ...state.streamingToolsBySession, [sessionId]: [] },
+    replyActivitiesBySession: { ...state.replyActivitiesBySession, [sessionId]: [] },
+    replyPhaseBySession: { ...state.replyPhaseBySession, [sessionId]: undefined },
     errorBySession: { ...state.errorBySession, [sessionId]: null },
     interactionBySession: { ...state.interactionBySession, [sessionId]: null },
     interruptDismissedBySession: { ...state.interruptDismissedBySession, [sessionId]: false },
@@ -537,7 +630,7 @@ async function dispatchTurn(
   clearComposerSeed(sessionId);
 
   const settings = settingsStore.getSnapshot().settings;
-  const acc = { text: '', tools: [] as ToolCallPart[] };
+  const acc = { text: '', tools: [] as ToolCallPart[], activities: [] as ReplyActivity[] };
 
   try {
     await api.sendMessage(sessionId, text, {
@@ -560,6 +653,8 @@ async function dispatchTurn(
       setState({
         messagesBySession: { ...state.messagesBySession, [sessionId]: session.messages },
         streamingBySession: { ...state.streamingBySession, [sessionId]: '' },
+        replyActivitiesBySession: { ...state.replyActivitiesBySession, [sessionId]: [] },
+        replyPhaseBySession: { ...state.replyPhaseBySession, [sessionId]: undefined },
         errorBySession: { ...state.errorBySession, [sessionId]: (err as Error).message },
       });
     } catch {
@@ -588,10 +683,12 @@ export async function resumeInterruptedTurn(sessionId: string): Promise<void> {
     streamingReasoningBySession: { ...state.streamingReasoningBySession, [sessionId]: '' },
     reasoningStartedAtBySession: { ...state.reasoningStartedAtBySession, [sessionId]: undefined },
     streamingToolsBySession: { ...state.streamingToolsBySession, [sessionId]: [] },
+    replyActivitiesBySession: { ...state.replyActivitiesBySession, [sessionId]: [] },
+    replyPhaseBySession: { ...state.replyPhaseBySession, [sessionId]: undefined },
     errorBySession: { ...state.errorBySession, [sessionId]: null },
   });
 
-  const acc = { text: '', tools: [] as ToolCallPart[] };
+  const acc = { text: '', tools: [] as ToolCallPart[], activities: [] as ReplyActivity[] };
   try {
     await api.resumeTurn(
       sessionId,
@@ -604,7 +701,11 @@ export async function resumeInterruptedTurn(sessionId: string): Promise<void> {
   } catch (err) {
     if ((err as Error).name === 'AbortError') return;
     // Resume failing is non-fatal — leave the interrupted banner visible.
-    setState({ streamingBySession: { ...state.streamingBySession, [sessionId]: '' } });
+    setState({
+      streamingBySession: { ...state.streamingBySession, [sessionId]: '' },
+      replyActivitiesBySession: { ...state.replyActivitiesBySession, [sessionId]: [] },
+      replyPhaseBySession: { ...state.replyPhaseBySession, [sessionId]: undefined },
+    });
   } finally {
     if (abortBySession.get(sessionId) === abort) abortBySession.delete(sessionId);
     setState({ sendingBySession: { ...state.sendingBySession, [sessionId]: false } });
@@ -619,6 +720,10 @@ export async function stopMessage(sessionId: string): Promise<void> {
     sendingBySession: { ...state.sendingBySession, [sessionId]: false },
     streamingBySession: { ...state.streamingBySession, [sessionId]: '' },
     streamingToolsBySession: { ...state.streamingToolsBySession, [sessionId]: [] },
+    streamingReasoningBySession: { ...state.streamingReasoningBySession, [sessionId]: '' },
+    reasoningStartedAtBySession: { ...state.reasoningStartedAtBySession, [sessionId]: undefined },
+    replyActivitiesBySession: { ...state.replyActivitiesBySession, [sessionId]: [] },
+    replyPhaseBySession: { ...state.replyPhaseBySession, [sessionId]: undefined },
     interactionBySession: { ...state.interactionBySession, [sessionId]: null },
   });
 }

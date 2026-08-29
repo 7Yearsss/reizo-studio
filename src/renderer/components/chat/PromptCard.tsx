@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { Send, Square } from 'lucide-react';
 import { cn } from '../../lib/cn';
 import { isImeComposingEvent } from '../../lib/ime';
@@ -34,6 +34,25 @@ export default function PromptCard({
 }) {
   const canSend = !disabled && Boolean(value.trim());
   const composingRef = useRef(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (!autoFocus) return;
+    const el = textareaRef.current;
+    if (!el) return;
+    const current = document.activeElement;
+    if (
+      current &&
+      current !== el &&
+      current !== document.body &&
+      (current instanceof HTMLInputElement ||
+        current instanceof HTMLTextAreaElement ||
+        (current instanceof HTMLElement && current.isContentEditable))
+    ) {
+      return;
+    }
+    el.focus();
+  }, [autoFocus]);
 
   return (
     <div
@@ -60,6 +79,7 @@ export default function PromptCard({
           e.preventDefault();
           if (canSend) onSubmit();
         }}
+        ref={textareaRef}
         placeholder={placeholder}
         disabled={disabled}
         rows={rows}

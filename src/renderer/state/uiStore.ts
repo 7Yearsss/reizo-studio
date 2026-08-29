@@ -1,4 +1,4 @@
-export type SidebarMode = 'chat' | 'projects' | 'skills' | 'settings';
+export type SidebarMode = 'chat' | 'projects' | 'skills' | 'artifacts' | 'automation' | 'settings';
 
 export interface UiState {
   mode: SidebarMode;
@@ -13,7 +13,14 @@ const ARTIFACTS_KEY = 'reizo:artifacts-open';
 function readMode(): SidebarMode {
   if (typeof localStorage === 'undefined') return 'chat';
   const raw = localStorage.getItem(MODE_KEY);
-  if (raw === 'chat' || raw === 'projects' || raw === 'skills' || raw === 'settings') return raw;
+  if (
+    raw === 'chat' ||
+    raw === 'projects' ||
+    raw === 'skills' ||
+    raw === 'artifacts' ||
+    raw === 'automation' ||
+    raw === 'settings'
+  ) return raw;
   return 'chat';
 }
 

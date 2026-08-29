@@ -1,5 +1,6 @@
 import type { SkillSummary } from '../../state/skillStore';
 import * as tabStore from '../../state/tabStore';
+import * as uiStore from '../../state/uiStore';
 
 export interface SlashCommand {
   id: string;
@@ -46,11 +47,12 @@ export default function SlashPalette({
           type="button"
           onClick={() => {
             if (cmd.id === 'new') {
+              uiStore.setMode('chat');
               tabStore.newLauncherTab();
               return;
             }
             if (cmd.id === 'settings') {
-              tabStore.openSettingsTab();
+              uiStore.setMode('settings');
               return;
             }
             onPick(cmd);

@@ -32,20 +32,21 @@
 }
 
 :root.dark {
-  --paper: #1a1614;
-  --paper-raised: #241e1b;
-  --paper-inset: #2e2825;
-  --sidebar: #161210;
-  --ink: #f2ece0;
-  --ink-muted: #a49a86;
-  --line: #3a3327;
-  --accent: #e18a58;
-  --accent-ink: #1a1614;
-  --success: #5db88a;
-  --success-bg: #1e3a2c;
-  --danger: #e5695c;
+  /* WinLume Studio night baseline: neutral black/gray, white primary CTA. */
+  --paper: #0d0d0d;
+  --paper-raised: #161616;
+  --paper-inset: #222222;
+  --sidebar: #111111;
+  --ink: #f4f4f4;
+  --ink-muted: #8a8a8a;
+  --line: #2a2a2a;
+  --accent: #f4f4f4;
+  --accent-ink: #0d0d0d;
+  --success: #2dd4bf;
+  --success-bg: #0d4e4a;
+  --danger: #fb7185;
 
-  --paper-a0: rgb(26 22 20 / 0);
+  --paper-a0: rgb(13 13 13 / 0);
 }
 
 @theme {
@@ -70,6 +71,7 @@ body,
 #root {
   height: 100%;
   margin: 0;
+  overflow: hidden;
 }
 
 body {
@@ -201,6 +203,30 @@ pre,
   animation: jump-in 180ms var(--ease-out);
 }
 
+.home-hero-canvas {
+  opacity: 0;
+  transition: opacity 420ms var(--ease-out);
+}
+
+.home-hero-canvas[data-ready='true'] {
+  opacity: 1;
+}
+
+.wordmark-caret {
+  display: inline-block;
+  flex: 0 0 2px;
+  width: 2px;
+  height: 0.78em;
+  margin-left: 4px;
+  vertical-align: -0.04em;
+  background: currentColor;
+  animation: wordmark-caret 900ms steps(1) infinite;
+}
+
+@keyframes wordmark-caret {
+  50% { opacity: 0; }
+}
+
 /* Small card / prompt swaps: fade + a short rise. */
 .rise-in {
   animation: rise-in var(--duration-fast) var(--ease-out);
@@ -233,6 +259,12 @@ button,
   .rise-in,
   .pop-in {
     animation: fade-in 180ms var(--ease-out);
+  }
+  .home-hero-canvas {
+    transition: none;
+  }
+  .wordmark-caret {
+    animation: none;
   }
   button,
   [role='button'] {
@@ -327,5 +359,5 @@ button,
 :root.dark .hljs-number,
 :root.dark .hljs-literal,
 :root.dark .hljs-symbol {
-  color: #f0b429;
+  color: #f4f4f4;
 }

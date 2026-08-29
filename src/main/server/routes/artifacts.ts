@@ -36,6 +36,8 @@ export function createSessionArtifactsRouter(artifactStore: ArtifactStore, sessi
 export function createArtifactsRouter(artifactStore: ArtifactStore) {
   const router = new Hono();
 
+  router.get('/', async (c) => c.json({ artifacts: await artifactStore.listAll() }));
+
   router.get('/:id', async (c) => {
     const artifact = await artifactStore.get(c.req.param('id'));
     if (!artifact) return c.json({ error: 'Artifact not found' }, 404);

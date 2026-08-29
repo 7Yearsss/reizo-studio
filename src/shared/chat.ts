@@ -37,6 +37,16 @@ export interface ToolCallPart {
   error?: string;
 }
 
+export interface ReplyActivity {
+  id: string;
+  kind: 'thinking' | 'tool';
+  status: 'running' | 'done' | 'error';
+  text?: string;
+  startedAt?: number;
+  durationMs?: number;
+  tool?: ToolCallPart;
+}
+
 export interface ChatMessage {
   id: string;
   role: ChatRole;
@@ -46,6 +56,8 @@ export interface ChatMessage {
   reasoning?: string;
   /** Wall-clock ms the model spent reasoning, frozen once the turn ends. */
   reasoningMs?: number;
+  /** Wall-clock ms for the full turn, including tools and final response. */
+  durationMs?: number;
   createdAt: string;
   /**
    * Backend-allocated stable id for an assistant row, stamped into the live

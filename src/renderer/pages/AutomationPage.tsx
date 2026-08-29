@@ -5,6 +5,7 @@ import { SCHEDULE_PRESETS } from '../../shared/schedule';
 import * as api from '../api';
 import * as chatStore from '../state/chatStore';
 import * as tabStore from '../state/tabStore';
+import * as uiStore from '../state/uiStore';
 import { useSkillStore } from '../state/useSkillStore';
 import { cn } from '../lib/cn';
 
@@ -65,6 +66,7 @@ export default function AutomationPage() {
                   className="text-[11px] text-accent"
                   onClick={async () => {
                     const session = await chatStore.createSession(thought.content.slice(0, 40));
+                    uiStore.setMode('chat');
                     tabStore.openChatTab(session.id, session.title);
                     void chatStore.sendMessage(session.id, thought.content);
                   }}

@@ -3,6 +3,7 @@ import { useSkillStore } from '../state/useSkillStore';
 import * as skillStore from '../state/skillStore';
 import * as tabStore from '../state/tabStore';
 import * as chatStore from '../state/chatStore';
+import * as uiStore from '../state/uiStore';
 
 export default function PluginsPage() {
   const { skills } = useSkillStore();
@@ -45,6 +46,7 @@ export default function PluginsPage() {
                 className="text-xs text-accent"
                 onClick={async () => {
                   const session = await chatStore.createSession(`/${skill.id}`);
+                  uiStore.setMode('chat');
                   tabStore.openChatTab(session.id, session.title);
                   void chatStore.sendMessage(session.id, `请按技能 ${skill.name} 开始工作。`, [], { skillId: skill.id });
                 }}

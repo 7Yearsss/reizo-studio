@@ -150,10 +150,41 @@ export async function runChatTurn(options: {
   const instructions = systemParts.join('\n\n');
 
   // `ai` v7 rejects a `system`-role entry in `messages`; the system prompt
-  // goes to the `instructions` option. Only replayable chat roles here.
-  const history: ModelMessage[] = session.messages
-    .filter((m) => m.role === 'user' || m.role === 'assistant')
-    .map((m) => ({ role: m.role, content: m.content }) as ModelMessage);
+  // goes to `instructions`. Preserve completed tool pairs so each new turn
+  // knows what was already inspected and does not repeat the same search.
+  const history: ModelMessage[] = [];
+  for (const message of session.messages) {
+    if (message.role === 'user') {
+      history.push({ role: 'user', content: message.content });
+      continue;
+    }
+    if (message.role !== 'assistant') continue;
+    const parts = message.parts ?? [];
+    if (parts.length === 0) {
+      history.push({ role: 'assistant', content: message.content });
+      continue;
+    }
+    const assistantContent: Array<Record<string, unknown>> = [];
+    if (message.content) assistantContent.push({ type: 'text', text: message.content });
+    for (const part of parts) {
+      assistantContent.push({
+        type: 'tool-call',
+        toolCallId: part.id,
+        toolName: part.name,
+        input: part.args,
+      });
+    }
+    history.push({ role: 'assistant', content: assistantContent } as ModelMessage);
+    history.push({
+      role: 'tool',
+      content: parts.map((part) => ({
+        type: 'tool-result',
+        toolCallId: part.id,
+        toolName: part.name,
+        output: parseToolOutput(part.result ?? part.error ?? ''),
+      })),
+    } as ModelMessage);
+  }
 
   // `emit` is bound to the live stream once `startAgentTurn` opens it; tools
   // created here need the reference up front (todos / permission side-channel).
@@ -201,4 +232,12 @@ export async function runChatTurn(options: {
         abortSignal: signal,
       }),
   });
+}
+
+function parseToolOutput(value: string): { type: 'json'; value: unknown } | { type: 'text'; value: string } {
+  try {
+    return { type: 'json', value: JSON.parse(value) };
+  } catch {
+    return { type: 'text', value };
+  }
 }

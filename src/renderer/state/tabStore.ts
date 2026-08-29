@@ -1,6 +1,6 @@
 import { nanoid } from 'nanoid';
 
-export type TabKind = 'launcher' | 'chat' | 'settings' | 'automation' | 'plugins';
+export type TabKind = 'launcher' | 'chat';
 
 export interface AppTab {
   id: string;
@@ -26,7 +26,18 @@ function loadStored(): TabState | null {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as TabState;
-    if (!Array.isArray(parsed.tabs) || parsed.tabs.length === 0) return null;
+    if (!Array.isArray(parsed.tabs)) return null;
+    // Global surfaces used to be persisted as tabs. Drop those legacy entries
+    // so settings/skills/artifacts/automation never reappear in the tab bar.
+    parsed.tabs = parsed.tabs.filter((tab) => tab.kind === 'launcher' || tab.kind === 'chat');
+    if (parsed.tabs.length === 0) return null;
+    // There is only one reusable "new conversation" entry. Older builds could
+    // persist several launcher tabs after repeated clicks; keep the first one
+    // and let the normal chat-tab rules handle future entries.
+    const launcher = parsed.tabs.find((tab) => tab.kind === 'launcher');
+    if (launcher) {
+      parsed.tabs = parsed.tabs.filter((tab) => tab.kind !== 'launcher' || tab.id === launcher.id);
+    }
     if (!parsed.tabs.some((t) => t.id === parsed.activeTabId)) {
       parsed.activeTabId = parsed.tabs[0].id;
     }
@@ -94,6 +105,16 @@ export function pruneMissingSessions(validSessionIds: string[]): void {
 }
 
 export function newLauncherTab(): AppTab {
+  const active = state.tabs.find((t) => t.id === state.activeTabId);
+  // Clicking the entry while already in the launcher is a no-op. From a chat
+  // context, reuse the existing launcher if one is already open; otherwise
+  // create the single new-conversation entry.
+  if (active?.kind === 'launcher') return active;
+  const existing = state.tabs.find((t) => t.kind === 'launcher');
+  if (existing) {
+    setState({ activeTabId: existing.id });
+    return existing;
+  }
   const tab = makeLauncher();
   select([...state.tabs, tab], tab.id);
   return tab;
@@ -120,29 +141,6 @@ export function openChatTab(sessionId: string, title: string, replaceActiveLaunc
   }
 
   const tab: AppTab = { id: nanoid(), kind: 'chat', sessionId, title };
-  select([...state.tabs, tab], tab.id);
-  return tab;
-}
-
-export function openSettingsTab(): AppTab {
-  return openSingletonTab('settings', '设置');
-}
-
-export function openAutomationTab(): AppTab {
-  return openSingletonTab('automation', '自动化');
-}
-
-export function openPluginsTab(): AppTab {
-  return openSingletonTab('plugins', '技能');
-}
-
-function openSingletonTab(kind: Exclude<TabKind, 'chat' | 'launcher'>, title: string): AppTab {
-  const existing = state.tabs.find((t) => t.kind === kind);
-  if (existing) {
-    setState({ activeTabId: existing.id });
-    return existing;
-  }
-  const tab: AppTab = { id: nanoid(), kind, title };
   select([...state.tabs, tab], tab.id);
   return tab;
 }
