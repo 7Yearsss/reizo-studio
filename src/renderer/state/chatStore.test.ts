@@ -133,6 +133,63 @@ describe('chatStore streaming fold', () => {
     await pending;
   });
 
+  it('keeps a permission prompt when a sibling tool_use arrives', async () => {
+    let release: () => void = () => undefined;
+    apiMock.sendMessage.mockImplementation(
+      (_s: string, _t: string, opts: { onEvent: StreamEventHandler }) =>
+        new Promise<void>((resolve) => {
+          opts.onEvent(
+            { type: 'permission', id: 'p1', name: 'run_command', args: { command: 'npm test' } },
+            { rev: 1, epoch: 'e1' },
+          );
+          opts.onEvent(
+            { type: 'tool', id: 't2', name: 'run_command', args: { command: 'npm run lint' } },
+            { rev: 2, epoch: 'e1' },
+          );
+          release = resolve;
+        }),
+    );
+    const pending = store.sendMessage('s1', 'do it');
+    await Promise.resolve();
+    expect(store.getSnapshot().interactionBySession['s1']).toMatchObject({
+      kind: 'permission',
+      id: 'p1',
+    });
+    release();
+    await pending;
+  });
+
+  it('does not wipe a newer permission that arrived while answering the previous one', async () => {
+    let onEvent: StreamEventHandler | undefined;
+    let release: () => void = () => undefined;
+    apiMock.sendMessage.mockImplementation(
+      (_s: string, _t: string, opts: { onEvent: StreamEventHandler }) =>
+        new Promise<void>((resolve) => {
+          onEvent = opts.onEvent;
+          opts.onEvent(
+            { type: 'permission', id: 'p1', name: 'run_command', args: { command: 'npm test' } },
+            { rev: 1, epoch: 'e1' },
+          );
+          release = resolve;
+        }),
+    );
+    apiMock.answerPermission.mockImplementation(async () => {
+      onEvent?.(
+        { type: 'permission', id: 'p2', name: 'run_command', args: { command: 'npm run lint' } },
+        { rev: 2, epoch: 'e1' },
+      );
+    });
+    const pending = store.sendMessage('s1', 'do it');
+    await Promise.resolve();
+    await store.answerPermission('s1', 'allow');
+    expect(store.getSnapshot().interactionBySession['s1']).toMatchObject({
+      kind: 'permission',
+      id: 'p2',
+    });
+    release();
+    await pending;
+  });
+
   it('gap in revisions still resolves (folds + tail reconcile)', async () => {
     feed(
       [
