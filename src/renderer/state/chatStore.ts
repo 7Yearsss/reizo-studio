@@ -502,7 +502,6 @@ function makeEventFolder(sessionId: string, acc: { text: string; tools: ToolCall
           streamingToolsBySession: { ...state.streamingToolsBySession, [sessionId]: [...acc.tools] },
           replyActivitiesBySession: { ...state.replyActivitiesBySession, [sessionId]: [...acc.activities] },
           replyPhaseBySession: { ...state.replyPhaseBySession, [sessionId]: 'tools' },
-          interactionBySession: { ...state.interactionBySession, [sessionId]: null },
         });
         if (event.name === 'run_command' && event.result) {
           try {
@@ -735,7 +734,12 @@ export async function answerPermission(
   const pending = state.interactionBySession[sessionId];
   if (!pending || pending.kind !== 'permission') return;
   await api.answerPermission(sessionId, pending.id, decision);
-  setState({ interactionBySession: { ...state.interactionBySession, [sessionId]: null } });
+  const current = state.interactionBySession[sessionId];
+  // The live stream may already have the next queued permission. Only clear
+  // if we are still looking at the one we just answered.
+  if (current?.kind === 'permission' && current.id === pending.id) {
+    setState({ interactionBySession: { ...state.interactionBySession, [sessionId]: null } });
+  }
 }
 
 export async function answerAsk(sessionId: string, answers: Record<string, string>): Promise<void> {

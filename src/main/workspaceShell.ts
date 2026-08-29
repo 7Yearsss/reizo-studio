@@ -29,6 +29,9 @@ export async function runWorkspaceCommand(cwd: string, command: string): Promise
         PATHEXT: process.env.PATHEXT,
         COMSPEC: process.env.COMSPEC,
         SystemRoot: process.env.SystemRoot,
+        GIT_PAGER: 'cat',
+        GIT_TERMINAL_PROMPT: '0',
+        PAGER: 'cat',
       },
     });
     return { command: trimmed, cwd, stdout: stdout.slice(0, 20_000), stderr: stderr.slice(0, 8_000), exitCode: 0 };
