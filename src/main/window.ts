@@ -30,7 +30,7 @@ export function createMainWindow(): BrowserWindow {
     frame: isMac,
     titleBarStyle: isMac ? 'hiddenInset' : undefined,
     trafficLightPosition: isMac ? { x: 16, y: 12 } : undefined,
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1a1614' : '#faf6ee',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#0d0d0d' : '#faf6ee',
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),

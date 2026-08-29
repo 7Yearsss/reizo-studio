@@ -3,7 +3,6 @@ import { useEffect, useState } from 'react';
 import TabBar from './TabBar';
 
 const isWindows = typeof window !== 'undefined' && window.reizo?.platform === 'win32';
-const isMac = typeof window !== 'undefined' && window.reizo?.platform === 'darwin';
 
 export default function CustomTitleBar() {
   const [maximized, setMaximized] = useState(false);
@@ -14,7 +13,11 @@ export default function CustomTitleBar() {
 
   return (
     <header className="titlebar flex h-10 shrink-0 items-stretch bg-sidebar">
-      {isMac && <div className="w-[76px] shrink-0" />}
+      <div
+        className="shrink-0 bg-sidebar"
+        style={{ width: 'var(--sidebar-width, 248px)' }}
+        aria-hidden="true"
+      />
       <TabBar />
       {isWindows && (
         <div className="titlebar-no-drag ml-auto flex">

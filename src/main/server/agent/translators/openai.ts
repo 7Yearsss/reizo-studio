@@ -41,6 +41,7 @@ const IGNORED = new Set([
   'start-step',
   'finish-step',
   'step-start',
+  'step-finish',
   'reset-step',
   'text-start',
   'text-end',
@@ -64,6 +65,22 @@ const IGNORED = new Set([
 
 export function translateOpenAiChunk(chunk: StreamPart): AgentEvent | null {
   switch (chunk.type) {
+    case 'start-step':
+    case 'step-start':
+      return {
+        type: 'status',
+        data: { phase: 'thinking', step: stepNumber(chunk.step) },
+        source: 'openai',
+      };
+
+    case 'finish-step':
+    case 'step-finish':
+      return {
+        type: 'status',
+        data: { phase: 'replying', step: stepNumber(chunk.step) },
+        source: 'openai',
+      };
+
     case 'text-delta':
       return { type: 'text', data: { delta: String(chunk.text ?? '') }, source: 'openai' };
 
@@ -127,4 +144,9 @@ export function translateOpenAiChunk(chunk: StreamPart): AgentEvent | null {
       }
       return null;
   }
+}
+
+function stepNumber(value: unknown): number | undefined {
+  const step = typeof value === 'number' ? value : Number(value);
+  return Number.isInteger(step) && step >= 0 ? step : undefined;
 }

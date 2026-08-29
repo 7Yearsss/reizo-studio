@@ -1,19 +1,23 @@
 import { useState } from 'react';
 import { FolderOpen, FolderPlus } from 'lucide-react';
+import HomeHero from '../components/home/HomeHero';
+import ReizoWordmark from '../components/home/ReizoWordmark';
 import PromptCard from '../components/chat/PromptCard';
 import ModelPicker from '../components/chat/ModelPicker';
 import MentionMenu, { extractMentionQuery } from '../components/chat/MentionMenu';
 import * as chatStore from '../state/chatStore';
 import * as tabStore from '../state/tabStore';
 import * as settingsStore from '../state/settingsStore';
+import * as uiStore from '../state/uiStore';
 import * as api from '../api';
 import { useSettingsStore } from '../state/useSettingsStore';
 
-export default function HomePage() {
+export default function HomePage({ active = true }: { active?: boolean }) {
   const [draft, setDraft] = useState('');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mentions, setMentions] = useState<string[]>([]);
+  const [composerReady, setComposerReady] = useState(false);
   const workspacePath = useSettingsStore((s) => s.settings.workspacePath);
   const mentionQuery = extractMentionQuery(draft);
   const folderName = workspacePath?.split(/[/\\]/).filter(Boolean).pop();
@@ -25,6 +29,7 @@ export default function HomePage() {
     setError(null);
     try {
       const session = await chatStore.createSession(text.slice(0, 60));
+      uiStore.setMode('chat');
       tabStore.openChatTab(session.id, session.title, true);
       void chatStore.sendMessage(session.id, text, mentions, extra);
       setDraft('');
@@ -50,7 +55,10 @@ export default function HomePage() {
 
   return (
     <div className="flex h-full flex-col items-center justify-center px-6">
-      <h1 className="text-[56px] font-semibold tracking-tight text-ink">Reizo</h1>
+      <div className="relative">
+        <HomeHero active={active} />
+        <ReizoWordmark active={active} onSettled={() => setComposerReady(true)} />
+      </div>
       <p className="mt-3 text-sm text-ink-muted">今天，想干点啥？</p>
 
       <div className="relative mt-10 w-full max-w-2xl">
@@ -69,7 +77,7 @@ export default function HomePage() {
           onSubmit={() => void handleSubmit()}
           placeholder="今天，想干点啥？"
           disabled={creating}
-          autoFocus
+          autoFocus={composerReady}
           toolbar={
             <>
               <button
@@ -107,7 +115,7 @@ export default function HomePage() {
             还没有 API Key。
             <button
               type="button"
-              onClick={() => tabStore.openSettingsTab()}
+              onClick={() => uiStore.setMode('settings')}
               className="ml-1 text-accent hover:opacity-80"
             >
               去设置

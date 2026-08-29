@@ -48,7 +48,6 @@ export default function Sidebar() {
   const projectsLoaded = useProjectStore((s) => s.loaded);
   const mode = useUiStore((s) => s.mode);
   const selectedProjectId = useUiStore((s) => s.selectedProjectId);
-  const artifactsOpen = useUiStore((s) => s.artifactsOpen);
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === '1');
   const [query, setQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
@@ -59,6 +58,13 @@ export default function Sidebar() {
   const [projectsOpen, setProjectsOpen] = useState(() => localStorage.getItem(PROJECTS_FOLD_KEY) !== '0');
   const [chatsOpen, setChatsOpen] = useState(() => localStorage.getItem(CHATS_FOLD_KEY) !== '0');
   const searchModHint = isMacPlatform() ? '⌘K' : 'Ctrl+K';
+
+  // The title bar lives outside the content row, so publish the current rail
+  // width for its leading spacer. This keeps tabs aligned with the work area
+  // when the sidebar is collapsed or expanded.
+  useEffect(() => {
+    document.documentElement.style.setProperty('--sidebar-width', `${collapsed ? 40 : 248}px`);
+  }, [collapsed]);
 
   useEffect(() => {
     if (!loaded) void chatStore.loadSessions();
@@ -146,7 +152,7 @@ export default function Sidebar() {
     );
 
   const foldRow =
-    'flex min-w-0 flex-1 items-center gap-1 rounded-xl px-3 py-2 text-left text-[13px] text-ink-muted outline-none transition-colors hover:text-ink';
+    'flex min-w-0 items-center gap-1 rounded-xl px-3 py-2 text-left text-[13px] text-ink-muted outline-none transition-colors hover:text-ink';
 
   return (
     <aside
@@ -218,32 +224,38 @@ export default function Sidebar() {
       <nav className="flex flex-col gap-0.5" aria-label="Studio 导航">
         <button
           type="button"
-          onClick={() => tabStore.newLauncherTab()}
-          className={navRow(activeTab?.kind === 'launcher')}
+          onClick={() => {
+            uiStore.setMode('chat');
+            tabStore.newLauncherTab();
+          }}
+          className={navRow(mode === 'chat' && activeTab?.kind === 'launcher')}
         >
           <CirclePlus size={18} className="shrink-0" strokeWidth={1.8} />
           开始创作
         </button>
         <button
           type="button"
-          onClick={() => tabStore.openPluginsTab()}
-          className={navRow(activeTab?.kind === 'plugins' || mode === 'skills')}
+          onClick={() => uiStore.setMode('skills')}
+          className={navRow(mode === 'skills')}
         >
           <Sparkles size={18} className="shrink-0" strokeWidth={1.8} />
           技能
         </button>
         <button
           type="button"
-          onClick={() => uiStore.toggleArtifacts()}
-          className={navRow(artifactsOpen)}
+          onClick={() => {
+            uiStore.setArtifactsOpen(false);
+            uiStore.setMode('artifacts');
+          }}
+          className={navRow(mode === 'artifacts')}
         >
           <LayoutGrid size={18} className="shrink-0" strokeWidth={1.8} />
           我的作品
         </button>
         <button
           type="button"
-          onClick={() => tabStore.openAutomationTab()}
-          className={navRow(activeTab?.kind === 'automation')}
+          onClick={() => uiStore.setMode('automation')}
+          className={navRow(mode === 'automation')}
         >
           <Timer size={18} className="shrink-0" strokeWidth={1.8} />
           自动化
@@ -252,9 +264,8 @@ export default function Sidebar() {
           type="button"
           onClick={() => {
             uiStore.setMode('settings');
-            tabStore.openSettingsTab();
           }}
-          className={navRow(activeTab?.kind === 'settings' || mode === 'settings')}
+          className={navRow(mode === 'settings')}
         >
           <Settings size={18} className="shrink-0" strokeWidth={1.8} />
           设置
@@ -262,9 +273,9 @@ export default function Sidebar() {
       </nav>
 
       <div className="mt-5 flex min-h-0 flex-1 flex-col gap-1 overflow-hidden">
-        <div className="flex min-h-0 flex-col">
+        <div className="flex min-h-0 shrink-0 flex-col">
           <div className="flex items-center gap-1">
-            <button type="button" onClick={toggleProjectsOpen} className={foldRow} aria-expanded={projectsOpen}>
+            <button type="button" onClick={toggleProjectsOpen} className={cn(foldRow, 'flex-1')} aria-expanded={projectsOpen}>
               <ChevronRight
                 size={14}
                 className={cn(
@@ -285,7 +296,7 @@ export default function Sidebar() {
             </button>
           </div>
           {projectsOpen && (
-            <div className="anim-fade min-h-0 overflow-y-auto px-1 pb-2">
+            <div className="anim-fade max-h-40 shrink-0 overflow-y-auto px-1 pb-2">
               {projects.length === 0 && (
                 <button
                   type="button"
@@ -302,7 +313,10 @@ export default function Sidebar() {
                   <button
                     key={project.id}
                     type="button"
-                    onClick={() => uiStore.selectProject(active ? null : project.id)}
+                    onClick={() => {
+                      uiStore.selectProject(active ? null : project.id);
+                      uiStore.setMode('chat');
+                    }}
                     className={cn(
                       'flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-[13px] text-ink-muted hover:bg-paper-inset/70 hover:text-ink',
                       active && 'bg-paper-inset/80 text-ink',
@@ -324,6 +338,7 @@ export default function Sidebar() {
                       className="text-[11px] text-accent"
                       onClick={async () => {
                         const session = await chatStore.createSession('新对话', selectedProjectId);
+                        uiStore.setMode('chat');
                         tabStore.openChatTab(session.id, session.title);
                       }}
                     >
@@ -339,7 +354,10 @@ export default function Sidebar() {
                       <button
                         key={session.id}
                         type="button"
-                        onClick={() => tabStore.openChatTab(session.id, session.title)}
+                        onClick={() => {
+                          uiStore.setMode('chat');
+                          tabStore.openChatTab(session.id, session.title);
+                        }}
                         className={cn(
                           'flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-ink-muted hover:bg-paper-inset/70 hover:text-ink',
                           active && 'bg-paper-inset/80 text-ink',
@@ -390,7 +408,10 @@ export default function Sidebar() {
                   <button
                     key={session.id}
                     type="button"
-                    onClick={() => tabStore.openChatTab(session.id, session.title)}
+                    onClick={() => {
+                      uiStore.setMode('chat');
+                      tabStore.openChatTab(session.id, session.title);
+                    }}
                     className={cn(
                       'group flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-ink-muted hover:bg-paper-inset/70 hover:text-ink',
                       active && 'bg-paper-inset/80 text-ink',
@@ -470,7 +491,6 @@ export default function Sidebar() {
             type="button"
             onClick={() => {
               uiStore.setMode('settings');
-              tabStore.openSettingsTab();
             }}
             className="min-w-0 flex-1 text-left"
           >

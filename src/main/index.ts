@@ -32,6 +32,9 @@ if (process.env.REIZO_DEV_NO_SANDBOX === '1') {
   app.commandLine.appendSwitch('in-process-gpu');
   app.commandLine.appendSwitch('disable-setuid-sandbox');
   app.disableHardwareAcceleration();
+} else {
+  // Electron's Chromium builds still gate WebGPU behind this switch on some GPUs.
+  app.commandLine.appendSwitch('enable-unsafe-webgpu');
 }
 
 let runningServer: RunningServer | null = null;

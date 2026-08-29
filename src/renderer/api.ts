@@ -20,7 +20,9 @@ async function readEnvelopeStream(res: Response, onEvent: StreamEventHandler): P
   if (!reader) return;
   const decoder = new TextDecoder();
   let buffer = '';
+  let ended = false;
   const dispatch = (line: string) => {
+    if (ended) return;
     const trimmed = line.trim();
     if (!trimmed) return;
     let parsed: unknown;
@@ -33,17 +35,23 @@ async function readEnvelopeStream(res: Response, onEvent: StreamEventHandler): P
     }
     if (isLiveEnvelope(parsed)) {
       onEvent(parsed.event, { rev: parsed.rev, epoch: parsed.epoch });
+      if (parsed.event.type === 'done') ended = true;
     } else {
-      onEvent(parsed as ChatStreamEvent);
+      const event = parsed as ChatStreamEvent;
+      onEvent(event);
+      if (event.type === 'done') ended = true;
     }
   };
   for (;;) {
     const { done, value } = await reader.read();
-    if (done) break;
+    if (done || ended) break;
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split('\n');
     buffer = lines.pop() ?? '';
-    for (const line of lines) dispatch(line);
+    for (const line of lines) {
+      dispatch(line);
+      if (ended) break;
+    }
   }
   dispatch(buffer);
 }
@@ -364,6 +372,12 @@ export async function deleteProject(id: string): Promise<void> {
 
 export async function listSessionArtifacts(sessionId: string): Promise<Artifact[]> {
   const res = await api(`/api/sessions/${sessionId}/artifacts`);
+  const { artifacts } = await res.json();
+  return artifacts;
+}
+
+export async function listArtifacts(): Promise<Artifact[]> {
+  const res = await api('/api/artifacts');
   const { artifacts } = await res.json();
   return artifacts;
 }

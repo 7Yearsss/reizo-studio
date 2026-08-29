@@ -11,9 +11,12 @@ export interface AskQuestion {
   multi?: boolean;
 }
 
+export type ReplyPhase = 'preparing' | 'thinking' | 'tools' | 'replying' | 'waiting';
+
 export type ChatStreamEvent =
   | { type: 'text'; delta: string }
   | { type: 'reasoning'; delta: string }
+  | { type: 'status'; phase: 'thinking' | 'tools' | 'replying'; step?: number }
   | { type: 'tool'; id: string; name: string; args: Record<string, unknown>; result?: string; error?: string }
   | { type: 'permission'; id: string; name: string; args: Record<string, unknown> }
   | { type: 'ask'; id: string; questions: AskQuestion[] }

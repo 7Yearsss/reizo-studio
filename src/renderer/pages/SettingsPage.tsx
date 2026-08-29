@@ -7,6 +7,7 @@ import { useSettingsStore } from '../state/useSettingsStore';
 import * as settingsStore from '../state/settingsStore';
 import * as api from '../api';
 import * as tabStore from '../state/tabStore';
+import * as uiStore from '../state/uiStore';
 
 type SectionId = 'general' | 'providers' | 'about';
 
@@ -268,7 +269,10 @@ function AboutSection() {
         本地优先的桌面 Agent 工作台。会话、密钥和工作区都留在这台电脑上。
       </p>
       <button
-        onClick={() => tabStore.newLauncherTab()}
+        onClick={() => {
+          uiStore.setMode('chat');
+          tabStore.newLauncherTab();
+        }}
         className="mt-6 text-sm text-accent hover:opacity-80"
       >
         返回对话

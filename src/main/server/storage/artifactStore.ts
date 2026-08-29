@@ -51,6 +51,17 @@ export function createArtifactStore(root: string) {
   }
 
   return {
+    async listAll(): Promise<Artifact[]> {
+      await ensureDir();
+      const files = await readdir(dir);
+      const items = await Promise.all(
+        files
+          .filter((f) => f.endsWith('.json'))
+          .map(async (f) => JSON.parse(await readFile(path.join(dir, f), 'utf8')) as ArtifactWithContent),
+      );
+      return items.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(toMeta);
+    },
+
     async listBySession(sessionId: string): Promise<Artifact[]> {
       await ensureDir();
       const files = await readdir(dir);

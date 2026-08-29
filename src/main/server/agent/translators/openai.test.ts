@@ -55,9 +55,20 @@ describe('translateOpenAiChunk', () => {
     expect(isTerminalAgentErrorEvent(err!)).toBe(true);
   });
 
+  it('maps step lifecycle chunks to visible status events', () => {
+    expect(translateOpenAiChunk({ type: 'start-step', step: 0 })).toMatchObject({
+      type: 'status',
+      data: { phase: 'thinking', step: 0 },
+    });
+    expect(translateOpenAiChunk({ type: 'finish-step', step: 0 })).toMatchObject({
+      type: 'status',
+      data: { phase: 'replying', step: 0 },
+    });
+  });
+
   it('drops known structural chunks silently', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    for (const type of ['start', 'finish', 'start-step', 'text-start', 'tool-input-delta']) {
+    for (const type of ['start', 'finish', 'text-start', 'tool-input-delta']) {
       expect(translateOpenAiChunk({ type })).toBeNull();
     }
     expect(warn).not.toHaveBeenCalled();
