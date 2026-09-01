@@ -1,5 +1,6 @@
 import { RotateCcw } from 'lucide-react';
 import type { ReplyActivity, ToolCallPart } from '../../../shared/chat';
+import type { TurnOutcome } from '../../../shared/stream';
 import MarkdownContent, { CopyButton } from './MarkdownContent';
 import WorkGroupCard from './WorkGroupCard';
 
@@ -25,6 +26,7 @@ export default function AssistantMessage({
   canRetry = false,
   onRetry,
   activities,
+  turnOutcome = null,
 }: {
   content: string;
   parts?: ToolCallPart[];
@@ -38,6 +40,7 @@ export default function AssistantMessage({
   canRetry?: boolean;
   onRetry?: () => void;
   activities?: ReplyActivity[];
+  turnOutcome?: TurnOutcome | null;
 }) {
   return (
     <div className={`anim-msg group space-y-3 ${currentMatch ? 'chat-search-current' : ''}`}>
@@ -50,39 +53,48 @@ export default function AssistantMessage({
         streaming={streaming}
         durationMs={durationMs}
         activities={activities}
+        turnOutcome={turnOutcome}
       />
-      <div className="markdown text-[15px] leading-[1.75] text-ink">
-        {content ? (
-          <>
-            <MarkdownContent content={content} streaming={streaming} />
-            {streaming && <StreamingCaret />}
-          </>
-        ) : streaming && !parts?.length ? (
+      {content ? (
+        <div className="markdown text-[15px] leading-[1.75] text-ink">
+          <MarkdownContent content={content} streaming={streaming} />
+          {streaming ? <StreamingCaret /> : null}
+        </div>
+      ) : streaming && !parts?.length && !activities?.length && !reasoning && !reasoningStreaming ? (
+        <div className="markdown text-[15px] leading-[1.75] text-ink">
           <span className="inline-flex items-center gap-2 text-ink-muted">
             <StreamingCaret />
             <span className="text-[12px]">正在回复</span>
           </span>
-        ) : null}
-      </div>
-      {content && !streaming && (
-        <div className="flex gap-3 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
-          {durationMs !== undefined && durationMs > 0 && (
-            <span className="text-[11px] text-ink-muted/70">已完成 · {formatDuration(durationMs)}</span>
+        </div>
+      ) : null}
+      {(content || parts?.length) && !streaming && (
+        <div className="flex items-center gap-3">
+          {turnOutcome === 'interrupted' ? (
+            <span className="text-[11px] text-amber-500/90">已中断{durationMs ? ` · ${formatDuration(durationMs)}` : ''}</span>
+          ) : turnOutcome === 'error' ? (
+            <span className="text-[11px] text-danger/80">回复失败{durationMs ? ` · ${formatDuration(durationMs)}` : ''}</span>
+          ) : (
+            <span className="text-[11px] text-ink-muted/70">
+              已完成{durationMs !== undefined && durationMs > 0 ? ` · ${formatDuration(durationMs)}` : ''}
+            </span>
           )}
-          <CopyButton
-            text={content}
-            className="inline-flex items-center gap-1 text-[11px] text-ink-muted hover:text-ink"
-          />
-          {canRetry && (
-            <button
-              type="button"
-              onClick={onRetry}
+          <div className="flex gap-3 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+            <CopyButton
+              text={content}
               className="inline-flex items-center gap-1 text-[11px] text-ink-muted hover:text-ink"
-            >
-              <RotateCcw size={11} />
-              重新生成
-            </button>
-          )}
+            />
+            {canRetry && (
+              <button
+                type="button"
+                onClick={onRetry}
+                className="inline-flex items-center gap-1 text-[11px] text-ink-muted hover:text-ink"
+              >
+                <RotateCcw size={11} />
+                重新生成
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>

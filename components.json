@@ -11,6 +11,9 @@
     "prefix": ""
   },
   "iconLibrary": "lucide",
+  "registries": {
+    "@beui": "https://beui.dev/r/{name}.json"
+  },
   "aliases": {
     "components": "@/renderer/components",
     "utils": "@/renderer/lib/cn",

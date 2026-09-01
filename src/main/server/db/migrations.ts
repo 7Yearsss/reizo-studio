@@ -48,4 +48,11 @@ export const MIGRATIONS: Migration[] = [
       `CREATE INDEX messages_session_active_idx ON messages (session_id, rowid) WHERE rewind_at IS NULL`,
     ],
   },
+  {
+    name: '0001_turn_outcomes',
+    statements: [
+      `ALTER TABLE sessions ADD COLUMN last_turn_outcome text`,
+      `ALTER TABLE sessions ADD COLUMN last_turn_error text`,
+    ],
+  },
 ];

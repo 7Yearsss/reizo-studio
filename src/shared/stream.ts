@@ -13,16 +13,18 @@ export interface AskQuestion {
 
 export type ReplyPhase = 'preparing' | 'thinking' | 'tools' | 'replying' | 'waiting';
 
+export type TurnOutcome = 'completed' | 'interrupted' | 'error';
+
 export type ChatStreamEvent =
   | { type: 'text'; delta: string }
   | { type: 'reasoning'; delta: string }
-  | { type: 'status'; phase: 'thinking' | 'tools' | 'replying'; step?: number }
+  | { type: 'status'; phase: 'thinking' | 'tools' | 'replying' | 'waiting'; step?: number; heartbeat?: boolean }
   | { type: 'tool'; id: string; name: string; args: Record<string, unknown>; result?: string; error?: string }
   | { type: 'permission'; id: string; name: string; args: Record<string, unknown> }
   | { type: 'ask'; id: string; questions: AskQuestion[] }
   | { type: 'todos'; items: TodoItem[] }
   | { type: 'error'; error: string }
-  | { type: 'done'; aborted?: boolean };
+  | { type: 'done'; outcome: TurnOutcome; aborted?: boolean; error?: string };
 
 export function encodeStreamEvent(event: ChatStreamEvent): string {
   return `${JSON.stringify(event)}\n`;

@@ -1,4 +1,6 @@
 import type { AgentEvent } from '../../../../shared/agentEvent';
+import { unwrapApprovalRequiredError } from '../permissions';
+import { formatProviderError } from '../providerError';
 
 /**
  * Translates one `ai` SDK `fullStream` chunk into a vendor-neutral
@@ -34,10 +36,18 @@ function asRecord(value: unknown): Record<string, unknown> {
   return { value };
 }
 
+/** Provider text fields only. Never stringify `id: 0` / numeric indexes. */
+function streamText(chunk: StreamPart): string {
+  for (const key of ['text', 'delta', 'textDelta'] as const) {
+    const value = chunk[key];
+    if (typeof value === 'string') return value;
+  }
+  return '';
+}
+
 /** Structural / lifecycle chunks that are intentionally not surfaced. */
 const IGNORED = new Set([
   'start',
-  'finish',
   'start-step',
   'finish-step',
   'step-start',
@@ -75,22 +85,40 @@ export function translateOpenAiChunk(chunk: StreamPart): AgentEvent | null {
 
     case 'finish-step':
     case 'step-finish':
+      // A finished step is not "still writing". The next useful work is
+      // another think/tool pass, or the turn ends.
       return {
         type: 'status',
-        data: { phase: 'replying', step: stepNumber(chunk.step) },
+        data: { phase: 'thinking', step: stepNumber(chunk.step) },
         source: 'openai',
       };
 
-    case 'text-delta':
-      return { type: 'text', data: { delta: String(chunk.text ?? '') }, source: 'openai' };
+    case 'finish':
+      console.info(
+        `[chat] provider finish reason=${String(chunk.finishReason ?? chunk.reason ?? '')}`,
+      );
+      return null;
+
+    case 'text-delta': {
+      const delta = streamText(chunk);
+      if (!delta) return null;
+      return {
+        type: 'text',
+        data: { delta },
+        source: 'openai',
+      };
+    }
 
     case 'reasoning':
-    case 'reasoning-delta':
+    case 'reasoning-delta': {
+      const delta = streamText(chunk);
+      if (!delta) return null;
       return {
         type: 'thinking',
-        data: { delta: String(chunk.text ?? chunk.delta ?? '') },
+        data: { delta },
         source: 'openai',
       };
+    }
 
     case 'tool-call':
       return {
@@ -115,7 +143,23 @@ export function translateOpenAiChunk(chunk: StreamPart): AgentEvent | null {
         source: 'openai',
       };
 
-    case 'tool-error':
+    case 'tool-error': {
+      // A tool that needs the user's go-ahead unwinds with this sentinel.
+      // Surface it as a suspend request, not a failed tool result.
+      const approval = unwrapApprovalRequiredError(chunk.error);
+      if (approval) {
+        return {
+          type: 'interaction_request',
+          data: {
+            id: approval.interaction.toolCallId,
+            name: approval.interaction.name,
+            args: approval.interaction.args,
+            kind: approval.interaction.kind,
+            questions: approval.interaction.questions,
+          },
+          source: 'openai',
+        };
+      }
       return {
         type: 'tool_result',
         data: {
@@ -126,6 +170,7 @@ export function translateOpenAiChunk(chunk: StreamPart): AgentEvent | null {
         },
         source: 'openai',
       };
+    }
 
     case 'abort':
       return { type: 'done', data: { aborted: true }, source: 'openai' };
@@ -133,7 +178,10 @@ export function translateOpenAiChunk(chunk: StreamPart): AgentEvent | null {
     case 'error':
       return {
         type: 'error',
-        data: { message: stringify(chunk.error), isTerminal: true },
+        data: {
+          message: formatProviderError(chunk.error),
+          isTerminal: true,
+        },
         source: 'openai',
       };
 

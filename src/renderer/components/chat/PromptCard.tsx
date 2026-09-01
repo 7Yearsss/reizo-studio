@@ -17,6 +17,7 @@ export default function PromptCard({
   toolbar,
   onKeyDown,
   hint,
+  status,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -31,6 +32,7 @@ export default function PromptCard({
   toolbar?: ReactNode;
   onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   hint?: string;
+  status?: ReactNode;
 }) {
   const canSend = !disabled && Boolean(value.trim());
   const composingRef = useRef(false);
@@ -61,6 +63,11 @@ export default function PromptCard({
         className,
       )}
     >
+      {status ? (
+        <div className="mb-3 border-b border-line/70 pb-3">
+          {status}
+        </div>
+      ) : null}
       <textarea
         value={value}
         onChange={(e) => onChange(e.target.value)}

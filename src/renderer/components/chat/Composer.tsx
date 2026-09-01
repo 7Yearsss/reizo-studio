@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AtSign, FolderTree, Paperclip } from 'lucide-react';
 import { isImeComposingEvent } from '../../lib/ime';
-import PromptCard from './PromptCard';
+import { PromptInput } from '../agents/prompt-input';
 import ModelPicker from './ModelPicker';
 import MentionMenu, { extractMentionQuery } from './MentionMenu';
 import SlashPalette, { buildSlashCommands, extractSlashQuery, type SlashCommand } from './SlashPalette';
@@ -10,6 +10,7 @@ import AskUserPrompt from './AskUserPrompt';
 import QueuePanel from './QueuePanel';
 import TodoCard from './TodoCard';
 import ReplyStatusBar, { type ReplyPhase } from './ReplyStatusBar';
+import InterruptedTurnBanner from './InterruptedTurnBanner';
 import SelectField from '../ui/SelectField';
 import { useSettingsStore } from '../../state/useSettingsStore';
 import { useSkillStore } from '../../state/useSkillStore';
@@ -17,6 +18,7 @@ import { useChatStore } from '../../state/useChatStore';
 import * as settingsStore from '../../state/settingsStore';
 import * as chatStore from '../../state/chatStore';
 import type { PermissionMode } from '../../../shared/settings';
+import type { TurnOutcome } from '../../../shared/stream';
 
 const MODE_LABEL: Record<PermissionMode, string> = {
   ask: '每次询问',
@@ -36,6 +38,12 @@ export default function Composer({
   replyPhase,
   replyStartedAt,
   replyToolCount = 0,
+  interruptRequested = false,
+  turnOutcome = null,
+  turnError = null,
+  showInterruptBanner = false,
+  onRetryTurn,
+  onDismissInterrupt,
 }: {
   sessionId?: string;
   disabled: boolean;
@@ -52,12 +60,19 @@ export default function Composer({
   replyPhase?: ReplyPhase;
   replyStartedAt?: number;
   replyToolCount?: number;
+  interruptRequested?: boolean;
+  turnOutcome?: TurnOutcome | null;
+  turnError?: string | null;
+  showInterruptBanner?: boolean;
+  onRetryTurn?: () => void;
+  onDismissInterrupt?: () => void;
 }) {
   const [draft, setDraft] = useState('');
   const [mentions, setMentions] = useState<string[]>([]);
   const [skillId, setSkillId] = useState<string | undefined>();
   const [attachments, setAttachments] = useState<{ name: string; content: string }[]>([]);
   const replaceFromIdRef = useRef<string | undefined>(undefined);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const workspacePath = useSettingsStore((s) => s.settings.workspacePath);
   const permissionMode = useSettingsStore((s) => s.settings.permissionMode);
   const skills = useSkillStore().skills;
@@ -66,6 +81,12 @@ export default function Composer({
   const ask = interaction?.kind === 'ask' ? interaction : null;
   const queue = useChatStore((s) => (sessionId ? s.queueBySession[sessionId] : undefined)) ?? [];
   const todos = useChatStore((s) => (sessionId ? s.todosBySession[sessionId] : undefined)) ?? [];
+  const lastTextAt = useChatStore((s) => (sessionId ? s.lastTextAtBySession[sessionId] : undefined));
+  const lastProgressAt = useChatStore((s) => (sessionId ? s.lastProgressAtBySession[sessionId] : undefined));
+  const turnStartedAt = useChatStore((s) => (sessionId ? s.turnStartedAtBySession[sessionId] : undefined));
+  const liveToolCount = useChatStore((s) => (sessionId ? s.streamingToolsBySession[sessionId] : undefined))?.filter(
+    (part) => part.result === undefined && part.error === undefined,
+  ).length ?? 0;
   const seed = useChatStore((s) => (sessionId ? s.composerSeedBySession[sessionId] : undefined));
   const mentionQuery = extractMentionQuery(draft);
   const slashQuery = extractSlashQuery(draft);
@@ -114,17 +135,38 @@ export default function Composer({
     setDraft('');
   }
 
+  const liveStatus = sessionId && sending ? (
+    <ReplyStatusBar
+      startedAt={turnStartedAt ?? replyStartedAt}
+      toolCount={liveToolCount}
+      todos={todos}
+      interaction={interaction}
+      interruptRequested={interruptRequested}
+      recovering={Boolean(turnError?.includes('正在恢复'))}
+      lastTextAt={lastTextAt}
+      lastProgressAt={lastProgressAt}
+    />
+  ) : null;
+
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-0 px-6 pt-16 pb-6 bg-gradient-to-t from-paper via-paper to-paper-a0">
       <div className="pointer-events-auto relative mx-auto max-w-3xl">
-        {sessionId && replyPhase && (
-          <ReplyStatusBar
-            phase={replyPhase}
-            startedAt={replyStartedAt}
-            toolCount={replyToolCount}
-            todos={todos}
-            interaction={interaction}
-          />
+        {!sending && turnOutcome === 'error' && turnError && (
+          <div className="mb-2 flex items-center gap-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[13px] text-ink" role="alert">
+            <span className="flex-1">回复失败：{turnError}</span>
+            {onRetryTurn && (
+              <button
+                type="button"
+                onClick={onRetryTurn}
+                className="inline-flex items-center gap-1 rounded-full bg-paper-inset px-2.5 py-1 text-[12px] text-ink transition-colors hover:bg-paper"
+              >
+                重试
+              </button>
+            )}
+          </div>
+        )}
+        {!sending && showInterruptBanner && onRetryTurn && onDismissInterrupt && (
+          <InterruptedTurnBanner onRetry={onRetryTurn} onDismiss={onDismissInterrupt} />
         )}
         {sessionId && <TodoCard items={todos} />}
         {sessionId && (
@@ -144,12 +186,18 @@ export default function Composer({
           <SlashPalette query={slashQuery} commands={slashCommands} onPick={pickSlash} />
         )}
         {ask && sessionId ? (
-          <AskUserPrompt pending={ask} onAnswer={(answers) => void chatStore.answerAsk(sessionId, answers)} />
+          <>
+            {liveStatus ? <div className="mb-2 px-1">{liveStatus}</div> : null}
+            <AskUserPrompt pending={ask} onAnswer={(answers) => void chatStore.answerAsk(sessionId, answers)} />
+          </>
         ) : permission && sessionId ? (
-          <PermissionPrompt
-            permission={permission}
-            onRespond={(decision) => void chatStore.answerPermission(sessionId, decision)}
-          />
+          <>
+            {liveStatus ? <div className="mb-2 px-1">{liveStatus}</div> : null}
+            <PermissionPrompt
+              permission={permission}
+              onRespond={(decision) => void chatStore.answerPermission(sessionId, decision)}
+            />
+          </>
         ) : (
           <div
             onDragOver={(e) => {
@@ -184,81 +232,68 @@ export default function Composer({
                 ))}
               </div>
             )}
-            <PromptCard
-              value={draft}
-              onChange={setDraft}
-              onSubmit={submit}
-              onStop={onStop}
-              sending={sending}
-              placeholder="输入消息，/ 调用技能，@ 引用文件…"
-              hint="Enter 发送 · Shift+Enter 换行 · 输入法选词时不会发送"
-              disabled={disabled}
-              autoFocus={autoFocus}
-              rows={2}
-              onKeyDown={(e) => {
-                if (isImeComposingEvent(e)) return;
-                if ((mentionQuery !== null || slashQuery !== null) && e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
+            <div className="rounded-2xl border border-line bg-paper-raised p-2 shadow-[0_8px_30px_rgba(28,22,18,0.06)]">
+              {liveStatus ? <div className="mb-2 px-2">{liveStatus}</div> : null}
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files) void addDroppedFiles(e.target.files);
+                  e.target.value = '';
+                }}
+              />
+              <PromptInput
+                value={draft}
+                onValueChange={setDraft}
+                onSubmit={() => submit()}
+                loading={Boolean(sending)}
+                onStop={onStop}
+                disabled={disabled}
+                autoFocus={autoFocus}
+                minRows={2}
+                placeholder="输入消息，/ 调用技能，@ 引用文件…"
+                onKeyDown={(e) => {
+                  if (isImeComposingEvent(e)) return;
+                  if ((mentionQuery !== null || slashQuery !== null) && e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                  }
+                }}
+                leadingAction={
+                  <div className="flex min-w-0 items-center gap-1">
+                    <ModelPicker />
+                    <SelectField
+                      ariaLabel="权限模式"
+                      value={permissionMode}
+                      options={(Object.keys(MODE_LABEL) as PermissionMode[]).map((mode) => ({
+                        value: mode,
+                        label: MODE_LABEL[mode],
+                      }))}
+                      onChange={(mode) =>
+                        void settingsStore.patchSettings({ permissionMode: mode as PermissionMode })
+                      }
+                      className="max-w-[120px]"
+                    />
+                  </div>
                 }
-              }}
-              toolbar={
-                <>
-                  <ModelPicker />
-                  <span className="h-4 w-px shrink-0 bg-line" aria-hidden />
-                  <SelectField
-                    ariaLabel="权限模式"
-                    value={permissionMode}
-                    options={(Object.keys(MODE_LABEL) as PermissionMode[]).map((mode) => ({
-                      value: mode,
-                      label: MODE_LABEL[mode],
-                    }))}
-                    onChange={(mode) =>
-                      void settingsStore.patchSettings({ permissionMode: mode as PermissionMode })
-                    }
-                    className="max-w-[120px]"
-                  />
-                  <button
-                    type="button"
-                    className="rounded-full p-1.5 text-ink-muted transition-colors duration-150 hover:bg-paper hover:text-ink"
-                    title="附件"
-                    onMouseDown={(e) => e.preventDefault()}
-                  >
-                    <label className="flex cursor-pointer items-center">
-                      <Paperclip size={14} />
-                      <input
-                        type="file"
-                        multiple
-                        className="hidden"
-                        onChange={(e) => {
-                          if (e.target.files) void addDroppedFiles(e.target.files);
-                          e.target.value = '';
-                        }}
-                      />
-                    </label>
-                  </button>
-                  {workspacePath && (
-                    <button
-                      type="button"
-                      className="rounded-full p-1.5 text-ink-muted transition-colors duration-150 hover:bg-paper hover:text-ink"
-                      title="@ 引用文件"
-                      onClick={() => setDraft((d) => (d.endsWith('@') ? d : `${d}@`))}
-                    >
-                      <AtSign size={14} />
-                    </button>
-                  )}
-                  {onToggleTree && workspacePath && (
-                    <button
-                      type="button"
-                      onClick={onToggleTree}
-                      className={`ml-auto rounded-full p-1.5 transition-colors duration-150 hover:bg-paper ${treeOpen ? 'text-accent' : 'text-ink-muted hover:text-ink'}`}
-                      title="右侧面板"
-                    >
-                      <FolderTree size={14} />
-                    </button>
-                  )}
-                </>
-              }
-            />
+                actions={[
+                  { value: 'attach', label: '附件', icon: <Paperclip size={14} /> },
+                  ...(workspacePath
+                    ? [{ value: 'mention', label: '引用文件', description: '插入 @ 路径', icon: <AtSign size={14} /> }]
+                    : []),
+                  ...(onToggleTree && workspacePath
+                    ? [{ value: 'tree', label: '右侧面板', icon: <FolderTree size={14} /> }]
+                    : []),
+                ]}
+                onAction={(action) => {
+                  if (action === 'attach') fileInputRef.current?.click();
+                  if (action === 'mention') setDraft((d) => (d.endsWith('@') ? d : `${d}@`));
+                  if (action === 'tree') onToggleTree?.();
+                }}
+                className="border-0 bg-transparent p-0"
+              />
+            </div>
           </div>
         )}
       </div>

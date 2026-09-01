@@ -10,6 +10,7 @@ import type {
   ToolCallPart,
   TurnRuntimeStore,
 } from '../../../shared/chat';
+import type { TurnOutcome } from '../../../shared/stream';
 import type { DbHandle } from '../db/client';
 
 const PREVIEW_CHARS = 500;
@@ -27,6 +28,8 @@ interface SessionRowRaw {
   project_id: string | null;
   active_turn_started_at: number | null;
   last_turn_ended_at: number | null;
+  last_turn_outcome: string | null;
+  last_turn_error: string | null;
   list_preview: string | null;
   list_preview_role: string | null;
   list_message_count: number;
@@ -55,6 +58,11 @@ function toSummary(row: SessionRowRaw): SessionSummary {
     projectId: row.project_id,
     activeTurnStartedAt: iso(row.active_turn_started_at),
     lastTurnEndedAt: iso(row.last_turn_ended_at),
+    lastTurnOutcome:
+      row.last_turn_outcome === 'completed' || row.last_turn_outcome === 'interrupted' || row.last_turn_outcome === 'error'
+        ? row.last_turn_outcome
+        : null,
+    lastTurnError: row.last_turn_error,
     listPreview: row.list_preview,
     listPreviewRole: (row.list_preview_role as ChatRole | null) ?? null,
     listMessageCount: row.list_message_count,
@@ -66,6 +74,7 @@ function decodeContent(raw: string): {
   parts?: ToolCallPart[];
   reasoning?: string;
   reasoningMs?: number;
+  durationMs?: number;
 } {
   try {
     const parsed = JSON.parse(raw) as {
@@ -73,6 +82,7 @@ function decodeContent(raw: string): {
       parts?: unknown;
       reasoning?: unknown;
       reasoningMs?: unknown;
+      durationMs?: unknown;
     };
     if (parsed && typeof parsed === 'object' && 'text' in parsed) {
       return {
@@ -80,6 +90,7 @@ function decodeContent(raw: string): {
         parts: Array.isArray(parsed.parts) ? (parsed.parts as ToolCallPart[]) : undefined,
         reasoning: typeof parsed.reasoning === 'string' ? parsed.reasoning : undefined,
         reasoningMs: typeof parsed.reasoningMs === 'number' ? parsed.reasoningMs : undefined,
+        durationMs: typeof parsed.durationMs === 'number' ? parsed.durationMs : undefined,
       };
     }
   } catch {
@@ -94,11 +105,12 @@ function encodeContent(message: ChatMessage): string {
     parts: message.parts ?? null,
     reasoning: message.reasoning ?? null,
     reasoningMs: message.reasoningMs ?? null,
+    durationMs: message.durationMs ?? null,
   });
 }
 
 function toMessage(row: MessageRowRaw): ChatMessage {
-  const { text, parts, reasoning, reasoningMs } = decodeContent(row.content);
+  const { text, parts, reasoning, reasoningMs, durationMs } = decodeContent(row.content);
   return {
     id: row.id,
     role: row.role as ChatRole,
@@ -106,6 +118,7 @@ function toMessage(row: MessageRowRaw): ChatMessage {
     parts: parts && parts.length ? parts : undefined,
     reasoning: reasoning || undefined,
     reasoningMs,
+    durationMs,
     createdAt: new Date(row.created_at).toISOString(),
     clientId: row.client_id ?? undefined,
     toolUseId: row.tool_use_id ?? undefined,
@@ -315,12 +328,16 @@ export function createSqliteSessionStore(handle: DbHandle): SessionStore & TurnR
     // --- TurnRuntimeStore: append-only turn markers for crash detection ---
 
     markTurnStart(id: string) {
-      raw.prepare('UPDATE sessions SET active_turn_started_at = ? WHERE id = ?').run(Date.now(), id);
+      raw
+        .prepare('UPDATE sessions SET active_turn_started_at = ?, last_turn_outcome = NULL, last_turn_error = NULL WHERE id = ?')
+        .run(Date.now(), id);
     },
 
-    markTurnEnd(id: string) {
+    markTurnEnd(id: string, outcome: TurnOutcome = 'completed', error?: string) {
       if (turnMarkersFrozen) return;
-      raw.prepare('UPDATE sessions SET last_turn_ended_at = ? WHERE id = ?').run(Date.now(), id);
+      raw
+        .prepare('UPDATE sessions SET last_turn_ended_at = ?, last_turn_outcome = ?, last_turn_error = ? WHERE id = ?')
+        .run(Date.now(), outcome, error ?? null, id);
     },
 
     setLiveRevision(id: string, rev: number) {
@@ -330,11 +347,17 @@ export function createSqliteSessionStore(handle: DbHandle): SessionStore & TurnR
     getRuntimeState(id: string) {
       const row = raw
         .prepare(
-          'SELECT active_turn_started_at AS a, last_turn_ended_at AS e, live_revision AS r FROM sessions WHERE id = ?',
+          'SELECT active_turn_started_at AS a, last_turn_ended_at AS e, last_turn_outcome AS o, last_turn_error AS x, live_revision AS r FROM sessions WHERE id = ?',
         )
-        .get(id) as { a: number | null; e: number | null; r: number } | undefined;
+        .get(id) as { a: number | null; e: number | null; o: string | null; x: string | null; r: number } | undefined;
       if (!row) return null;
-      return { activeTurnStartedAt: row.a, lastTurnEndedAt: row.e, liveRevision: row.r };
+      return {
+        activeTurnStartedAt: row.a,
+        lastTurnEndedAt: row.e,
+        lastTurnOutcome: row.o === 'completed' || row.o === 'interrupted' || row.o === 'error' ? row.o : null,
+        lastTurnError: row.x,
+        liveRevision: row.r,
+      };
     },
 
     /**

@@ -43,6 +43,11 @@ export function createChatRouter(
       return c.json({ error: 'text is required' }, 400);
     }
 
+    const sessionId = c.req.param('id');
+    console.info(
+      `[chat] request accepted session=${sessionId} chars=${body.text.length} provider=${typeof body.providerId === 'string' ? body.providerId : 'default'} model=${typeof body.model === 'string' ? body.model : 'default'}`,
+    );
+
     const mentions = Array.isArray(body.mentions)
       ? body.mentions.filter((m: unknown) => typeof m === 'string')
       : [];
@@ -62,10 +67,10 @@ export function createChatRouter(
       skill = skills.find((item) => item.id === body.skillId) ?? null;
     }
 
-    return runChatTurn({
+    const response = await runChatTurn({
       sessionStore,
       settingsStore,
-      sessionId: c.req.param('id'),
+      sessionId,
       userText: body.text,
       providerId: typeof body.providerId === 'string' ? body.providerId : undefined,
       model: typeof body.model === 'string' ? body.model : undefined,
@@ -78,6 +83,8 @@ export function createChatRouter(
       regenerate: body.regenerate === true,
       largeValueStore,
     });
+    console.info(`[chat] stream opened session=${sessionId} status=${response.status}`);
+    return response;
   });
 
   // Reattach to an in-flight turn after a dropped connection / window reload.

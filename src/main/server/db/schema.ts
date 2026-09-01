@@ -23,6 +23,8 @@ export const sessions = sqliteTable('sessions', {
   // Interrupted-turn detection (Phase 2): append-only, no clear op.
   activeTurnStartedAt: integer('active_turn_started_at'),
   lastTurnEndedAt: integer('last_turn_ended_at'),
+  lastTurnOutcome: text('last_turn_outcome'),
+  lastTurnError: text('last_turn_error'),
 
   // Resumable-stream cursor (Phase 2): monotonic per session.
   liveRevision: integer('live_revision').notNull().default(0),

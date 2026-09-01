@@ -1,19 +1,17 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown } from 'lucide-react';
 import type { ChatMessage, ReplyActivity, ToolCallPart } from '../../../shared/chat';
+import type { TurnOutcome } from '../../../shared/stream';
 import {
   buildRenderItems,
   initialWindowStart,
   snapWindowStart,
   WINDOW_GROW_ITEMS,
 } from '../../lib/buildRenderItems';
+import { MessageScroller } from '../agents/message-scroller';
 import UserMessage from './UserMessage';
 import AssistantMessage from './AssistantMessage';
 import EmptyChatHints from './EmptyChatHints';
-
-function nearBottom(el: HTMLElement): boolean {
-  return el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-}
 
 const GROW_TRIGGER_PX = 160;
 
@@ -29,6 +27,7 @@ export default function MessageList({
   currentMatchId,
   lastUserId,
   lastAssistantId,
+  turnOutcome = null,
   onEditLastUser,
   onRetryLastAssistant,
   onPickHint,
@@ -44,15 +43,13 @@ export default function MessageList({
   currentMatchId?: string | null;
   lastUserId?: string;
   lastAssistantId?: string;
+  turnOutcome?: TurnOutcome | null;
   onEditLastUser?: () => void;
   onRetryLastAssistant?: () => void;
   onPickHint?: (text: string) => void;
 }) {
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const scrollerRef = useRef<HTMLDivElement>(null);
-  const stickRef = useRef(true);
-  const frozenRef = useRef(false);
-  const [showJump, setShowJump] = useState(false);
+  const viewportRef = useRef<HTMLElement>(null);
+  const [following, setFollowing] = useState(true);
 
   const items = useMemo(() => buildRenderItems(messages), [messages]);
   const firstKey = items[0]?.key;
@@ -65,6 +62,7 @@ export default function MessageList({
   itemsRef.current = items;
   useEffect(() => {
     setWindowStart(initialWindowStart(itemsRef.current));
+    setFollowing(true);
   }, [firstKey]);
 
   // Keep the window start valid if the list shrank (truncate / regenerate).
@@ -73,7 +71,7 @@ export default function MessageList({
   }, [items.length]);
 
   useLayoutEffect(() => {
-    const el = scrollerRef.current;
+    const el = viewportRef.current;
     if (el && growAnchorRef.current !== null) {
       el.scrollTop += el.scrollHeight - growAnchorRef.current;
       growAnchorRef.current = null;
@@ -81,27 +79,10 @@ export default function MessageList({
   }, [windowStart]);
 
   useEffect(() => {
-    const el = scrollerRef.current;
-    if (!el) return;
-    if (frozenRef.current) {
-      setShowJump(true);
-      return;
-    }
-    if (stickRef.current) {
-      el.scrollTop = el.scrollHeight;
-      setShowJump(false);
-    } else {
-      setShowJump(true);
-    }
-  }, [messages, streaming, streamingTools, streamingActivities]);
-
-  useEffect(() => {
     if (!currentMatchId) return;
-    const el = scrollerRef.current?.querySelector(`[data-message-id="${CSS.escape(currentMatchId)}"]`);
+    const el = viewportRef.current?.querySelector(`[data-message-id="${CSS.escape(currentMatchId)}"]`);
     el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    frozenRef.current = true;
-    stickRef.current = false;
-    setShowJump(true);
+    setFollowing(false);
   }, [currentMatchId, searchQuery]);
 
   // Search must see the whole history — widen the window to cover any match.
@@ -116,37 +97,28 @@ export default function MessageList({
   const hasOlder = windowStart > 0;
 
   return (
-    <div
-      ref={scrollerRef}
-      className="relative flex-1 overflow-y-auto px-8 pt-4 pb-40"
-      onScroll={(e) => {
-        const el = e.currentTarget;
-        if (el.scrollTop < GROW_TRIGGER_PX && windowStart > 0 && growAnchorRef.current === null) {
-          growAnchorRef.current = el.scrollHeight;
-          setWindowStart((s) => snapWindowStart(items, s - WINDOW_GROW_ITEMS));
-        }
-        const atBottom = nearBottom(el);
-        stickRef.current = atBottom;
-        if (atBottom) {
-          frozenRef.current = false;
-          setShowJump(false);
-        }
-      }}
-      onWheel={(e) => {
-        if (e.deltaY < 0) {
-          frozenRef.current = true;
-          stickRef.current = false;
-          setShowJump(true);
-        } else {
-          const el = scrollerRef.current;
-          if (el && nearBottom(el)) {
-            frozenRef.current = false;
-            stickRef.current = true;
-          }
-        }
-      }}
-    >
-      <div className="mx-auto max-w-3xl space-y-8">
+    <div className="relative min-h-0 flex-1">
+      <MessageScroller
+        followOutput={following}
+        followThreshold={80}
+        smooth={false}
+        onFollowChange={setFollowing}
+        busy={sending}
+        label="对话"
+        className="absolute inset-0"
+        viewportRef={viewportRef}
+        viewportClassName={`px-8 pt-4 ${sending ? 'pb-56' : 'pb-44'}`}
+        contentClassName="mx-auto max-w-3xl space-y-8"
+        viewportProps={{
+          onScroll: (event) => {
+            const el = event.currentTarget;
+            if (el.scrollTop < GROW_TRIGGER_PX && windowStart > 0 && growAnchorRef.current === null) {
+              growAnchorRef.current = el.scrollHeight;
+              setWindowStart((s) => snapWindowStart(items, s - WINDOW_GROW_ITEMS));
+            }
+          },
+        }}
+      >
         {empty && onPickHint ? <EmptyChatHints onPick={onPickHint} /> : null}
         {hasOlder && (
           <div className="pt-2 text-center text-[11px] text-ink-muted">向上滚动加载更早的消息…</div>
@@ -180,6 +152,7 @@ export default function MessageList({
                 currentMatch={currentMatchId === m.id}
                 canRetry={!sending && m.id === lastAssistantId}
                 onRetry={onRetryLastAssistant}
+                turnOutcome={!sending && m.id === lastAssistantId ? turnOutcome : null}
               />
             )}
           </div>
@@ -197,19 +170,12 @@ export default function MessageList({
             />
           </div>
         )}
-        <div ref={bottomRef} />
-      </div>
-      {showJump && (
+      </MessageScroller>
+      {!following && (
         <button
           type="button"
-          onClick={() => {
-            frozenRef.current = false;
-            stickRef.current = true;
-            setShowJump(false);
-            const el = scrollerRef.current;
-            if (el) el.scrollTop = el.scrollHeight;
-          }}
-          className="anim-jump sticky bottom-4 z-10 mx-auto flex items-center gap-1 rounded-full border border-line bg-paper-raised px-3 py-1.5 text-xs text-ink shadow-[0_8px_30px_rgba(28,22,18,0.08)] transition-opacity duration-200"
+          onClick={() => setFollowing(true)}
+          className="anim-jump absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full border border-line bg-paper-raised px-3 py-1.5 text-xs text-ink shadow-[0_8px_30px_rgba(28,22,18,0.08)]"
         >
           <ArrowDown size={14} />
           跳到底部

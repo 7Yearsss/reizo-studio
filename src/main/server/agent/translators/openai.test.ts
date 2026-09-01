@@ -9,6 +9,17 @@ describe('translateOpenAiChunk', () => {
       data: { delta: 'hi' },
       source: 'openai',
     });
+    expect(translateOpenAiChunk({ type: 'text-delta', delta: 'yo' })).toEqual({
+      type: 'text',
+      data: { delta: 'yo' },
+      source: 'openai',
+    });
+  });
+
+  it('does not stringify text-delta ids or numeric indexes as visible text', () => {
+    expect(translateOpenAiChunk({ type: 'text-delta', id: '0' })).toBeNull();
+    expect(translateOpenAiChunk({ type: 'text-delta', id: 0, delta: 0 })).toBeNull();
+    expect(translateOpenAiChunk({ type: 'reasoning-delta', id: '0' })).toBeNull();
   });
 
   it('maps reasoning to thinking', () => {
@@ -55,6 +66,23 @@ describe('translateOpenAiChunk', () => {
     expect(isTerminalAgentErrorEvent(err!)).toBe(true);
   });
 
+  it('rewrites a retryable 524 APICallError instead of showing openai_error', () => {
+    const error = Object.assign(new Error('openai_error'), {
+      name: 'AI_APICallError',
+      statusCode: 524,
+      isRetryable: true,
+      data: { error: { message: 'openai_error', type: 'bad_response_status_code' } },
+    });
+    const err = translateOpenAiChunk({ type: 'error', error });
+    expect(err).toMatchObject({
+      type: 'error',
+      data: {
+        message: '上游超时（HTTP 524）。网关在等待模型输出时断开了，可以重试。',
+        isTerminal: true,
+      },
+    });
+  });
+
   it('maps step lifecycle chunks to visible status events', () => {
     expect(translateOpenAiChunk({ type: 'start-step', step: 0 })).toMatchObject({
       type: 'status',
@@ -62,17 +90,24 @@ describe('translateOpenAiChunk', () => {
     });
     expect(translateOpenAiChunk({ type: 'finish-step', step: 0 })).toMatchObject({
       type: 'status',
-      data: { phase: 'replying', step: 0 },
+      data: { phase: 'thinking', step: 0 },
     });
   });
 
   it('drops known structural chunks silently', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    for (const type of ['start', 'finish', 'text-start', 'tool-input-delta']) {
+    for (const type of ['start', 'text-start', 'tool-input-delta']) {
       expect(translateOpenAiChunk({ type })).toBeNull();
     }
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
+  });
+
+  it('logs provider finish reason without surfacing a user event', () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    expect(translateOpenAiChunk({ type: 'finish', finishReason: 'stop' })).toBeNull();
+    expect(info).toHaveBeenCalledWith('[chat] provider finish reason=stop');
+    info.mockRestore();
   });
 
   it('warns once and drops an unknown chunk type', () => {
