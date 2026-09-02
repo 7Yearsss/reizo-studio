@@ -1,14 +1,15 @@
-import { useEffect, useState } from 'react';
-import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react';
+import { useEffect, useRef, useState } from 'react';
+import { Handle, NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
 import type { CanvasAgentParams } from '../../../shared/canvas';
 import * as canvasStore from '../../state/canvasStore';
 import { cn } from '../../lib/cn';
-import type { CanvasNodeData } from './ImageNode';
+import { NodeTitle, type CanvasNodeData } from './ImageNode';
 
 export default function AgentNode({ id, data, selected }: NodeProps) {
-  const { sessionId, node } = data as CanvasNodeData;
+  const { sessionId, node, highlighted } = data as CanvasNodeData;
   const params = node.params as CanvasAgentParams;
   const [instruction, setInstruction] = useState(params.instruction ?? '');
+  const resizeStart = useRef<{ w: number; h: number } | null>(null);
 
   useEffect(() => {
     setInstruction((params.instruction as string) ?? '');
@@ -19,6 +20,7 @@ export default function AgentNode({ id, data, selected }: NodeProps) {
       className={cn(
         'flex h-full w-full flex-col rounded-xl border bg-paper-raised p-3 text-xs shadow-sm',
         selected ? 'border-accent' : 'border-line',
+        highlighted && 'canvas-node-highlight',
       )}
     >
       <NodeResizer
@@ -27,11 +29,20 @@ export default function AgentNode({ id, data, selected }: NodeProps) {
         isVisible={selected}
         lineClassName="!border-accent/40"
         handleClassName="!h-2 !w-2 !rounded-sm !border-accent !bg-paper"
-        onResizeEnd={(_, p) => canvasStore.resizeNode(sessionId, id, p.width, p.height)}
+        onResizeStart={(_, p: ResizeParams) => {
+          resizeStart.current = { w: p.width, h: p.height };
+        }}
+        onResizeEnd={(_, p: ResizeParams) => {
+          const from = resizeStart.current;
+          resizeStart.current = null;
+          if (from) canvasStore.commitResize(sessionId, id, from, { w: p.width, h: p.height });
+        }}
       />
       <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-line !bg-paper" />
       <Handle type="source" position={Position.Right} className="!h-2 !w-2 !border-line !bg-accent" />
-      <div className="mb-2 truncate font-medium text-ink-muted">{node.title || 'Agent 任务'}</div>
+      <div className="mb-2 flex">
+        <NodeTitle sessionId={sessionId} nodeId={node.id} title={node.title} fallback="Agent 任务" />
+      </div>
       <textarea
         value={instruction}
         onChange={(e) => setInstruction(e.target.value)}

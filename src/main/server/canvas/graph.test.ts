@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CanvasEdge, CanvasNode } from '../../../shared/canvas';
-import { descendants, directUpstream, inputHash, topoOrder, wouldCycle } from './graph';
+import { descendants, directUpstream, inputHash, layoutGraph, topoOrder, wouldCycle } from './graph';
 
 function node(id: string): CanvasNode {
   return {
@@ -48,6 +48,16 @@ describe('canvas graph helpers', () => {
     expect([...descendants(edges, 'a')].sort()).toEqual(['b', 'c', 'd']);
     expect([...descendants(edges, 'b')]).toEqual(['c']);
     expect(directUpstream(edges, 'c')).toEqual(['b']);
+  });
+
+  it('layoutGraph puts downstream nodes in later columns', () => {
+    const nodes = [node('a'), node('b'), node('c'), node('loose')];
+    const pos = layoutGraph(nodes, [edge('a', 'b'), edge('b', 'c')], { x: 300, y: 200 });
+    expect(pos.a.x).toBeLessThan(pos.b.x);
+    expect(pos.b.x).toBeLessThan(pos.c.x);
+    // a root and a loose node share the first column but different rows
+    expect(pos.a.x).toBe(pos.loose.x);
+    expect(pos.a.y).not.toBe(pos.loose.y);
   });
 
   it('inputHash changes with params and with an upstream output', () => {

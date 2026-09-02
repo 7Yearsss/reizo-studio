@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Maximize2, Minimize2, X } from 'lucide-react';
 import { cn } from '../../lib/cn';
 import * as uiStore from '../../state/uiStore';
 import { useUiStore } from '../../state/useUiStore';
@@ -28,7 +29,9 @@ export default function RightPanel({
   preferCanvas?: boolean;
 }) {
   const workspace = Boolean(showWorkspace);
-  const width = useUiStore((s) => s.rightPanelWidth);
+  const storedWidth = useUiStore((s) => s.rightPanelWidth);
+  const maximized = useUiStore((s) => s.rightPanelMaximized);
+  const width = maximized ? Math.min(1200, Math.round(window.innerWidth * 0.78)) : storedWidth;
   const visible: PanelTab[] = [
     ...(sessionId ? (['canvas', 'artifacts'] as const) : []),
     ...(workspace ? (['files', 'git', 'terminal'] as const) : []),
@@ -54,7 +57,7 @@ export default function RightPanel({
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
   };
   const onPointerMove = (e: React.PointerEvent) => {
-    if (!dragging.current) return;
+    if (!dragging.current || maximized) return;
     uiStore.setRightPanelWidth(startWidth.current + (startX.current - e.clientX));
   };
   const onPointerUp = (e: React.PointerEvent) => {
@@ -69,13 +72,17 @@ export default function RightPanel({
       className="relative flex h-full shrink-0 flex-col border-l border-line bg-sidebar"
       style={{ width }}
     >
-      <div
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        className="absolute -left-1 top-0 z-10 h-full w-2 cursor-col-resize"
-        title="拖动调整宽度"
-      />
+      {!maximized && (
+        <div
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          className="group absolute -left-1 top-0 z-10 flex h-full w-2 cursor-col-resize items-center justify-center"
+          title="拖动调整宽度"
+        >
+          <span className="h-8 w-1 rounded-full bg-line opacity-0 transition-opacity group-hover:opacity-100" />
+        </div>
+      )}
       <div className="flex items-center gap-1 px-2 pt-2">
         {visible.map((id) => (
           <button
@@ -90,16 +97,29 @@ export default function RightPanel({
             {LABELS[id]}
           </button>
         ))}
-        {sessionId && (
+        <div className="ml-auto flex items-center gap-0.5">
           <button
             type="button"
-            onClick={() => uiStore.setCanvasOpen(false)}
-            className="ml-auto rounded-full px-2 py-1 text-xs text-ink-muted hover:bg-paper-inset/70"
-            title="关闭面板"
+            onClick={() => uiStore.toggleRightPanelMaximized()}
+            className="rounded-full p-1.5 text-ink-muted hover:bg-paper-inset/70"
+            title={maximized ? '还原宽度' : '最大化面板'}
           >
-            ✕
+            {maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
           </button>
-        )}
+          {sessionId && (
+            <button
+              type="button"
+              onClick={() => {
+                uiStore.setCanvasOpen(false);
+                uiStore.setArtifactsOpen(false);
+              }}
+              className="rounded-full p-1.5 text-ink-muted hover:bg-paper-inset/70"
+              title="关闭面板"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
       </div>
       <div className="min-h-0 flex-1">
         {active === 'canvas' && sessionId && <CanvasPanel key={sessionId} sessionId={sessionId} />}

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react';
+import { useEffect, useRef, useState } from 'react';
+import { Handle, NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
 import { Download, FolderPlus, Loader2, Play } from 'lucide-react';
 import type { CanvasImageParams, CanvasNode } from '../../../shared/canvas';
 import { CANVAS_IMAGE_SIZES } from '../../../shared/canvas';
@@ -11,12 +11,16 @@ import Lightbox from './Lightbox';
 export interface CanvasNodeData extends Record<string, unknown> {
   sessionId: string;
   node: CanvasNode;
+  highlighted?: boolean;
 }
 
 function useAssetUrl(rel: string | undefined): string | null {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
-    if (!rel) return;
+    if (!rel) {
+      setUrl(null);
+      return;
+    }
     let ok = true;
     void canvasAssetUrl(rel).then((u) => ok && setUrl(u));
     return () => {
@@ -26,19 +30,74 @@ function useAssetUrl(rel: string | undefined): string | null {
   return url;
 }
 
+export function NodeTitle({
+  sessionId,
+  nodeId,
+  title,
+  fallback,
+}: {
+  sessionId: string;
+  nodeId: string;
+  title: string;
+  fallback: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(title);
+  useEffect(() => setDraft(title), [title]);
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => {
+          setEditing(false);
+          void canvasStore.renameNode(sessionId, nodeId, draft.trim());
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+          if (e.key === 'Escape') {
+            setDraft(title);
+            setEditing(false);
+          }
+        }}
+        className="nodrag min-w-0 flex-1 rounded bg-paper-inset px-1 text-xs font-medium text-ink outline-none"
+      />
+    );
+  }
+  return (
+    <span
+      className="truncate font-medium text-ink-muted"
+      title="双击重命名"
+      onDoubleClick={() => {
+        setDraft(title);
+        setEditing(true);
+      }}
+    >
+      {title || fallback}
+    </span>
+  );
+}
+
 export default function ImageNode({ id, data, selected }: NodeProps) {
-  const { sessionId, node } = data as CanvasNodeData;
+  const { sessionId, node, highlighted } = data as CanvasNodeData;
   const params = node.params as CanvasImageParams;
   const [prompt, setPrompt] = useState(params.prompt ?? '');
   const [zoom, setZoom] = useState<string | null>(null);
+  const [assetIdx, setAssetIdx] = useState(0);
+  const resizeStart = useRef<{ w: number; h: number } | null>(null);
   const size = params.size ?? '1024x1024';
   const running = node.runState === 'running';
-  const firstAsset = node.output?.assets?.[0];
-  const assetUrl = useAssetUrl(firstAsset);
+  const assets = node.output?.assets ?? [];
+  const current = assets[Math.min(assetIdx, assets.length - 1)];
+  const assetUrl = useAssetUrl(current);
 
   useEffect(() => {
     setPrompt((params.prompt as string) ?? '');
   }, [params.prompt]);
+  useEffect(() => {
+    if (assetIdx >= assets.length) setAssetIdx(0);
+  }, [assets.length, assetIdx]);
 
   const commitPrompt = () => {
     if (prompt === params.prompt) return;
@@ -62,6 +121,7 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
         'flex h-full w-full flex-col rounded-xl border bg-paper-raised p-3 text-xs shadow-sm transition-shadow',
         selected ? 'border-accent' : 'border-line',
         running && 'canvas-node-running',
+        highlighted && 'canvas-node-highlight',
       )}
     >
       <NodeResizer
@@ -70,13 +130,20 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
         isVisible={selected}
         lineClassName="!border-accent/40"
         handleClassName="!h-2 !w-2 !rounded-sm !border-accent !bg-paper"
-        onResizeEnd={(_, p) => canvasStore.resizeNode(sessionId, id, p.width, p.height)}
+        onResizeStart={(_, p: ResizeParams) => {
+          resizeStart.current = { w: p.width, h: p.height };
+        }}
+        onResizeEnd={(_, p: ResizeParams) => {
+          const from = resizeStart.current;
+          resizeStart.current = null;
+          if (from) canvasStore.commitResize(sessionId, id, from, { w: p.width, h: p.height });
+        }}
       />
       <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-line !bg-paper" />
       <Handle type="source" position={Position.Right} className="!h-2 !w-2 !border-line !bg-accent" />
 
       <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="truncate font-medium text-ink-muted">{node.title || '图片'}</span>
+        <NodeTitle sessionId={sessionId} nodeId={node.id} title={node.title} fallback="图片" />
         <div className="flex shrink-0 items-center gap-1">
           {node.dirty && !running ? (
             <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">
@@ -158,6 +225,21 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
             onClick={() => setZoom(assetUrl)}
             className="nodrag h-full w-full cursor-zoom-in object-contain"
           />
+          {assets.length > 1 ? (
+            <div className="absolute inset-x-0 bottom-1 flex justify-center gap-1">
+              {assets.map((_, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setAssetIdx(i);
+                  }}
+                  className={cn('nodrag h-1.5 w-1.5 rounded-full', i === assetIdx ? 'bg-white' : 'bg-white/40')}
+                />
+              ))}
+            </div>
+          ) : null}
           <div className="absolute right-1.5 top-1.5 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
             <a
               href={assetUrl}
@@ -172,7 +254,7 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                void canvasStore.saveAsset(sessionId, node.id, 0);
+                void canvasStore.saveAsset(sessionId, node.id, assetIdx);
               }}
               className="nodrag rounded-md bg-black/50 p-1 text-white hover:bg-black/70"
               title="存到作品"

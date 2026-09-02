@@ -7,6 +7,7 @@ import { createRevealController, type RevealController } from './revealControlle
 import * as settingsStore from './settingsStore';
 import * as tabStore from './tabStore';
 import * as uiStore from './uiStore';
+import * as canvasStore from './canvasStore';
 import * as artifactStore from './artifactStore';
 import { appendTerminalLine } from './terminalStore';
 
@@ -62,6 +63,8 @@ export interface ChatState {
   todosBySession: Record<string, TodoItem[]>;
   queueBySession: Record<string, QueuedTurn[]>;
   composerSeedBySession: Record<string, ComposerSeed | undefined>;
+  /** Canvas nodes the user pulled into the composer as `@`-style references. */
+  nodeRefsBySession: Record<string, { id: string; label: string }[]>;
   /** Sessions where the user dismissed the "interrupted turn" banner. */
   interruptDismissedBySession: Record<string, boolean>;
 }
@@ -87,8 +90,25 @@ let state: ChatState = {
   todosBySession: {},
   queueBySession: {},
   composerSeedBySession: {},
+  nodeRefsBySession: {},
   interruptDismissedBySession: {},
 };
+
+export function addNodeRef(sessionId: string, ref: { id: string; label: string }): void {
+  const current = state.nodeRefsBySession[sessionId] ?? [];
+  if (current.some((r) => r.id === ref.id)) return;
+  setState({ nodeRefsBySession: { ...state.nodeRefsBySession, [sessionId]: [...current, ref] } });
+}
+
+export function removeNodeRef(sessionId: string, id: string): void {
+  const current = state.nodeRefsBySession[sessionId] ?? [];
+  setState({ nodeRefsBySession: { ...state.nodeRefsBySession, [sessionId]: current.filter((r) => r.id !== id) } });
+}
+
+export function clearNodeRefs(sessionId: string): void {
+  if (!(state.nodeRefsBySession[sessionId]?.length)) return;
+  setState({ nodeRefsBySession: { ...state.nodeRefsBySession, [sessionId]: [] } });
+}
 
 const abortBySession = new Map<string, AbortController>();
 /** Non-reactive: liveRevision fence + last seen stream meta, per session. */
@@ -580,8 +600,22 @@ function makeEventFolder(
         finishThinkingActivity(acc);
         const part = upsertToolPart(acc, event);
         upsertToolActivity(acc, part);
-        // The agent placed something on the canvas — surface it.
-        if (event.name === 'add_node') uiStore.setCanvasOpen(true);
+        // The agent touched the canvas — surface it and pan to the node.
+        if (['add_node', 'run_node', 'update_node'].includes(event.name)) {
+          if (event.name === 'add_node') uiStore.setCanvasOpen(true);
+          const nodeId =
+            typeof event.args.id === 'string'
+              ? event.args.id
+              : ((): string | null => {
+                  try {
+                    const parsed = JSON.parse(event.result ?? '') as { id?: string };
+                    return typeof parsed.id === 'string' ? parsed.id : null;
+                  } catch {
+                    return null;
+                  }
+                })();
+          if (nodeId) canvasStore.focusNode(sessionId, nodeId);
+        }
         setState({
           ...progressPatch(sessionId),
           streamingToolsBySession: { ...state.streamingToolsBySession, [sessionId]: [...acc.tools] },

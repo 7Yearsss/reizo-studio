@@ -113,8 +113,27 @@ export async function runChatTurn(options: {
     session = await sessionStore.setMessages(sessionId, session.messages.slice(0, idx));
   }
 
+  const canvasRefIds = mentions.filter((m) => m.startsWith('canvas:')).map((m) => m.slice('canvas:'.length));
+  const pathMentions = mentions.filter((m) => !m.startsWith('canvas:'));
+
+  let canvasRefBlock = '';
+  if (canvasRefIds.length > 0 && canvasStore) {
+    const canvas = canvasStore.findCanvasBySession(sessionId);
+    const lines: string[] = [];
+    for (const nodeId of canvasRefIds) {
+      const node = canvas ? canvasStore.getNode(canvas.id, nodeId) : null;
+      if (!node) continue;
+      const p = node.params as { prompt?: string; instruction?: string; size?: string };
+      lines.push(
+        `- ${node.id} [${node.type}, ${node.runState}] ${node.title || ''} ${p.prompt ? `prompt: "${p.prompt.slice(0, 120)}"` : p.instruction ? `task: "${p.instruction.slice(0, 120)}"` : ''}`.trim(),
+      );
+    }
+    if (lines.length > 0) canvasRefBlock = `Referenced canvas nodes:\n${lines.join('\n')}`;
+  }
+
   const extraBlocks = [
-    mentions.length > 0 ? `Referenced workspace paths:\n${mentions.map((m) => `- ${m}`).join('\n')}` : '',
+    pathMentions.length > 0 ? `Referenced workspace paths:\n${pathMentions.map((m) => `- ${m}`).join('\n')}` : '',
+    canvasRefBlock,
     attachments.length > 0
       ? attachments.map((file) => `Attached file ${file.name}:\n\`\`\`\n${file.content.slice(0, 20_000)}\n\`\`\``).join('\n\n')
       : '',

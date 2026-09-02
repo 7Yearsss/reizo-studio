@@ -88,6 +88,7 @@ export default function Composer({
     (part) => part.result === undefined && part.error === undefined,
   ).length ?? 0;
   const seed = useChatStore((s) => (sessionId ? s.composerSeedBySession[sessionId] : undefined));
+  const nodeRefs = useChatStore((s) => (sessionId ? s.nodeRefsBySession[sessionId] : undefined)) ?? [];
   const mentionQuery = extractMentionQuery(draft);
   const slashQuery = extractSlashQuery(draft);
   const slashCommands = buildSlashCommands(skills);
@@ -101,13 +102,17 @@ export default function Composer({
 
   function submit() {
     if (!draft.trim() || disabled) return;
-    onSend(draft, mentions, { skillId, attachments, replaceFromId: replaceFromIdRef.current });
+    const allMentions = [...mentions, ...nodeRefs.map((r) => `canvas:${r.id}`)];
+    onSend(draft, allMentions, { skillId, attachments, replaceFromId: replaceFromIdRef.current });
     setDraft('');
     setMentions([]);
     setSkillId(undefined);
     setAttachments([]);
     replaceFromIdRef.current = undefined;
-    if (sessionId) chatStore.clearComposerSeed(sessionId);
+    if (sessionId) {
+      chatStore.clearComposerSeed(sessionId);
+      chatStore.clearNodeRefs(sessionId);
+    }
   }
 
   useEffect(() => {
@@ -208,8 +213,21 @@ export default function Composer({
               if (e.dataTransfer.files.length) void addDroppedFiles(e.dataTransfer.files);
             }}
           >
-            {(activeSkill || attachments.length > 0) && (
+            {(activeSkill || attachments.length > 0 || nodeRefs.length > 0) && (
               <div className="mb-2 flex flex-wrap gap-1.5">
+                {sessionId &&
+                  nodeRefs.map((ref) => (
+                    <span key={ref.id} className="rounded-full bg-accent/10 px-2 py-0.5 text-[11px] text-accent">
+                      ◇ {ref.label}
+                      <button
+                        type="button"
+                        className="ml-1 text-accent/60"
+                        onClick={() => chatStore.removeNodeRef(sessionId, ref.id)}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
                 {activeSkill && (
                   <span className="rounded-full bg-paper-inset px-2 py-0.5 text-[11px] text-ink">
                     /{activeSkill.id}

@@ -15,11 +15,25 @@ import {
   type NodeTypes,
   type Viewport,
 } from '@xyflow/react';
-import { ImageIcon, Bot, PlayCircle, Square, Copy, Trash2, MessagesSquare, Play } from 'lucide-react';
+import {
+  ImageIcon,
+  Bot,
+  PlayCircle,
+  Square,
+  Copy,
+  Trash2,
+  MessagesSquare,
+  Play,
+  Undo2,
+  Redo2,
+  LayoutGrid,
+  AtSign,
+} from 'lucide-react';
 import * as canvasStore from '../../state/canvasStore';
 import * as chatStore from '../../state/chatStore';
 import { useCanvasStore } from '../../state/useCanvasStore';
 import { cn } from '../../lib/cn';
+import { layoutGraph, wouldCycle } from '../../../shared/canvasGraph';
 import ImageNode, { type CanvasNodeData } from './ImageNode';
 import AgentNode from './AgentNode';
 
@@ -35,14 +49,17 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
   const storeEdges = useCanvasStore((s) => s.edgesBySession[sessionId]) ?? [];
   const loaded = useCanvasStore((s) => s.loadedBySession[sessionId]) ?? false;
   const graphRun = useCanvasStore((s) => s.graphRunBySession[sessionId]);
+  const history = useCanvasStore((s) => s.historyBySession[sessionId]);
+  const focus = useCanvasStore((s) => s.focusBySession[sessionId]);
   const rf = useReactFlow();
-  const wrapRef = useRef<HTMLDivElement>(null);
 
   const [menu, setMenu] = useState<Menu | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [confirmAll, setConfirmAll] = useState(false);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const confirmTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const dragStart = useRef<Record<string, { x: number; y: number }>>({});
 
   const flash = useCallback((msg: string) => {
     setToast(msg);
@@ -55,7 +72,17 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     return () => canvasStore.closeCanvas(sessionId);
   }, [sessionId]);
 
-  // Restore the last viewport for this session (falls back to fitView on init).
+  // The agent touched a node -> pan to it and pulse a highlight.
+  useEffect(() => {
+    if (!focus) return;
+    const node = storeNodes.find((n) => n.id === focus.id);
+    if (!node) return;
+    rf.setCenter(node.x + node.w / 2, node.y + node.h / 2, { zoom: rf.getZoom(), duration: 300 });
+    setHighlightId(focus.id);
+    const t = setTimeout(() => setHighlightId(null), 1800);
+    return () => clearTimeout(t);
+  }, [focus?.id, focus?.at, storeNodes, rf]);
+
   const restoredRef = useRef(false);
   const restoreViewport = () => {
     if (restoredRef.current) return;
@@ -83,9 +110,9 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         position: { x: node.x, y: node.y },
         width: node.w,
         height: node.h,
-        data: { sessionId, node },
+        data: { sessionId, node, highlighted: node.id === highlightId },
       })),
-    [storeNodes, sessionId],
+    [storeNodes, sessionId, highlightId],
   );
 
   const runningTargets = useMemo(
@@ -108,11 +135,9 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     (changes: NodeChange[]) => {
       for (const change of changes) {
         if (change.type === 'position' && change.position) {
-          canvasStore.moveNode(sessionId, change.id, change.position.x, change.position.y);
+          canvasStore.moveNodeLive(sessionId, change.id, change.position.x, change.position.y);
         } else if (change.type === 'remove') {
           void canvasStore.removeNode(sessionId, change.id);
-        } else if (change.type === 'select') {
-          // handled in bulk by onSelectionChange
         }
       }
     },
@@ -136,6 +161,15 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       });
     },
     [sessionId, flash],
+  );
+
+  const isValidConnection = useCallback(
+    (c: Connection | Edge) => {
+      if (!c.source || !c.target || c.source === c.target) return false;
+      if (storeEdges.some((e) => e.sourceId === c.source && e.targetId === c.target)) return false;
+      return !wouldCycle(storeEdges, c.source, c.target);
+    },
+    [storeEdges],
   );
 
   const onSelectionChange = useCallback(
@@ -163,6 +197,12 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     void canvasStore.runGraph(sessionId);
   };
 
+  const tidy = () => {
+    if (storeNodes.length === 0) return;
+    canvasStore.applyLayout(sessionId, layoutGraph(storeNodes, storeEdges));
+    setTimeout(() => rf.fitView({ padding: 0.2, duration: 250 }), 60);
+  };
+
   const askAgent = (nodeId: string) => {
     const node = storeNodes.find((n) => n.id === nodeId);
     if (!node) return;
@@ -174,6 +214,15 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       [],
       {},
     );
+  };
+
+  const refToComposer = (nodeId: string) => {
+    const node = storeNodes.find((n) => n.id === nodeId);
+    if (!node) return;
+    const p = (node.params as { prompt?: string; instruction?: string }) ?? {};
+    const label = (node.title || p.prompt || p.instruction || node.type).toString().slice(0, 24);
+    chatStore.addNodeRef(sessionId, { id: nodeId, label });
+    flash('已加入输入框引用');
   };
 
   const onDrop = useCallback(
@@ -191,10 +240,26 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     [sessionId, rf, flash],
   );
 
+  const onKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const k = e.key.toLowerCase();
+      if (k === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        void canvasStore.undo(sessionId);
+      } else if ((k === 'z' && e.shiftKey) || k === 'y') {
+        e.preventDefault();
+        void canvasStore.redo(sessionId);
+      }
+    },
+    [sessionId],
+  );
+
   return (
     <div
-      ref={wrapRef}
-      className="h-full w-full"
+      className="h-full w-full outline-none"
+      tabIndex={0}
+      onKeyDown={onKeyDown}
       onDragOver={(e) => e.preventDefault()}
       onDrop={onDrop}
       onClick={() => menu && setMenu(null)}
@@ -206,7 +271,20 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        isValidConnection={isValidConnection}
         onSelectionChange={onSelectionChange}
+        onNodeDragStart={(_, __, dragged) => {
+          for (const n of dragged) dragStart.current[n.id] = { x: n.position.x, y: n.position.y };
+        }}
+        onNodeDragStop={(_, __, dragged) => {
+          for (const n of dragged) {
+            const from = dragStart.current[n.id];
+            if (from) {
+              canvasStore.commitMove(sessionId, n.id, from, n.position);
+              delete dragStart.current[n.id];
+            }
+          }
+        }}
         onInit={restoreViewport}
         onMoveEnd={(_, v) => {
           try {
@@ -233,28 +311,42 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         <Controls showInteractive={false} />
         <MiniMap pannable zoomable className="!bg-paper-inset" />
 
-        <Panel position="top-left" className="flex gap-1.5">
-          <button
-            type="button"
-            onClick={() => addNode('image')}
-            className="inline-flex items-center gap-1 rounded-lg border border-line bg-paper-raised px-2.5 py-1 text-xs text-ink shadow-sm hover:bg-paper-inset"
-          >
+        <Panel position="top-left" className="flex flex-wrap gap-1.5">
+          <button type="button" onClick={() => addNode('image')} className="canvas-tool">
             <ImageIcon size={13} />
             图片
           </button>
-          <button
-            type="button"
-            onClick={() => addNode('agent')}
-            className="inline-flex items-center gap-1 rounded-lg border border-line bg-paper-raised px-2.5 py-1 text-xs text-ink shadow-sm hover:bg-paper-inset"
-          >
+          <button type="button" onClick={() => addNode('agent')} className="canvas-tool">
             <Bot size={13} />
             Agent
+          </button>
+          <button type="button" onClick={tidy} disabled={storeNodes.length === 0} className="canvas-tool">
+            <LayoutGrid size={13} />
+            整理
+          </button>
+          <button
+            type="button"
+            onClick={() => void canvasStore.undo(sessionId)}
+            disabled={!history?.canUndo}
+            className="canvas-tool !px-1.5"
+            title="撤销 (Ctrl+Z)"
+          >
+            <Undo2 size={13} />
+          </button>
+          <button
+            type="button"
+            onClick={() => void canvasStore.redo(sessionId)}
+            disabled={!history?.canRedo}
+            className="canvas-tool !px-1.5"
+            title="重做 (Ctrl+Shift+Z)"
+          >
+            <Redo2 size={13} />
           </button>
           {graphRun?.running ? (
             <button
               type="button"
               onClick={() => void canvasStore.stopGraph(sessionId)}
-              className="inline-flex items-center gap-1 rounded-lg border border-line bg-danger/10 px-2.5 py-1 text-xs text-danger shadow-sm"
+              className="canvas-tool !border-danger/30 !bg-danger/10 !text-danger"
             >
               <Square size={12} />
               停止 · {graphRun.done}/{graphRun.total}
@@ -264,10 +356,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
               type="button"
               onClick={runAll}
               disabled={!hasImage}
-              className={cn(
-                'inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs shadow-sm disabled:opacity-40',
-                confirmAll ? 'border-accent bg-accent text-accent-ink' : 'border-line bg-ink text-paper-raised',
-              )}
+              className={cn('canvas-tool', confirmAll ? '!border-accent !bg-accent !text-accent-ink' : '!bg-ink !text-paper-raised')}
             >
               <PlayCircle size={13} />
               {confirmAll ? '确认运行整图（付费）' : '运行整图'}
@@ -296,75 +385,20 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         >
           {menu.kind === 'node' ? (
             <>
-              <MenuItem
-                icon={<Play size={13} />}
-                label="运行这个节点"
-                onClick={() => {
-                  void canvasStore.runNode(sessionId, menu.nodeId);
-                  setMenu(null);
-                }}
-              />
-              <MenuItem
-                icon={<PlayCircle size={13} />}
-                label="从这里往下运行"
-                onClick={() => {
-                  void canvasStore.runGraph(sessionId, menu.nodeId);
-                  setMenu(null);
-                }}
-              />
-              <MenuItem
-                icon={<MessagesSquare size={13} />}
-                label="让 agent 处理"
-                onClick={() => {
-                  askAgent(menu.nodeId);
-                  setMenu(null);
-                }}
-              />
-              <MenuItem
-                icon={<Copy size={13} />}
-                label="克隆节点"
-                onClick={() => {
-                  void canvasStore.duplicateNode(sessionId, menu.nodeId);
-                  setMenu(null);
-                }}
-              />
+              <MenuItem icon={<Play size={13} />} label="运行这个节点" onClick={() => { void canvasStore.runNode(sessionId, menu.nodeId); setMenu(null); }} />
+              <MenuItem icon={<PlayCircle size={13} />} label="从这里往下运行" onClick={() => { void canvasStore.runGraph(sessionId, menu.nodeId); setMenu(null); }} />
+              <MenuItem icon={<MessagesSquare size={13} />} label="让 agent 处理" onClick={() => { askAgent(menu.nodeId); setMenu(null); }} />
+              <MenuItem icon={<AtSign size={13} />} label="引用到输入框" onClick={() => { refToComposer(menu.nodeId); setMenu(null); }} />
+              <MenuItem icon={<Copy size={13} />} label="克隆节点" onClick={() => { void canvasStore.duplicateNode(sessionId, menu.nodeId); setMenu(null); }} />
               <div className="my-1 h-px bg-line" />
-              <MenuItem
-                icon={<Trash2 size={13} />}
-                label="删除"
-                danger
-                onClick={() => {
-                  void canvasStore.removeNode(sessionId, menu.nodeId);
-                  setMenu(null);
-                }}
-              />
+              <MenuItem icon={<Trash2 size={13} />} label="删除" danger onClick={() => { void canvasStore.removeNode(sessionId, menu.nodeId); setMenu(null); }} />
             </>
           ) : (
             <>
-              <MenuItem
-                icon={<ImageIcon size={13} />}
-                label="加图片节点"
-                onClick={() => {
-                  addNode('image', { x: menu.flowX, y: menu.flowY });
-                  setMenu(null);
-                }}
-              />
-              <MenuItem
-                icon={<Bot size={13} />}
-                label="加 Agent 节点"
-                onClick={() => {
-                  addNode('agent', { x: menu.flowX, y: menu.flowY });
-                  setMenu(null);
-                }}
-              />
-              <MenuItem
-                icon={<PlayCircle size={13} />}
-                label="适应视图"
-                onClick={() => {
-                  rf.fitView({ padding: 0.2, duration: 200 });
-                  setMenu(null);
-                }}
-              />
+              <MenuItem icon={<ImageIcon size={13} />} label="加图片节点" onClick={() => { addNode('image', { x: menu.flowX, y: menu.flowY }); setMenu(null); }} />
+              <MenuItem icon={<Bot size={13} />} label="加 Agent 节点" onClick={() => { addNode('agent', { x: menu.flowX, y: menu.flowY }); setMenu(null); }} />
+              <MenuItem icon={<LayoutGrid size={13} />} label="整理布局" onClick={() => { tidy(); setMenu(null); }} />
+              <MenuItem icon={<PlayCircle size={13} />} label="适应视图" onClick={() => { rf.fitView({ padding: 0.2, duration: 200 }); setMenu(null); }} />
             </>
           )}
         </div>
