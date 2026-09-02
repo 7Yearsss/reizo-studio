@@ -8,6 +8,7 @@ import { resumeAgentTurn } from '../agent/session';
 import { answerAsk, answerPermission, type PermissionDecision } from '../agent/permissions';
 import { loadSkills } from '../../skills';
 import type { LargeValueStore } from '../storage/largeValueStore';
+import type { CanvasStore } from '../storage/canvasStore';
 
 const DECISIONS = new Set<PermissionDecision>(['allow', 'deny', 'allow-session']);
 
@@ -18,6 +19,7 @@ export function createChatRouter(
   artifactStore?: ArtifactStore,
   projectStore?: ProjectStore,
   largeValueStore?: LargeValueStore,
+  canvas?: { canvasStore?: CanvasStore; dataRoot: string },
 ) {
   const router = new Hono();
 
@@ -82,6 +84,8 @@ export function createChatRouter(
       truncateAfterId: typeof body.truncateAfterId === 'string' ? body.truncateAfterId : undefined,
       regenerate: body.regenerate === true,
       largeValueStore,
+      canvasStore: canvas?.canvasStore,
+      dataRoot: canvas?.dataRoot,
     });
     console.info(`[chat] stream opened session=${sessionId} status=${response.status}`);
     return response;

@@ -69,6 +69,7 @@ async function bootstrap(): Promise<void> {
     scheduleStore,
     thoughtStore,
     skillsDirs,
+    db: dbHandle,
     devServerOrigin: devServerOrigin(),
   });
   stopScheduler = startScheduler({ dataRoot, scheduleStore, settingsStore, skillsDirs });

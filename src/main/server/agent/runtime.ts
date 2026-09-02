@@ -4,6 +4,9 @@ import { getProviderPreset } from '../../../shared/providers';
 import type { ChatStreamEvent, TodoItem } from '../../../shared/stream';
 import { createOpenAiModel } from './provider/openai';
 import { createWorkspaceTools } from './workspaceTools';
+import { createCanvasTools } from './canvasTools';
+import type { CanvasStore } from '../storage/canvasStore';
+import type { CanvasImageParams } from '../../../shared/canvas';
 import { startAgentTurn } from './session';
 import { consumeInteractions, waitForInteractions } from './permissions';
 import { translateOpenAiChunk } from './translators/openai';
@@ -54,6 +57,8 @@ export async function runChatTurn(options: {
   truncateAfterId?: string;
   regenerate?: boolean;
   largeValueStore?: LargeValueStore;
+  canvasStore?: CanvasStore;
+  dataRoot?: string;
 }): Promise<Response> {
   const {
     sessionStore,
@@ -68,6 +73,8 @@ export async function runChatTurn(options: {
     truncateAfterId,
     regenerate = false,
     largeValueStore,
+    canvasStore,
+    dataRoot,
   } = options;
 
   let session = await sessionStore.get(sessionId);
@@ -162,10 +169,33 @@ export async function runChatTurn(options: {
       projectName = project.name;
     }
   }
+  // Compact canvas summary (decision 9). Frozen at turn start — a node the
+  // agent adds mid-turn is not reflected here; that is intentional for slice C
+  // (there is no `read_canvas` tool yet, and the summary is only orientation).
+  let canvasSummary = '';
+  if (canvasStore) {
+    const existing = canvasStore.findCanvasBySession(sessionId);
+    const snapshot = existing ? canvasStore.getSnapshot(existing.id) : null;
+    if (snapshot && snapshot.nodes.length > 0) {
+      const lines = snapshot.nodes.map((node) => {
+        const label =
+          node.type === 'image'
+            ? `image "${((node.params as CanvasImageParams).prompt ?? '').slice(0, 60)}"`
+            : `agent task`;
+        return `- ${node.id} [${node.type}, ${node.runState}] ${node.title || label}`;
+      });
+      canvasSummary = `The session canvas has ${snapshot.nodes.length} node(s):\n${lines.join('\n')}`;
+    }
+  }
+
   const systemParts = [
     workspacePath
       ? `You are Reizo Studio, a local desktop agent that finishes real work in the user's files. The workspace is at: ${workspacePath}. Prefer tools over guessing. Use list_dir/read_file/find_files/grep to inspect, edit_file/write_file to change files, run_command for tests and git, ask_user when you need a choice, todo_write for a visible plan, and memory_read/memory_write for durable notes in MEMORY.md.`
       : 'You are Reizo Studio, a helpful creative assistant running locally on the user\'s desktop. Use ask_user if you need the user to choose.',
+    canvasStore
+      ? 'When the user wants to generate or iterate on images, use the canvas: add_node (type "image") to place a node, then run_node to generate. The canvas panel opens automatically.'
+      : '',
+    canvasSummary,
     memory ? `Workspace MEMORY.md:\n${memory}` : '',
     skill ? `The user invoked skill "${skill.name}". Follow this skill:\n${skill.body}` : '',
     projectInstructions ? `Project "${projectName}" working rules:\n${projectInstructions}` : '',
@@ -215,7 +245,16 @@ export async function runChatTurn(options: {
           : undefined,
       })
     : undefined;
-  const tools = toolset?.tools;
+
+  const canvasTools =
+    canvasStore && dataRoot
+      ? createCanvasTools({ sessionId, canvasStore, settingsStore, dataRoot })
+      : undefined;
+
+  const tools =
+    toolset?.tools || canvasTools
+      ? { ...(toolset?.tools ?? {}), ...(canvasTools ?? {}) }
+      : undefined;
 
   const model = createOpenAiModel({ apiKey, modelId, baseUrl });
 

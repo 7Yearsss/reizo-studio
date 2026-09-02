@@ -6,6 +6,7 @@ import type { SessionStore } from '../../shared/chat';
 import type { SettingsStore } from './storage/settingsStore';
 import type { ScheduleStore } from './storage/scheduleStore';
 import type { ThoughtStore } from './storage/thoughtStore';
+import type { DbHandle } from './db/client';
 
 export interface RunningServer {
   server: ServerType;
@@ -29,6 +30,7 @@ export async function startLocalServer(options: {
   skillsDirs?: string[];
   scheduleStore?: ScheduleStore;
   thoughtStore?: ThoughtStore;
+  db?: DbHandle;
 }): Promise<RunningServer> {
   let lastError: unknown;
 
@@ -43,6 +45,7 @@ export async function startLocalServer(options: {
       skillsDirs: options.skillsDirs,
       scheduleStore: options.scheduleStore,
       thoughtStore: options.thoughtStore,
+      db: options.db,
     });
 
     try {

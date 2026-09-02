@@ -32,6 +32,8 @@ export function toolLabel(name: string): string {
     case 'run_command': return '运行命令';
     case 'todo_write': return '更新计划';
     case 'ask_user': return '等待你的回答';
+    case 'add_node': return '画布加节点';
+    case 'run_node': return '运行画布节点';
     default: return name.replace(/[_-]+/g, ' ');
   }
 }

@@ -1,0 +1,146 @@
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { generateImage } from 'ai';
+import type { CanvasImageParams, CanvasNode } from '../../../shared/canvas';
+import { getProviderPreset } from '../../../shared/providers';
+import { createOpenAiProvider } from '../agent/provider/openai';
+import type { SettingsStore } from '../storage/settingsStore';
+import type { CanvasStore } from '../storage/canvasStore';
+import { getCanvasChannel } from './channel';
+
+/** Where a canvas node's generated assets live on disk. */
+export function canvasAssetsDir(dataRoot: string, canvasId: string): string {
+  return path.join(dataRoot, 'canvas', canvasId);
+}
+
+function assetAbsPath(dataRoot: string, relPath: string): string {
+  // relPath is `<canvasId>/<file>`; keep it inside the canvas dir.
+  const abs = path.resolve(dataRoot, 'canvas', relPath);
+  if (!abs.startsWith(path.resolve(dataRoot, 'canvas') + path.sep)) {
+    throw new Error('asset path escapes canvas dir');
+  }
+  return abs;
+}
+
+export async function readCanvasAsset(dataRoot: string, relPath: string): Promise<Buffer> {
+  return readFile(assetAbsPath(dataRoot, relPath));
+}
+
+function isImageParams(value: unknown): value is CanvasImageParams {
+  return Boolean(value && typeof value === 'object' && typeof (value as CanvasImageParams).prompt === 'string');
+}
+
+async function upstreamImageBytes(
+  store: CanvasStore,
+  dataRoot: string,
+  canvasId: string,
+  nodeId: string,
+): Promise<Uint8Array[]> {
+  const upstream = store.upstreamNodes(canvasId, nodeId);
+  const out: Uint8Array[] = [];
+  for (const node of upstream) {
+    const assets = node.output?.assets ?? [];
+    for (const rel of assets.slice(0, 2)) {
+      try {
+        out.push(new Uint8Array(await readCanvasAsset(dataRoot, rel)));
+      } catch {
+        /* skip a missing asset */
+      }
+    }
+  }
+  return out.slice(0, 2);
+}
+
+/**
+ * Run one image node: resolve the OpenAI-compatible provider from settings,
+ * call `generateImage` (img2img when an upstream image node is wired in),
+ * write the PNG(s) under `<dataRoot>/canvas/<canvasId>/`, and broadcast the
+ * run-state / output transitions on the canvas channel.
+ *
+ * Fire-and-forget: the route returns before this resolves.
+ */
+export async function runImageNode(options: {
+  canvasStore: CanvasStore;
+  settingsStore: SettingsStore;
+  dataRoot: string;
+  canvasId: string;
+  node: CanvasNode;
+  providerId?: string;
+}): Promise<void> {
+  const { canvasStore, settingsStore, dataRoot, canvasId, node } = options;
+  const channel = getCanvasChannel(canvasId);
+
+  const running = canvasStore.updateNode(canvasId, node.id, { runState: 'running', output: null });
+  if (running) channel.broadcast(running.rev, { type: 'run_state', id: node.id, runState: 'running' });
+
+  const fail = (message: string) => {
+    const res = canvasStore.updateNode(canvasId, node.id, {
+      runState: 'error',
+      output: { error: message },
+    });
+    if (res) {
+      channel.broadcast(res.rev, {
+        type: 'node_output',
+        id: node.id,
+        output: res.node.output ?? { error: message },
+        runState: 'error',
+      });
+    }
+  };
+
+  try {
+    if (!isImageParams(node.params) || !node.params.prompt.trim()) {
+      fail('Image node has no prompt');
+      return;
+    }
+    const params = node.params;
+
+    const settings = await settingsStore.get();
+    const providerId = options.providerId || 'openai';
+    const preset = getProviderPreset(providerId);
+    const stored = settings.providers[providerId];
+    if (!preset || !stored?.apiKey) {
+      fail(`No API key configured for ${preset?.name ?? providerId}. Add one in Settings.`);
+      return;
+    }
+    const modelId = params.model || 'gpt-image-1';
+    const baseUrl = stored.baseUrl || preset.baseUrl;
+
+    const provider = createOpenAiProvider({ apiKey: stored.apiKey, baseUrl });
+    const images = await upstreamImageBytes(canvasStore, dataRoot, canvasId, node.id);
+    const prompt = images.length > 0 ? { text: params.prompt, images } : params.prompt;
+
+    const result = await generateImage({
+      model: provider.image(modelId),
+      prompt,
+      size: params.size ?? '1024x1024',
+    });
+
+    const dir = canvasAssetsDir(dataRoot, canvasId);
+    await mkdir(dir, { recursive: true });
+    const rels: string[] = [];
+    let n = 0;
+    for (const image of result.images) {
+      const ext = image.mediaType?.includes('jpeg') ? 'jpg' : 'png';
+      const file = `${node.id}-${Date.now().toString(36)}-${n}.${ext}`;
+      await writeFile(path.join(dir, file), Buffer.from(image.uint8Array));
+      rels.push(`${canvasId}/${file}`);
+      n += 1;
+    }
+
+    const done = canvasStore.updateNode(canvasId, node.id, {
+      runState: 'done',
+      output: { assets: rels },
+    });
+    if (done) {
+      channel.broadcast(done.rev, {
+        type: 'node_output',
+        id: node.id,
+        output: done.node.output ?? { assets: rels },
+        runState: 'done',
+      });
+    }
+  } catch (err) {
+    fail(err instanceof Error ? err.message : String(err));
+  }
+}

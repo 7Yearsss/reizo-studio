@@ -29,8 +29,10 @@ export default function MainLayout() {
   const isWorkbench = isChatView && (activeTab?.kind === 'chat' || activeTab?.kind === 'launcher');
   const showWorkspace = Boolean(workspacePath) && isWorkbench && treeOpen;
   const artifactsOpen = useUiStore((s) => s.artifactsOpen);
+  const canvasOpen = useUiStore((s) => s.canvasOpen);
   const showArtifacts = isChatView && activeTab?.kind === 'chat' && artifactsOpen;
-  const showRight = showWorkspace || showArtifacts;
+  const showCanvas = isChatView && activeTab?.kind === 'chat' && canvasOpen;
+  const showRight = showWorkspace || showArtifacts || showCanvas;
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-paper text-ink">
@@ -70,7 +72,11 @@ export default function MainLayout() {
           )}
         </main>
         {showRight && (
-          <RightPanel sessionId={activeTab?.kind === 'chat' ? activeTab.sessionId : undefined} showWorkspace={showWorkspace} />
+          <RightPanel
+            sessionId={activeTab?.kind === 'chat' ? activeTab.sessionId : undefined}
+            showWorkspace={showWorkspace}
+            preferCanvas={showCanvas && !showArtifacts}
+          />
         )}
       </div>
     </div>

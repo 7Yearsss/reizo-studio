@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FolderKanban, Search } from 'lucide-react';
+import { FolderKanban, Search, Workflow } from 'lucide-react';
 import * as chatStore from '../state/chatStore';
 import * as uiStore from '../state/uiStore';
 import { useChatStore } from '../state/useChatStore';
@@ -48,6 +48,7 @@ export default function ChatPage({
     return started > ended && !s.sendingBySession[sessionId] && !s.interruptDismissedBySession[sessionId];
   });
   const artifactsOpen = useUiStore((s) => s.artifactsOpen);
+  const canvasOpen = useUiStore((s) => s.canvasOpen);
   const [renaming, setRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState(session?.title ?? '');
   const [searchOpen, setSearchOpen] = useState(false);
@@ -164,6 +165,18 @@ export default function ChatPage({
         >
           <FolderKanban size={13} />
           作品
+        </button>
+        <button
+          type="button"
+          onClick={() => uiStore.toggleCanvas()}
+          className={cn(
+            'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] transition-colors duration-150',
+            canvasOpen ? 'bg-paper-inset text-ink' : 'text-ink-muted hover:bg-paper-inset/70 hover:text-ink',
+          )}
+          title="画布"
+        >
+          <Workflow size={13} />
+          画布
         </button>
       </header>
       {searchOpen && (

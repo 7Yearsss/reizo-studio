@@ -7,6 +7,8 @@ import type { Schedule, Thought } from '../shared/schedule';
 import { SCHEDULE_PRESETS } from '../shared/schedule';
 import { parseStreamLine, type ChatStreamEvent } from '../shared/stream';
 import { isLiveEnvelope } from '../shared/liveRevision';
+import type { CanvasSnapshot, CanvasEdge, CanvasNode, CanvasNodeParams, CanvasNodeType } from '../shared/canvas';
+import { isCanvasEnvelope, type CanvasEvent } from '../shared/canvasStream';
 
 export interface StreamMeta {
   rev: number;
@@ -411,4 +413,114 @@ export async function getArtifact(id: string): Promise<ArtifactWithContent> {
 
 export async function deleteArtifact(id: string): Promise<void> {
   await api(`/api/artifacts/${id}`, { method: 'DELETE' });
+}
+
+// --- Canvas ---
+
+export async function canvasAssetUrl(relPath: string): Promise<string> {
+  const origin = await apiOrigin();
+  return `${origin}/api/canvas/assets/${relPath}`;
+}
+
+export async function getCanvas(sessionId: string): Promise<CanvasSnapshot> {
+  const res = await api(`/api/canvas/${sessionId}`);
+  return res.json();
+}
+
+export async function addCanvasNode(
+  canvasId: string,
+  input: { type: CanvasNodeType; x?: number; y?: number; title?: string; params?: CanvasNodeParams },
+): Promise<CanvasNode> {
+  const res = await api(`/api/canvas/${canvasId}/nodes`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const { node } = await res.json();
+  return node;
+}
+
+export async function patchCanvasNode(
+  canvasId: string,
+  id: string,
+  patch: { x?: number; y?: number; w?: number; h?: number; title?: string; params?: CanvasNodeParams },
+): Promise<CanvasNode> {
+  const res = await api(`/api/canvas/${canvasId}/nodes/${id}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  const { node } = await res.json();
+  return node;
+}
+
+export async function deleteCanvasNode(canvasId: string, id: string): Promise<void> {
+  await api(`/api/canvas/${canvasId}/nodes/${id}`, { method: 'DELETE' });
+}
+
+export async function addCanvasEdge(
+  canvasId: string,
+  input: { sourceId: string; targetId: string; sourceHandle?: string | null; targetHandle?: string | null },
+): Promise<CanvasEdge> {
+  const res = await api(`/api/canvas/${canvasId}/edges`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const { edge } = await res.json();
+  return edge;
+}
+
+export async function deleteCanvasEdge(canvasId: string, id: string): Promise<void> {
+  await api(`/api/canvas/${canvasId}/edges/${id}`, { method: 'DELETE' });
+}
+
+export async function runCanvasNode(
+  canvasId: string,
+  id: string,
+  options: { confirmedSpend?: boolean; providerId?: string } = {},
+): Promise<void> {
+  await api(`/api/canvas/${canvasId}/nodes/${id}/run`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(options),
+  });
+}
+
+/**
+ * Reads the long-lived canvas NDJSON channel. Unlike the chat stream this has
+ * no terminal event — it returns cleanly when the body ends (server restart /
+ * disconnect) so the caller can reconnect from the last seen `rev`.
+ */
+export async function readCanvasStream(
+  canvasId: string,
+  after: number,
+  onEvent: (event: CanvasEvent, rev: number) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const origin = await apiOrigin();
+  const res = await fetch(`${origin}/api/canvas/${canvasId}/stream?after=${after}`, { signal });
+  if (!res.ok || !res.body) throw new Error(`canvas stream failed: ${res.status}`);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const dispatch = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (isCanvasEnvelope(parsed)) onEvent(parsed.event, parsed.rev);
+    } catch {
+      /* skip a partial line */
+    }
+  };
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) dispatch(line);
+  }
+  dispatch(buffer);
 }
