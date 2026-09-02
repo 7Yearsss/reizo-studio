@@ -1,4 +1,25 @@
 import type { ToolCallPart } from '../../../shared/chat';
+import type { FileDiffPreview } from '../../../shared/stream';
+
+/** Pull the before/after file snapshot a write tool attaches to its result. */
+export function toolDiffPreview(part: ToolCallPart): FileDiffPreview | null {
+  if (!part.result) return null;
+  try {
+    const parsed = JSON.parse(part.result) as { preview?: Partial<FileDiffPreview> };
+    const p = parsed.preview;
+    if (
+      p &&
+      typeof p.path === 'string' &&
+      typeof p.before === 'string' &&
+      typeof p.after === 'string'
+    ) {
+      return p as FileDiffPreview;
+    }
+  } catch {
+    /* raw result — no preview */
+  }
+  return null;
+}
 
 export function toolLabel(name: string): string {
   switch (name) {

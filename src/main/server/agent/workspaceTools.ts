@@ -2,13 +2,30 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { READ_FILE_TOOL_MAX_BYTES } from '../../../shared/constants';
 import type { PermissionMode } from '../../../shared/settings';
-import type { AskQuestion, ChatStreamEvent, TodoItem } from '../../../shared/stream';
+import {
+  buildFileDiffPreview,
+  type AskQuestion,
+  type ChatStreamEvent,
+  type FileDiffPreview,
+  type TodoItem,
+} from '../../../shared/stream';
 import { flattenWorkspace, listWorkspaceDir, readWorkspaceText } from '../../workspaceFs';
 import { grepWorkspace } from '../../workspaceGrep';
 import { readWorkspaceMemory, writeWorkspaceMemory } from '../../workspaceMemory';
-import { editWorkspaceFile, previewDiff, writeWorkspaceFile } from '../../workspaceWrite';
+import {
+  editWorkspaceFile,
+  previewDiff,
+  readWorkspaceFileOrEmpty,
+  writeWorkspaceFile,
+} from '../../workspaceWrite';
 import { runWorkspaceCommand } from '../../workspaceShell';
 import { ApprovalRequiredError, registerPendingAsk, requestPermission } from './permissions';
+
+/** Apply the same substitution `editWorkspaceFile` would, for a pre-write preview. */
+function applyEdit(before: string, oldString: string, newString: string, replaceAll: boolean): string {
+  if (!oldString || !before.includes(oldString)) return before;
+  return replaceAll ? before.split(oldString).join(newString) : before.replace(oldString, newString);
+}
 
 function asRecord(value: unknown): Record<string, unknown> {
   if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
@@ -26,12 +43,25 @@ async function approve(
   name: string,
   input: unknown,
   mode: PermissionMode,
-  options: { toolCallId: string },
+  options: { toolCallId: string; preview?: FileDiffPreview },
 ): Promise<void> {
   const args = asRecord(input);
-  const ok = await requestPermission({ sessionId, toolCallId: options.toolCallId, name, args, mode });
+  const ok = await requestPermission({
+    sessionId,
+    toolCallId: options.toolCallId,
+    name,
+    args,
+    mode,
+    preview: options.preview,
+  });
   if (!ok) {
-    throw new ApprovalRequiredError({ toolCallId: options.toolCallId, name, args, kind: 'permission' });
+    throw new ApprovalRequiredError({
+      toolCallId: options.toolCallId,
+      name,
+      args,
+      kind: 'permission',
+      preview: options.preview,
+    });
   }
 }
 
@@ -71,7 +101,14 @@ export function createWorkspaceTools(options: {
           const content = String(args.content ?? '');
           const result = await writeWorkspaceFile(workspacePath, path, content);
           if (onFileWritten) await onFileWritten(path, content);
-          return { result: JSON.stringify({ ...result, diff: previewDiff('', content) }) };
+          const { before, ...rest } = result;
+          return {
+            result: JSON.stringify({
+              ...rest,
+              diff: previewDiff(before, content),
+              preview: buildFileDiffPreview(result.path, before, content),
+            }),
+          };
         }
         case 'edit_file': {
           const result = await editWorkspaceFile(
@@ -87,11 +124,21 @@ export function createWorkspaceTools(options: {
               path: result.path,
               replacements: result.replacements,
               diff: previewDiff(result.before, result.after),
+              preview: buildFileDiffPreview(result.path, result.before, result.after),
             }),
           };
         }
-        case 'memory_write':
-          return { result: JSON.stringify(await writeWorkspaceMemory(workspacePath, String(args.content ?? ''))) };
+        case 'memory_write': {
+          const content = String(args.content ?? '');
+          const before = await readWorkspaceMemory(workspacePath).catch(() => '');
+          const result = await writeWorkspaceMemory(workspacePath, content);
+          return {
+            result: JSON.stringify({
+              ...result,
+              preview: buildFileDiffPreview('MEMORY.md', before, content),
+            }),
+          };
+        }
         default:
           return { error: `Cannot resume unknown tool "${name}"` };
       }
@@ -152,10 +199,19 @@ function buildTools(options: {
         content: z.string().describe('Full file contents to write.'),
       }),
       execute: async (input, toolOptions) => {
-        await approve(sessionId, 'write_file', input, permissionMode, toolOptions);
+        const priorContent = await readWorkspaceFileOrEmpty(workspacePath, input.path);
+        await approve(sessionId, 'write_file', input, permissionMode, {
+          ...toolOptions,
+          preview: buildFileDiffPreview(input.path, priorContent, input.content),
+        });
         const result = await writeWorkspaceFile(workspacePath, input.path, input.content);
         if (onFileWritten) await onFileWritten(input.path, input.content);
-        return { ...result, diff: previewDiff('', input.content) };
+        const { before, ...rest } = result;
+        return {
+          ...rest,
+          diff: previewDiff(before, input.content),
+          preview: buildFileDiffPreview(result.path, before, input.content),
+        };
       },
     }),
     edit_file: tool({
@@ -167,7 +223,15 @@ function buildTools(options: {
         replaceAll: z.boolean().optional(),
       }),
       execute: async (input, toolOptions) => {
-        await approve(sessionId, 'edit_file', input, permissionMode, toolOptions);
+        const priorContent = await readWorkspaceFileOrEmpty(workspacePath, input.path);
+        await approve(sessionId, 'edit_file', input, permissionMode, {
+          ...toolOptions,
+          preview: buildFileDiffPreview(
+            input.path,
+            priorContent,
+            applyEdit(priorContent, input.oldString, input.newString, Boolean(input.replaceAll)),
+          ),
+        });
         const result = await editWorkspaceFile(
           workspacePath,
           input.path,
@@ -180,6 +244,7 @@ function buildTools(options: {
           path: result.path,
           replacements: result.replacements,
           diff: previewDiff(result.before, result.after),
+          preview: buildFileDiffPreview(result.path, result.before, result.after),
         };
       },
     }),
@@ -212,8 +277,13 @@ function buildTools(options: {
         content: z.string(),
       }),
       execute: async (input, toolOptions) => {
-        await approve(sessionId, 'write_file', { path: 'MEMORY.md', content: input.content }, permissionMode, toolOptions);
-        return writeWorkspaceMemory(workspacePath, input.content);
+        const before = await readWorkspaceMemory(workspacePath).catch(() => '');
+        await approve(sessionId, 'write_file', { path: 'MEMORY.md', content: input.content }, permissionMode, {
+          ...toolOptions,
+          preview: buildFileDiffPreview('MEMORY.md', before, input.content),
+        });
+        const result = await writeWorkspaceMemory(workspacePath, input.content);
+        return { ...result, preview: buildFileDiffPreview('MEMORY.md', before, input.content) };
       },
     }),
     ask_user: tool({

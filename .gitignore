@@ -88,6 +88,9 @@ typings/
 # Vite
 .vite/
 
+# tsc / vite build output (tsconfig outDir, renderer build check)
+dist/
+
 # Electron-Forge
 out/
 

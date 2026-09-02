@@ -1,5 +1,5 @@
 import type { PermissionMode } from '../../../shared/settings';
-import type { AskQuestion, ChatStreamEvent } from '../../../shared/stream';
+import type { AskQuestion, ChatStreamEvent, FileDiffPreview } from '../../../shared/stream';
 
 export type PermissionDecision = 'allow' | 'deny' | 'allow-session';
 
@@ -40,6 +40,8 @@ export interface PendingInteractionInfo {
   args: Record<string, unknown>;
   kind: 'permission' | 'ask';
   questions?: AskQuestion[];
+  /** Before/after file snapshot for write_file / edit_file approvals. */
+  preview?: FileDiffPreview;
 }
 
 export class ApprovalRequiredError extends Error {
@@ -135,7 +137,13 @@ function emitNextInteraction(sessionId: string): void {
     sink({ type: 'ask', id: next.toolCallId, questions: next.questions ?? [] });
   } else {
     console.info(`[chat] permission presented session=${sessionId} id=${next.toolCallId} tool=${next.name}`);
-    sink({ type: 'permission', id: next.toolCallId, name: next.name, args: next.args });
+    sink({
+      type: 'permission',
+      id: next.toolCallId,
+      name: next.name,
+      args: next.args,
+      ...(next.preview ? { preview: next.preview } : {}),
+    });
   }
 }
 
@@ -159,14 +167,15 @@ export async function requestPermission(options: {
   name: string;
   args: Record<string, unknown>;
   mode: PermissionMode;
+  preview?: FileDiffPreview;
 }): Promise<boolean> {
-  const { sessionId, toolCallId, name, args, mode } = options;
+  const { sessionId, toolCallId, name, args, mode, preview } = options;
   if (sessionAllow.get(sessionId)?.has(name)) return true;
   if (!needsApproval(mode, name)) return true;
   if (name === 'run_command' && typeof args.command === 'string' && isReadOnlyShellCommand(args.command)) {
     return true;
   }
-  recordPending({ sessionId, toolCallId, name, args, kind: 'permission' });
+  recordPending({ sessionId, toolCallId, name, args, kind: 'permission', preview });
   return false;
 }
 
