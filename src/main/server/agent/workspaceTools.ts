@@ -2,39 +2,108 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { READ_FILE_TOOL_MAX_BYTES } from '../../../shared/constants';
 import type { PermissionMode } from '../../../shared/settings';
-import type { ChatStreamEvent, TodoItem } from '../../../shared/stream';
-import type { AskQuestion } from '../../../shared/stream';
+import type { AskQuestion, ChatStreamEvent, TodoItem } from '../../../shared/stream';
 import { flattenWorkspace, listWorkspaceDir, readWorkspaceText } from '../../workspaceFs';
 import { grepWorkspace } from '../../workspaceGrep';
 import { readWorkspaceMemory, writeWorkspaceMemory } from '../../workspaceMemory';
 import { editWorkspaceFile, previewDiff, writeWorkspaceFile } from '../../workspaceWrite';
 import { runWorkspaceCommand } from '../../workspaceShell';
-import { requestAsk, requestPermission } from './permissions';
+import { ApprovalRequiredError, registerPendingAsk, requestPermission } from './permissions';
 
 function asRecord(value: unknown): Record<string, unknown> {
   if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
   return { value };
 }
 
+/**
+ * Gate a side-effecting tool. Never blocks: if the user hasn't pre-approved
+ * this tool, a pending `permission` interaction is recorded and this throws
+ * `ApprovalRequiredError`, which unwinds the AI SDK step so `session.ts` can
+ * suspend the turn (all provider timers cleared) until the answer arrives.
+ */
 async function approve(
   sessionId: string,
   name: string,
   input: unknown,
   mode: PermissionMode,
-  options: { toolCallId: string; abortSignal?: AbortSignal },
+  options: { toolCallId: string },
 ): Promise<void> {
-  const allowed = await requestPermission({
-    sessionId,
-    toolCallId: options.toolCallId,
-    name,
-    args: asRecord(input),
-    mode,
-    abortSignal: options.abortSignal,
-  });
-  if (!allowed) throw new Error('User denied this tool call');
+  const args = asRecord(input);
+  const ok = await requestPermission({ sessionId, toolCallId: options.toolCallId, name, args, mode });
+  if (!ok) {
+    throw new ApprovalRequiredError({ toolCallId: options.toolCallId, name, args, kind: 'permission' });
+  }
+}
+
+export interface WorkspaceToolset {
+  tools: ReturnType<typeof buildTools>;
+  /**
+   * Run the post-approval body of a side-effecting tool during a resumed
+   * pass, after the user granted it. Returns a JSON string result (matching
+   * how the live path stringifies tool output) or an error string.
+   */
+  executeApproved(
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<{ result?: string; error?: string }>;
 }
 
 export function createWorkspaceTools(options: {
+  sessionId: string;
+  workspacePath: string;
+  permissionMode: PermissionMode;
+  emit: (event: ChatStreamEvent) => void;
+  todos: TodoItem[];
+  onFileWritten?: (relativePath: string, content: string) => Promise<void>;
+}): WorkspaceToolset {
+  const { workspacePath, onFileWritten } = options;
+
+  async function executeApproved(
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<{ result?: string; error?: string }> {
+    try {
+      switch (name) {
+        case 'run_command':
+          return { result: JSON.stringify(await runWorkspaceCommand(workspacePath, String(args.command ?? ''))) };
+        case 'write_file': {
+          const path = String(args.path ?? '');
+          const content = String(args.content ?? '');
+          const result = await writeWorkspaceFile(workspacePath, path, content);
+          if (onFileWritten) await onFileWritten(path, content);
+          return { result: JSON.stringify({ ...result, diff: previewDiff('', content) }) };
+        }
+        case 'edit_file': {
+          const result = await editWorkspaceFile(
+            workspacePath,
+            String(args.path ?? ''),
+            String(args.oldString ?? ''),
+            String(args.newString ?? ''),
+            Boolean(args.replaceAll),
+          );
+          if (onFileWritten) await onFileWritten(result.path, result.after);
+          return {
+            result: JSON.stringify({
+              path: result.path,
+              replacements: result.replacements,
+              diff: previewDiff(result.before, result.after),
+            }),
+          };
+        }
+        case 'memory_write':
+          return { result: JSON.stringify(await writeWorkspaceMemory(workspacePath, String(args.content ?? ''))) };
+        default:
+          return { error: `Cannot resume unknown tool "${name}"` };
+      }
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  return { tools: buildTools(options), executeApproved };
+}
+
+function buildTools(options: {
   sessionId: string;
   workspacePath: string;
   permissionMode: PermissionMode;
@@ -159,14 +228,23 @@ export function createWorkspaceTools(options: {
           }),
         ),
       }),
-      execute: async ({ questions }, toolOptions) => {
-        const answers = await requestAsk({
+      // Never returns: it records the pending question and unwinds the step so
+      // the turn suspends. The resumed pass supplies `{ answers }` as this
+      // tool call's result. The annotation keeps the tool's output type real.
+      execute: async ({ questions }, toolOptions): Promise<{ answers: Record<string, string> }> => {
+        registerPendingAsk({
           sessionId,
           toolCallId: toolOptions.toolCallId,
+          name: 'ask_user',
           questions: questions as AskQuestion[],
-          abortSignal: toolOptions.abortSignal,
         });
-        return { answers };
+        throw new ApprovalRequiredError({
+          toolCallId: toolOptions.toolCallId,
+          name: 'ask_user',
+          args: { questions },
+          kind: 'ask',
+          questions: questions as AskQuestion[],
+        });
       },
     }),
     todo_write: tool({

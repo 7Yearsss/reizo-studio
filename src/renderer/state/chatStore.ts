@@ -1,6 +1,6 @@
 import * as api from '../api';
 import type { ChatMessage, ReplyActivity, SessionSummary, ToolCallPart } from '../../shared/chat';
-import type { AskQuestion, ChatStreamEvent, ReplyPhase, TodoItem } from '../../shared/stream';
+import type { AskQuestion, ChatStreamEvent, ReplyPhase, TodoItem, TurnOutcome } from '../../shared/stream';
 import type { StreamMeta } from '../api';
 import { completeResync, createFence, ingestEnvelope, type Fence } from './liveRevisionFence';
 import { createRevealController, type RevealController } from './revealController';
@@ -47,9 +47,15 @@ export interface ChatState {
   streamingReasoningBySession: Record<string, string>;
   /** Wall-clock ms when the first reasoning delta of the live turn arrived. */
   reasoningStartedAtBySession: Record<string, number | undefined>;
+  /** Local send/resume clock for the live elapsed timer. Never a stale DB marker. */
+  turnStartedAtBySession: Record<string, number | undefined>;
+  lastProgressAtBySession: Record<string, number | undefined>;
+  lastTextAtBySession: Record<string, number | undefined>;
   streamingToolsBySession: Record<string, ToolCallPart[]>;
   replyActivitiesBySession: Record<string, ReplyActivity[]>;
   replyPhaseBySession: Record<string, ReplyPhase | undefined>;
+  turnOutcomeBySession: Record<string, TurnOutcome | null>;
+  interruptRequestedBySession: Record<string, boolean>;
   sendingBySession: Record<string, boolean>;
   errorBySession: Record<string, string | null>;
   interactionBySession: Record<string, ChatInteraction | null>;
@@ -67,9 +73,14 @@ let state: ChatState = {
   streamingBySession: {},
   streamingReasoningBySession: {},
   reasoningStartedAtBySession: {},
+  turnStartedAtBySession: {},
+  lastProgressAtBySession: {},
+  lastTextAtBySession: {},
   streamingToolsBySession: {},
   replyActivitiesBySession: {},
   replyPhaseBySession: {},
+  turnOutcomeBySession: {},
+  interruptRequestedBySession: {},
   sendingBySession: {},
   errorBySession: {},
   interactionBySession: {},
@@ -84,22 +95,53 @@ const abortBySession = new Map<string, AbortController>();
 const fenceBySession = new Map<string, Fence>();
 const streamMetaBySession = new Map<string, StreamMeta>();
 const revealBySession = new Map<string, RevealController>();
+const reasoningRevealBySession = new Map<string, RevealController>();
 const listeners = new Set<() => void>();
 
 function getReveal(sessionId: string): RevealController {
   let controller = revealBySession.get(sessionId);
   if (!controller) {
     controller = createRevealController((text) => {
-      setState({ streamingBySession: { ...state.streamingBySession, [sessionId]: text } });
+      const now = Date.now();
+      setState({
+        streamingBySession: { ...state.streamingBySession, [sessionId]: text },
+        lastTextAtBySession: { ...state.lastTextAtBySession, [sessionId]: now },
+        lastProgressAtBySession: { ...state.lastProgressAtBySession, [sessionId]: now },
+      });
     });
     revealBySession.set(sessionId, controller);
   }
   return controller;
 }
 
+function getReasoningReveal(sessionId: string): RevealController {
+  let controller = reasoningRevealBySession.get(sessionId);
+  if (!controller) {
+    controller = createRevealController((text) => {
+      setState({
+        streamingReasoningBySession: { ...state.streamingReasoningBySession, [sessionId]: text },
+        lastProgressAtBySession: { ...state.lastProgressAtBySession, [sessionId]: Date.now() },
+      });
+    });
+    reasoningRevealBySession.set(sessionId, controller);
+  }
+  return controller;
+}
+
+function resetReveals(sessionId: string): void {
+  revealBySession.get(sessionId)?.reset();
+  reasoningRevealBySession.get(sessionId)?.reset();
+}
+
 function setState(patch: Partial<ChatState>): void {
   state = { ...state, ...patch };
   listeners.forEach((l) => l());
+}
+
+function progressPatch(sessionId: string): Partial<ChatState> {
+  return {
+    lastProgressAtBySession: { ...state.lastProgressAtBySession, [sessionId]: Date.now() },
+  };
 }
 
 export function subscribe(listener: () => void): () => void {
@@ -113,7 +155,14 @@ export function getSnapshot(): ChatState {
 
 export async function loadSessions(): Promise<void> {
   const sessions = await api.listSessions();
-  setState({ sessions, sessionsLoaded: true });
+  const outcomes = Object.fromEntries(sessions.map((session) => [session.id, session.lastTurnOutcome ?? null]));
+  const errors = Object.fromEntries(sessions.map((session) => [session.id, session.lastTurnError ?? null]));
+  setState({
+    sessions,
+    sessionsLoaded: true,
+    turnOutcomeBySession: { ...state.turnOutcomeBySession, ...outcomes },
+    errorBySession: { ...state.errorBySession, ...errors },
+  });
   tabStore.pruneMissingSessions(sessions.map((s) => s.id));
 }
 
@@ -134,6 +183,7 @@ export async function createSession(title?: string, projectId?: string | null): 
       ...state.sessions,
     ],
     messagesBySession: { ...state.messagesBySession, [session.id]: session.messages },
+    turnOutcomeBySession: { ...state.turnOutcomeBySession, [session.id]: session.lastTurnOutcome ?? null },
   });
   return session;
 }
@@ -160,12 +210,18 @@ export async function deleteSession(id: string): Promise<void> {
   const { [id]: _removedTools, ...streamingToolsBySession } = state.streamingToolsBySession;
   const { [id]: _removedReasoning, ...streamingReasoningBySession } = state.streamingReasoningBySession;
   const { [id]: _removedReasoningAt, ...reasoningStartedAtBySession } = state.reasoningStartedAtBySession;
+  const { [id]: _removedTurnAt, ...turnStartedAtBySession } = state.turnStartedAtBySession;
+  const { [id]: _removedProgressAt, ...lastProgressAtBySession } = state.lastProgressAtBySession;
+  const { [id]: _removedTextAt, ...lastTextAtBySession } = state.lastTextAtBySession;
   const { [id]: _removedActivities, ...replyActivitiesBySession } = state.replyActivitiesBySession;
   const { [id]: _removedPhase, ...replyPhaseBySession } = state.replyPhaseBySession;
+  const { [id]: _removedOutcome, ...turnOutcomeBySession } = state.turnOutcomeBySession;
+  const { [id]: _removedInterrupt, ...interruptRequestedBySession } = state.interruptRequestedBySession;
   fenceBySession.delete(id);
   streamMetaBySession.delete(id);
-  revealBySession.get(id)?.reset();
+  resetReveals(id);
   revealBySession.delete(id);
+  reasoningRevealBySession.delete(id);
   setState({
     sessions: state.sessions.filter((s) => s.id !== id),
     messagesBySession,
@@ -173,8 +229,13 @@ export async function deleteSession(id: string): Promise<void> {
     streamingToolsBySession,
     streamingReasoningBySession,
     reasoningStartedAtBySession,
+    turnStartedAtBySession,
+    lastProgressAtBySession,
+    lastTextAtBySession,
     replyActivitiesBySession,
     replyPhaseBySession,
+    turnOutcomeBySession,
+    interruptRequestedBySession,
   });
   tabStore.closeSessionTabs(id);
   artifactStore.dropSessionArtifacts(id);
@@ -187,10 +248,14 @@ function isInterrupted(summary: SessionSummary | undefined): boolean {
   return started > ended;
 }
 
+function hasInterruptedOutcome(summary: SessionSummary | undefined): boolean {
+  return summary?.lastTurnOutcome === 'interrupted' || isInterrupted(summary);
+}
+
 /** Whether the "上次回复被中断" banner should show for this session. */
 export function shouldShowInterruptBanner(sessionId: string): boolean {
   return (
-    isInterrupted(state.sessions.find((s) => s.id === sessionId)) &&
+    hasInterruptedOutcome(state.sessions.find((s) => s.id === sessionId)) &&
     !state.sendingBySession[sessionId] &&
     !state.interruptDismissedBySession[sessionId]
   );
@@ -203,11 +268,18 @@ export function dismissInterrupt(sessionId: string): void {
 }
 
 export async function ensureSessionMessages(id: string): Promise<void> {
-  if (state.messagesBySession[id]) return;
   const session = await api.getSession(id);
+  if (state.sendingBySession[id]) {
+    setState({
+      sessions: state.sessions.map((s) => (s.id === id ? { ...s, ...summaryOf(session) } : s)),
+    });
+    return;
+  }
   setState({
     messagesBySession: { ...state.messagesBySession, [id]: session.messages },
     sessions: state.sessions.map((s) => (s.id === id ? { ...s, ...summaryOf(session) } : s)),
+    turnOutcomeBySession: { ...state.turnOutcomeBySession, [id]: session.lastTurnOutcome ?? null },
+    errorBySession: { ...state.errorBySession, [id]: session.lastTurnError ?? null },
   });
   // A turn was in flight when we last lost the connection — try to reattach.
   if (isInterrupted(summaryOf(session)) && !state.sendingBySession[id]) {
@@ -224,6 +296,8 @@ function summaryOf(session: {
   projectId?: string | null;
   activeTurnStartedAt?: string | null;
   lastTurnEndedAt?: string | null;
+  lastTurnOutcome?: TurnOutcome | null;
+  lastTurnError?: string | null;
 }): SessionSummary {
   return {
     id: session.id,
@@ -234,6 +308,8 @@ function summaryOf(session: {
     projectId: session.projectId,
     activeTurnStartedAt: session.activeTurnStartedAt,
     lastTurnEndedAt: session.lastTurnEndedAt,
+    lastTurnOutcome: session.lastTurnOutcome,
+    lastTurnError: session.lastTurnError,
   };
 }
 
@@ -441,7 +517,10 @@ function finishThinkingActivity(acc: { activities: ReplyActivity[] }): void {
   };
 }
 
-function makeEventFolder(sessionId: string, acc: { text: string; tools: ToolCallPart[]; activities: ReplyActivity[] }) {
+function makeEventFolder(
+  sessionId: string,
+  acc: { text: string; reasoning: string; tools: ToolCallPart[]; activities: ReplyActivity[] },
+) {
   return (event: ChatStreamEvent, meta?: StreamMeta): void => {
     if (meta) {
       const fence = fenceBySession.get(sessionId) ?? createFence(sessionId);
@@ -465,33 +544,36 @@ function makeEventFolder(sessionId: string, acc: { text: string; tools: ToolCall
     switch (event.type) {
       case 'text': {
         acc.text += event.delta;
-        getReveal(sessionId).push(acc.text);
+        const thinkingRunning = acc.activities.some((activity) => activity.kind === 'thinking' && activity.status === 'running');
         finishThinkingActivity(acc);
-        setState({
-          replyActivitiesBySession: { ...state.replyActivitiesBySession, [sessionId]: [...acc.activities] },
-          replyPhaseBySession: { ...state.replyPhaseBySession, [sessionId]: 'replying' },
-        });
+        getReveal(sessionId).push(acc.text);
+        if (thinkingRunning || state.replyPhaseBySession[sessionId] !== 'replying') {
+          setState({
+            replyActivitiesBySession: { ...state.replyActivitiesBySession, [sessionId]: [...acc.activities] },
+            replyPhaseBySession: { ...state.replyPhaseBySession, [sessionId]: 'replying' },
+          });
+        }
         break;
       }
       case 'reasoning': {
-        const prev = state.streamingReasoningBySession[sessionId] ?? '';
+        const first = acc.reasoning.length === 0;
+        acc.reasoning += event.delta;
         upsertThinkingActivity(acc, event.delta);
-        setState({
-          streamingReasoningBySession: {
-            ...state.streamingReasoningBySession,
-            [sessionId]: prev + event.delta,
-          },
-          ...(prev
-            ? {}
-            : {
-                reasoningStartedAtBySession: {
-                  ...state.reasoningStartedAtBySession,
-                  [sessionId]: Date.now(),
-              },
-            }),
-          replyActivitiesBySession: { ...state.replyActivitiesBySession, [sessionId]: [...acc.activities] },
-          replyPhaseBySession: { ...state.replyPhaseBySession, [sessionId]: 'thinking' },
-        });
+        getReasoningReveal(sessionId).push(acc.reasoning);
+        if (first || state.replyPhaseBySession[sessionId] !== 'thinking') {
+          setState({
+            ...(first
+              ? {
+                  reasoningStartedAtBySession: {
+                    ...state.reasoningStartedAtBySession,
+                    [sessionId]: Date.now(),
+                  },
+                }
+              : {}),
+            replyActivitiesBySession: { ...state.replyActivitiesBySession, [sessionId]: [...acc.activities] },
+            replyPhaseBySession: { ...state.replyPhaseBySession, [sessionId]: 'thinking' },
+          });
+        }
         break;
       }
       case 'tool': {
@@ -499,6 +581,7 @@ function makeEventFolder(sessionId: string, acc: { text: string; tools: ToolCall
         const part = upsertToolPart(acc, event);
         upsertToolActivity(acc, part);
         setState({
+          ...progressPatch(sessionId),
           streamingToolsBySession: { ...state.streamingToolsBySession, [sessionId]: [...acc.tools] },
           replyActivitiesBySession: { ...state.replyActivitiesBySession, [sessionId]: [...acc.activities] },
           replyPhaseBySession: { ...state.replyPhaseBySession, [sessionId]: 'tools' },
@@ -525,6 +608,7 @@ function makeEventFolder(sessionId: string, acc: { text: string; tools: ToolCall
       }
       case 'permission':
         setState({
+          ...progressPatch(sessionId),
           interactionBySession: {
             ...state.interactionBySession,
             [sessionId]: { kind: 'permission', id: event.id, name: event.name, args: event.args },
@@ -533,6 +617,7 @@ function makeEventFolder(sessionId: string, acc: { text: string; tools: ToolCall
         break;
       case 'ask':
         setState({
+          ...progressPatch(sessionId),
           interactionBySession: {
             ...state.interactionBySession,
             [sessionId]: { kind: 'ask', id: event.id, questions: event.questions },
@@ -543,27 +628,38 @@ function makeEventFolder(sessionId: string, acc: { text: string; tools: ToolCall
         setState({ todosBySession: { ...state.todosBySession, [sessionId]: event.items } });
         break;
       case 'error':
-        setState({ errorBySession: { ...state.errorBySession, [sessionId]: event.error } });
+        setState({
+          errorBySession: { ...state.errorBySession, [sessionId]: event.error },
+          turnOutcomeBySession: { ...state.turnOutcomeBySession, [sessionId]: 'error' },
+        });
         break;
       case 'status':
+        if (event.heartbeat) break;
         if (event.phase === 'thinking') upsertThinkingActivity(acc);
-        if (event.phase === 'tools' || event.phase === 'replying') finishThinkingActivity(acc);
+        if (event.phase === 'tools' || event.phase === 'replying' || event.phase === 'waiting') finishThinkingActivity(acc);
         setState({
+          ...progressPatch(sessionId),
           replyActivitiesBySession: { ...state.replyActivitiesBySession, [sessionId]: [...acc.activities] },
           replyPhaseBySession: { ...state.replyPhaseBySession, [sessionId]: event.phase },
         });
         break;
       case 'done':
         getReveal(sessionId).flush();
+        getReasoningReveal(sessionId).flush();
         finishThinkingActivity(acc);
-        setState({ replyActivitiesBySession: { ...state.replyActivitiesBySession, [sessionId]: [...acc.activities] } });
+        setState({
+          replyActivitiesBySession: { ...state.replyActivitiesBySession, [sessionId]: [...acc.activities] },
+          turnOutcomeBySession: { ...state.turnOutcomeBySession, [sessionId]: event.outcome },
+          interruptRequestedBySession: { ...state.interruptRequestedBySession, [sessionId]: false },
+          ...(event.error ? { errorBySession: { ...state.errorBySession, [sessionId]: event.error } } : {}),
+        });
         break;
     }
   };
 }
 
-async function reconcileAfterTurn(sessionId: string): Promise<void> {
-  revealBySession.get(sessionId)?.reset();
+async function reconcileAfterTurn(sessionId: string, fallbackOutcome?: TurnOutcome): Promise<void> {
+  resetReveals(sessionId);
   const session = await api.getSession(sessionId);
   setState({
     sessions: state.sessions.map((s) => (s.id === sessionId ? { ...s, ...summaryOf(session) } : s)),
@@ -571,10 +667,22 @@ async function reconcileAfterTurn(sessionId: string): Promise<void> {
     streamingBySession: { ...state.streamingBySession, [sessionId]: '' },
     streamingReasoningBySession: { ...state.streamingReasoningBySession, [sessionId]: '' },
     reasoningStartedAtBySession: { ...state.reasoningStartedAtBySession, [sessionId]: undefined },
+    turnStartedAtBySession: { ...state.turnStartedAtBySession, [sessionId]: undefined },
+    lastProgressAtBySession: { ...state.lastProgressAtBySession, [sessionId]: undefined },
+    lastTextAtBySession: { ...state.lastTextAtBySession, [sessionId]: undefined },
     streamingToolsBySession: { ...state.streamingToolsBySession, [sessionId]: [] },
     replyActivitiesBySession: { ...state.replyActivitiesBySession, [sessionId]: [] },
     replyPhaseBySession: { ...state.replyPhaseBySession, [sessionId]: undefined },
     interactionBySession: { ...state.interactionBySession, [sessionId]: null },
+    turnOutcomeBySession: {
+      ...state.turnOutcomeBySession,
+      [sessionId]: session.lastTurnOutcome ?? fallbackOutcome ?? null,
+    },
+    errorBySession: {
+      ...state.errorBySession,
+      [sessionId]: session.lastTurnError ?? state.errorBySession[sessionId] ?? null,
+    },
+    interruptRequestedBySession: { ...state.interruptRequestedBySession, [sessionId]: false },
   });
   tabStore.renameChatTab(sessionId, session.title);
   void artifactStore.loadSessionArtifacts(sessionId);
@@ -611,7 +719,7 @@ async function dispatchTurn(
   abortBySession.set(sessionId, abort);
   fenceBySession.set(sessionId, createFence(sessionId));
   streamMetaBySession.delete(sessionId);
-  getReveal(sessionId).reset();
+  resetReveals(sessionId);
 
   setState({
     messagesBySession: { ...state.messagesBySession, [sessionId]: nextMessages },
@@ -619,9 +727,14 @@ async function dispatchTurn(
     streamingBySession: { ...state.streamingBySession, [sessionId]: '' },
     streamingReasoningBySession: { ...state.streamingReasoningBySession, [sessionId]: '' },
     reasoningStartedAtBySession: { ...state.reasoningStartedAtBySession, [sessionId]: undefined },
+    turnStartedAtBySession: { ...state.turnStartedAtBySession, [sessionId]: Date.now() },
+    lastProgressAtBySession: { ...state.lastProgressAtBySession, [sessionId]: Date.now() },
+    lastTextAtBySession: { ...state.lastTextAtBySession, [sessionId]: undefined },
     streamingToolsBySession: { ...state.streamingToolsBySession, [sessionId]: [] },
     replyActivitiesBySession: { ...state.replyActivitiesBySession, [sessionId]: [] },
-    replyPhaseBySession: { ...state.replyPhaseBySession, [sessionId]: undefined },
+    replyPhaseBySession: { ...state.replyPhaseBySession, [sessionId]: 'thinking' },
+    turnOutcomeBySession: { ...state.turnOutcomeBySession, [sessionId]: null },
+    interruptRequestedBySession: { ...state.interruptRequestedBySession, [sessionId]: false },
     errorBySession: { ...state.errorBySession, [sessionId]: null },
     interactionBySession: { ...state.interactionBySession, [sessionId]: null },
     interruptDismissedBySession: { ...state.interruptDismissedBySession, [sessionId]: false },
@@ -629,7 +742,8 @@ async function dispatchTurn(
   clearComposerSeed(sessionId);
 
   const settings = settingsStore.getSnapshot().settings;
-  const acc = { text: '', tools: [] as ToolCallPart[], activities: [] as ReplyActivity[] };
+  const acc = { text: '', reasoning: '', tools: [] as ToolCallPart[], activities: [] as ReplyActivity[] };
+  let reconnectAfterTransportLoss = false;
 
   try {
     await api.sendMessage(sessionId, text, {
@@ -643,10 +757,20 @@ async function dispatchTurn(
       signal: abort.signal,
       onEvent: makeEventFolder(sessionId, acc),
     });
-    await reconcileAfterTurn(sessionId);
+    await reconcileAfterTurn(sessionId, state.turnOutcomeBySession[sessionId] ?? undefined);
   } catch (err) {
-    if ((err as Error).name === 'AbortError') return;
-    revealBySession.get(sessionId)?.reset();
+    if ((err as Error).name === 'AbortError') {
+      setState({ turnOutcomeBySession: { ...state.turnOutcomeBySession, [sessionId]: 'interrupted' } });
+      return;
+    }
+    if (isIncompleteStream(err)) {
+      reconnectAfterTransportLoss = true;
+      setState({
+        errorBySession: { ...state.errorBySession, [sessionId]: '回复连接中断，正在恢复…' },
+      });
+      return;
+    }
+    resetReveals(sessionId);
     try {
       const session = await api.getSession(sessionId);
       setState({
@@ -655,39 +779,80 @@ async function dispatchTurn(
         replyActivitiesBySession: { ...state.replyActivitiesBySession, [sessionId]: [] },
         replyPhaseBySession: { ...state.replyPhaseBySession, [sessionId]: undefined },
         errorBySession: { ...state.errorBySession, [sessionId]: (err as Error).message },
+        turnOutcomeBySession: { ...state.turnOutcomeBySession, [sessionId]: 'error' },
       });
     } catch {
       setState({ errorBySession: { ...state.errorBySession, [sessionId]: (err as Error).message } });
     }
   } finally {
     if (abortBySession.get(sessionId) === abort) abortBySession.delete(sessionId);
-    setState({ sendingBySession: { ...state.sendingBySession, [sessionId]: false } });
-    const next = (getSnapshot().queueBySession[sessionId] ?? [])[0];
-    if (next) void continueQueue(sessionId);
+    if (reconnectAfterTransportLoss) {
+      await resumeInterruptedTurn(sessionId, { takeover: true });
+    } else {
+      setState({ sendingBySession: { ...state.sendingBySession, [sessionId]: false } });
+      const next = (getSnapshot().queueBySession[sessionId] ?? [])[0];
+      if (next && getSnapshot().turnOutcomeBySession[sessionId] === 'completed') void continueQueue(sessionId);
+    }
   }
 }
 
+function isIncompleteStream(err: unknown): boolean {
+  return err instanceof Error && err.name === 'ChatStreamIncompleteError';
+}
+
 /** Reattach to a turn that was streaming when the connection/app dropped. */
-export async function resumeInterruptedTurn(sessionId: string): Promise<void> {
-  if (state.sendingBySession[sessionId]) return;
+export async function resumeInterruptedTurn(
+  sessionId: string,
+  opts: { takeover?: boolean } = {},
+): Promise<void> {
+  if (state.sendingBySession[sessionId] && !opts.takeover) return;
   const abort = new AbortController();
   abortBySession.set(sessionId, abort);
   const meta = streamMetaBySession.get(sessionId);
-  fenceBySession.set(sessionId, createFence(sessionId));
-  getReveal(sessionId).reset();
+  if (!opts.takeover) {
+    fenceBySession.set(sessionId, createFence(sessionId));
+    resetReveals(sessionId);
+  }
+
+  const acc = {
+    text: opts.takeover ? (state.streamingBySession[sessionId] ?? '') : '',
+    reasoning: opts.takeover ? (state.streamingReasoningBySession[sessionId] ?? '') : '',
+    tools: opts.takeover ? [...(state.streamingToolsBySession[sessionId] ?? [])] : [],
+    activities: opts.takeover ? [...(state.replyActivitiesBySession[sessionId] ?? [])] : [],
+  };
+  if (opts.takeover) {
+    if (acc.text) {
+      getReveal(sessionId).push(acc.text);
+      getReveal(sessionId).flush();
+    }
+    if (acc.reasoning) {
+      getReasoningReveal(sessionId).push(acc.reasoning);
+      getReasoningReveal(sessionId).flush();
+    }
+  }
 
   setState({
     sendingBySession: { ...state.sendingBySession, [sessionId]: true },
-    streamingBySession: { ...state.streamingBySession, [sessionId]: '' },
-    streamingReasoningBySession: { ...state.streamingReasoningBySession, [sessionId]: '' },
-    reasoningStartedAtBySession: { ...state.reasoningStartedAtBySession, [sessionId]: undefined },
-    streamingToolsBySession: { ...state.streamingToolsBySession, [sessionId]: [] },
-    replyActivitiesBySession: { ...state.replyActivitiesBySession, [sessionId]: [] },
-    replyPhaseBySession: { ...state.replyPhaseBySession, [sessionId]: undefined },
-    errorBySession: { ...state.errorBySession, [sessionId]: null },
+    ...(opts.takeover
+      ? {
+          errorBySession: { ...state.errorBySession, [sessionId]: '回复连接中断，正在恢复…' },
+        }
+      : {
+          streamingBySession: { ...state.streamingBySession, [sessionId]: '' },
+          streamingReasoningBySession: { ...state.streamingReasoningBySession, [sessionId]: '' },
+          reasoningStartedAtBySession: { ...state.reasoningStartedAtBySession, [sessionId]: undefined },
+          turnStartedAtBySession: { ...state.turnStartedAtBySession, [sessionId]: Date.now() },
+          lastProgressAtBySession: { ...state.lastProgressAtBySession, [sessionId]: Date.now() },
+          lastTextAtBySession: { ...state.lastTextAtBySession, [sessionId]: undefined },
+          streamingToolsBySession: { ...state.streamingToolsBySession, [sessionId]: [] },
+          replyActivitiesBySession: { ...state.replyActivitiesBySession, [sessionId]: [] },
+          replyPhaseBySession: { ...state.replyPhaseBySession, [sessionId]: 'thinking' },
+          errorBySession: { ...state.errorBySession, [sessionId]: null },
+          turnOutcomeBySession: { ...state.turnOutcomeBySession, [sessionId]: null },
+          interruptRequestedBySession: { ...state.interruptRequestedBySession, [sessionId]: false },
+        }),
   });
 
-  const acc = { text: '', tools: [] as ToolCallPart[], activities: [] as ReplyActivity[] };
   try {
     await api.resumeTurn(
       sessionId,
@@ -696,7 +861,7 @@ export async function resumeInterruptedTurn(sessionId: string): Promise<void> {
       makeEventFolder(sessionId, acc),
       abort.signal,
     );
-    await reconcileAfterTurn(sessionId);
+    await reconcileAfterTurn(sessionId, state.turnOutcomeBySession[sessionId] ?? undefined);
   } catch (err) {
     if ((err as Error).name === 'AbortError') return;
     // Resume failing is non-fatal — leave the interrupted banner visible.
@@ -704,6 +869,9 @@ export async function resumeInterruptedTurn(sessionId: string): Promise<void> {
       streamingBySession: { ...state.streamingBySession, [sessionId]: '' },
       replyActivitiesBySession: { ...state.replyActivitiesBySession, [sessionId]: [] },
       replyPhaseBySession: { ...state.replyPhaseBySession, [sessionId]: undefined },
+      errorBySession: { ...state.errorBySession, [sessionId]: '回复连接中断，无法自动恢复' },
+      turnOutcomeBySession: { ...state.turnOutcomeBySession, [sessionId]: 'interrupted' },
+      interruptRequestedBySession: { ...state.interruptRequestedBySession, [sessionId]: false },
     });
   } finally {
     if (abortBySession.get(sessionId) === abort) abortBySession.delete(sessionId);
@@ -712,19 +880,19 @@ export async function resumeInterruptedTurn(sessionId: string): Promise<void> {
 }
 
 export async function stopMessage(sessionId: string): Promise<void> {
-  abortBySession.get(sessionId)?.abort();
-  revealBySession.get(sessionId)?.reset();
-  await api.stopMessage(sessionId).catch((): undefined => undefined);
-  setState({
-    sendingBySession: { ...state.sendingBySession, [sessionId]: false },
-    streamingBySession: { ...state.streamingBySession, [sessionId]: '' },
-    streamingToolsBySession: { ...state.streamingToolsBySession, [sessionId]: [] },
-    streamingReasoningBySession: { ...state.streamingReasoningBySession, [sessionId]: '' },
-    reasoningStartedAtBySession: { ...state.reasoningStartedAtBySession, [sessionId]: undefined },
-    replyActivitiesBySession: { ...state.replyActivitiesBySession, [sessionId]: [] },
-    replyPhaseBySession: { ...state.replyPhaseBySession, [sessionId]: undefined },
-    interactionBySession: { ...state.interactionBySession, [sessionId]: null },
-  });
+  if (!state.sendingBySession[sessionId]) return;
+  setState({ interruptRequestedBySession: { ...state.interruptRequestedBySession, [sessionId]: true } });
+  try {
+    // Keep the stream attached so the backend's terminal interrupted event is
+    // observed before sending is released.
+    await api.stopMessage(sessionId);
+  } catch (err) {
+    abortBySession.get(sessionId)?.abort();
+    setState({
+      errorBySession: { ...state.errorBySession, [sessionId]: (err as Error).message },
+      turnOutcomeBySession: { ...state.turnOutcomeBySession, [sessionId]: 'interrupted' },
+    });
+  }
 }
 
 export async function answerPermission(

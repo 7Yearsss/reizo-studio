@@ -13,15 +13,15 @@ export default function InterruptedTurnBanner({
   onDismiss: () => void;
 }) {
   return (
-    <div className="mx-8 mb-2 flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[13px] text-ink">
-      <span className="flex-1">上次回复被中断。</span>
+    <div className="mb-2 flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[13px] text-ink">
+      <span className="flex-1">上次回复被中断，可重新执行。</span>
       <button
         type="button"
         onClick={onRetry}
         className="inline-flex items-center gap-1 rounded-full bg-paper-inset px-2.5 py-1 text-[12px] text-ink transition-colors hover:bg-paper"
       >
         <RotateCcw size={12} />
-        继续
+        重新执行
       </button>
       <button
         type="button"

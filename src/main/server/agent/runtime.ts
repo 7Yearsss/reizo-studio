@@ -5,14 +5,37 @@ import type { ChatStreamEvent, TodoItem } from '../../../shared/stream';
 import { createOpenAiModel } from './provider/openai';
 import { createWorkspaceTools } from './workspaceTools';
 import { startAgentTurn } from './session';
+import { consumeInteractions, waitForInteractions } from './permissions';
 import { translateOpenAiChunk } from './translators/openai';
+import { compactAssistantParts, compactModelMessages } from './modelHistory';
+import { CONTINUE_USER_MESSAGE, MAX_CONTINUE_PASSES, shouldContinueAgentPass } from './continuePass';
 import { readWorkspaceMemory } from '../../workspaceMemory';
 import type { Skill } from '../../skills';
-import type { ChatMessage, SessionStore } from '../../../shared/chat';
+import type { ChatMessage, SessionStore, ToolCallPart } from '../../../shared/chat';
 import type { SettingsStore } from '../storage/settingsStore';
 import type { ArtifactStore } from '../storage/artifactStore';
 import type { ProjectStore } from '../storage/projectStore';
 import type { LargeValueStore } from '../storage/largeValueStore';
+
+/**
+ * Reverse proxies (Cloudflare 524, nginx read timeouts) often fail one
+ * Responses API pass after a long wait. A couple of retries recover that
+ * pass without re-running tools the user already approved. 0 turned those
+ * into a dead `openai_error` with no second chance.
+ */
+const PROVIDER_MAX_RETRIES = 2;
+/**
+ * These now only ever cover *real generation* plus bounded autonomous tools
+ * (read_file, inspect-only git, post-approval tool bodies — the shell path
+ * self-limits at 30s). Human approval time is never inside a step: an
+ * approval-needing tool unwinds the step immediately and the turn suspends
+ * between passes with every one of these timers cleared.
+ */
+const PROVIDER_TIMEOUT = {
+  firstChunkMs: 3 * 60_000,
+  chunkMs: 60_000,
+  stepMs: 5 * 60_000,
+} as const;
 
 export { abortChatTurn } from './session';
 
@@ -164,26 +187,7 @@ export async function runChatTurn(options: {
       history.push({ role: 'assistant', content: message.content });
       continue;
     }
-    const assistantContent: Array<Record<string, unknown>> = [];
-    if (message.content) assistantContent.push({ type: 'text', text: message.content });
-    for (const part of parts) {
-      assistantContent.push({
-        type: 'tool-call',
-        toolCallId: part.id,
-        toolName: part.name,
-        input: part.args,
-      });
-    }
-    history.push({ role: 'assistant', content: assistantContent } as ModelMessage);
-    history.push({
-      role: 'tool',
-      content: parts.map((part) => ({
-        type: 'tool-result',
-        toolCallId: part.id,
-        toolName: part.name,
-        output: parseToolOutput(part.result ?? part.error ?? ''),
-      })),
-    } as ModelMessage);
+    history.push(...assistantTurnToModelMessages(message.content, compactAssistantParts(parts)));
   }
 
   // `emit` is bound to the live stream once `startAgentTurn` opens it; tools
@@ -191,7 +195,7 @@ export async function runChatTurn(options: {
   let emit: (event: ChatStreamEvent) => void = () => undefined;
   const todos: TodoItem[] = [];
 
-  const tools = workspacePath
+  const toolset = workspacePath
     ? createWorkspaceTools({
         sessionId,
         workspacePath,
@@ -211,8 +215,24 @@ export async function runChatTurn(options: {
           : undefined,
       })
     : undefined;
+  const tools = toolset?.tools;
 
   const model = createOpenAiModel({ apiKey, modelId, baseUrl });
+
+  const buildStream = (messages: ModelMessage[], signal: AbortSignal) =>
+    streamText({
+      model,
+      instructions,
+      messages: compactModelMessages(messages),
+      tools,
+      stopWhen: tools ? isStepCount(64) : undefined,
+      maxRetries: PROVIDER_MAX_RETRIES,
+      timeout: PROVIDER_TIMEOUT,
+      abortSignal: signal,
+      prepareStep: ({ messages: stepMessages }) => ({
+        messages: compactModelMessages(stepMessages as ModelMessage[]),
+      }),
+    });
 
   return startAgentTurn({
     sessionStore,
@@ -222,16 +242,95 @@ export async function runChatTurn(options: {
     onReady: (send) => {
       emit = send;
     },
-    createStream: (signal) =>
-      streamText({
-        model,
-        instructions,
-        messages: history,
-        tools,
-        stopWhen: tools ? isStepCount(12) : undefined,
-        abortSignal: signal,
-      }),
+    createStream: (signal) => buildStream(history, signal),
+    onAwaitingInteraction: async ({ sessionId: sid, signal, emitToolResult, getAssistant }) => {
+      // Suspended: no provider connection is open. Wait for every pending
+      // permission / question, run whatever was approved, then resume with a
+      // fresh provider pass whose history already has the tool results.
+      await waitForInteractions(sid, signal);
+      if (signal.aborted) return null;
+      for (const item of consumeInteractions(sid)) {
+        if (item.kind === 'ask') {
+          emitToolResult({
+            toolCallId: item.toolCallId,
+            name: item.name,
+            args: item.args,
+            result: JSON.stringify({ answers: item.answers ?? {} }),
+          });
+          continue;
+        }
+        if (item.decision === 'deny') {
+          emitToolResult({
+            toolCallId: item.toolCallId,
+            name: item.name,
+            args: item.args,
+            error: 'User denied this tool call',
+          });
+          continue;
+        }
+        const outcome = (await toolset?.executeApproved(item.name, item.args)) ?? {
+          error: 'This turn has no workspace tools',
+        };
+        emitToolResult({
+          toolCallId: item.toolCallId,
+          name: item.name,
+          args: item.args,
+          result: outcome.result,
+          error: outcome.error,
+        });
+      }
+      if (signal.aborted) return null;
+      const snap = getAssistant();
+      return buildStream(
+        [...history, ...assistantTurnToModelMessages(snap.text, compactAssistantParts(snap.parts))],
+        signal,
+      );
+    },
+    onContinuePass: async ({ getAssistant, finishReason, passIndex, signal }) => {
+      if (passIndex >= MAX_CONTINUE_PASSES) return null;
+      const snap = getAssistant();
+      const reason = shouldContinueAgentPass({ text: snap.text, todos, finishReason });
+      if (!reason) return null;
+      console.info(`[chat] continue pass reason=${reason} pass=${passIndex + 1}`);
+      return buildStream(
+        [
+          ...history,
+          ...assistantTurnToModelMessages(snap.text, compactAssistantParts(snap.parts)),
+          { role: 'user', content: CONTINUE_USER_MESSAGE },
+        ],
+        signal,
+      );
+    },
   });
+}
+
+/**
+ * One assistant turn (text + tool calls) as the `[assistant, tool]` message
+ * pair the model needs to see completed tool work on the next pass.
+ */
+function assistantTurnToModelMessages(text: string, parts: ToolCallPart[]): ModelMessage[] {
+  const assistantContent: Array<Record<string, unknown>> = [];
+  if (text) assistantContent.push({ type: 'text', text });
+  for (const part of parts) {
+    assistantContent.push({
+      type: 'tool-call',
+      toolCallId: part.id,
+      toolName: part.name,
+      input: part.args,
+    });
+  }
+  return [
+    { role: 'assistant', content: assistantContent } as ModelMessage,
+    {
+      role: 'tool',
+      content: parts.map((part) => ({
+        type: 'tool-result',
+        toolCallId: part.id,
+        toolName: part.name,
+        output: parseToolOutput(part.result ?? part.error ?? ''),
+      })),
+    } as ModelMessage,
+  ];
 }
 
 function parseToolOutput(value: string): { type: 'json'; value: unknown } | { type: 'text'; value: string } {

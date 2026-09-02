@@ -42,6 +42,21 @@ export interface AgentToolResultData {
   error?: string;
 }
 
+/**
+ * The provider tried to run a tool that needs the user's go-ahead. The turn
+ * has *suspended* — the provider stream for this pass has ended and no
+ * provider timer is running — until every pending interaction for the
+ * session is answered, after which the turn resumes with a fresh pass.
+ */
+export interface AgentInteractionRequestData {
+  id: string;
+  name: string;
+  args: Record<string, unknown>;
+  kind: 'permission' | 'ask';
+  /** Present when `kind === 'ask'`. */
+  questions?: import('./stream').AskQuestion[];
+}
+
 export interface AgentErrorData {
   message: string;
   /**

@@ -1,8 +1,10 @@
-import { BrainCircuit, Clock3, LoaderCircle, MessageCircle, Wrench } from 'lucide-react';
+import { Clock3 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { TodoItem } from '../../../shared/stream';
 import type { ReplyPhase } from '../../../shared/stream';
 import type { ChatInteraction } from '../../state/chatStore';
+import { formatTurnElapsed, liveReplyPhase, liveReplySilence, liveReplyWaitLabel } from '../../state/liveReply';
+import { ThinkingShimmer } from '../agents/loading-states/thinking-shimmer';
 
 export type { ReplyPhase } from '../../../shared/stream';
 
@@ -15,51 +17,77 @@ const PHASE_LABEL: Record<ReplyPhase, string> = {
 };
 
 export default function ReplyStatusBar({
-  phase,
   startedAt,
   toolCount,
   todos,
   interaction,
+  interruptRequested = false,
+  recovering = false,
+  lastTextAt,
+  lastProgressAt,
 }: {
-  phase: ReplyPhase;
   startedAt?: number;
   toolCount: number;
   todos: TodoItem[];
   interaction: ChatInteraction | null;
+  interruptRequested?: boolean;
+  recovering?: boolean;
+  lastTextAt?: number;
+  lastProgressAt?: number;
 }) {
-  const [elapsed, setElapsed] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    const start = startedAt ?? Date.now();
-    const update = () => setElapsed(Math.max(0, Date.now() - start));
-    update();
-    const id = window.setInterval(update, 500);
+    const id = window.setInterval(() => setNow(Date.now()), 500);
     return () => window.clearInterval(id);
-  }, [phase, startedAt]);
+  }, [startedAt]);
 
+  const start = startedAt ?? now;
+  const elapsed = Math.max(0, now - start);
+  const phase = liveReplyPhase({
+    sending: true,
+    waitingOnUser: Boolean(interaction),
+    activeToolCount: toolCount,
+    lastTextAt,
+    now,
+  }) ?? 'thinking';
+  const silence = liveReplySilence({ lastProgressAt, now });
   const done = todos.filter((item) => item.status === 'completed').length;
-  const Icon = phase === 'thinking'
-    ? BrainCircuit
-    : phase === 'tools'
-      ? Wrench
-      : phase === 'replying'
-        ? MessageCircle
-        : phase === 'waiting'
-          ? Clock3
-          : LoaderCircle;
   const suffix = phase === 'tools' && toolCount > 0
     ? ` · ${toolCount} 个`
     : todos.length > 0
       ? ` · 计划 ${done}/${todos.length}`
       : '';
+  const waitLabel = liveReplyWaitLabel({
+    silence,
+    waitedMs: lastProgressAt ? now - lastProgressAt : elapsed,
+  });
+  // The transcript already shows 正在思考 / 正在使用工具. Only keep copy here
+  // when it adds information the work card does not: interrupt, recovery,
+  // waiting on the user, or a quiet/stale upstream.
+  const label = interruptRequested
+    ? '正在停止'
+    : recovering
+      ? '回复连接中断，正在恢复…'
+      : interaction
+        ? PHASE_LABEL.waiting
+        : waitLabel;
+  const shimmer = Boolean(label) && !interruptRequested && !recovering && !interaction && silence !== 'stale';
 
   return (
-    <div className="mb-2 flex min-h-7 items-center gap-2 px-1 text-[11px] text-ink-muted" role="status" aria-live="polite">
-      <Icon className={phase === 'preparing' || phase === 'thinking' || phase === 'tools' || phase === 'replying' ? 'h-3.5 w-3.5 animate-pulse' : 'h-3.5 w-3.5'} />
-      <span>{interaction ? PHASE_LABEL.waiting : PHASE_LABEL[phase]}{suffix}</span>
-      <span className="ml-auto inline-flex items-center gap-1 font-mono tabular-nums text-[10px] text-ink-muted/80">
+    <div className="flex min-h-6 min-w-0 items-center gap-2 text-[11px] text-ink-muted" role="status" aria-live="polite">
+      {label ? (
+        shimmer ? (
+          <ThinkingShimmer className="min-w-0 truncate text-[11px]">{label}{suffix}</ThinkingShimmer>
+        ) : (
+          <span className="min-w-0 truncate">{label}{suffix}</span>
+        )
+      ) : (
+        <span className="min-w-0" />
+      )}
+      <span className="ml-auto inline-flex shrink-0 items-center gap-1 font-mono tabular-nums text-[10px] text-ink-muted/80">
         <Clock3 className="h-3 w-3" />
-        {Math.max(1, Math.round(elapsed / 1000))}s
+        {formatTurnElapsed(elapsed)}
       </span>
     </div>
   );

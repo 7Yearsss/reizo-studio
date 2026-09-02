@@ -14,10 +14,17 @@ export interface StreamMeta {
 }
 export type StreamEventHandler = (event: ChatStreamEvent, meta?: StreamMeta) => void;
 
+export class ChatStreamIncompleteError extends Error {
+  constructor() {
+    super('Response stream ended before terminal turn outcome');
+    this.name = 'ChatStreamIncompleteError';
+  }
+}
+
 /** Reads an NDJSON body of `LiveEnvelope` lines, handing each event + its meta to `onEvent`. */
 async function readEnvelopeStream(res: Response, onEvent: StreamEventHandler): Promise<void> {
   const reader = res.body?.getReader();
-  if (!reader) return;
+  if (!reader) throw new ChatStreamIncompleteError();
   const decoder = new TextDecoder();
   let buffer = '';
   let ended = false;
@@ -54,6 +61,7 @@ async function readEnvelopeStream(res: Response, onEvent: StreamEventHandler): P
     }
   }
   dispatch(buffer);
+  if (!ended) throw new ChatStreamIncompleteError();
 }
 
 let originPromise: Promise<string> | null = null;

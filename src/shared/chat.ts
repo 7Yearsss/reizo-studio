@@ -1,3 +1,5 @@
+import type { TurnOutcome } from './stream';
+
 /**
  * Chat wire types — the contract shared by the Hono server, the agent
  * runtime, and the React renderer. Moved here from
@@ -92,6 +94,8 @@ export interface SessionSummary {
    */
   activeTurnStartedAt?: string | null;
   lastTurnEndedAt?: string | null;
+  lastTurnOutcome?: TurnOutcome | null;
+  lastTurnError?: string | null;
   /** Denormalised sidebar projection, maintained in the same write. */
   listPreview?: string | null;
   listPreviewRole?: ChatRole | null;
@@ -114,14 +118,20 @@ export interface SessionPatch {
  * when absent.
  */
 export interface TurnRuntimeStore {
-  /** Stamp `active_turn_started_at = now`. Append-only, no clear op. */
-  markTurnStart(sessionId: string): void;
-  /** Stamp `last_turn_ended_at = now`. No-op after `freezeTurnMarkers`. */
-  markTurnEnd(sessionId: string): void;
+  /** Stamp the active turn and clear any previous terminal outcome. */
+  markTurnStart(sessionId: string, turnId?: string): void;
+  /** Stamp a terminal turn outcome. No-op after `freezeTurnMarkers`. */
+  markTurnEnd(sessionId: string, outcome?: TurnOutcome, error?: string): void;
   setLiveRevision(sessionId: string, rev: number): void;
   getRuntimeState(
     sessionId: string,
-  ): { activeTurnStartedAt: number | null; lastTurnEndedAt: number | null; liveRevision: number } | null;
+  ): {
+    activeTurnStartedAt: number | null;
+    lastTurnEndedAt: number | null;
+    lastTurnOutcome: TurnOutcome | null;
+    lastTurnError: string | null;
+    liveRevision: number;
+  } | null;
   /** Quit-chain guard: makes subsequent `markTurnEnd` calls no-ops. */
   freezeTurnMarkers(): void;
 }

@@ -1,30 +1,41 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createRevealController } from './revealController';
+import { COMMIT_MS, createRevealController } from './revealController';
 
 describe('revealController', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it('reveals text progressively, not all at once', () => {
+  it('paints the first slice immediately, then reveals the rest on the clock', () => {
     const commits: string[] = [];
     const rc = createRevealController((t) => commits.push(t));
     rc.push('the quick brown fox jumps over the lazy dog');
 
-    vi.advanceTimersByTime(33);
     expect(commits.length).toBe(1);
     expect(commits[0].length).toBeGreaterThan(0);
     expect(commits[0].length).toBeLessThan('the quick brown fox jumps over the lazy dog'.length);
 
+    vi.advanceTimersByTime(COMMIT_MS);
+    expect(commits.length).toBeGreaterThan(1);
+
     vi.advanceTimersByTime(2000);
     expect(commits.at(-1)).toBe('the quick brown fox jumps over the lazy dog');
+  });
+
+  it('coalesces a burst of 1-char pushes onto the clock', () => {
+    const commits: string[] = [];
+    const rc = createRevealController((t) => commits.push(t));
+    for (let i = 1; i <= 20; i += 1) rc.push('x'.repeat(i));
+    expect(commits.length).toBe(1);
+    expect(commits[0].length).toBeLessThan(20);
+    vi.advanceTimersByTime(2000);
+    expect(commits.at(-1)).toBe('x'.repeat(20));
   });
 
   it('accelerates when the backlog is large', () => {
     const commits: string[] = [];
     const rc = createRevealController((t) => commits.push(t));
     rc.push('x'.repeat(2000));
-    vi.advanceTimersByTime(33);
-    // cps = backlog/0.32 -> ~6250/s -> ~206 chars in 33ms
+    // First tick is synchronous; cps = backlog/0.32 -> ~6250/s -> ~313 chars in 50ms
     expect(commits[0].length).toBeGreaterThan(100);
   });
 
@@ -54,7 +65,7 @@ describe('revealController', () => {
     const commits: string[] = [];
     const rc = createRevealController((t) => commits.push(t));
     rc.push(emoji);
-    for (let i = 0; i < 100; i += 1) vi.advanceTimersByTime(33);
+    for (let i = 0; i < 100; i += 1) vi.advanceTimersByTime(COMMIT_MS);
     for (const c of commits) {
       const last = c.charCodeAt(c.length - 1);
       expect(last >= 0xd800 && last <= 0xdbff).toBe(false);

@@ -33,6 +33,8 @@ export interface TurnPersister {
   onReasoning(delta: string): void;
   onToolPart(part: ToolCallPart): void;
   hasContent(): boolean;
+  /** Assistant text + tool parts accumulated so far (defensive copies). */
+  snapshot(): { text: string; parts: ToolCallPart[] };
   /** Serialized append of the assistant row. No-op when aborted / empty. */
   commit(opts: { aborted: boolean }): Promise<void>;
 }
@@ -100,6 +102,7 @@ export function createTurnPersister(deps: {
 
   return {
     clientId,
+    snapshot: () => ({ text, parts: parts.map((p) => ({ ...p })) }),
     onText: (delta) => {
       text += delta;
     },

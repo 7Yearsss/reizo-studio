@@ -7,10 +7,10 @@ import { useUiStore } from '../state/useUiStore';
 import MessageList from '../components/chat/MessageList';
 import Composer from '../components/chat/Composer';
 import ChatSearchPanel from '../components/chat/ChatSearchPanel';
-import InterruptedTurnBanner from '../components/chat/InterruptedTurnBanner';
 import { collectMessageMatches } from '../lib/highlightText';
 import { cn } from '../lib/cn';
 import type { ReplyPhase } from '../components/chat/ReplyStatusBar';
+import { liveReplyPhase } from '../state/liveReply';
 
 export default function ChatPage({
   sessionId,
@@ -29,13 +29,19 @@ export default function ChatPage({
   const streamingTools = useChatStore((s) => s.streamingToolsBySession[sessionId]) ?? [];
   const streamingReasoning = useChatStore((s) => s.streamingReasoningBySession[sessionId]) ?? '';
   const streamingActivities = useChatStore((s) => s.replyActivitiesBySession[sessionId]) ?? [];
-  const explicitReplyPhase = useChatStore((s) => s.replyPhaseBySession[sessionId]);
   const reasoningStartedAt = useChatStore((s) => s.reasoningStartedAtBySession[sessionId]);
+  const lastTextAt = useChatStore((s) => s.lastTextAtBySession[sessionId]);
+  const turnStartedAt = useChatStore((s) => s.turnStartedAtBySession[sessionId]);
   const sending = useChatStore((s) => s.sendingBySession[sessionId]) ?? false;
   const error = useChatStore((s) => s.errorBySession[sessionId]) ?? null;
+  const turnOutcome = useChatStore((s) => s.turnOutcomeBySession[sessionId]) ?? null;
+  const interruptRequested = useChatStore((s) => s.interruptRequestedBySession[sessionId]) ?? false;
   const interaction = useChatStore((s) => s.interactionBySession[sessionId]) ?? null;
   const showInterruptBanner = useChatStore((s) => {
     const summary = s.sessions.find((x) => x.id === sessionId);
+    if (s.sendingBySession[sessionId]) return false;
+    if (s.interruptDismissedBySession[sessionId]) return false;
+    if (s.turnOutcomeBySession[sessionId] === 'interrupted' || summary?.lastTurnOutcome === 'interrupted') return true;
     if (!summary?.activeTurnStartedAt) return false;
     const started = Date.parse(summary.activeTurnStartedAt);
     const ended = summary.lastTurnEndedAt ? Date.parse(summary.lastTurnEndedAt) : 0;
@@ -83,24 +89,18 @@ export default function ChatPage({
   const lastUserId = [...messages].reverse().find((m) => m.role === 'user')?.id;
   const lastAssistantId = [...messages].reverse().find((m) => m.role === 'assistant')?.id;
   const activeToolCount = streamingTools.filter((part) => part.result === undefined && part.error === undefined).length;
-  const derivedReplyPhase: ReplyPhase | undefined = sending
-    ? interaction
-      ? 'waiting'
-      : streamingReasoning && !streaming
-        ? 'thinking'
-        : activeToolCount > 0
-          ? 'tools'
-          : streaming
-            ? 'replying'
-            : 'preparing'
-      : undefined;
+  const derivedReplyPhase: ReplyPhase | undefined = liveReplyPhase({
+    sending,
+    waitingOnUser: Boolean(interaction),
+    activeToolCount,
+    lastTextAt,
+  });
   const replyPhase: ReplyPhase | undefined = sending
     ? interaction
       ? 'waiting'
-      : explicitReplyPhase ?? derivedReplyPhase
+      : derivedReplyPhase
     : undefined;
-  const replyStartedAt = reasoningStartedAt
-    ?? (session?.activeTurnStartedAt ? Date.parse(session.activeTurnStartedAt) : undefined);
+  const replyStartedAt = turnStartedAt;
 
   function commitRename() {
     const next = titleDraft.trim();
@@ -192,17 +192,11 @@ export default function ChatPage({
         currentMatchId={searchOpen ? currentMatch?.messageId : null}
         lastUserId={lastUserId}
         lastAssistantId={lastAssistantId}
+        turnOutcome={turnOutcome}
         onEditLastUser={() => chatStore.editLastUserMessage(sessionId)}
         onRetryLastAssistant={() => void chatStore.retryLastAssistant(sessionId)}
         onPickHint={(text) => chatStore.seedComposer(sessionId, text)}
       />
-      {showInterruptBanner && (
-        <InterruptedTurnBanner
-          onRetry={() => void chatStore.retryInterruptedTurn(sessionId)}
-          onDismiss={() => chatStore.dismissInterrupt(sessionId)}
-        />
-      )}
-      {error && <p className="px-8 pb-2 text-sm text-danger">{error}</p>}
       <Composer
         sessionId={sessionId}
         disabled={false}
@@ -215,6 +209,12 @@ export default function ChatPage({
         replyPhase={replyPhase}
         replyStartedAt={replyStartedAt}
         replyToolCount={streamingTools.length}
+        interruptRequested={interruptRequested}
+        turnOutcome={turnOutcome}
+        turnError={error}
+        showInterruptBanner={showInterruptBanner}
+        onRetryTurn={() => void chatStore.retryInterruptedTurn(sessionId)}
+        onDismissInterrupt={() => chatStore.dismissInterrupt(sessionId)}
       />
     </div>
   );

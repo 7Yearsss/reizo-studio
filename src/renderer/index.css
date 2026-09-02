@@ -1,5 +1,7 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
+@source "../../node_modules/streamdown/dist/*.js";
+@source "../../node_modules/@streamdown/code/dist/*.js";
 
 /*
  * Semantic color tokens (`--paper`, `--ink`, ...) rather than raw Tailwind
@@ -22,6 +24,23 @@
   /* Zero-alpha `--paper` for gradient masks. `transparent` interpolates
      through black in WebKit and leaves a dirty edge. */
   --paper-a0: rgb(250 246 238 / 0);
+
+  /* shadcn / beUI semantic aliases — keep Reizo paper/ink as the source. */
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--paper-raised);
+  --card-foreground: var(--ink);
+  --muted: var(--paper-inset);
+  --muted-foreground: var(--ink-muted);
+  --border: var(--line);
+  --input: var(--line);
+  --primary: var(--accent);
+  --primary-foreground: var(--accent-ink);
+  --secondary: var(--paper-inset);
+  --secondary-foreground: var(--ink);
+  --accent-foreground: var(--accent-ink);
+  --destructive: var(--danger);
+  --ring: color-mix(in srgb, var(--ink) 18%, transparent);
 
   /* Motion tokens. Built-in CSS easings are too weak for deliberate UI. */
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
@@ -47,6 +66,22 @@
   --danger: #fb7185;
 
   --paper-a0: rgb(13 13 13 / 0);
+
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--paper-raised);
+  --card-foreground: var(--ink);
+  --muted: var(--paper-inset);
+  --muted-foreground: var(--ink-muted);
+  --border: var(--line);
+  --input: var(--line);
+  --primary: var(--accent);
+  --primary-foreground: var(--accent-ink);
+  --secondary: var(--paper-inset);
+  --secondary-foreground: var(--ink);
+  --accent-foreground: var(--accent-ink);
+  --destructive: var(--danger);
+  --ring: color-mix(in srgb, var(--ink) 22%, transparent);
 }
 
 @theme {
@@ -56,7 +91,7 @@
   --color-paper-inset: var(--paper-inset);
   --color-sidebar: var(--sidebar);
   --color-ink: var(--ink);
-  --color-muted: var(--ink-muted);
+  --color-muted: var(--muted);
   --color-ink-muted: var(--ink-muted);
   --color-line: var(--line);
   --color-accent: var(--accent);
@@ -64,6 +99,20 @@
   --color-success: var(--success);
   --color-success-bg: var(--success-bg);
   --color-danger: var(--danger);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-ring: var(--ring);
 }
 
 html,
@@ -107,6 +156,14 @@ pre,
   -webkit-app-region: no-drag;
 }
 
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -147,6 +204,73 @@ pre,
   border-radius: 8px;
   padding: 10px 12px;
   overflow-x: auto;
+}
+
+/* Streamdown ships a bordered shell *and* a bordered body. Flatten to one
+   Reizo card so fenced code is not a box inside a box. */
+.markdown [data-streamdown='code-block'] {
+  margin: 0.5em 0;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 8px;
+  border-color: var(--line);
+  background: var(--paper-raised);
+}
+
+.markdown [data-streamdown='code-block-header'] {
+  height: auto;
+  min-height: 28px;
+  padding: 4px 12px;
+  background: color-mix(in srgb, var(--paper-inset) 70%, transparent);
+  color: var(--ink-muted);
+}
+
+.markdown [data-streamdown='code-block-header'] span {
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.markdown [data-streamdown='code-block'] > :has(> [data-streamdown='code-block-actions']) {
+  top: 0;
+  height: 28px;
+  margin-top: -28px;
+  padding-right: 6px;
+}
+
+.markdown [data-streamdown='code-block-actions'] {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.markdown [data-streamdown='code-block-body'] {
+  border: 0;
+  border-radius: 0;
+  background: var(--paper);
+  padding: 10px 12px;
+}
+
+.markdown [data-streamdown='code-block'] pre {
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.markdown [data-streamdown='table-wrapper'] {
+  margin: 0.5em 0;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 8px;
+  border-color: var(--line);
+  background: var(--paper-raised);
 }
 
 .markdown code {
