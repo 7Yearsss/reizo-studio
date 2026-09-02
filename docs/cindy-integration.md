@@ -102,7 +102,17 @@ counters) in the system-prompt prefix; tool set fixed across a session. Reizo's
   529/overloaded copy.
 - Gates: `tsc` clean · `vitest` 34 files / 212 tests · `test:api` pass.
 
+- **R3** — PDF export. `src/main/pdfExport.ts` (throwaway hidden BrowserWindow,
+  explicit webPreferences, no preload, all navigation denied, 30s timeout,
+  concurrency-1 promise chain) + `IPC.EXPORT_PDF` handler + preload
+  `exportPdf(html)` + `window.d.ts`. Renderer:
+  `lib/artifactExport.ts` (`toHtmlDocument` — markdown→`renderToStaticMarkup`
+  with print CSS, html passthrough; `downloadBase64`) + a 导出 PDF button in
+  `ArtifactPreview` for markdown/text/html. **Closes the deferred half of
+  AP3 X3.**
+- Gates: `tsc` clean · `vitest` 34 files / 212 tests · `test:api` pass.
+
 ### Next
 
-- R3 (PDF export IPC — unblocks AP3 X3), R17 (small-utils bundle), then the
-  structural bets R2 (permission triage) + R4 (persistent memory).
+- R17 (small-utils bundle), then the structural bets R2 (permission triage) +
+  R4 (persistent memory), then R9 / R6 / R7.

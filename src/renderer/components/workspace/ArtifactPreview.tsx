@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Code2, Copy, Download, Eye, History, X } from 'lucide-react';
+import { Code2, Copy, Download, Eye, FileDown, History, X } from 'lucide-react';
 import type { Artifact } from '../../../shared/artifact';
 import { isBlobKind } from '../../../shared/artifact';
 import * as api from '../../api';
 import * as artifactStore from '../../state/artifactStore';
+import { downloadBase64, toHtmlDocument } from '../../lib/artifactExport';
 import { pickRenderer } from './renderers';
 import ArtifactVersionRail from './ArtifactVersionRail';
 import HandoffMenu from './HandoffMenu';
@@ -75,6 +76,21 @@ export default function ArtifactPreview({
   const isText = !isBlobKind(artifact.kind);
   const isLatest = version === artifact.version;
   const editable = isText && isLatest && !sourceView;
+  const canPdf = artifact.kind === 'markdown' || artifact.kind === 'text' || artifact.kind === 'html';
+  const [pdfBusy, setPdfBusy] = useState(false);
+
+  async function exportPdf() {
+    if (!window.reizo?.exportPdf) return;
+    setPdfBusy(true);
+    try {
+      const base64 = await window.reizo.exportPdf(toHtmlDocument(artifact, text));
+      downloadBase64(base64, artifact.name.replace(/\.[^.]+$/, '') + '.pdf', 'application/pdf');
+    } catch {
+      /* export failed */
+    } finally {
+      setPdfBusy(false);
+    }
+  }
 
   async function commitDraft(next: string): Promise<void> {
     await api.addArtifactVersion(artifact.id, next);
@@ -141,6 +157,17 @@ export default function ArtifactPreview({
           </button>
         )}
         <HandoffMenu artifact={artifact} getContent={() => text} />
+        {canPdf && (
+          <button
+            type="button"
+            onClick={() => void exportPdf()}
+            disabled={pdfBusy}
+            className="rounded p-1 text-ink-muted hover:bg-paper-inset hover:text-ink disabled:opacity-50"
+            title="导出 PDF"
+          >
+            <FileDown size={12} />
+          </button>
+        )}
         <button
           type="button"
           onClick={() => void download()}
