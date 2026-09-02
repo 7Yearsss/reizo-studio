@@ -9,6 +9,7 @@ import PermissionPrompt from './PermissionPrompt';
 import AskUserPrompt from './AskUserPrompt';
 import QueuePanel from './QueuePanel';
 import TodoCard from './TodoCard';
+import NextStepStrip from './NextStepStrip';
 import ReplyStatusBar, { type ReplyPhase } from './ReplyStatusBar';
 import InterruptedTurnBanner from './InterruptedTurnBanner';
 import SelectField from '../ui/SelectField';
@@ -184,6 +185,12 @@ export default function Composer({
           </div>
         )}
         {sessionId && <TodoCard items={todos} />}
+        {sessionId && !sending && turnOutcome === 'completed' && (
+          <NextStepStrip
+            sessionId={sessionId}
+            onPick={(prompt) => onSend(prompt, [], {})}
+          />
+        )}
         {sessionId && (
           <QueuePanel items={queue} onRemove={(id) => chatStore.removeQueuedTurn(sessionId, id)} />
         )}

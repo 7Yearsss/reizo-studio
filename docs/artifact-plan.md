@@ -653,14 +653,38 @@ intelligence. AP6 rides on the canvas P4 provider work.
   下载 / 删除 / 清除 bar. Empty-state copy updated to "拖文件到这里".
 - `renderers/types.ts` — `ArtifactRenderProps.onCommitDraft`.
 - Gates: `tsc` clean · `vitest` 31 files / 185 tests · `test:api` pass.
-- **Left in AP3**: X3 share/export menu (PDF via Electron `printToPDF`,
-  standalone HTML, ZIP), MD2 streaming-status wiring (producers must flip
-  `status`), MD6 viewport/zoom for HTML previews.
+**AP3 — editing & preview UX (cont.).**
+- `renderers/PreviewFrame.tsx` — MD6: 桌面/平板(820)/手机(390) segmented control
+  + zoom, wraps `HtmlRenderer`'s iframe.
+- **Left in AP3**: X3 share/export menu (PDF needs an Electron `printToPDF` IPC
+  handler — deferred as a small follow-up; standalone-HTML + ZIP unbuilt),
+  MD2 streaming-status wiring (renderer-ready; no producer streams into an
+  artifact incrementally yet).
+
+**AP4 — conversation gets visual (partial).**
+- X8/X9 via the existing `ask_user` seam (no new fenced-block protocol):
+  `AskQuestion` gained `kind:'direction'` + `directions: DirectionCard[]`;
+  `ask_user` tool schema + system-prompt nudge; `DirectionCard.tsx` (palette
+  swatches, "Aa" in the proposed font, mood, refs); `AskUserPrompt.tsx`
+  branches to a bespoke direction layout, else the existing `ApprovalCard`.
+  Reuses the whole `registerPendingAsk` / `waitForInteractions` / `answerAsk`
+  round-trip untouched.
+- **Left in AP4**: DR1 draw-to-annotate, DR3 comment pins, DR4 screenshot→chat.
+
+**AP5 — actionability (partial).**
+- X5 next-step strip: `shared/nextStep.ts` (`pickNextStepActions` + catalogue,
+  4 tests), `NextStepStrip.tsx` rendered in `Composer` after a
+  `completed` turn; cards fire a pre-written prompt via `onSend`. Context
+  (has-artifact / text / image) filters the catalogue.
+- **Left in AP5**: X4 hand-off, X7 context chips, X6 toolbox, X10 od-card,
+  MD3 templates, MD4 plan→artifact loop.
+
+- Gates: `tsc` clean · `vitest` 33 files / 194 tests · `test:api` pass.
 
 ### In progress
 
-- **AP3 tail** then **AP4** — question-form, direction-cards, draw-to-annotate,
-  comment pins.
+- **AP4 tail** (draw-to-annotate, comment pins) → **AP5 tail** → **AP6**
+  (media option strips + task queue) → **cindy investigation + build**.
 
 ### Deviations
 

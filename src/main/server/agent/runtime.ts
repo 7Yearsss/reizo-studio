@@ -219,6 +219,7 @@ export async function runChatTurn(options: {
       ? 'When the user wants to generate or iterate on images, use the canvas: add_node (type "image") to place a node, then run_node to generate. add_node (type "agent") places a read-only research/critique node — wire it downstream of other nodes and run_node to have it comment on their outputs. The canvas panel opens automatically.'
       : '',
     canvasSummary,
+    'When a request needs a visual direction (mood, palette, typography) before you generate or design something, call ask_user with kind:"direction" and 2-4 `directions` cards (title, palette hex list, displayFont/bodyFont stacks, one-line mood, real-world references) so the user picks by looking.',
     memory ? `Workspace MEMORY.md:\n${memory}` : '',
     skill ? `The user invoked skill "${skill.name}". Follow this skill:\n${skill.body}` : '',
     projectInstructions ? `Project "${projectName}" working rules:\n${projectInstructions}` : '',

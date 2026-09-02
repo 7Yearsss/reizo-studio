@@ -1,19 +1,22 @@
 import type { Artifact } from '../../../../shared/artifact';
 import type { ArtifactRendererDef, ArtifactRenderProps } from './types';
 import MarkdownRenderer from './MarkdownRenderer';
+import PreviewFrame from './PreviewFrame';
 
 const HtmlRenderer: React.FC<ArtifactRenderProps> = ({ artifact, text }) => (
   // `sandbox=""` blocks scripts entirely, which is the safe default for a
-  // static preview. When a "run" mode is added (AP3) it switches to
+  // static preview. When a "run" mode is added it switches to
   // `sandbox="allow-scripts"` and wraps `text` with `withHtmlPreviewGuard`
   // (see ./htmlGuards) to neutralise focus-steal / reload-loop / storage
   // throws.
-  <iframe
-    title={artifact.name}
-    sandbox=""
-    className="h-full min-h-[160px] w-full bg-paper-raised"
-    srcDoc={text}
-  />
+  <PreviewFrame>
+    <iframe
+      title={artifact.name}
+      sandbox=""
+      className="h-full min-h-[160px] w-full bg-paper-raised"
+      srcDoc={text}
+    />
+  </PreviewFrame>
 );
 
 const ImageRenderer: React.FC<ArtifactRenderProps> = ({ artifact, text, rawUrl }) => {

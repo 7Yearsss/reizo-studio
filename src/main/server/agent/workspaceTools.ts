@@ -287,7 +287,10 @@ function buildTools(options: {
       },
     }),
     ask_user: tool({
-      description: 'Ask the user a structured question with optional choices. Use this instead of guessing preferences.',
+      description:
+        'Ask the user a structured question with optional choices. Use this instead of guessing preferences. ' +
+        'For a visual-direction choice (mood / palette / typography for something you are about to design or generate), ' +
+        'set kind:"direction" and provide 2-4 `directions` cards — the user picks by looking. The answer is the chosen card id.',
       inputSchema: z.object({
         questions: z.array(
           z.object({
@@ -295,6 +298,20 @@ function buildTools(options: {
             prompt: z.string(),
             options: z.array(z.string()).optional(),
             multi: z.boolean().optional(),
+            kind: z.enum(['choice', 'text', 'direction']).optional(),
+            directions: z
+              .array(
+                z.object({
+                  id: z.string(),
+                  title: z.string(),
+                  palette: z.array(z.string()).optional(),
+                  displayFont: z.string().optional(),
+                  bodyFont: z.string().optional(),
+                  mood: z.string().optional(),
+                  references: z.array(z.string()).optional(),
+                }),
+              )
+              .optional(),
           }),
         ),
       }),
