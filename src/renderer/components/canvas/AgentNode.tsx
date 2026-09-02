@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Handle, NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
+import { Loader2, Play } from 'lucide-react';
 import type { CanvasAgentParams } from '../../../shared/canvas';
 import * as canvasStore from '../../state/canvasStore';
 import { cn } from '../../lib/cn';
@@ -10,16 +11,30 @@ export default function AgentNode({ id, data, selected }: NodeProps) {
   const params = node.params as CanvasAgentParams;
   const [instruction, setInstruction] = useState(params.instruction ?? '');
   const resizeStart = useRef<{ w: number; h: number } | null>(null);
+  const running = node.runState === 'running';
+  const answer = node.output?.text ?? '';
 
   useEffect(() => {
     setInstruction((params.instruction as string) ?? '');
   }, [params.instruction]);
 
+  const run = () => {
+    if (running || !instruction.trim()) return;
+    if (instruction !== params.instruction) {
+      void canvasStore
+        .updateNodeParams(sessionId, node.id, { ...params, instruction })
+        .then(() => canvasStore.runNode(sessionId, node.id));
+    } else {
+      void canvasStore.runNode(sessionId, node.id);
+    }
+  };
+
   return (
     <div
       className={cn(
-        'flex h-full w-full flex-col rounded-xl border bg-paper-raised p-3 text-xs shadow-sm',
+        'flex h-full w-full flex-col rounded-xl border bg-paper-raised p-3 text-xs shadow-sm transition-shadow',
         selected ? 'border-accent' : 'border-line',
+        running && 'canvas-node-running',
         highlighted && 'canvas-node-highlight',
       )}
     >
@@ -40,9 +55,32 @@ export default function AgentNode({ id, data, selected }: NodeProps) {
       />
       <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-line !bg-paper" />
       <Handle type="source" position={Position.Right} className="!h-2 !w-2 !border-line !bg-accent" />
-      <div className="mb-2 flex">
+
+      <div className="mb-2 flex items-center justify-between gap-2">
         <NodeTitle sessionId={sessionId} nodeId={node.id} title={node.title} fallback="Agent 任务" />
+        <div className="flex shrink-0 items-center gap-1">
+          {node.dirty && !running ? (
+            <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">
+              待更新
+            </span>
+          ) : null}
+          <span
+            className={cn(
+              'rounded-full px-1.5 py-0.5 text-[10px]',
+              node.runState === 'error'
+                ? 'bg-danger/10 text-danger'
+                : node.runState === 'done'
+                  ? 'bg-success/10 text-success'
+                  : running
+                    ? 'bg-accent/10 text-accent'
+                    : 'bg-paper-inset text-ink-muted',
+            )}
+          >
+            {node.runState === 'idle' ? '未运行' : running ? '思考中' : node.runState === 'done' ? '完成' : '失败'}
+          </span>
+        </div>
       </div>
+
       <textarea
         value={instruction}
         onChange={(e) => setInstruction(e.target.value)}
@@ -50,11 +88,33 @@ export default function AgentNode({ id, data, selected }: NodeProps) {
           instruction !== params.instruction &&
           void canvasStore.updateNodeParams(sessionId, node.id, { ...params, instruction })
         }
-        rows={3}
-        placeholder="调研 / 批评 / 改写…"
-        className="nodrag min-h-0 flex-1 resize-none rounded-lg border border-line bg-paper px-2 py-1.5 text-xs text-ink outline-none focus:border-accent"
+        rows={2}
+        placeholder="调研 / 批评 / 改写…（可连一个上游节点让它点评其结果）"
+        className="nodrag w-full resize-none rounded-lg border border-line bg-paper px-2 py-1.5 text-xs text-ink outline-none focus:border-accent"
       />
-      <p className="mt-2 text-[11px] text-ink-muted">Agent 节点的执行在下个版本 (P2) 接入。</p>
+
+      <div className="mt-2 flex items-center">
+        <button
+          type="button"
+          onClick={run}
+          disabled={running || !instruction.trim()}
+          className="nodrag ml-auto inline-flex items-center gap-1 rounded-lg bg-ink px-2.5 py-1 text-[11px] text-paper-raised disabled:opacity-40"
+        >
+          {running ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+          运行
+        </button>
+      </div>
+
+      {node.output?.error ? (
+        <p className="mt-2 rounded-lg bg-danger/10 px-2 py-1 text-[11px] text-danger">{node.output.error}</p>
+      ) : null}
+
+      {answer ? (
+        <div className="nodrag mt-2 min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap rounded-lg border border-line bg-paper px-2 py-1.5 text-[11px] leading-relaxed text-ink">
+          {answer}
+          {running ? <span className="ml-0.5 inline-block h-3 w-1 animate-pulse bg-accent align-middle" /> : null}
+        </div>
+      ) : null}
     </div>
   );
 }

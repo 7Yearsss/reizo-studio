@@ -2,7 +2,11 @@ import type { SettingsStore } from '../storage/settingsStore';
 import type { CanvasStore } from '../storage/canvasStore';
 import { getCanvasChannel } from './channel';
 import { runImageNode } from './imageExecutor';
+import { runAgentNode } from './agentExecutor';
 import { descendants, directUpstream, topoOrder } from './graph';
+
+/** Node types the executor knows how to run. */
+const RUNNABLE = new Set(['image', 'agent']);
 
 /** In-flight `runGraph` per canvas, so a "stop" can abort between nodes. */
 const activeRuns = new Map<string, AbortController>();
@@ -53,7 +57,7 @@ export async function runGraph(options: {
   const channel = getCanvasChannel(canvasId);
   const failed = new Set<string>();
 
-  const runnable = order.filter((id) => inScope.has(id) && byId.get(id)?.type === 'image');
+  const runnable = order.filter((id) => inScope.has(id) && RUNNABLE.has(byId.get(id)?.type ?? ''));
   const total = runnable.length;
   if (total === 0) return;
 
@@ -69,7 +73,7 @@ export async function runGraph(options: {
       if (abort.signal.aborted) break;
       if (!inScope.has(id)) continue;
       const node = byId.get(id);
-      if (!node || node.type !== 'image') continue; // 'agent' nodes land in P2
+      if (!node || !RUNNABLE.has(node.type)) continue;
 
       const brokenUpstream = directUpstream(edges, id).some((u) => failed.has(u));
       if (brokenUpstream) {
@@ -95,7 +99,11 @@ export async function runGraph(options: {
       // during this run), so re-read rather than passing the stale snapshot.
       const fresh = canvasStore.getNode(canvasId, id);
       if (!fresh) continue;
-      await runImageNode({ canvasStore, settingsStore, dataRoot, canvasId, node: fresh, providerId });
+      if (fresh.type === 'agent') {
+        await runAgentNode({ canvasStore, settingsStore, canvasId, node: fresh, providerId, signal: abort.signal });
+      } else {
+        await runImageNode({ canvasStore, settingsStore, dataRoot, canvasId, node: fresh, providerId });
+      }
       if (canvasStore.getNode(canvasId, id)?.runState === 'error') failed.add(id);
       done += 1;
       channel.broadcast(rev(), { type: 'graph_run', running: true, done, total });

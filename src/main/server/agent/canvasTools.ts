@@ -5,6 +5,7 @@ import type { SettingsStore } from '../storage/settingsStore';
 import type { CanvasStore } from '../storage/canvasStore';
 import { getCanvasChannel } from '../canvas/channel';
 import { broadcastDownstreamDirty, runImageNode } from '../canvas/imageExecutor';
+import { runAgentNode } from '../canvas/agentExecutor';
 import { runGraph } from '../canvas/graphExecutor';
 import type { CanvasNode } from '../../../shared/canvas';
 
@@ -74,14 +75,17 @@ export function createCanvasTools(options: {
 
     run_node: tool({
       description:
-        'Run a canvas node by id. For an image node this generates the image (a paid call). Returns immediately; the result streams onto the canvas.',
+        'Run a canvas node by id. An image node generates the image (a paid call); an agent node runs a read-only research/critique pass. Returns immediately; the result streams onto the canvas.',
       inputSchema: z.object({ id: z.string() }),
       execute: async ({ id }) => {
         const canvas = canvasStore.ensureCanvas(sessionId);
         const node = canvasStore.getNode(canvas.id, id);
         if (!node) return { error: `No canvas node "${id}"` };
-        if (node.type !== 'image') return { error: 'Only image nodes can be run in this version' };
-        void runImageNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node });
+        if (node.type === 'agent') {
+          void runAgentNode({ canvasStore, settingsStore, canvasId: canvas.id, node });
+        } else {
+          void runImageNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node });
+        }
         return { ok: true, id, status: 'running' };
       },
     }),

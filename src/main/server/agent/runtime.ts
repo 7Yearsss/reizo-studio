@@ -215,7 +215,7 @@ export async function runChatTurn(options: {
       ? `You are Reizo Studio, a local desktop agent that finishes real work in the user's files. The workspace is at: ${workspacePath}. Prefer tools over guessing. Use list_dir/read_file/find_files/grep to inspect, edit_file/write_file to change files, run_command for tests and git, ask_user when you need a choice, todo_write for a visible plan, and memory_read/memory_write for durable notes in MEMORY.md.`
       : 'You are Reizo Studio, a helpful creative assistant running locally on the user\'s desktop. Use ask_user if you need the user to choose.',
     canvasStore
-      ? 'When the user wants to generate or iterate on images, use the canvas: add_node (type "image") to place a node, then run_node to generate. The canvas panel opens automatically.'
+      ? 'When the user wants to generate or iterate on images, use the canvas: add_node (type "image") to place a node, then run_node to generate. add_node (type "agent") places a read-only research/critique node — wire it downstream of other nodes and run_node to have it comment on their outputs. The canvas panel opens automatically.'
       : '',
     canvasSummary,
     memory ? `Workspace MEMORY.md:\n${memory}` : '',

@@ -1,6 +1,6 @@
 # Canvas + Agent — design decisions & feasibility
 
-Status: **C + P1 + P1.5 + P2-UX shipped to `main`** (2026-09-02). Target: an
+Status: **C + P1 + P1.5 + P2-UX + P2 (Agent Task node) shipped to `main`** (2026-09-02). Target: an
 infinite node canvas (React Flow) in the right-side panel where an agent and the
 user co-edit a graph. §1–§5 are the original decision record from a grilling
 session plus an Opus 5 feasibility review; **§6 is the live implementation status
@@ -274,9 +274,11 @@ and at that point generalize `sinks` from `Map<sessionId, sink>` to
   executor core is textbook (topo sort, cycle detection at connect time, dirty
   propagation, per-field LWW); ~1–2 weeks. Node `run()` = API call, so no
   VRAM / model management.
-- **P2** — Agent Task node. Requires the `runAgentPass()` extraction (trap D11)
-  and generalizing the permission `sinks` scope (R3). 3–5 days for the refactor
-  + the node.
+- **P2** — Agent Task node. **Shipped (#16).** Landed *without* the
+  `runAgentPass()` extraction or the `sinks` scoping: a read-only toolset
+  (`read_canvas` / `read_node`) raises no interactions, so `runAgentNode` is a
+  self-contained `streamText` pass that never enters the chat turn lifecycle.
+  The refactor is only needed if a later node type wants approval-gated tools.
 - **P3** — undo / redo polish, drag-to-mention, right-click node actions.
 - **P4** — video / audio nodes (same async-job → media-URL pattern, new
   provider contracts + longer-job UX + player widgets).
@@ -293,6 +295,7 @@ and at that point generalize `sinks` from `Map<sessionId, sink>` to
 | #11 | **C** | React Flow right-panel canvas, `image` node with real generation, `add_node` / `run_node` agent tools, session-scoped `canvases`/`canvas_nodes`/`canvas_edges` tables + `0002_canvas` migration, forked `CanvasChannel` (own ring, no `done`, 15s heartbeat), `DbHandle` plumbed to `createApp`, on-disk PNG assets served at `GET /api/canvas/assets/:canvasId/:file`, renderer-local pre-flight spend confirm. R1/R2/R3 mitigations all implemented as designed. |
 | #13 | **P1 + P1.5** | Topological executor (`topoOrder` Kahn, cycle detection at connect time, `descendants` scoping for "run from here"), dirty tracking (`inputHash` vs stored `paramsHash`, `broadcastDownstreamDirty`), `run_graph` + `graph_run` progress events + stop; **P1.5 UX**: right-click context menus (node + pane), drag-drop image import (`POST /:canvasId/import`), `NodeResizer` with resize-end commit, animated edges on running targets, lightbox / download / "save to artifacts" (`POST /:canvasId/nodes/:id/save-asset`), agent `read_canvas` / `read_node` / `update_node` / `connect_nodes` / `delete_node` tools, selection → agent turn summary (`selectionByCanvas`), focus-canvas-on-agent-touch, no `window.confirm` popups (explicit click = consent; batch run = 2-click inline confirm). |
 | #14 | **P2-UX** (pulled forward from old P3) | Renderer-side undo/redo (`HistoryEntry` closures, `HISTORY_CAP=60`, mutable-id capture), drag node → composer reference chip + `canvas:<id>` mentions, bidirectional node↔chat highlight, auto-layout ("整理" → `layoutGraph`), connection validation (`isValidConnection` = `wouldCycle` + dup check), inline double-click rename, multi-image dot navigation, right-panel maximize / resizable divider / close. |
+| #16 | **P2 (Agent Task node)** | `canvas/agentExecutor.ts` `runAgentNode` — a headless, isolated `streamText` pass with a **read-only** toolset (`read_canvas` / `read_node` scoped to the canvas id, no writes, no chat history), streaming its answer into `output.text` over the canvas channel (throttled `node_output` at 400ms, `stopWhen: isStepCount(12)`). Upstream node outputs are folded into the prompt as context; `paramsHash` written on success so dirty-tracking covers agent nodes. `graphExecutor` now runs `image` **and** `agent` nodes in topo order; `POST /:canvasId/nodes/:id/run` executes agent nodes (no spend gate — text only); `run_node` agent tool dispatches them. `AgentNode.tsx` gained a Run button, status badge, dirty badge, and a scrolling streamed-answer panel. **The `runAgentPass()` extraction from `runChatTurn` and the `permissions.ts` sink-scoping (R3) were _not_ needed** — the read-only toolset raises no interactions, so the node never touches the chat turn lifecycle or the permission sink. |
 
 Merge base tips: `13fab01` (#10 doc) ◂ `8967721` (#14) ◂ `9987deb` (#13) ◂ `134a8bf` (#11) ◂ `33336d4` (#9). `main` verified green: `tsc` clean, `vitest` 26 files / 155 tests, `test:api` smoke pass.
 
@@ -312,20 +315,17 @@ Merge base tips: `13fab01` (#10 doc) ◂ `8967721` (#14) ◂ `9987deb` (#13) ◂
 
 ### Not done
 
-**P2 — Agent Task node (the biggest remaining planned piece).**
-`AgentNode.tsx` is a placeholder (instruction textarea + "P2" note);
-`graphExecutor.ts` skips `agent` nodes; `POST /:canvasId/nodes/:id/run` returns
-501 for them. Blockers, both called out in §2/§4:
-- Extract `runAgentPass({ model, instructions, messages, tools, onEvent, signal })`
-  out of `runChatTurn` (`agent/runtime.ts`) so a sub-agent turn does **not**
-  persist a `ChatMessage`, rename the session, or read `session.messages` as
-  history (trap D11). ~3–5 day refactor.
-- Generalize `permissions.ts` `sinks` from `Map<sessionId, sink>` to
-  `Map<scopeId, sink>` (`chat:<id>` / `canvas:<id>`) and make
-  `clearPermissionSink` scope-selective (R3), so an Agent Task run has a
-  delivery channel for any interaction it raises.
-- Point the sub-agent's event sink at the `CanvasChannel`; restricted read-only
-  toolset (`web_search` + `read_node` + `read_canvas`).
+**P2 v1.1 — richer Agent Task node.** The v1 node (#16) works but is
+deliberately thin:
+- **No `web_search`** — the codebase has no search tool yet, so the node can
+  only reason over the canvas + upstream outputs. Add a real search tool and
+  include it in the read-only toolset.
+- **Single output, overwritten on rerun** — no history / variations.
+- **Frozen context** — upstream outputs are folded in at run start; a mid-run
+  upstream change is not seen (acceptable — rerun).
+- The `runAgentPass()` extraction from `runChatTurn` is still worth doing if a
+  future node type needs approval-gated tools (then R3's `sinks` scoping also
+  becomes real). Not needed for the read-only node.
 
 **P4 — video / audio nodes.** Nothing started. Needs provider contracts (video:
 Kling / Runway / Veo; audio: ElevenLabs / Suno), long-job progress UX, and
