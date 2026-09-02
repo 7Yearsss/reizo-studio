@@ -270,13 +270,26 @@ export function createCanvasRouter(
       return c.json({ error: 'Asset missing on disk' }, 404);
     }
     const session = canvas ? await sessionStore.get(canvas.sessionId) : null;
-    const name = `${(node.title || 'canvas-image').replace(/[^\w.-]+/g, '-').slice(0, 60)}.${rel.split('.').pop() || 'png'}`;
-    const artifact = await artifactStore.create({
+    const ext = rel.split('.').pop() || 'png';
+    // Stable per-node name so re-saving a re-run of the same node appends a
+    // version to one artifact instead of piling up rows (IM3 — regenerate
+    // history via the version rail).
+    const name = `${(node.title || 'canvas-image').replace(/[^\w.-]+/g, '-').slice(0, 48)}-${node.id.slice(0, 6)}.${ext}`;
+    const p = node.params as { prompt?: string; model?: string };
+    const artifact = await artifactStore.createOrAddVersion({
       sessionId: canvas?.sessionId ?? '',
       projectId: session?.projectId ?? null,
       name,
-      content: `data:image/${rel.endsWith('jpg') ? 'jpeg' : 'png'};base64,${bytes.toString('base64')}`,
+      kind: 'image',
+      bytes,
+      mimeType: ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : 'image/png',
       source: 'generated',
+      origin: {
+        surface: 'canvas',
+        canvasNodeId: node.id,
+        prompt: p.prompt?.slice(0, 400),
+        model: p.model,
+      },
     });
     return c.json({ artifact }, 201);
   });

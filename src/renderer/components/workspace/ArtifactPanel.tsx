@@ -21,6 +21,18 @@ const KIND_LABELS: Record<ArtifactKind, string> = {
   json: 'JSON',
   image: '图片',
   binary: '二进制',
+  svg: 'SVG',
+  diagram: '图表',
+  code: '代码',
+  video: '视频',
+  audio: '音频',
+  sketch: '手绘',
+};
+
+const SOURCE_LABELS: Record<string, string> = {
+  attachment: '附件',
+  generated: '生成',
+  manual: '手动',
 };
 
 function KindIcon({ kind }: { kind: ArtifactKind }) {
@@ -113,9 +125,16 @@ export default function ArtifactPanel({ sessionId }: { sessionId: string }) {
                 >
                   <KindIcon kind={a.kind} />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-xs font-medium">{a.name}</span>
+                    <span className="flex items-center gap-1.5 truncate text-xs font-medium">
+                      <span className="truncate">{a.name}</span>
+                      {a.versionCount > 1 ? (
+                        <span className="shrink-0 rounded bg-paper-inset px-1 text-[9px] font-medium tabular-nums text-ink-muted">
+                          v{a.version}
+                        </span>
+                      ) : null}
+                    </span>
                     <span className="mt-0.5 block truncate font-mono text-[10px] text-ink-muted">
-                      {KIND_LABELS[a.kind]} · {a.source === 'attachment' ? '附件' : '生成'} · {formatTime(a.createdAt)}
+                      {KIND_LABELS[a.kind]} · {SOURCE_LABELS[a.source] ?? a.source} · {formatTime(a.createdAt)}
                     </span>
                   </span>
                 </button>

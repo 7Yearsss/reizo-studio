@@ -579,14 +579,55 @@ intelligence. AP6 rides on the canvas P4 provider work.
 
 ## 6. Implementation status — 2026-09-03
 
+### Shipped (branch `feat/artifact-substrate`)
+
+**AP1 — artifact substrate.**
+- `shared/artifact.ts` — `ArtifactKind` grew `svg/diagram/code/video/audio/sketch`;
+  new `ArtifactRenderer`, `ArtifactStatus`, `ArtifactOrigin`, `ArtifactVersion`;
+  `Artifact` gained `renderer/status/version/versionCount/byteSize/origin/metadata/updatedAt`.
+  `source` gained `'manual'`. Helpers: `inferRenderer`, `isBlobKind`, `extForBlob`.
+- `db/migrations.ts` + `db/schema.ts` + `db/migrations/0003_artifacts.sql` —
+  `artifacts` + `artifact_versions` (append-only, `origin_json` per version,
+  `storage: inline|blob`). No FK on `session_id` (test app keeps sessions
+  outside SQLite; cleanup stays manual via `removeBySession`).
+- `server/storage/artifactStore.ts` — full rewrite against `node:sqlite` raw
+  prepares (canvasStore pattern). Blobs at `<dataRoot>/artifacts/blobs/<id>/v<n><ext>`.
+  New: `addVersion`, `restoreVersion`, `listVersions`, `get(id, v?)`,
+  `getMeta`, `blobFilePath`, `createOrAddVersion`, `setStatus`. `data:` URLs
+  auto-decode to blobs. **One-shot legacy JSON import** on construction
+  (`<dataRoot>/artifacts/*.json` → tables → dir renamed + marker file).
+  `artifactStore.test.ts` — 7 cases (versions, blob, restore, legacy import
+  idempotency, per-session `createOrAddVersion`, blob cleanup).
+- `app.ts` — `db = options.db ?? openDb(':memory:')`; artifact + canvas stores
+  now always available (test app included). `createArtifactStore(db, dataRoot)`.
+- `routes/artifacts.ts` — `GET /:id?v=`, `GET /:id/versions`, `GET /:id/raw?v=`
+  (blob bytes / inline fallback), `POST /:id/versions` (manual edit),
+  `POST /:id/restore/:n`. `POST /api/sessions/:id/artifacts` accepts
+  `kind` + `source:'manual'`.
+- `agent/runtime.ts` — `onFileWritten` → `createOrAddVersion` tagged with the
+  turn's prompt, so a rewritten file builds a version history.
+- `routes/canvas.ts` `save-asset` → `createOrAddVersion` keyed by a stable
+  per-node name with `origin { surface:'canvas', canvasNodeId, prompt, model }`
+  (IM3 — regenerate history lands in the version rail).
+- Renderer: `components/workspace/renderers/` (`pickRenderer` registry:
+  image/video/audio/svg/html/markdown/code/raw), `ArtifactVersionRail.tsx`
+  (version list · prompt · 切换到此版本), `ArtifactPreview.tsx` reduced to a
+  host (toolbar + renderer + rail; `status` badges; blob download via raw URL).
+  `state/artifactStore.ts` — content keyed `${id}@${v}`, `loadArtifactVersions`,
+  `invalidateArtifact`. `api.ts` — `getArtifactVersions`, `addArtifactVersion`,
+  `restoreArtifactVersion`, `artifactRawUrl`.
+- Gates: `tsc` clean · `vitest` 27 files / 166 tests · `test:api` pass.
+
 ### In progress
 
-- **AP1** — plan written; substrate implementation starting.
-
-### Shipped
-
-_(nothing yet)_
+- **AP2** — honesty rails (tool-loop guard, preview iframe guards, media-error
+  classifier).
 
 ### Deviations
 
-_(none yet)_
+- AP1 §1.2 proposed a `session_id` FK on `artifacts`; dropped it (test app runs
+  the JSON session store, so a FK would 500 there). Cleanup was already manual.
+- Image auto-artifact-on-generation (§1.3) folded into the existing explicit
+  "save to artifacts" node action rather than writing an artifact on every
+  run — keeps the 作品 panel from filling with every iteration; the version
+  rail still delivers history when the user saves a re-run.

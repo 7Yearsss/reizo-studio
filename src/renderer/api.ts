@@ -1,6 +1,6 @@
 import type { Session, SessionSummary } from '../shared/chat';
 import type { Project } from '../shared/project';
-import type { Artifact, ArtifactWithContent } from '../shared/artifact';
+import type { Artifact, ArtifactVersion, ArtifactWithContent } from '../shared/artifact';
 import type { DirEntry } from '../shared/workspace';
 import type { PublicSettings, SettingsPatch } from '../shared/settings';
 import type { Schedule, Thought } from '../shared/schedule';
@@ -405,10 +405,38 @@ export async function createSessionArtifact(
   return artifact;
 }
 
-export async function getArtifact(id: string): Promise<ArtifactWithContent> {
-  const res = await api(`/api/artifacts/${id}`);
+export async function getArtifact(id: string, version?: number): Promise<ArtifactWithContent> {
+  const res = await api(`/api/artifacts/${id}${version ? `?v=${version}` : ''}`);
   const { artifact } = await res.json();
   return artifact;
+}
+
+export async function getArtifactVersions(id: string): Promise<ArtifactVersion[]> {
+  const res = await api(`/api/artifacts/${id}/versions`);
+  const { versions } = await res.json();
+  return versions;
+}
+
+export async function addArtifactVersion(id: string, content: string): Promise<ArtifactWithContent> {
+  const res = await api(`/api/artifacts/${id}/versions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ content }),
+  });
+  const { artifact } = await res.json();
+  return artifact;
+}
+
+export async function restoreArtifactVersion(id: string, n: number): Promise<ArtifactWithContent> {
+  const res = await api(`/api/artifacts/${id}/restore/${n}`, { method: 'POST' });
+  const { artifact } = await res.json();
+  return artifact;
+}
+
+/** Absolute URL for a blob-backed artifact version (`<img src>` / `<video src>`). */
+export async function artifactRawUrl(id: string, version?: number): Promise<string> {
+  const origin = await apiOrigin();
+  return `${origin}/api/artifacts/${id}/raw${version ? `?v=${version}` : ''}`;
 }
 
 export async function deleteArtifact(id: string): Promise<void> {

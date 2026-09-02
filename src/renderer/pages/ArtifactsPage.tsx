@@ -11,6 +11,12 @@ const KIND_LABELS: Record<ArtifactKind, string> = {
   json: 'JSON',
   image: '图片',
   binary: '二进制',
+  svg: 'SVG',
+  diagram: '图表',
+  code: '代码',
+  video: '视频',
+  audio: '音频',
+  sketch: '手绘',
 };
 
 function KindIcon({ kind }: { kind: ArtifactKind }) {

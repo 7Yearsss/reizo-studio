@@ -256,12 +256,15 @@ export async function runChatTurn(options: {
         todos,
         onFileWritten: artifactStore
           ? async (relativePath, content) => {
-              await artifactStore.create({
+              // Same file rewritten in a later turn → append a version tagged
+              // with the prompt that caused it, not a fresh row.
+              await artifactStore.createOrAddVersion({
                 sessionId,
                 projectId: session.projectId,
                 name: relativePath.split(/[/\\]/).pop() || relativePath,
                 content,
                 source: 'generated',
+                origin: { surface: 'chat', prompt: userText.slice(0, 400) },
               });
             }
           : undefined,
