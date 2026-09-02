@@ -29,6 +29,14 @@ export default function ArtifactVersionRail({
     | undefined;
   const [busy, setBusy] = useState(false);
 
+  async function copyPrompt(text: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      /* clipboard unavailable */
+    }
+  }
+
   useEffect(() => {
     void artifactStore.loadArtifactVersions(artifactId);
   }, [artifactId]);
@@ -79,7 +87,7 @@ export default function ArtifactVersionRail({
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      void navigator.clipboard.writeText(v.origin.prompt ?? '').catch(() => undefined);
+                      void copyPrompt(v.origin.prompt ?? '');
                     }}
                     className="rounded p-0.5 text-ink-muted hover:bg-paper hover:text-ink"
                     title="复制这条提示"

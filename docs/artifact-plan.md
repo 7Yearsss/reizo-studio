@@ -618,10 +618,32 @@ intelligence. AP6 rides on the canvas P4 provider work.
   `restoreArtifactVersion`, `artifactRawUrl`.
 - Gates: `tsc` clean · `vitest` 27 files / 166 tests · `test:api` pass.
 
+**AP2 — honesty rails.**
+- `server/agent/toolLoopGuard.ts` (+ test, 8 cases) — `inspectToolStream` pure
+  fn + `createToolLoopGuard` stateful wrapper. Triggers: 3/6 consecutive tool
+  errors (reset by any success); same signature failing 3/5× (reset only by a
+  successful *mutating* call). Emits a verdict only when the tier rises.
+- `shared/stream.ts` — new `{ type: 'tool_loop'; tier: 'warn'|'halt'; reason }`
+  event.
+- `agent/runtime.ts` — wraps `emit` in `onReady`: completed tool calls feed the
+  guard; `warn` → `tool_loop` event; `halt` → also `abortChatTurn` (settles as
+  `interrupted`; the event carries the reason).
+- Renderer — `chatStore` folds `tool_loop` into `loopNoticeBySession` (cleared
+  on new turn); `Composer` renders an amber `role="status"` banner.
+- `renderers/htmlGuards.ts` (+ test) — `withHtmlPreviewGuard` / injectable
+  script neutralising focus-steal, redirect-loop, and opaque-origin storage
+  throws. Wired into `HtmlRenderer` as a comment for now — activates with the
+  AP3 "run HTML" mode (current default stays `sandbox=""`, scripts off).
+- `server/canvas/mediaError.ts` (+ test, 7 cases) — `classifyMediaError` →
+  `{ code, subject, retryable?, message, raw }`. Tri-state `retryable`
+  (`undefined` ≠ `false`). Wired into `imageExecutor` catch: the node shows one
+  localised sentence, the raw goes to the log.
+- Gates: `tsc` clean · `vitest` 31 files / 185 tests · `test:api` pass.
+
 ### In progress
 
-- **AP2** — honesty rails (tool-loop guard, preview iframe guards, media-error
-  classifier).
+- **AP3** — editing & preview UX (markdown split editor + autosave, streaming
+  status, viewport/zoom, share/export menu, drop zone).
 
 ### Deviations
 

@@ -46,7 +46,11 @@ export default function ArtifactPreview({
 
   async function copy() {
     if (text) {
-      await navigator.clipboard.writeText(text).catch(() => undefined);
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        /* clipboard unavailable */
+      }
     }
   }
 

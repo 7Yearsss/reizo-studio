@@ -10,6 +10,11 @@ const MarkdownRenderer: React.FC<ArtifactRenderProps> = ({ text }) => (
 );
 
 const HtmlRenderer: React.FC<ArtifactRenderProps> = ({ artifact, text }) => (
+  // `sandbox=""` blocks scripts entirely, which is the safe default for a
+  // static preview. When a "run" mode is added (AP3) it switches to
+  // `sandbox="allow-scripts"` and wraps `text` with `withHtmlPreviewGuard`
+  // (see ./htmlGuards) to neutralise focus-steal / reload-loop / storage
+  // throws.
   <iframe
     title={artifact.name}
     sandbox=""

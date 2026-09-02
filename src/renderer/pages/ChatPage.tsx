@@ -34,6 +34,7 @@ export default function ChatPage({
   const turnStartedAt = useChatStore((s) => s.turnStartedAtBySession[sessionId]);
   const sending = useChatStore((s) => s.sendingBySession[sessionId]) ?? false;
   const error = useChatStore((s) => s.errorBySession[sessionId]) ?? null;
+  const loopNotice = useChatStore((s) => s.loopNoticeBySession[sessionId]) ?? null;
   const turnOutcome = useChatStore((s) => s.turnOutcomeBySession[sessionId]) ?? null;
   const interruptRequested = useChatStore((s) => s.interruptRequestedBySession[sessionId]) ?? false;
   const interaction = useChatStore((s) => s.interactionBySession[sessionId]) ?? null;
@@ -225,6 +226,7 @@ export default function ChatPage({
         interruptRequested={interruptRequested}
         turnOutcome={turnOutcome}
         turnError={error}
+        loopNotice={loopNotice}
         showInterruptBanner={showInterruptBanner}
         onRetryTurn={() => void chatStore.retryInterruptedTurn(sessionId)}
         onDismissInterrupt={() => chatStore.dismissInterrupt(sessionId)}

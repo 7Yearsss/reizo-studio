@@ -51,6 +51,7 @@ export type ChatStreamEvent =
   | { type: 'permission'; id: string; name: string; args: Record<string, unknown>; preview?: FileDiffPreview }
   | { type: 'ask'; id: string; questions: AskQuestion[] }
   | { type: 'todos'; items: TodoItem[] }
+  | { type: 'tool_loop'; tier: 'warn' | 'halt'; reason: string }
   | { type: 'error'; error: string }
   | { type: 'done'; outcome: TurnOutcome; aborted?: boolean; error?: string };
 

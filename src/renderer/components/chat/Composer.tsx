@@ -41,6 +41,7 @@ export default function Composer({
   interruptRequested = false,
   turnOutcome = null,
   turnError = null,
+  loopNotice = null,
   showInterruptBanner = false,
   onRetryTurn,
   onDismissInterrupt,
@@ -63,6 +64,7 @@ export default function Composer({
   interruptRequested?: boolean;
   turnOutcome?: TurnOutcome | null;
   turnError?: string | null;
+  loopNotice?: string | null;
   showInterruptBanner?: boolean;
   onRetryTurn?: () => void;
   onDismissInterrupt?: () => void;
@@ -172,6 +174,14 @@ export default function Composer({
         )}
         {!sending && showInterruptBanner && onRetryTurn && onDismissInterrupt && (
           <InterruptedTurnBanner onRetry={onRetryTurn} onDismiss={onDismissInterrupt} />
+        )}
+        {loopNotice && (
+          <div
+            className="mb-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-ink"
+            role="status"
+          >
+            ⚠ {loopNotice}
+          </div>
         )}
         {sessionId && <TodoCard items={todos} />}
         {sessionId && (

@@ -8,7 +8,8 @@ import { createCanvasTools } from './canvasTools';
 import { getCanvasSelection } from '../canvas/selection';
 import type { CanvasStore } from '../storage/canvasStore';
 import type { CanvasImageParams } from '../../../shared/canvas';
-import { startAgentTurn } from './session';
+import { startAgentTurn, abortChatTurn } from './session';
+import { createToolLoopGuard } from './toolLoopGuard';
 import { consumeInteractions, waitForInteractions } from './permissions';
 import { translateOpenAiChunk } from './translators/openai';
 import { compactAssistantParts, compactModelMessages } from './modelHistory';
@@ -41,7 +42,7 @@ const PROVIDER_TIMEOUT = {
   stepMs: 5 * 60_000,
 } as const;
 
-export { abortChatTurn } from './session';
+export { abortChatTurn };
 
 export async function runChatTurn(options: {
   sessionStore: SessionStore;
@@ -246,6 +247,7 @@ export async function runChatTurn(options: {
   // created here need the reference up front (todos / permission side-channel).
   let emit: (event: ChatStreamEvent) => void = () => undefined;
   const todos: TodoItem[] = [];
+  const loopGuard = createToolLoopGuard();
 
   const toolset = workspacePath
     ? createWorkspaceTools({
@@ -304,7 +306,26 @@ export async function runChatTurn(options: {
     translate: translateOpenAiChunk,
     largeValues: largeValueStore,
     onReady: (send) => {
-      emit = send;
+      // Watch completed tool calls for a stuck-agent loop. `warn` surfaces a
+      // banner; `halt` also aborts the turn (it settles as `interrupted` — the
+      // tool_loop event carries the reason).
+      emit = (event) => {
+        if (
+          event.type === 'tool' &&
+          (event.result !== undefined || event.error !== undefined)
+        ) {
+          const verdict = loopGuard.record({
+            name: event.name,
+            args: event.args,
+            ok: event.error === undefined,
+          });
+          if (verdict && verdict.tier !== 'ok') {
+            send({ type: 'tool_loop', tier: verdict.tier, reason: verdict.reason });
+            if (verdict.tier === 'halt') setTimeout(() => abortChatTurn(sessionId), 0);
+          }
+        }
+        send(event);
+      };
     },
     createStream: (signal) => buildStream(history, signal),
     onAwaitingInteraction: async ({ sessionId: sid, signal, emitToolResult, getAssistant }) => {
