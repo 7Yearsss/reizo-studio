@@ -70,15 +70,36 @@ export function toolSignature(name: string, args: Record<string, unknown>): stri
   return `${name}(${parts.join('&')})`;
 }
 
+/**
+ * Diversity-collapse windows (ported from cindy's loop-guard). Catch loops
+ * where every call *succeeds* — a model re-running the same few reads/greps
+ * forever. Over the last N completed calls, if the count of distinct
+ * `name+args` fingerprints is at or below `maxDistinct`, the agent is
+ * spinning. L2 = ABAB ping-pong; L3 = ABCD rotation (added after a real
+ * incident: 4 rotating Greps, 1000+ calls in one turn).
+ */
+const DIVERSITY_WINDOWS = [
+  { window: 12, minPresent: 8, maxDistinct: 2, haltAt: 12, label: 'ABAB 往复调用' },
+  { window: 16, minPresent: 12, maxDistinct: 4, haltAt: 16, label: 'ABCD 轮换调用' },
+] as const;
+
+function shortName(sig: string): string {
+  return sig.split('(')[0];
+}
+
 export function inspectToolStream(
   outcomes: ToolOutcome[],
   thresholds: ToolLoopThresholds = DEFAULT_TOOL_LOOP_THRESHOLDS,
 ): ToolLoopVerdict {
   let consecutiveErrors = 0;
   const sigErrors = new Map<string, number>();
+  let consecutiveIdentical = 0;
+  let lastSig = '';
 
   for (const o of outcomes) {
     const sig = toolSignature(o.name, o.args);
+    consecutiveIdentical = sig === lastSig ? consecutiveIdentical + 1 : 1;
+    lastSig = sig;
     if (o.ok) {
       consecutiveErrors = 0;
       if (isMutating(o)) sigErrors.delete(sig);
@@ -88,29 +109,37 @@ export function inspectToolStream(
     sigErrors.set(sig, (sigErrors.get(sig) ?? 0) + 1);
   }
 
+  // L1: the same call (name+args) repeated verbatim, regardless of outcome.
+  if (consecutiveIdentical >= 6) {
+    return { tier: 'halt', reason: `连续 ${consecutiveIdentical} 次完全相同的调用 ${shortName(lastSig)}` };
+  }
+
   const worstSig = [...sigErrors.entries()].sort((a, b) => b[1] - a[1])[0];
   const sigCount = worstSig?.[1] ?? 0;
 
   if (consecutiveErrors >= thresholds.consecutiveHalt) {
-    return {
-      tier: 'halt',
-      reason: `${consecutiveErrors} 次工具调用连续失败`,
-    };
+    return { tier: 'halt', reason: `${consecutiveErrors} 次工具调用连续失败` };
   }
   if (sigCount >= thresholds.signatureHalt) {
-    return {
-      tier: 'halt',
-      reason: `同一操作 ${worstSig[0].split('(')[0]} 失败 ${sigCount} 次`,
-    };
+    return { tier: 'halt', reason: `同一操作 ${shortName(worstSig[0])} 失败 ${sigCount} 次` };
   }
+
+  // L2 / L3: fingerprint-diversity collapse over the recent window.
+  for (const spec of DIVERSITY_WINDOWS) {
+    const slice = outcomes.slice(-spec.window);
+    if (slice.length < spec.minPresent) continue;
+    const distinct = new Set(slice.map((o) => toolSignature(o.name, o.args))).size;
+    if (distinct <= spec.maxDistinct) {
+      const tier: ToolLoopVerdict['tier'] = slice.length >= spec.haltAt ? 'halt' : 'warn';
+      return { tier, reason: `${spec.label}：最近 ${slice.length} 次调用只有 ${distinct} 种` };
+    }
+  }
+
   if (consecutiveErrors >= thresholds.consecutiveWarn) {
     return { tier: 'warn', reason: `${consecutiveErrors} 次工具调用连续失败` };
   }
   if (sigCount >= thresholds.signatureWarn) {
-    return {
-      tier: 'warn',
-      reason: `同一操作 ${worstSig[0].split('(')[0]} 反复失败 ${sigCount} 次`,
-    };
+    return { tier: 'warn', reason: `同一操作 ${shortName(worstSig[0])} 反复失败 ${sigCount} 次` };
   }
   return { tier: 'ok', reason: '' };
 }

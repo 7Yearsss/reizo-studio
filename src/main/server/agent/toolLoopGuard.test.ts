@@ -67,6 +67,36 @@ describe('inspectToolStream', () => {
   it('toolSignature ignores object args but keeps scalars', () => {
     expect(toolSignature('t', { a: 1, b: 'hi', c: { deep: true } })).toBe('t(a=1&b=hi&c=[obj])');
   });
+
+  it('L1: halts on 6 identical successful calls in a row', () => {
+    const same = Array.from({ length: 6 }, () => ok('read_file', { path: 'a.ts' }));
+    expect(inspectToolStream(same).tier).toBe('halt');
+  });
+
+  it('L2: flags an ABAB ping-pong of successful calls', () => {
+    const stream: ToolOutcome[] = [];
+    for (let i = 0; i < 5; i++) {
+      stream.push(ok('grep', { pattern: 'A' }), ok('read_file', { path: 'x' }));
+    }
+    // 10 calls, 2 distinct fingerprints, none errored.
+    expect(inspectToolStream(stream).tier).not.toBe('ok');
+  });
+
+  it('L3: flags an ABCD rotation once the window fills', () => {
+    const names = ['grep', 'read_file', 'list_dir', 'find_files'];
+    const stream: ToolOutcome[] = [];
+    for (let i = 0; i < 16; i++) {
+      stream.push(ok(names[i % 4], { q: i % 4 }));
+    }
+    expect(inspectToolStream(stream).tier).toBe('halt');
+  });
+
+  it('does not flag a genuinely varied run', () => {
+    const stream: ToolOutcome[] = Array.from({ length: 16 }, (_, i) =>
+      ok(`tool_${i}`, { n: i }),
+    );
+    expect(inspectToolStream(stream).tier).toBe('ok');
+  });
 });
 
 describe('createToolLoopGuard', () => {

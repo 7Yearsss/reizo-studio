@@ -15,6 +15,7 @@ import { translateOpenAiChunk } from './translators/openai';
 import { compactAssistantParts, compactModelMessages } from './modelHistory';
 import { CONTINUE_USER_MESSAGE, MAX_CONTINUE_PASSES, shouldContinueAgentPass } from './continuePass';
 import { readWorkspaceMemory } from '../../workspaceMemory';
+import { redactSecrets } from '../../../shared/redactSecrets';
 import type { Skill } from '../../skills';
 import type { ChatMessage, SessionStore, ToolCallPart } from '../../../shared/chat';
 import type { SettingsStore } from '../storage/settingsStore';
@@ -136,7 +137,12 @@ export async function runChatTurn(options: {
     pathMentions.length > 0 ? `Referenced workspace paths:\n${pathMentions.map((m) => `- ${m}`).join('\n')}` : '',
     canvasRefBlock,
     attachments.length > 0
-      ? attachments.map((file) => `Attached file ${file.name}:\n\`\`\`\n${file.content.slice(0, 20_000)}\n\`\`\``).join('\n\n')
+      ? attachments
+          .map(
+            (file) =>
+              `Attached file ${file.name}:\n\`\`\`\n${redactSecrets(file.content.slice(0, 20_000))}\n\`\`\``,
+          )
+          .join('\n\n')
       : '',
   ]
     .filter(Boolean)
@@ -220,7 +226,7 @@ export async function runChatTurn(options: {
       : '',
     canvasSummary,
     'When a request needs a visual direction (mood, palette, typography) before you generate or design something, call ask_user with kind:"direction" and 2-4 `directions` cards (title, palette hex list, displayFont/bodyFont stacks, one-line mood, real-world references) so the user picks by looking.',
-    memory ? `Workspace MEMORY.md:\n${memory}` : '',
+    memory ? `Workspace MEMORY.md:\n${redactSecrets(memory)}` : '',
     skill ? `The user invoked skill "${skill.name}". Follow this skill:\n${skill.body}` : '',
     projectInstructions ? `Project "${projectName}" working rules:\n${projectInstructions}` : '',
   ].filter(Boolean);

@@ -49,8 +49,72 @@ export function formatProviderError(error: unknown): string {
   if (status === 502 || status === 503) {
     return `上游暂时不可用（HTTP ${status}）${retryHint}。`;
   }
+  if (status === 529 || /overloaded|at capacity|capacity/i.test(raw)) {
+    return `模型服务当前过载${retryHint || '，请稍后重试'}。`;
+  }
   if (status && opaque) return `模型请求失败（HTTP ${status}）${retryHint}。`;
   if (raw && !opaque) return raw;
   if (raw) return `模型请求失败（${raw}）${retryHint}。`;
   return '模型请求失败。';
+}
+
+export type ProviderErrorKind =
+  | 'timeout'
+  | 'rate_limited'
+  | 'capacity'
+  | 'overloaded'
+  | 'auth'
+  | 'upstream'
+  | 'unknown';
+
+export interface ProviderErrorInfo {
+  kind: ProviderErrorKind;
+  /** Should a caller try again at all? */
+  retryable: boolean;
+  /**
+   * Did the SDK / provider already retry internally? If so, a host-level
+   * retry loop would amplify one overload into many billed requests — see
+   * cindy's `overload-error.ts`. `overloaded` (Anthropic 529, SDK retries) is
+   * true; `capacity` (OpenAI "at capacity", vendor does NOT self-retry) is
+   * false, so the host should back off and re-dispatch.
+   */
+  alreadyRetriedBySdk: boolean;
+  message: string;
+}
+
+/**
+ * Structured companion to `formatProviderError`. Keeps `capacity` and
+ * `overloaded` distinct because they have different retry owners.
+ */
+export function classifyProviderError(error: unknown): ProviderErrorInfo {
+  const rec = isRecord(error) ? error : undefined;
+  const nested = nestedError(error);
+  const status = asStatus(rec?.statusCode ?? rec?.status ?? nested?.status);
+  const raw = (
+    (error instanceof Error && error.message) ||
+    (typeof nested?.message === 'string' && nested.message) ||
+    (typeof error === 'string' ? error : '') ||
+    ''
+  ).toLowerCase();
+  const message = formatProviderError(error);
+
+  if (status === 401 || status === 403 || /api key|unauthorized|invalid authentication/.test(raw)) {
+    return { kind: 'auth', retryable: false, alreadyRetriedBySdk: false, message };
+  }
+  if (status === 529 || /\boverloaded\b/.test(raw)) {
+    return { kind: 'overloaded', retryable: true, alreadyRetriedBySdk: true, message };
+  }
+  if (/at capacity|selected model is at capacity/.test(raw)) {
+    return { kind: 'capacity', retryable: true, alreadyRetriedBySdk: false, message };
+  }
+  if (status === 429 || /rate limit|too many requests/.test(raw)) {
+    return { kind: 'rate_limited', retryable: true, alreadyRetriedBySdk: false, message };
+  }
+  if (status === 408 || status === 504 || status === 524 || /timeout|timed out/.test(raw)) {
+    return { kind: 'timeout', retryable: true, alreadyRetriedBySdk: false, message };
+  }
+  if (status === 502 || status === 503 || (typeof status === 'number' && status >= 500)) {
+    return { kind: 'upstream', retryable: true, alreadyRetriedBySdk: false, message };
+  }
+  return { kind: 'unknown', retryable: rec?.isRetryable === true, alreadyRetriedBySdk: false, message };
 }

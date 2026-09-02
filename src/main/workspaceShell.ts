@@ -1,6 +1,9 @@
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { RUN_COMMAND_MAX_BUFFER, RUN_COMMAND_TIMEOUT_MS } from '../shared/constants';
+import { plainTextTerminalEnv, stripTerminalControlSequences } from '../shared/terminalOutput';
+
+const clean = (s: string): string => stripTerminalControlSequences(s);
 
 const execAsync = promisify(exec);
 
@@ -32,16 +35,23 @@ export async function runWorkspaceCommand(cwd: string, command: string): Promise
         GIT_PAGER: 'cat',
         GIT_TERMINAL_PROMPT: '0',
         PAGER: 'cat',
+        ...plainTextTerminalEnv(),
       },
     });
-    return { command: trimmed, cwd, stdout: stdout.slice(0, 20_000), stderr: stderr.slice(0, 8_000), exitCode: 0 };
+    return {
+      command: trimmed,
+      cwd,
+      stdout: clean(stdout).slice(0, 20_000),
+      stderr: clean(stderr).slice(0, 8_000),
+      exitCode: 0,
+    };
   } catch (err) {
     const error = err as { stdout?: string; stderr?: string; code?: number; message?: string };
     return {
       command: trimmed,
       cwd,
-      stdout: String(error.stdout ?? '').slice(0, 20_000),
-      stderr: String(error.stderr || error.message || err).slice(0, 8_000),
+      stdout: clean(String(error.stdout ?? '')).slice(0, 20_000),
+      stderr: clean(String(error.stderr || error.message || err)).slice(0, 8_000),
       exitCode: typeof error.code === 'number' ? error.code : 1,
     };
   }

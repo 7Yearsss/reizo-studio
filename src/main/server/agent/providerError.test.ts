@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatProviderError } from './providerError';
+import { classifyProviderError, formatProviderError } from './providerError';
 
 /** Shape logged from the v2api.top 524 that surfaced as `openai_error`. */
 function apiCallError(input: {
@@ -43,5 +43,27 @@ describe('formatProviderError', () => {
     expect(formatProviderError(new Error('Step timeout of 120000ms exceeded'))).toBe(
       'Step timeout of 120000ms exceeded',
     );
+  });
+});
+
+describe('classifyProviderError', () => {
+  it('splits Anthropic 529 overloaded (SDK already retries) from OpenAI capacity', () => {
+    const over = classifyProviderError({ statusCode: 529, message: 'Overloaded' });
+    expect(over.kind).toBe('overloaded');
+    expect(over.alreadyRetriedBySdk).toBe(true);
+
+    const cap = classifyProviderError(new Error('Selected model is at capacity. Please try again.'));
+    expect(cap.kind).toBe('capacity');
+    expect(cap.alreadyRetriedBySdk).toBe(false);
+    expect(cap.retryable).toBe(true);
+  });
+
+  it('auth errors are not retryable', () => {
+    expect(classifyProviderError({ status: 401, message: 'invalid api key' }).retryable).toBe(false);
+  });
+
+  it('classifies a rate limit and a timeout', () => {
+    expect(classifyProviderError({ statusCode: 429, message: 'rate limit' }).kind).toBe('rate_limited');
+    expect(classifyProviderError(new Error('Step timeout of 120000ms exceeded')).kind).toBe('timeout');
   });
 });
