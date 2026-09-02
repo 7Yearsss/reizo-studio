@@ -6,6 +6,7 @@ import * as api from '../../api';
 import * as artifactStore from '../../state/artifactStore';
 import { pickRenderer } from './renderers';
 import ArtifactVersionRail from './ArtifactVersionRail';
+import HandoffMenu from './HandoffMenu';
 
 export default function ArtifactPreview({
   artifact,
@@ -139,6 +140,7 @@ export default function ArtifactPreview({
             <Copy size={12} />
           </button>
         )}
+        <HandoffMenu artifact={artifact} getContent={() => text} />
         <button
           type="button"
           onClick={() => void download()}
