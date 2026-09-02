@@ -1,9 +1,10 @@
 # Canvas + Agent — design decisions & feasibility
 
-Status: **planning**. Target: an infinite node canvas (React Flow) in the right-side
-panel where an agent and the user co-edit a graph. This doc is the decision record
-from a grilling session plus an Opus 5 feasibility review against the current
-codebase.
+Status: **C + P1 + P1.5 + P2-UX shipped to `main`** (2026-09-02). Target: an
+infinite node canvas (React Flow) in the right-side panel where an agent and the
+user co-edit a graph. §1–§5 are the original decision record from a grilling
+session plus an Opus 5 feasibility review; **§6 is the live implementation status
+and what is left** — read it first if you just want to know where things stand.
 
 ---
 
@@ -279,3 +280,70 @@ and at that point generalize `sinks` from `Map<sessionId, sink>` to
 - **P3** — undo / redo polish, drag-to-mention, right-click node actions.
 - **P4** — video / audio nodes (same async-job → media-URL pattern, new
   provider contracts + longer-job UX + player widgets).
+
+---
+
+## 6. Implementation status — 2026-09-02
+
+### Shipped to `main`
+
+| PR | Phase | What landed |
+|---|---|---|
+| #9 | — | pierre `@pierre/diffs` file-diff rendering in tool-approval + completed write cards (adjacent feature, not canvas). |
+| #11 | **C** | React Flow right-panel canvas, `image` node with real generation, `add_node` / `run_node` agent tools, session-scoped `canvases`/`canvas_nodes`/`canvas_edges` tables + `0002_canvas` migration, forked `CanvasChannel` (own ring, no `done`, 15s heartbeat), `DbHandle` plumbed to `createApp`, on-disk PNG assets served at `GET /api/canvas/assets/:canvasId/:file`, renderer-local pre-flight spend confirm. R1/R2/R3 mitigations all implemented as designed. |
+| #13 | **P1 + P1.5** | Topological executor (`topoOrder` Kahn, cycle detection at connect time, `descendants` scoping for "run from here"), dirty tracking (`inputHash` vs stored `paramsHash`, `broadcastDownstreamDirty`), `run_graph` + `graph_run` progress events + stop; **P1.5 UX**: right-click context menus (node + pane), drag-drop image import (`POST /:canvasId/import`), `NodeResizer` with resize-end commit, animated edges on running targets, lightbox / download / "save to artifacts" (`POST /:canvasId/nodes/:id/save-asset`), agent `read_canvas` / `read_node` / `update_node` / `connect_nodes` / `delete_node` tools, selection → agent turn summary (`selectionByCanvas`), focus-canvas-on-agent-touch, no `window.confirm` popups (explicit click = consent; batch run = 2-click inline confirm). |
+| #14 | **P2-UX** (pulled forward from old P3) | Renderer-side undo/redo (`HistoryEntry` closures, `HISTORY_CAP=60`, mutable-id capture), drag node → composer reference chip + `canvas:<id>` mentions, bidirectional node↔chat highlight, auto-layout ("整理" → `layoutGraph`), connection validation (`isValidConnection` = `wouldCycle` + dup check), inline double-click rename, multi-image dot navigation, right-panel maximize / resizable divider / close. |
+
+Merge base tips: `13fab01` (#10 doc) ◂ `8967721` (#14) ◂ `9987deb` (#13) ◂ `134a8bf` (#11) ◂ `33336d4` (#9). `main` verified green: `tsc` clean, `vitest` 26 files / 155 tests, `test:api` smoke pass.
+
+### Deviations from the original plan
+
+- **Old P3 was pulled forward** and shipped as "P2-UX" (#14) *before* the Agent
+  Task node. The number "P2" now ambiguously refers to both — this doc keeps
+  "P2 = Agent Task node" as the canonical meaning; the UX work is "P2-UX".
+- **Pop-out to a separate `BrowserWindow` is cut permanently** (user: "不用弹出
+  独立窗口吧 这样感觉有点怪怪的"). D3's pop-out control is gone from the plan,
+  not merely deferred. Maximize + resizable divider + close cover the need.
+- **`window.confirm` popups removed** (user: "没必要的提示弹窗可以砍了"). Per-node
+  Run and "run from here" are silent; only the batch "运行整图" keeps a 2-click
+  inline confirm as the spend gate.
+- **`dirty` / `paramsHash` / `inputHash`** shipped in P1 as designed — the
+  schema seed from C paid off.
+
+### Not done
+
+**P2 — Agent Task node (the biggest remaining planned piece).**
+`AgentNode.tsx` is a placeholder (instruction textarea + "P2" note);
+`graphExecutor.ts` skips `agent` nodes; `POST /:canvasId/nodes/:id/run` returns
+501 for them. Blockers, both called out in §2/§4:
+- Extract `runAgentPass({ model, instructions, messages, tools, onEvent, signal })`
+  out of `runChatTurn` (`agent/runtime.ts`) so a sub-agent turn does **not**
+  persist a `ChatMessage`, rename the session, or read `session.messages` as
+  history (trap D11). ~3–5 day refactor.
+- Generalize `permissions.ts` `sinks` from `Map<sessionId, sink>` to
+  `Map<scopeId, sink>` (`chat:<id>` / `canvas:<id>`) and make
+  `clearPermissionSink` scope-selective (R3), so an Agent Task run has a
+  delivery channel for any interaction it raises.
+- Point the sub-agent's event sink at the `CanvasChannel`; restricted read-only
+  toolset (`web_search` + `read_node` + `read_canvas`).
+
+**P4 — video / audio nodes.** Nothing started. Needs provider contracts (video:
+Kling / Runway / Veo; audio: ElevenLabs / Suno), long-job progress UX, and
+player widgets in the node body.
+
+**Un-phased backlog (raised during the UX passes, no phase assigned):**
+
+- Copy / paste nodes (Ctrl+C / Ctrl+V).
+- Double-click canvas / drop-a-wire-on-empty → node search palette (the ComfyUI
+  signature interaction).
+- Node bypass / mute; collapse; group / frame nodes.
+- Per-node generation params: model picker, seed, negative prompt, `n` (batch).
+- img2img before/after compare view; regenerate history / variations (a rerun
+  currently overwrites the single output).
+- Non-image providers (fal / Replicate) — currently OpenAI images only.
+- Promote a canvas to project-level / standalone document (D5 growth path,
+  explicitly deferred).
+- Keyboard shortcuts beyond undo/redo (e.g. `R` = run selected).
+- Canvas loading skeleton + a persistent "stream disconnected" banner;
+  dark-mode alignment of React Flow's own CSS variables; right panel
+  remembering its last-open tab.
