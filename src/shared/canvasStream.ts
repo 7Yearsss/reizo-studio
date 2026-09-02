@@ -13,6 +13,7 @@ export type CanvasEvent =
   | { type: 'edge_deleted'; id: string }
   | { type: 'run_state'; id: string; runState: NodeRunState }
   | { type: 'node_output'; id: string; output: CanvasNodeOutput; runState: NodeRunState }
+  | { type: 'graph_run'; running: boolean; done: number; total: number }
   | { type: 'heartbeat' };
 
 export interface CanvasEnvelope {

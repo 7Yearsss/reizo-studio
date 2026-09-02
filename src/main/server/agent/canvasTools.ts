@@ -4,8 +4,25 @@ import { CANVAS_IMAGE_SIZES, defaultNodeBox } from '../../../shared/canvas';
 import type { SettingsStore } from '../storage/settingsStore';
 import type { CanvasStore } from '../storage/canvasStore';
 import { getCanvasChannel } from '../canvas/channel';
-import { runImageNode } from '../canvas/imageExecutor';
+import { broadcastDownstreamDirty, runImageNode } from '../canvas/imageExecutor';
 import { runGraph } from '../canvas/graphExecutor';
+import type { CanvasNode } from '../../../shared/canvas';
+
+function nodeBrief(node: CanvasNode) {
+  const params = node.params as Record<string, unknown>;
+  return {
+    id: node.id,
+    type: node.type,
+    title: node.title || null,
+    runState: node.runState,
+    dirty: node.dirty ?? false,
+    prompt: typeof params.prompt === 'string' ? params.prompt : undefined,
+    instruction: typeof params.instruction === 'string' ? params.instruction : undefined,
+    size: typeof params.size === 'string' ? params.size : undefined,
+    assets: node.output?.assets ?? [],
+    error: node.output?.error,
+  };
+}
 
 /**
  * Agent-facing canvas tools (slice C: `add_node`, `run_node`). Structure edits
@@ -78,6 +95,86 @@ export function createCanvasTools(options: {
         if (from && !canvasStore.getNode(canvas.id, from)) return { error: `No canvas node "${from}"` };
         void runGraph({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, fromNodeId: from });
         return { ok: true, status: 'running' };
+      },
+    }),
+
+    read_canvas: tool({
+      description: 'List every node on this session\'s canvas with its type, run state, prompt/instruction and outputs, plus the edges between them.',
+      inputSchema: z.object({}),
+      execute: async () => {
+        const canvas = canvasStore.findCanvasBySession(sessionId);
+        if (!canvas) return { nodes: [], edges: [] };
+        const snap = canvasStore.getSnapshot(canvas.id);
+        return {
+          nodes: (snap?.nodes ?? []).map(nodeBrief),
+          edges: (snap?.edges ?? []).map((e) => ({ source: e.sourceId, target: e.targetId })),
+        };
+      },
+    }),
+
+    read_node: tool({
+      description: 'Read one canvas node in full (params, run state, output assets/error).',
+      inputSchema: z.object({ id: z.string() }),
+      execute: async ({ id }) => {
+        const canvas = canvasStore.findCanvasBySession(sessionId);
+        const node = canvas ? canvasStore.getNode(canvas.id, id) : null;
+        return node ? nodeBrief(node) : { error: `No canvas node "${id}"` };
+      },
+    }),
+
+    update_node: tool({
+      description: 'Change a canvas node\'s params. For an image node pass `prompt` and/or `size`; for an agent node pass `instruction`. Also renames via `title`. Does not re-run the node.',
+      inputSchema: z.object({
+        id: z.string(),
+        prompt: z.string().optional(),
+        size: z.enum(CANVAS_IMAGE_SIZES as [string, ...string[]]).optional(),
+        instruction: z.string().optional(),
+        title: z.string().optional(),
+      }),
+      execute: async ({ id, prompt, size, instruction, title }) => {
+        const canvas = canvasStore.ensureCanvas(sessionId);
+        const node = canvasStore.getNode(canvas.id, id);
+        if (!node) return { error: `No canvas node "${id}"` };
+        const params = { ...(node.params as Record<string, unknown>) };
+        if (prompt !== undefined) params.prompt = prompt;
+        if (size !== undefined) params.size = size;
+        if (instruction !== undefined) params.instruction = instruction;
+        const res = canvasStore.updateNode(canvas.id, id, {
+          params,
+          ...(title !== undefined ? { title } : {}),
+        });
+        if (!res) return { error: `No canvas node "${id}"` };
+        const channel = getCanvasChannel(canvas.id);
+        channel.broadcast(res.rev, { type: 'node_updated', node: res.node });
+        broadcastDownstreamDirty(canvasStore, canvas.id, id, res.rev);
+        return { id, params: res.node.params };
+      },
+    }),
+
+    connect_nodes: tool({
+      description: 'Wire one canvas node\'s output into another node\'s input (source -> target). An image node with an image input does image-to-image.',
+      inputSchema: z.object({ source: z.string(), target: z.string() }),
+      execute: async ({ source, target }) => {
+        const canvas = canvasStore.ensureCanvas(sessionId);
+        const res = canvasStore.addEdge(canvas.id, { sourceId: source, targetId: target });
+        if (res.error === 'cycle') return { error: 'That connection would create a cycle' };
+        if (res.error || !res.edge || res.rev === undefined) return { error: 'source or target node not found' };
+        const channel = getCanvasChannel(canvas.id);
+        channel.broadcast(res.rev, { type: 'edge_added', edge: res.edge });
+        broadcastDownstreamDirty(canvasStore, canvas.id, source, res.rev);
+        return { edgeId: res.edge.id };
+      },
+    }),
+
+    delete_node: tool({
+      description: 'Remove a canvas node and any edges touching it.',
+      inputSchema: z.object({ id: z.string() }),
+      execute: async ({ id }) => {
+        const canvas = canvasStore.ensureCanvas(sessionId);
+        const res = canvasStore.deleteNode(canvas.id, id);
+        if (!res) return { error: `No canvas node "${id}"` };
+        getCanvasChannel(canvas.id).broadcast(res.rev, { type: 'node_deleted', id });
+        return { ok: true };
       },
     }),
   };

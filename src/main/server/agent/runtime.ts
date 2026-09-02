@@ -5,6 +5,7 @@ import type { ChatStreamEvent, TodoItem } from '../../../shared/stream';
 import { createOpenAiModel } from './provider/openai';
 import { createWorkspaceTools } from './workspaceTools';
 import { createCanvasTools } from './canvasTools';
+import { getCanvasSelection } from '../canvas/selection';
 import type { CanvasStore } from '../storage/canvasStore';
 import type { CanvasImageParams } from '../../../shared/canvas';
 import { startAgentTurn } from './session';
@@ -169,22 +170,24 @@ export async function runChatTurn(options: {
       projectName = project.name;
     }
   }
-  // Compact canvas summary (decision 9). Frozen at turn start — a node the
-  // agent adds mid-turn is not reflected here; that is intentional for slice C
-  // (there is no `read_canvas` tool yet, and the summary is only orientation).
+  // Compact canvas summary (decision 9). Frozen at turn start — use the
+  // read_canvas / read_node tools for anything the agent changes mid-turn.
   let canvasSummary = '';
   if (canvasStore) {
     const existing = canvasStore.findCanvasBySession(sessionId);
     const snapshot = existing ? canvasStore.getSnapshot(existing.id) : null;
     if (snapshot && snapshot.nodes.length > 0) {
+      const selected = new Set(existing ? getCanvasSelection(existing.id) : []);
       const lines = snapshot.nodes.map((node) => {
         const label =
           node.type === 'image'
             ? `image "${((node.params as CanvasImageParams).prompt ?? '').slice(0, 60)}"`
             : `agent task`;
-        return `- ${node.id} [${node.type}, ${node.runState}] ${node.title || label}`;
+        const mark = selected.has(node.id) ? ' (selected)' : '';
+        return `- ${node.id} [${node.type}, ${node.runState}] ${node.title || label}${mark}`;
       });
-      canvasSummary = `The session canvas has ${snapshot.nodes.length} node(s):\n${lines.join('\n')}`;
+      const selNote = selected.size > 0 ? `\nThe user has ${selected.size} node(s) selected (marked "(selected)").` : '';
+      canvasSummary = `The session canvas has ${snapshot.nodes.length} node(s):\n${lines.join('\n')}${selNote}`;
     }
   }
 

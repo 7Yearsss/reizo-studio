@@ -152,7 +152,7 @@ export function createApp(options: CreateAppOptions) {
   if (canvasStore) {
     app.route(
       '/api/canvas',
-      createCanvasRouter(canvasStore, settingsStore, sessionStore, options.dataRoot),
+      createCanvasRouter(canvasStore, settingsStore, sessionStore, options.dataRoot, artifactStore),
     );
   }
 
