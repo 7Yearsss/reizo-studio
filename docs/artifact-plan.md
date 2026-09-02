@@ -656,9 +656,11 @@ intelligence. AP6 rides on the canvas P4 provider work.
 **AP3 — editing & preview UX (cont.).**
 - `renderers/PreviewFrame.tsx` — MD6: 桌面/平板(820)/手机(390) segmented control
   + zoom, wraps `HtmlRenderer`'s iframe.
-- **Left in AP3**: X3 share/export menu (PDF needs an Electron `printToPDF` IPC
-  handler — deferred as a small follow-up; standalone-HTML + ZIP unbuilt),
-  MD2 streaming-status wiring (renderer-ready; no producer streams into an
+- **X3 PDF export — done** via cindy R3 (`src/main/pdfExport.ts` + IPC +
+  `lib/artifactExport.ts` + 导出 PDF button for markdown/text/html). See
+  `cindy-integration.md`.
+- **Left in AP3**: X3 standalone-HTML + ZIP export (unbuilt), MD2
+  streaming-status wiring (renderer-ready; no producer streams into an
   artifact incrementally yet).
 
 **AP4 — conversation gets visual (partial).**
