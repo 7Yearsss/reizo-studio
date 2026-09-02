@@ -15,6 +15,9 @@ import { createLargeValueStore } from './storage/largeValueStore';
 import { createProjectsRouter } from './routes/projects';
 import { createArtifactsRouter, createSessionArtifactsRouter } from './routes/artifacts';
 import { createRefsRouter } from './routes/refs';
+import { createCanvasRouter } from './routes/canvas';
+import { createCanvasStore } from './storage/canvasStore';
+import type { DbHandle } from './db/client';
 
 export interface CreateAppOptions {
   /** Directory the local session/settings JSON files live under. */
@@ -29,6 +32,8 @@ export interface CreateAppOptions {
   skillsDirs?: string[];
   scheduleStore?: ReturnType<typeof createScheduleStore>;
   thoughtStore?: ReturnType<typeof createThoughtStore>;
+  /** SQLite handle. Required for the canvas feature; omitted in the JSON-only test app. */
+  db?: DbHandle;
 }
 
 /**
@@ -119,6 +124,8 @@ export function createApp(options: CreateAppOptions) {
   const artifactStore = createArtifactStore(options.dataRoot);
   const largeValueStore = createLargeValueStore(options.dataRoot);
 
+  const canvasStore = options.db ? createCanvasStore(options.db) : undefined;
+
   const app = new Hono();
   app.use('*', originGuard(options));
 
@@ -127,7 +134,10 @@ export function createApp(options: CreateAppOptions) {
   app.route('/api/sessions', createSessionsRouter(sessionStore, artifactStore));
   app.route(
     '/api/sessions',
-    createChatRouter(sessionStore, settingsStore, skillsDirs, artifactStore, projectStore, largeValueStore),
+    createChatRouter(sessionStore, settingsStore, skillsDirs, artifactStore, projectStore, largeValueStore, {
+      canvasStore,
+      dataRoot: options.dataRoot,
+    }),
   );
   app.route('/api/sessions', createSessionArtifactsRouter(artifactStore, sessionStore));
   app.route('/api/artifacts', createArtifactsRouter(artifactStore));
@@ -138,6 +148,13 @@ export function createApp(options: CreateAppOptions) {
   app.route('/api/settings', createSettingsRouter(settingsStore));
   app.route('/api/skills', createSkillsRouter(skillsDirs));
   app.route('/api/schedules', createSchedulesRouter(scheduleStore, thoughtStore));
+
+  if (canvasStore) {
+    app.route(
+      '/api/canvas',
+      createCanvasRouter(canvasStore, settingsStore, sessionStore, options.dataRoot),
+    );
+  }
 
   return app;
 }

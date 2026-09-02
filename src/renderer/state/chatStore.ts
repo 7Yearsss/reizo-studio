@@ -580,6 +580,8 @@ function makeEventFolder(
         finishThinkingActivity(acc);
         const part = upsertToolPart(acc, event);
         upsertToolActivity(acc, part);
+        // The agent placed something on the canvas — surface it.
+        if (event.name === 'add_node') uiStore.setCanvasOpen(true);
         setState({
           ...progressPatch(sessionId),
           streamingToolsBySession: { ...state.streamingToolsBySession, [sessionId]: [...acc.tools] },

@@ -34,7 +34,12 @@ function isOfficialOpenAi(baseUrl?: string): boolean {
   }
 }
 
-export function createOpenAiModel(options: { apiKey: string; modelId: string; baseUrl?: string }) {
+/**
+ * The bare `@ai-sdk/openai` provider, with request logging wired in. Callers
+ * pick the surface: `.chat(id)` / `(id)` for language models, `.image(id)` for
+ * `generateImage`.
+ */
+export function createOpenAiProvider(options: { apiKey: string; baseUrl?: string }) {
   const loggedFetch: typeof globalThis.fetch = async (input, init) => {
     const url = input instanceof Request ? input.url : String(input);
     const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
@@ -51,11 +56,15 @@ export function createOpenAiModel(options: { apiKey: string; modelId: string; ba
       throw error;
     }
   };
-  const openai = createOpenAI({
+  return createOpenAI({
     apiKey: options.apiKey,
     baseURL: options.baseUrl || undefined,
     fetch: loggedFetch,
   });
+}
+
+export function createOpenAiModel(options: { apiKey: string; modelId: string; baseUrl?: string }) {
+  const openai = createOpenAiProvider(options);
   // Default `openai(model)` is the Responses API (`/v1/responses`). new-api
   // gateways (v2api.top) stream that poorly with tools: each step resends
   // every function_call item and nginx returns HTTP 524 after ~165s.

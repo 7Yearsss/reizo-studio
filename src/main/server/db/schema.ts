@@ -76,5 +76,71 @@ export const messages = sqliteTable(
   }),
 );
 
+/**
+ * Session-scoped node canvas (slice C). One `canvases` row per session,
+ * created lazily. `live_revision` is bumped in the same statement as every
+ * node/edge mutation so a reconnecting client resumes from the gap. Columns
+ * `params_hash` (dirty tracking) and node type `agent` are seeded now so P1
+ * (topological executor) and P2 (agent-task node) need no migration.
+ */
+export const canvases = sqliteTable('canvases', {
+  id: text('id').primaryKey(),
+  sessionId: text('session_id')
+    .notNull()
+    .references(() => sessions.id, { onDelete: 'cascade' }),
+  liveRevision: integer('live_revision').notNull().default(0),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+export const canvasNodes = sqliteTable(
+  'canvas_nodes',
+  {
+    id: text('id').primaryKey(),
+    canvasId: text('canvas_id')
+      .notNull()
+      .references(() => canvases.id, { onDelete: 'cascade' }),
+    type: text('type', { enum: ['image', 'agent'] }).notNull(),
+    x: integer('x').notNull(),
+    y: integer('y').notNull(),
+    w: integer('w').notNull(),
+    h: integer('h').notNull(),
+    title: text('title').notNull().default(''),
+    /** JSON blob of node params. */
+    paramsJson: text('params_json').notNull().default('{}'),
+    /** Stable hash of params + upstream refs. Seeded for P1 dirty tracking. */
+    paramsHash: text('params_hash'),
+    runState: text('run_state', { enum: ['idle', 'running', 'done', 'error'] })
+      .notNull()
+      .default('idle'),
+    /** JSON blob of node output (`{ assets, text, error }`). */
+    outputJson: text('output_json'),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => ({
+    byCanvas: index('canvas_nodes_canvas_idx').on(t.canvasId),
+  }),
+);
+
+export const canvasEdges = sqliteTable(
+  'canvas_edges',
+  {
+    id: text('id').primaryKey(),
+    canvasId: text('canvas_id')
+      .notNull()
+      .references(() => canvases.id, { onDelete: 'cascade' }),
+    sourceId: text('source_id').notNull(),
+    sourceHandle: text('source_handle'),
+    targetId: text('target_id').notNull(),
+    targetHandle: text('target_handle'),
+  },
+  (t) => ({
+    byCanvas: index('canvas_edges_canvas_idx').on(t.canvasId),
+  }),
+);
+
 export type SessionRow = typeof sessions.$inferSelect;
 export type MessageRow = typeof messages.$inferSelect;
+export type CanvasRow = typeof canvases.$inferSelect;
+export type CanvasNodeRow = typeof canvasNodes.$inferSelect;
+export type CanvasEdgeRow = typeof canvasEdges.$inferSelect;
