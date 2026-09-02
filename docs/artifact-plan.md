@@ -1,6 +1,6 @@
 # Artifacts + Work-product — design decisions & roadmap
 
-Status: **AP1 in progress** (2026-09-03). Companion to `canvas-plan.md`. Where
+Status: **AP1–AP2 done, AP3–AP5 partial** (2026-09-03). Companion to `canvas-plan.md`. Where
 `canvas-plan.md` went deep on the node graph, this plan goes deep on the
 **work-product surface** — the 作品 panel and every artifact type it holds
 (markdown, html, image, video, draw/annotation, files). Source: an Opus
@@ -679,12 +679,19 @@ intelligence. AP6 rides on the canvas P4 provider work.
 - **Left in AP5**: X4 hand-off, X7 context chips, X6 toolbox, X10 od-card,
   MD3 templates, MD4 plan→artifact loop.
 
-- Gates: `tsc` clean · `vitest` 33 files / 194 tests · `test:api` pass.
+- X7 context chips: `@`-path mentions now render as removable chips in the
+  Composer (skill / attachments / node refs already did).
+- MD3 templates: `shared/docTemplates.ts` (空白 / 图片需求 / 视频分镜 / 方案 /
+  落地页) + a 新建文档 menu in `ArtifactPanel` → creates a `source:'manual'`
+  markdown artifact and opens it in the split editor.
+
+- Gates: `tsc` clean · `vitest` 32 files / 189 tests · `test:api` pass.
 
 ### In progress
 
-- **AP4 tail** (draw-to-annotate, comment pins) → **AP5 tail** → **AP6**
-  (media option strips + task queue) → **cindy investigation + build**.
+- **AP4 tail** (draw-to-annotate, comment pins), **AP5 tail** (hand-off,
+  toolbox, od-card, plan→artifact loop), **AP6** (media option strips + task
+  queue — rides on canvas P4 provider work). **cindy investigation** running.
 
 ### Deviations
 

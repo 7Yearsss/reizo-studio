@@ -3,6 +3,7 @@ import {
   CheckSquare,
   FileCode2,
   FileJson,
+  FilePlus2,
   FileText,
   FolderKanban,
   Image as ImageIcon,
@@ -15,6 +16,7 @@ import {
 import { cn } from '../../lib/cn';
 import type { ArtifactKind } from '../../../shared/artifact';
 import { inferArtifactKind, isBlobKind } from '../../../shared/artifact';
+import { DOC_TEMPLATES } from '../../../shared/docTemplates';
 import * as api from '../../api';
 import { useArtifactStore } from '../../state/useArtifactStore';
 import * as artifactStore from '../../state/artifactStore';
@@ -84,7 +86,24 @@ export default function ArtifactPanel({ sessionId }: { sessionId: string }) {
   const [dragOver, setDragOver] = useState(false);
   const [picking, setPicking] = useState(false);
   const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [newMenu, setNewMenu] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+
+  async function newFromTemplate(templateId: string) {
+    setNewMenu(false);
+    const tpl = DOC_TEMPLATES.find((t) => t.id === templateId);
+    if (!tpl) return;
+    const created = await api
+      .createSessionArtifact(sessionId, {
+        name: tpl.fileName,
+        content: tpl.body,
+        kind: 'markdown',
+        source: 'manual',
+      })
+      .catch(swallowNull);
+    await artifactStore.loadSessionArtifacts(sessionId);
+    if (created) setSelectedId(created.id);
+  }
 
   useEffect(() => {
     void artifactStore.loadSessionArtifacts(sessionId);
@@ -196,7 +215,29 @@ export default function ArtifactPanel({ sessionId }: { sessionId: string }) {
             </span>
           )}
         </h2>
-        <div className="flex items-center gap-0.5">
+        <div className="relative flex items-center gap-0.5">
+          <button
+            type="button"
+            onClick={() => setNewMenu((v) => !v)}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-paper-inset hover:text-ink"
+            title="新建文档"
+          >
+            <FilePlus2 className="h-3.5 w-3.5" />
+          </button>
+          {newMenu && (
+            <div className="absolute right-0 top-8 z-20 w-36 rounded-lg border border-line bg-paper-raised py-1 shadow-lg">
+              {DOC_TEMPLATES.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => void newFromTemplate(t.id)}
+                  className="block w-full px-3 py-1.5 text-left text-[11px] hover:bg-paper-inset"
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          )}
           <button
             type="button"
             onClick={() => fileInput.current?.click()}
