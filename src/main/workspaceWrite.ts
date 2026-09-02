@@ -7,14 +7,24 @@ export async function writeWorkspaceFile(
   workspaceRoot: string,
   relativePath: string,
   content: string,
-): Promise<{ path: string; bytes: number }> {
+): Promise<{ path: string; bytes: number; before: string }> {
   if (Buffer.byteLength(content, 'utf8') > WRITE_FILE_MAX_BYTES) {
     throw new Error(`File exceeds ${WRITE_FILE_MAX_BYTES} byte write limit`);
   }
   const abs = resolveInsideWorkspace(workspaceRoot, relativePath);
+  const before = await readFile(abs, 'utf8').catch(() => '');
   await mkdir(path.dirname(abs), { recursive: true });
   await writeFile(abs, content, 'utf8');
-  return { path: toWorkspaceRelative(workspaceRoot, abs), bytes: Buffer.byteLength(content, 'utf8') };
+  return { path: toWorkspaceRelative(workspaceRoot, abs), bytes: Buffer.byteLength(content, 'utf8'), before };
+}
+
+/** Read a workspace file for a diff preview; missing file reads as empty. */
+export async function readWorkspaceFileOrEmpty(
+  workspaceRoot: string,
+  relativePath: string,
+): Promise<string> {
+  const abs = resolveInsideWorkspace(workspaceRoot, relativePath);
+  return readFile(abs, 'utf8').catch(() => '');
 }
 
 export async function editWorkspaceFile(

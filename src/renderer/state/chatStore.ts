@@ -1,6 +1,13 @@
 import * as api from '../api';
 import type { ChatMessage, ReplyActivity, SessionSummary, ToolCallPart } from '../../shared/chat';
-import type { AskQuestion, ChatStreamEvent, ReplyPhase, TodoItem, TurnOutcome } from '../../shared/stream';
+import type {
+  AskQuestion,
+  ChatStreamEvent,
+  FileDiffPreview,
+  ReplyPhase,
+  TodoItem,
+  TurnOutcome,
+} from '../../shared/stream';
 import type { StreamMeta } from '../api';
 import { completeResync, createFence, ingestEnvelope, type Fence } from './liveRevisionFence';
 import { createRevealController, type RevealController } from './revealController';
@@ -14,6 +21,7 @@ export interface PendingPermission {
   id: string;
   name: string;
   args: Record<string, unknown>;
+  preview?: FileDiffPreview;
 }
 
 export interface PendingAsk {
@@ -23,7 +31,7 @@ export interface PendingAsk {
 
 /** Unified interaction model — permission gate or a mid-turn question. */
 export type ChatInteraction =
-  | { kind: 'permission'; id: string; name: string; args: Record<string, unknown> }
+  | { kind: 'permission'; id: string; name: string; args: Record<string, unknown>; preview?: FileDiffPreview }
   | { kind: 'ask'; id: string; questions: AskQuestion[] };
 
 export interface QueuedTurn {
@@ -611,7 +619,13 @@ function makeEventFolder(
           ...progressPatch(sessionId),
           interactionBySession: {
             ...state.interactionBySession,
-            [sessionId]: { kind: 'permission', id: event.id, name: event.name, args: event.args },
+            [sessionId]: {
+              kind: 'permission',
+              id: event.id,
+              name: event.name,
+              args: event.args,
+              ...(event.preview ? { preview: event.preview } : {}),
+            },
           },
         });
         break;

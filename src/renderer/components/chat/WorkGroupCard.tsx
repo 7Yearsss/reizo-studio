@@ -6,6 +6,9 @@ import { formatThinkingDuration } from './ThinkingCard';
 import ToolCard from './ToolCard';
 import { toolAction, toolLabel, toolTarget } from './toolDisplay';
 
+/** Tools whose full card (with its diff) stays visible after the turn ends. */
+const PERSISTENT_TOOL_NAMES = new Set(['edit_file', 'write_file', 'memory_write']);
+
 export default function WorkGroupCard({
   reasoning,
   reasoningStreaming = false,
@@ -74,6 +77,17 @@ export default function WorkGroupCard({
           {parts.filter((part) => !part.result && !part.error).map((part) => (
             <ToolCard key={part.id} part={part} />
           ))}
+        </div>
+      ) : null}
+      {/* After the turn ends the activity strip collapses, so keep write cards
+          (and their diffs) visible — that is the point of the review surface. */}
+      {!active && parts.some((part) => PERSISTENT_TOOL_NAMES.has(part.name)) ? (
+        <div className="mt-1 flex flex-col gap-1">
+          {parts
+            .filter((part) => PERSISTENT_TOOL_NAMES.has(part.name))
+            .map((part) => (
+              <ToolCard key={part.id} part={part} collapsed />
+            ))}
         </div>
       ) : null}
     </div>
