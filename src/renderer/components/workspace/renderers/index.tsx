@@ -1,13 +1,6 @@
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import type { Artifact } from '../../../../shared/artifact';
 import type { ArtifactRendererDef, ArtifactRenderProps } from './types';
-
-const MarkdownRenderer: React.FC<ArtifactRenderProps> = ({ text }) => (
-  <div className="markdown px-3 py-2 text-xs">
-    <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
-  </div>
-);
+import MarkdownRenderer from './MarkdownRenderer';
 
 const HtmlRenderer: React.FC<ArtifactRenderProps> = ({ artifact, text }) => (
   // `sandbox=""` blocks scripts entirely, which is the safe default for a

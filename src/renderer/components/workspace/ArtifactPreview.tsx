@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Copy, Download, History, X } from 'lucide-react';
+import { Code2, Copy, Download, Eye, History, X } from 'lucide-react';
 import type { Artifact } from '../../../shared/artifact';
+import { isBlobKind } from '../../../shared/artifact';
 import * as api from '../../api';
 import * as artifactStore from '../../state/artifactStore';
 import { pickRenderer } from './renderers';
@@ -18,8 +19,8 @@ export default function ArtifactPreview({
   const [rawUrl, setRawUrl] = useState('');
   const [loading, setLoading] = useState(true);
   const [showRail, setShowRail] = useState(false);
+  const [sourceView, setSourceView] = useState(false);
 
-  // Reset when a different artifact is selected.
   useEffect(() => {
     setVersion(artifact.version);
   }, [artifact.id, artifact.version]);
@@ -45,12 +46,11 @@ export default function ArtifactPreview({
   }, [artifact.id, version]);
 
   async function copy() {
-    if (text) {
-      try {
-        await navigator.clipboard.writeText(text);
-      } catch {
-        /* clipboard unavailable */
-      }
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      /* clipboard unavailable */
     }
   }
 
@@ -71,7 +71,21 @@ export default function ArtifactPreview({
     URL.revokeObjectURL(url);
   }
 
-  const Renderer = pickRenderer(artifact).Component;
+  const isText = !isBlobKind(artifact.kind);
+  const isLatest = version === artifact.version;
+  const editable = isText && isLatest && !sourceView;
+
+  async function commitDraft(next: string): Promise<void> {
+    await api.addArtifactVersion(artifact.id, next);
+    artifactStore.invalidateArtifact(artifact.id);
+    await Promise.all([
+      artifactStore.loadArtifactVersions(artifact.id),
+      artifactStore.loadSessionArtifacts(artifact.sessionId),
+    ]);
+  }
+
+  const effective: Artifact = sourceView ? { ...artifact, renderer: 'code' } : artifact;
+  const Renderer = pickRenderer(effective).Component;
   const hasHistory = artifact.versionCount > 1;
 
   return (
@@ -79,15 +93,28 @@ export default function ArtifactPreview({
       <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-1.5">
         <span className="min-w-0 flex-1 truncate text-xs font-medium">
           {artifact.name}
-          {version !== artifact.version || hasHistory ? (
+          {(!isLatest || hasHistory) && (
             <span className="ml-1.5 text-[10px] text-ink-muted">v{version}</span>
-          ) : null}
+          )}
         </span>
         {artifact.status === 'streaming' && (
           <span className="rounded bg-accent/10 px-1.5 text-[10px] text-accent">生成中…</span>
         )}
         {artifact.status === 'error' && (
           <span className="rounded bg-red-500/10 px-1.5 text-[10px] text-red-500">中断</span>
+        )}
+        {isText && (
+          <button
+            type="button"
+            onClick={() => setSourceView((v) => !v)}
+            className={[
+              'rounded p-1 hover:bg-paper-inset hover:text-ink',
+              sourceView ? 'text-accent' : 'text-ink-muted',
+            ].join(' ')}
+            title={sourceView ? '渲染视图' : '源码视图'}
+          >
+            {sourceView ? <Eye size={12} /> : <Code2 size={12} />}
+          </button>
         )}
         {hasHistory && (
           <button
@@ -102,7 +129,7 @@ export default function ArtifactPreview({
             <History size={12} />
           </button>
         )}
-        {text ? (
+        {text && (
           <button
             type="button"
             onClick={() => void copy()}
@@ -111,7 +138,7 @@ export default function ArtifactPreview({
           >
             <Copy size={12} />
           </button>
-        ) : null}
+        )}
         <button
           type="button"
           onClick={() => void download()}
@@ -134,7 +161,13 @@ export default function ArtifactPreview({
           {loading ? (
             <p className="px-3 py-2 text-xs text-ink-muted">加载中…</p>
           ) : (
-            <Renderer artifact={artifact} version={version} text={text} rawUrl={rawUrl} />
+            <Renderer
+              artifact={effective}
+              version={version}
+              text={text}
+              rawUrl={rawUrl}
+              onCommitDraft={editable ? commitDraft : undefined}
+            />
           )}
         </div>
         {showRail && hasHistory && (

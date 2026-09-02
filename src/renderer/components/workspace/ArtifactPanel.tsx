@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  CheckSquare,
   FileCode2,
   FileJson,
   FileText,
@@ -7,9 +8,14 @@ import {
   Image as ImageIcon,
   LoaderCircle,
   RefreshCw,
+  Square,
+  Trash2,
+  Upload,
 } from 'lucide-react';
 import { cn } from '../../lib/cn';
 import type { ArtifactKind } from '../../../shared/artifact';
+import { inferArtifactKind, isBlobKind } from '../../../shared/artifact';
+import * as api from '../../api';
 import { useArtifactStore } from '../../state/useArtifactStore';
 import * as artifactStore from '../../state/artifactStore';
 import ArtifactPreview from './ArtifactPreview';
@@ -56,10 +62,29 @@ function formatTime(iso: string): string {
   }
 }
 
+const swallow = (): undefined => undefined;
+const swallowNull = (): null => null;
+
+function readFileForUpload(file: File): Promise<{ content: string; mimeType: string; kind: ArtifactKind }> {
+  const kind = inferArtifactKind(file.name, file.type || undefined);
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () =>
+      resolve({ content: String(reader.result ?? ''), mimeType: file.type || '', kind });
+    if (isBlobKind(kind)) reader.readAsDataURL(file);
+    else reader.readAsText(file);
+  });
+}
+
 export default function ArtifactPanel({ sessionId }: { sessionId: string }) {
   const artifacts = useArtifactStore((s) => s.bySession[sessionId]) ?? [];
   const loading = useArtifactStore((s) => s.loadingBySession[sessionId]) ?? false;
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     void artifactStore.loadSessionArtifacts(sessionId);
@@ -67,6 +92,10 @@ export default function ArtifactPanel({ sessionId }: { sessionId: string }) {
 
   useEffect(() => {
     if (selectedId && !artifacts.some((a) => a.id === selectedId)) setSelectedId(null);
+    setChecked((prev) => {
+      const next = new Set([...prev].filter((id) => artifacts.some((a) => a.id === id)));
+      return next.size === prev.size ? prev : next;
+    });
   }, [artifacts, selectedId]);
 
   const selected = useMemo(
@@ -74,28 +103,149 @@ export default function ArtifactPanel({ sessionId }: { sessionId: string }) {
     [artifacts, selectedId],
   );
 
+  async function upload(files: FileList | File[]) {
+    const list = Array.from(files);
+    if (list.length === 0) return;
+    await Promise.all(
+      list.map(async (file) => {
+        try {
+          const { content, mimeType, kind } = await readFileForUpload(file);
+          await api.createSessionArtifact(sessionId, {
+            name: file.name,
+            content,
+            mimeType: mimeType || undefined,
+            kind,
+            source: 'attachment',
+          });
+        } catch {
+          /* skip unreadable file */
+        }
+      }),
+    );
+    await artifactStore.loadSessionArtifacts(sessionId);
+  }
+
+  function toggleCheck(id: string) {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function deleteChecked() {
+    const ids = [...checked];
+    if (ids.length === 0) return;
+    await Promise.all(ids.map((id) => api.deleteArtifact(id).catch(swallow)));
+    setChecked(new Set());
+    await artifactStore.loadSessionArtifacts(sessionId);
+  }
+
+  async function downloadChecked() {
+    for (const id of checked) {
+      const full = await api.getArtifact(id).catch(swallowNull);
+      const meta = artifacts.find((a) => a.id === id);
+      if (!full || !meta) continue;
+      const a = document.createElement('a');
+      if (full.rawUrl) {
+        a.href = await api.artifactRawUrl(id, meta.version);
+      } else {
+        const blob = new Blob([full.content], { type: meta.mimeType || 'text/plain' });
+        a.href = URL.createObjectURL(blob);
+      }
+      a.download = meta.name;
+      a.click();
+      await new Promise((r) => setTimeout(r, 120));
+    }
+  }
+
+  const selecting = checked.size > 0 || picking;
+
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div
+      className={cn('relative flex h-full min-h-0 flex-col', dragOver && 'ring-2 ring-accent ring-inset')}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDragOver(true);
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragOver(false);
+        if (e.dataTransfer?.files?.length) void upload(e.dataTransfer.files);
+      }}
+    >
+      <input
+        ref={fileInput}
+        type="file"
+        multiple
+        hidden
+        onChange={(e) => {
+          if (e.target.files) void upload(e.target.files);
+          e.target.value = '';
+        }}
+      />
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-line px-3 py-2.5">
         <h2 className="flex min-w-0 items-center gap-1.5 text-xs font-semibold">
           <FolderKanban className="h-3.5 w-3.5 shrink-0 text-accent" />
           <span className="truncate">本会话作品</span>
-          {artifacts.length > 0 ? (
+          {artifacts.length > 0 && (
             <span className="rounded-full bg-paper-inset px-1.5 text-[10px] font-medium tabular-nums">
               {artifacts.length}
             </span>
-          ) : null}
+          )}
         </h2>
-        <button
-          type="button"
-          onClick={() => void artifactStore.loadSessionArtifacts(sessionId)}
-          disabled={loading}
-          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-paper-inset hover:text-ink disabled:opacity-50"
-          title="刷新"
-        >
-          <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
-        </button>
+        <div className="flex items-center gap-0.5">
+          <button
+            type="button"
+            onClick={() => fileInput.current?.click()}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-paper-inset hover:text-ink"
+            title="上传文件"
+          >
+            <Upload className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setPicking((v) => !v)}
+            className={cn(
+              'inline-flex h-7 w-7 items-center justify-center rounded-md hover:bg-paper-inset hover:text-ink',
+              selecting ? 'text-accent' : 'text-ink-muted',
+            )}
+            title="多选"
+          >
+            <CheckSquare className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => void artifactStore.loadSessionArtifacts(sessionId)}
+            disabled={loading}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-paper-inset hover:text-ink disabled:opacity-50"
+            title="刷新"
+          >
+            <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
+          </button>
+        </div>
       </div>
+
+      {checked.size > 0 && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-line bg-paper-inset/40 px-3 py-1.5 text-[11px]">
+          <span className="text-ink-muted">已选 {checked.size}</span>
+          <button type="button" onClick={() => void downloadChecked()} className="rounded px-1.5 py-0.5 hover:bg-paper-inset">
+            下载
+          </button>
+          <button
+            type="button"
+            onClick={() => void deleteChecked()}
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-red-500 hover:bg-red-500/10"
+          >
+            <Trash2 size={11} /> 删除
+          </button>
+          <button type="button" onClick={() => setChecked(new Set())} className="ml-auto rounded px-1.5 py-0.5 hover:bg-paper-inset">
+            清除
+          </button>
+        </div>
+      )}
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {loading && artifacts.length === 0 ? (
@@ -108,16 +258,30 @@ export default function ArtifactPanel({ sessionId }: { sessionId: string }) {
             <FolderKanban className="mx-auto h-6 w-6 text-ink-muted/50" />
             <p className="mt-2 text-xs text-ink-muted">暂无作品</p>
             <p className="mt-1 text-[11px] leading-4 text-ink-muted">
-              附件和 Agent 写入的文件会出现在这里
+              拖文件到这里 · 图片、文档、参考；Agent 写入的文件也会出现在这里
             </p>
           </div>
         ) : (
           <ul className="flex flex-col p-2">
             {artifacts.map((a) => (
-              <li key={a.id}>
+              <li key={a.id} className="flex items-stretch gap-1">
+                {selecting && (
+                  <button
+                    type="button"
+                    onClick={() => toggleCheck(a.id)}
+                    className="flex shrink-0 items-center px-1 text-ink-muted hover:text-ink"
+                    aria-label="选择"
+                  >
+                    {checked.has(a.id) ? (
+                      <CheckSquare size={13} className="text-accent" />
+                    ) : (
+                      <Square size={13} />
+                    )}
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={() => setSelectedId(a.id)}
+                  onClick={() => (selecting ? toggleCheck(a.id) : setSelectedId(a.id))}
                   className={cn(
                     'flex w-full items-start gap-2 rounded-xl px-2.5 py-2.5 text-left hover:bg-paper-inset/70',
                     selectedId === a.id && 'bg-paper-inset',
@@ -127,11 +291,11 @@ export default function ArtifactPanel({ sessionId }: { sessionId: string }) {
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-1.5 truncate text-xs font-medium">
                       <span className="truncate">{a.name}</span>
-                      {a.versionCount > 1 ? (
+                      {a.versionCount > 1 && (
                         <span className="shrink-0 rounded bg-paper-inset px-1 text-[9px] font-medium tabular-nums text-ink-muted">
                           v{a.version}
                         </span>
-                      ) : null}
+                      )}
                     </span>
                     <span className="mt-0.5 block truncate font-mono text-[10px] text-ink-muted">
                       {KIND_LABELS[a.kind]} · {SOURCE_LABELS[a.source] ?? a.source} · {formatTime(a.createdAt)}
@@ -144,7 +308,15 @@ export default function ArtifactPanel({ sessionId }: { sessionId: string }) {
         )}
       </div>
 
-      {selected ? (
+      {dragOver && (
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-paper/70">
+          <span className="rounded-lg border border-dashed border-accent px-4 py-2 text-xs text-accent">
+            松开以上传
+          </span>
+        </div>
+      )}
+
+      {selected && !selecting ? (
         <div className="flex max-h-[55%] min-h-[140px] shrink-0 flex-col border-t border-line">
           <ArtifactPreview artifact={selected} onClose={() => setSelectedId(null)} />
         </div>

@@ -8,6 +8,11 @@ export interface ArtifactRenderProps {
   text: string;
   /** Absolute URL for blob kinds (`<img src>` etc.); '' for text. */
   rawUrl: string;
+  /**
+   * Present when this artifact's latest version is editable in place (a text
+   * kind, showing the latest version). Persists a new version.
+   */
+  onCommitDraft?: (nextText: string) => Promise<void>;
 }
 
 export interface ArtifactRendererDef {

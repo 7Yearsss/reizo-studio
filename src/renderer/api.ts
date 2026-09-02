@@ -394,7 +394,13 @@ export async function listArtifacts(): Promise<Artifact[]> {
 
 export async function createSessionArtifact(
   sessionId: string,
-  input: { name: string; content: string; source?: 'attachment' | 'generated'; mimeType?: string },
+  input: {
+    name: string;
+    content: string;
+    source?: 'attachment' | 'generated' | 'manual';
+    mimeType?: string;
+    kind?: string;
+  },
 ): Promise<ArtifactWithContent> {
   const res = await api(`/api/sessions/${sessionId}/artifacts`, {
     method: 'POST',

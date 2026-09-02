@@ -640,10 +640,27 @@ intelligence. AP6 rides on the canvas P4 provider work.
   localised sentence, the raw goes to the log.
 - Gates: `tsc` clean · `vitest` 31 files / 185 tests · `test:api` pass.
 
+**AP3 — editing & preview UX (partial).**
+- `renderers/MarkdownRenderer.tsx` — MD1: 预览 / 分屏 / 编辑 mode toggle, a
+  `<textarea>` draft, 900 ms debounced autosave via `POST /:id/versions`
+  (`保存中… → 已保存 · HH:MM`). Only active when the artifact is a text kind on
+  its latest version.
+- `ArtifactPreview.tsx` — MD7: 源码/渲染 toggle (swaps in the `code` renderer);
+  passes `onCommitDraft` (→ `addArtifactVersion` + reload) to editable text
+  renderers; blob download goes through the raw URL.
+- `ArtifactPanel.tsx` — IM4: drag-drop / 上传 button reads files (text inline,
+  binary as data URL → blob) into `createSessionArtifact`. IM5: 多选 mode with
+  下载 / 删除 / 清除 bar. Empty-state copy updated to "拖文件到这里".
+- `renderers/types.ts` — `ArtifactRenderProps.onCommitDraft`.
+- Gates: `tsc` clean · `vitest` 31 files / 185 tests · `test:api` pass.
+- **Left in AP3**: X3 share/export menu (PDF via Electron `printToPDF`,
+  standalone HTML, ZIP), MD2 streaming-status wiring (producers must flip
+  `status`), MD6 viewport/zoom for HTML previews.
+
 ### In progress
 
-- **AP3** — editing & preview UX (markdown split editor + autosave, streaming
-  status, viewport/zoom, share/export menu, drop zone).
+- **AP3 tail** then **AP4** — question-form, direction-cards, draw-to-annotate,
+  comment pins.
 
 ### Deviations
 
