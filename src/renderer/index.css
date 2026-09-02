@@ -372,6 +372,30 @@ pre,
   animation: canvas-node-pulse 1.6s var(--ease-out) infinite;
   border-color: var(--accent);
 }
+.canvas-node-highlight {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent);
+  border-color: var(--accent);
+}
+
+/* Canvas toolbar buttons (React Flow Panel). */
+.canvas-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--line);
+  background: var(--paper-raised);
+  padding: 0.25rem 0.625rem;
+  font-size: 0.75rem;
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+.canvas-tool:hover:not(:disabled) {
+  background: var(--paper-inset);
+}
+.canvas-tool:disabled {
+  opacity: 0.4;
+}
 
 /* Global press feedback — respond on pointer-down, Apple-style. The
    `:has()` guard keeps a nested button from double-scaling its parent. */
@@ -397,6 +421,9 @@ button,
   }
   .canvas-node-running {
     animation: none;
+  }
+  .canvas-tool {
+    transition: none;
   }
   .home-hero-canvas {
     transition: none;

@@ -6,6 +6,7 @@ export interface UiState {
   artifactsOpen: boolean;
   canvasOpen: boolean;
   rightPanelWidth: number;
+  rightPanelMaximized: boolean;
 }
 
 const MODE_KEY = 'reizo:sidebar-mode';
@@ -46,6 +47,7 @@ let state: UiState = {
   artifactsOpen: typeof localStorage !== 'undefined' && localStorage.getItem(ARTIFACTS_KEY) === '1',
   canvasOpen: typeof localStorage !== 'undefined' && localStorage.getItem(CANVAS_KEY) === '1',
   rightPanelWidth: readRightWidth(),
+  rightPanelMaximized: false,
 };
 
 const listeners = new Set<() => void>();
@@ -102,5 +104,12 @@ export function toggleCanvas(): void {
 }
 
 export function setRightPanelWidth(width: number): void {
-  setState({ rightPanelWidth: Math.min(RIGHT_PANEL_MAX, Math.max(RIGHT_PANEL_MIN, Math.round(width))) });
+  setState({
+    rightPanelWidth: Math.min(RIGHT_PANEL_MAX, Math.max(RIGHT_PANEL_MIN, Math.round(width))),
+    rightPanelMaximized: false,
+  });
+}
+
+export function toggleRightPanelMaximized(): void {
+  setState({ rightPanelMaximized: !state.rightPanelMaximized });
 }
