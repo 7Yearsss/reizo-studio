@@ -54,6 +54,12 @@ export default function ImageNode({ data, selected }: NodeProps) {
     }
   };
 
+  const runFromHere = () => {
+    if (running) return;
+    if (!window.confirm('从这个节点往下按依赖顺序重新生成（付费）。继续？')) return;
+    void canvasStore.runGraph(sessionId, true, node.id);
+  };
+
   return (
     <div
       className={cn(
@@ -66,20 +72,27 @@ export default function ImageNode({ data, selected }: NodeProps) {
 
       <div className="mb-2 flex items-center justify-between gap-2">
         <span className="font-medium text-ink-muted">{node.title || '图片'}</span>
-        <span
-          className={cn(
-            'rounded-full px-1.5 py-0.5 text-[10px]',
-            node.runState === 'error'
-              ? 'bg-danger/10 text-danger'
-              : node.runState === 'done'
-                ? 'bg-success/10 text-success'
-                : running
-                  ? 'bg-accent/10 text-accent'
-                  : 'bg-paper-inset text-ink-muted',
-          )}
-        >
-          {node.runState === 'idle' ? '未运行' : node.runState === 'running' ? '生成中' : node.runState === 'done' ? '完成' : '失败'}
-        </span>
+        <div className="flex items-center gap-1">
+          {node.dirty && !running ? (
+            <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">
+              待更新
+            </span>
+          ) : null}
+          <span
+            className={cn(
+              'rounded-full px-1.5 py-0.5 text-[10px]',
+              node.runState === 'error'
+                ? 'bg-danger/10 text-danger'
+                : node.runState === 'done'
+                  ? 'bg-success/10 text-success'
+                  : running
+                    ? 'bg-accent/10 text-accent'
+                    : 'bg-paper-inset text-ink-muted',
+            )}
+          >
+            {node.runState === 'idle' ? '未运行' : node.runState === 'running' ? '生成中' : node.runState === 'done' ? '完成' : '失败'}
+          </span>
+        </div>
       </div>
 
       <textarea
@@ -110,9 +123,18 @@ export default function ImageNode({ data, selected }: NodeProps) {
         </select>
         <button
           type="button"
+          onClick={runFromHere}
+          disabled={running}
+          className="nodrag ml-auto rounded-lg border border-line px-2 py-1 text-[11px] text-ink-muted hover:bg-paper-inset disabled:opacity-40"
+          title="从这里往下重新运行"
+        >
+          从这里
+        </button>
+        <button
+          type="button"
           onClick={run}
           disabled={running || !prompt.trim()}
-          className="nodrag ml-auto inline-flex items-center gap-1 rounded-lg bg-ink px-2.5 py-1 text-[11px] text-paper-raised disabled:opacity-40"
+          className="nodrag inline-flex items-center gap-1 rounded-lg bg-ink px-2.5 py-1 text-[11px] text-paper-raised disabled:opacity-40"
         >
           {running ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
           运行

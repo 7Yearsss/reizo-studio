@@ -204,3 +204,13 @@ export async function runNode(sessionId: string, nodeId: string, confirmedSpend:
   if (!id) return;
   await api.runCanvasNode(id, nodeId, { confirmedSpend });
 }
+
+export async function runGraph(
+  sessionId: string,
+  confirmedSpend: boolean,
+  from?: string,
+): Promise<void> {
+  const id = canvasId(sessionId);
+  if (!id) return;
+  await api.runCanvasGraph(id, { confirmedSpend, from });
+}

@@ -487,6 +487,17 @@ export async function runCanvasNode(
   });
 }
 
+export async function runCanvasGraph(
+  canvasId: string,
+  options: { confirmedSpend?: boolean; from?: string; providerId?: string } = {},
+): Promise<void> {
+  await api(`/api/canvas/${canvasId}/run`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(options),
+  });
+}
+
 /**
  * Reads the long-lived canvas NDJSON channel. Unlike the chat stream this has
  * no terminal event — it returns cleanly when the body ends (server restart /

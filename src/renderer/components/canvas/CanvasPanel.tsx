@@ -13,7 +13,7 @@ import {
   type Connection,
   type NodeTypes,
 } from '@xyflow/react';
-import { ImageIcon, Bot } from 'lucide-react';
+import { ImageIcon, Bot, PlayCircle } from 'lucide-react';
 import * as canvasStore from '../../state/canvasStore';
 import { useCanvasStore } from '../../state/useCanvasStore';
 import ImageNode, { type CanvasNodeData } from './ImageNode';
@@ -83,6 +83,13 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     void canvasStore.addNode(sessionId, type, { x: 60 + offset, y: 60 + offset });
   };
 
+  const hasImage = storeNodes.some((n) => n.type === 'image');
+  const runAll = () => {
+    if (!hasImage) return;
+    if (!window.confirm('运行整图会按依赖顺序生成所有图片节点（付费）。继续？')) return;
+    void canvasStore.runGraph(sessionId, true);
+  };
+
   return (
     <ReactFlow
       nodes={nodes}
@@ -115,6 +122,15 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         >
           <Bot size={13} />
           Agent
+        </button>
+        <button
+          type="button"
+          onClick={runAll}
+          disabled={!hasImage}
+          className="inline-flex items-center gap-1 rounded-lg border border-line bg-ink px-2.5 py-1 text-xs text-paper-raised shadow-sm disabled:opacity-40"
+        >
+          <PlayCircle size={13} />
+          运行整图
         </button>
       </Panel>
       {loaded && storeNodes.length === 0 ? (

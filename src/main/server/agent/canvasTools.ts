@@ -5,6 +5,7 @@ import type { SettingsStore } from '../storage/settingsStore';
 import type { CanvasStore } from '../storage/canvasStore';
 import { getCanvasChannel } from '../canvas/channel';
 import { runImageNode } from '../canvas/imageExecutor';
+import { runGraph } from '../canvas/graphExecutor';
 
 /**
  * Agent-facing canvas tools (slice C: `add_node`, `run_node`). Structure edits
@@ -65,6 +66,18 @@ export function createCanvasTools(options: {
         if (node.type !== 'image') return { error: 'Only image nodes can be run in this version' };
         void runImageNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node });
         return { ok: true, id, status: 'running' };
+      },
+    }),
+
+    run_graph: tool({
+      description:
+        'Run the whole canvas as a pipeline (topological order; a node runs after its inputs). Pass `from` to run only that node and everything downstream. Returns immediately; results stream onto the canvas.',
+      inputSchema: z.object({ from: z.string().optional() }),
+      execute: async ({ from }) => {
+        const canvas = canvasStore.ensureCanvas(sessionId);
+        if (from && !canvasStore.getNode(canvas.id, from)) return { error: `No canvas node "${from}"` };
+        void runGraph({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, fromNodeId: from });
+        return { ok: true, status: 'running' };
       },
     }),
   };

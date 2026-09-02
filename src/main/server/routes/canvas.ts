@@ -4,7 +4,8 @@ import { defaultNodeBox, type CanvasNodeType } from '../../../shared/canvas';
 import type { SettingsStore } from '../storage/settingsStore';
 import type { CanvasStore } from '../storage/canvasStore';
 import { getCanvasChannel } from '../canvas/channel';
-import { readCanvasAsset, runImageNode } from '../canvas/imageExecutor';
+import { broadcastDownstreamDirty, readCanvasAsset, runImageNode } from '../canvas/imageExecutor';
+import { runGraph } from '../canvas/graphExecutor';
 
 const NODE_TYPES = new Set<CanvasNodeType>(['image', 'agent']);
 
@@ -66,6 +67,7 @@ export function createCanvasRouter(
 
   router.patch('/:canvasId/nodes/:id', async (c) => {
     const canvasId = c.req.param('canvasId');
+    const id = c.req.param('id');
     const body = await c.req.json().catch((): null => null);
     if (!body || typeof body !== 'object') return c.json({ error: 'body required' }, 400);
     const patch: Record<string, unknown> = {};
@@ -73,10 +75,14 @@ export function createCanvasRouter(
       if (typeof body[key] === 'number') patch[key] = body[key];
     }
     if (typeof body.title === 'string') patch.title = body.title;
-    if (body.params && typeof body.params === 'object') patch.params = body.params;
-    const result = canvasStore.updateNode(canvasId, c.req.param('id'), patch);
+    const paramsChanged = body.params && typeof body.params === 'object';
+    if (paramsChanged) patch.params = body.params;
+    const result = canvasStore.updateNode(canvasId, id, patch);
     if (!result) return c.json({ error: 'Node not found' }, 404);
-    getCanvasChannel(canvasId).broadcast(result.rev, { type: 'node_updated', node: result.node });
+    const channel = getCanvasChannel(canvasId);
+    channel.broadcast(result.rev, { type: 'node_updated', node: result.node });
+    // A param change can restate this node and everything downstream.
+    if (paramsChanged) broadcastDownstreamDirty(canvasStore, canvasId, id, result.rev);
     return c.json({ node: result.node });
   });
 
@@ -101,8 +107,15 @@ export function createCanvasRouter(
       targetId: body.targetId,
       targetHandle: typeof body.targetHandle === 'string' ? body.targetHandle : null,
     });
-    if (!result) return c.json({ error: 'source or target node not found' }, 404);
-    getCanvasChannel(canvasId).broadcast(result.rev, { type: 'edge_added', edge: result.edge });
+    if (result.error === 'cycle') {
+      return c.json({ error: 'That connection would create a cycle' }, 409);
+    }
+    if (result.error || !result.edge || result.rev === undefined) {
+      return c.json({ error: 'source or target node not found' }, 404);
+    }
+    const channel = getCanvasChannel(canvasId);
+    channel.broadcast(result.rev, { type: 'edge_added', edge: result.edge });
+    broadcastDownstreamDirty(canvasStore, canvasId, result.edge.sourceId, result.rev);
     return c.json({ edge: result.edge }, 201);
   });
 
@@ -111,7 +124,9 @@ export function createCanvasRouter(
     const id = c.req.param('id');
     const result = canvasStore.deleteEdge(canvasId, id);
     if (!result) return c.json({ error: 'Edge not found' }, 404);
-    getCanvasChannel(canvasId).broadcast(result.rev, { type: 'edge_deleted', id });
+    const channel = getCanvasChannel(canvasId);
+    channel.broadcast(result.rev, { type: 'edge_deleted', id });
+    broadcastDownstreamDirty(canvasStore, canvasId, result.targetId, result.rev);
     return c.body(null, 204);
   });
 
@@ -145,6 +160,32 @@ export function createCanvasRouter(
 
     // 'agent' node execution lands in P2.
     return c.json({ error: 'Agent node execution is not available yet' }, 501);
+  });
+
+  /**
+   * Run the graph in topological order. `?from=<nodeId>` restricts it to that
+   * node and its descendants. Paid (image nodes) -> `confirmedSpend` required.
+   */
+  router.post('/:canvasId/run', async (c) => {
+    const canvasId = c.req.param('canvasId');
+    if (!canvasStore.getCanvas(canvasId)) return c.json({ error: 'Canvas not found' }, 404);
+    const body = await c.req.json().catch((): Record<string, unknown> => ({}));
+    if (body?.confirmedSpend !== true) {
+      return c.json({ error: 'confirmedSpend required for a paid run' }, 402);
+    }
+    const fromNodeId = typeof body.from === 'string' ? body.from : undefined;
+    if (fromNodeId && !canvasStore.getNode(canvasId, fromNodeId)) {
+      return c.json({ error: 'from node not found' }, 404);
+    }
+    void runGraph({
+      canvasStore,
+      settingsStore,
+      dataRoot,
+      canvasId,
+      fromNodeId,
+      providerId: typeof body.providerId === 'string' ? body.providerId : undefined,
+    });
+    return c.json({ ok: true }, 202);
   });
 
   return router;
