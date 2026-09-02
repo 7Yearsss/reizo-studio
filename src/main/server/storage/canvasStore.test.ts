@@ -46,7 +46,7 @@ describe('CanvasStore', () => {
     const tgt = canvas.addNode(c.id, { type: 'image', x: 0, y: 0, w: 1, h: 1, params: {} }).node;
 
     const edge = canvas.addEdge(c.id, { sourceId: src.id, targetId: tgt.id });
-    expect(edge?.edge.sourceId).toBe(src.id);
+    expect(edge.edge?.sourceId).toBe(src.id);
     expect(canvas.getSnapshot(c.id)?.edges).toHaveLength(1);
     expect(canvas.upstreamNodes(c.id, tgt.id).map((n) => n.id)).toEqual([src.id]);
 
@@ -54,11 +54,34 @@ describe('CanvasStore', () => {
     expect(canvas.getSnapshot(c.id)?.edges).toHaveLength(0);
   });
 
-  it('rejects an edge to a missing node', async () => {
+  it('rejects an edge to a missing node, a duplicate, and a cycle', async () => {
     const { canvas, sessionId } = await freshStores();
     const c = canvas.ensureCanvas(sessionId);
-    const src = canvas.addNode(c.id, { type: 'image', x: 0, y: 0, w: 1, h: 1, params: {} }).node;
-    expect(canvas.addEdge(c.id, { sourceId: src.id, targetId: 'nope' })).toBeNull();
+    const a = canvas.addNode(c.id, { type: 'image', x: 0, y: 0, w: 1, h: 1, params: {} }).node;
+    const b = canvas.addNode(c.id, { type: 'image', x: 0, y: 0, w: 1, h: 1, params: {} }).node;
+    expect(canvas.addEdge(c.id, { sourceId: a.id, targetId: 'nope' }).error).toBe('missing');
+    expect(canvas.addEdge(c.id, { sourceId: a.id, targetId: b.id }).edge).toBeTruthy();
+    expect(canvas.addEdge(c.id, { sourceId: a.id, targetId: b.id }).error).toBe('cycle'); // duplicate
+    expect(canvas.addEdge(c.id, { sourceId: b.id, targetId: a.id }).error).toBe('cycle');
+  });
+
+  it('flags a node dirty when its params drift after a run', async () => {
+    const { canvas, sessionId } = await freshStores();
+    const c = canvas.ensureCanvas(sessionId);
+    const n = canvas.addNode(c.id, { type: 'image', x: 0, y: 0, w: 1, h: 1, params: { prompt: 'a', size: '1024x1024' } }).node;
+
+    // never run -> not dirty, just un-run
+    expect(canvas.getSnapshot(c.id)?.nodes[0].dirty).toBe(false);
+
+    // simulate a successful run: store the hash of the current inputs
+    const { inputHash } = await import('../canvas/graph');
+    const ran = canvas.getNode(c.id, n.id)!;
+    canvas.updateNode(c.id, n.id, { runState: 'done', output: { assets: ['x'] }, paramsHash: inputHash(ran, []) });
+    expect(canvas.getSnapshot(c.id)?.nodes[0].dirty).toBe(false);
+
+    // change the prompt -> now stale
+    canvas.updateNode(c.id, n.id, { params: { prompt: 'b', size: '1024x1024' } });
+    expect(canvas.getSnapshot(c.id)?.nodes[0].dirty).toBe(true);
   });
 
   it('cascade-deletes the canvas when the session goes', async () => {

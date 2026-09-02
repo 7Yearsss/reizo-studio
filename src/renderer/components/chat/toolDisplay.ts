@@ -34,6 +34,12 @@ export function toolLabel(name: string): string {
     case 'ask_user': return '等待你的回答';
     case 'add_node': return '画布加节点';
     case 'run_node': return '运行画布节点';
+    case 'run_graph': return '运行画布';
+    case 'read_canvas': return '读取画布';
+    case 'read_node': return '读取画布节点';
+    case 'update_node': return '修改画布节点';
+    case 'connect_nodes': return '连接画布节点';
+    case 'delete_node': return '删除画布节点';
     default: return name.replace(/[_-]+/g, ' ');
   }
 }

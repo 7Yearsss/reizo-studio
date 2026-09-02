@@ -37,6 +37,11 @@ export interface CanvasNode {
   /** Result payload. For image nodes: `{ assets: string[], error?: string }`. */
   output: CanvasNodeOutput | null;
   updatedAt: string;
+  /**
+   * Derived (not stored): the node ran before but its params or an upstream
+   * output has changed since, so its result is out of date.
+   */
+  dirty?: boolean;
 }
 
 export interface CanvasNodeOutput {

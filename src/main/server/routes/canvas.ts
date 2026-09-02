@@ -1,18 +1,26 @@
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { Hono } from 'hono';
+import { nanoid } from 'nanoid';
 import type { SessionStore } from '../../../shared/chat';
 import { defaultNodeBox, type CanvasNodeType } from '../../../shared/canvas';
 import type { SettingsStore } from '../storage/settingsStore';
 import type { CanvasStore } from '../storage/canvasStore';
+import type { ArtifactStore } from '../storage/artifactStore';
 import { getCanvasChannel } from '../canvas/channel';
-import { readCanvasAsset, runImageNode } from '../canvas/imageExecutor';
+import { broadcastDownstreamDirty, canvasAssetsDir, readCanvasAsset, runImageNode } from '../canvas/imageExecutor';
+import { isCanvasRunning, runGraph, stopCanvasRun } from '../canvas/graphExecutor';
+import { setCanvasSelection } from '../canvas/selection';
 
 const NODE_TYPES = new Set<CanvasNodeType>(['image', 'agent']);
+const IMPORT_MAX_BYTES = 12 * 1024 * 1024;
 
 export function createCanvasRouter(
   canvasStore: CanvasStore,
   settingsStore: SettingsStore,
   sessionStore: SessionStore,
   dataRoot: string,
+  artifactStore?: ArtifactStore,
 ) {
   const router = new Hono();
 
@@ -66,6 +74,7 @@ export function createCanvasRouter(
 
   router.patch('/:canvasId/nodes/:id', async (c) => {
     const canvasId = c.req.param('canvasId');
+    const id = c.req.param('id');
     const body = await c.req.json().catch((): null => null);
     if (!body || typeof body !== 'object') return c.json({ error: 'body required' }, 400);
     const patch: Record<string, unknown> = {};
@@ -73,10 +82,14 @@ export function createCanvasRouter(
       if (typeof body[key] === 'number') patch[key] = body[key];
     }
     if (typeof body.title === 'string') patch.title = body.title;
-    if (body.params && typeof body.params === 'object') patch.params = body.params;
-    const result = canvasStore.updateNode(canvasId, c.req.param('id'), patch);
+    const paramsChanged = body.params && typeof body.params === 'object';
+    if (paramsChanged) patch.params = body.params;
+    const result = canvasStore.updateNode(canvasId, id, patch);
     if (!result) return c.json({ error: 'Node not found' }, 404);
-    getCanvasChannel(canvasId).broadcast(result.rev, { type: 'node_updated', node: result.node });
+    const channel = getCanvasChannel(canvasId);
+    channel.broadcast(result.rev, { type: 'node_updated', node: result.node });
+    // A param change can restate this node and everything downstream.
+    if (paramsChanged) broadcastDownstreamDirty(canvasStore, canvasId, id, result.rev);
     return c.json({ node: result.node });
   });
 
@@ -101,8 +114,15 @@ export function createCanvasRouter(
       targetId: body.targetId,
       targetHandle: typeof body.targetHandle === 'string' ? body.targetHandle : null,
     });
-    if (!result) return c.json({ error: 'source or target node not found' }, 404);
-    getCanvasChannel(canvasId).broadcast(result.rev, { type: 'edge_added', edge: result.edge });
+    if (result.error === 'cycle') {
+      return c.json({ error: 'That connection would create a cycle' }, 409);
+    }
+    if (result.error || !result.edge || result.rev === undefined) {
+      return c.json({ error: 'source or target node not found' }, 404);
+    }
+    const channel = getCanvasChannel(canvasId);
+    channel.broadcast(result.rev, { type: 'edge_added', edge: result.edge });
+    broadcastDownstreamDirty(canvasStore, canvasId, result.edge.sourceId, result.rev);
     return c.json({ edge: result.edge }, 201);
   });
 
@@ -111,7 +131,9 @@ export function createCanvasRouter(
     const id = c.req.param('id');
     const result = canvasStore.deleteEdge(canvasId, id);
     if (!result) return c.json({ error: 'Edge not found' }, 404);
-    getCanvasChannel(canvasId).broadcast(result.rev, { type: 'edge_deleted', id });
+    const channel = getCanvasChannel(canvasId);
+    channel.broadcast(result.rev, { type: 'edge_deleted', id });
+    broadcastDownstreamDirty(canvasStore, canvasId, result.targetId, result.rev);
     return c.body(null, 204);
   });
 
@@ -145,6 +167,117 @@ export function createCanvasRouter(
 
     // 'agent' node execution lands in P2.
     return c.json({ error: 'Agent node execution is not available yet' }, 501);
+  });
+
+  /**
+   * Run the graph in topological order. `?from=<nodeId>` restricts it to that
+   * node and its descendants. Paid (image nodes) -> `confirmedSpend` required.
+   */
+  router.post('/:canvasId/run', async (c) => {
+    const canvasId = c.req.param('canvasId');
+    if (!canvasStore.getCanvas(canvasId)) return c.json({ error: 'Canvas not found' }, 404);
+    const body = await c.req.json().catch((): Record<string, unknown> => ({}));
+    if (body?.confirmedSpend !== true) {
+      return c.json({ error: 'confirmedSpend required for a paid run' }, 402);
+    }
+    const fromNodeId = typeof body.from === 'string' ? body.from : undefined;
+    if (fromNodeId && !canvasStore.getNode(canvasId, fromNodeId)) {
+      return c.json({ error: 'from node not found' }, 404);
+    }
+    void runGraph({
+      canvasStore,
+      settingsStore,
+      dataRoot,
+      canvasId,
+      fromNodeId,
+      providerId: typeof body.providerId === 'string' ? body.providerId : undefined,
+    });
+    return c.json({ ok: true }, 202);
+  });
+
+  router.post('/:canvasId/run/stop', (c) => {
+    const stopped = stopCanvasRun(c.req.param('canvasId'));
+    return c.json({ stopped, running: isCanvasRunning(c.req.param('canvasId')) });
+  });
+
+  /** Import a dropped image file as a `done` image node. */
+  router.post('/:canvasId/import', async (c) => {
+    const canvasId = c.req.param('canvasId');
+    if (!canvasStore.getCanvas(canvasId)) return c.json({ error: 'Canvas not found' }, 404);
+    const body = await c.req.json().catch((): null => null);
+    if (typeof body?.dataBase64 !== 'string' || typeof body?.name !== 'string') {
+      return c.json({ error: 'name and dataBase64 are required' }, 400);
+    }
+    const bytes = Buffer.from(body.dataBase64, 'base64');
+    if (bytes.byteLength === 0 || bytes.byteLength > IMPORT_MAX_BYTES) {
+      return c.json({ error: `Image must be 1 byte – ${IMPORT_MAX_BYTES} bytes` }, 413);
+    }
+    const ext = (body.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
+    const box = defaultNodeBox('image');
+    const { rev, node } = canvasStore.addNode(canvasId, {
+      type: 'image',
+      x: typeof body.x === 'number' ? body.x : 40,
+      y: typeof body.y === 'number' ? body.y : 40,
+      w: box.w,
+      h: box.h,
+      title: body.name.slice(0, 80),
+      params: { prompt: '', size: '1024x1024' },
+    });
+    const dir = canvasAssetsDir(dataRoot, canvasId);
+    await mkdir(dir, { recursive: true });
+    const file = `${node.id}-import-${nanoid(6)}.${ext}`;
+    await writeFile(path.join(dir, file), bytes);
+    getCanvasChannel(canvasId).broadcast(rev, { type: 'node_added', node });
+    const withAsset = canvasStore.updateNode(canvasId, node.id, {
+      runState: 'done',
+      output: { assets: [`${canvasId}/${file}`] },
+    });
+    if (withAsset) {
+      getCanvasChannel(canvasId).broadcast(withAsset.rev, {
+        type: 'node_output',
+        id: node.id,
+        output: withAsset.node.output ?? { assets: [`${canvasId}/${file}`] },
+        runState: 'done',
+      });
+    }
+    return c.json({ node: withAsset?.node ?? node }, 201);
+  });
+
+  /** Copy one of a node's output images into the session's Artifacts. */
+  router.post('/:canvasId/nodes/:id/save-asset', async (c) => {
+    if (!artifactStore) return c.json({ error: 'Artifacts unavailable' }, 501);
+    const canvasId = c.req.param('canvasId');
+    const node = canvasStore.getNode(canvasId, c.req.param('id'));
+    if (!node) return c.json({ error: 'Node not found' }, 404);
+    const body = await c.req.json().catch((): Record<string, unknown> => ({}));
+    const index = typeof body.assetIndex === 'number' ? body.assetIndex : 0;
+    const rel = node.output?.assets?.[index];
+    if (!rel) return c.json({ error: 'No such asset' }, 404);
+    const canvas = canvasStore.getCanvas(canvasId);
+    let bytes: Buffer;
+    try {
+      bytes = await readCanvasAsset(dataRoot, rel);
+    } catch {
+      return c.json({ error: 'Asset missing on disk' }, 404);
+    }
+    const session = canvas ? await sessionStore.get(canvas.sessionId) : null;
+    const name = `${(node.title || 'canvas-image').replace(/[^\w.-]+/g, '-').slice(0, 60)}.${rel.split('.').pop() || 'png'}`;
+    const artifact = await artifactStore.create({
+      sessionId: canvas?.sessionId ?? '',
+      projectId: session?.projectId ?? null,
+      name,
+      content: `data:image/${rel.endsWith('jpg') ? 'jpeg' : 'png'};base64,${bytes.toString('base64')}`,
+      source: 'generated',
+    });
+    return c.json({ artifact }, 201);
+  });
+
+  /** Record the user's current node selection (feeds the agent's canvas summary). */
+  router.put('/:canvasId/selection', async (c) => {
+    const body = await c.req.json().catch((): null => null);
+    const ids = Array.isArray(body?.ids) ? body.ids.filter((v: unknown): v is string => typeof v === 'string') : [];
+    setCanvasSelection(c.req.param('canvasId'), ids);
+    return c.json({ ok: true });
   });
 
   return router;

@@ -487,6 +487,50 @@ export async function runCanvasNode(
   });
 }
 
+export async function runCanvasGraph(
+  canvasId: string,
+  options: { confirmedSpend?: boolean; from?: string; providerId?: string } = {},
+): Promise<void> {
+  await api(`/api/canvas/${canvasId}/run`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(options),
+  });
+}
+
+export async function stopCanvasGraph(canvasId: string): Promise<void> {
+  await api(`/api/canvas/${canvasId}/run/stop`, { method: 'POST' });
+}
+
+export async function importCanvasImage(
+  canvasId: string,
+  input: { name: string; dataBase64: string; x?: number; y?: number },
+): Promise<CanvasNode> {
+  const res = await api(`/api/canvas/${canvasId}/import`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const { node } = await res.json();
+  return node;
+}
+
+export async function saveCanvasAsset(canvasId: string, nodeId: string, assetIndex = 0): Promise<void> {
+  await api(`/api/canvas/${canvasId}/nodes/${nodeId}/save-asset`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ assetIndex }),
+  });
+}
+
+export async function setCanvasSelection(canvasId: string, ids: string[]): Promise<void> {
+  await api(`/api/canvas/${canvasId}/selection`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ids }),
+  });
+}
+
 /**
  * Reads the long-lived canvas NDJSON channel. Unlike the chat stream this has
  * no terminal event — it returns cleanly when the body ends (server restart /

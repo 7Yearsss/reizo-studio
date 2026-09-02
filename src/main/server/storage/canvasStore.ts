@@ -11,6 +11,7 @@ import type {
   NodeRunState,
 } from '../../../shared/canvas';
 import type { DbHandle } from '../db/client';
+import { descendants, inputHash, wouldCycle } from '../canvas/graph';
 
 interface CanvasRowRaw {
   id: string;
@@ -112,6 +113,15 @@ export interface NodePatch {
   params?: CanvasNodeParams;
   runState?: NodeRunState;
   output?: CanvasNodeOutput | null;
+  /** The input hash captured at the moment of a successful run. */
+  paramsHash?: string | null;
+}
+
+/** Flat result — this project has weak (non-strict) discriminated-union narrowing. */
+export interface AddEdgeResult {
+  edge?: CanvasEdge;
+  rev?: number;
+  error?: 'missing' | 'cycle';
 }
 
 export interface EdgeInput {
@@ -148,6 +158,27 @@ export function createCanvasStore(handle: DbHandle) {
   function readNode(canvasId: string, id: string): CanvasNode | null {
     const row = selNode.get(canvasId, id) as unknown as NodeRowRaw | undefined;
     return row ? toNode(row) : null;
+  }
+
+  function readNodes(canvasId: string): CanvasNode[] {
+    return (selNodes.all(canvasId) as unknown as NodeRowRaw[]).map(toNode);
+  }
+
+  function readEdges(canvasId: string): CanvasEdge[] {
+    return (selEdges.all(canvasId) as unknown as EdgeRowRaw[]).map(toEdge);
+  }
+
+  /** Set the derived `dirty` flag: ran before, but inputs have drifted since. */
+  function annotate(nodes: CanvasNode[], edges: CanvasEdge[]): CanvasNode[] {
+    const byId = new Map(nodes.map((n) => [n.id, n] as const));
+    return nodes.map((node) => {
+      if (!node.paramsHash) return { ...node, dirty: false };
+      const upstream = edges
+        .filter((e) => e.targetId === node.id)
+        .map((e) => byId.get(e.sourceId))
+        .filter((n): n is CanvasNode => Boolean(n));
+      return { ...node, dirty: node.paramsHash !== inputHash(node, upstream) };
+    });
   }
 
   function ensureCanvas(sessionId: string): Canvas {
@@ -190,19 +221,29 @@ export function createCanvasStore(handle: DbHandle) {
     getSnapshot(canvasId: string): CanvasSnapshot | null {
       const canvasRow = selCanvasById.get(canvasId) as unknown as CanvasRowRaw | undefined;
       if (!canvasRow) return null;
-      const nodes = (selNodes.all(canvasId) as unknown as NodeRowRaw[]).map(toNode);
-      const edges = (selEdges.all(canvasId) as unknown as EdgeRowRaw[]).map(toEdge);
-      return { canvas: toCanvas(canvasRow), nodes, edges };
+      const edges = readEdges(canvasId);
+      return { canvas: toCanvas(canvasRow), nodes: annotate(readNodes(canvasId), edges), edges };
     },
 
     getSnapshotBySession(sessionId: string): CanvasSnapshot {
       const canvas = ensureCanvas(sessionId);
-      const nodes = (selNodes.all(canvas.id) as unknown as NodeRowRaw[]).map(toNode);
-      const edges = (selEdges.all(canvas.id) as unknown as EdgeRowRaw[]).map(toEdge);
-      return { canvas, nodes, edges };
+      const edges = readEdges(canvas.id);
+      return { canvas, nodes: annotate(readNodes(canvas.id), edges), edges };
     },
 
     getNode: readNode,
+    getNodes: readNodes,
+    getEdges: readEdges,
+
+    /** The mutated node plus its descendants, each with a fresh `dirty` flag. */
+    annotatedFrom(canvasId: string, nodeId: string): CanvasNode[] {
+      const nodes = readNodes(canvasId);
+      const edges = readEdges(canvasId);
+      const annotated = annotate(nodes, edges);
+      const affected = descendants(edges, nodeId);
+      affected.add(nodeId);
+      return annotated.filter((n) => affected.has(n.id));
+    },
 
     addNode(canvasId: string, input: NodeInput): { rev: number; node: CanvasNode } {
       return tx(() => {
@@ -245,6 +286,7 @@ export function createCanvasStore(handle: DbHandle) {
         if (patch.title !== undefined) { sets.push('title = ?'); vals.push(patch.title); }
         if (patch.params !== undefined) { sets.push('params_json = ?'); vals.push(JSON.stringify(patch.params)); }
         if (patch.runState !== undefined) { sets.push('run_state = ?'); vals.push(patch.runState); }
+        if (patch.paramsHash !== undefined) { sets.push('params_hash = ?'); vals.push(patch.paramsHash); }
         if (patch.output !== undefined) {
           sets.push('output_json = ?');
           vals.push(patch.output === null ? null : JSON.stringify(patch.output));
@@ -277,11 +319,18 @@ export function createCanvasStore(handle: DbHandle) {
       });
     },
 
-    addEdge(canvasId: string, input: EdgeInput): { rev: number; edge: CanvasEdge } | null {
-      return tx(() => {
+    addEdge(canvasId: string, input: EdgeInput): AddEdgeResult {
+      return tx((): AddEdgeResult => {
         const src = readNode(canvasId, input.sourceId);
         const tgt = readNode(canvasId, input.targetId);
-        if (!src || !tgt) return null;
+        if (!src || !tgt) return { error: 'missing' };
+        const existing = readEdges(canvasId);
+        if (
+          existing.some((e) => e.sourceId === input.sourceId && e.targetId === input.targetId) ||
+          wouldCycle(existing, input.sourceId, input.targetId)
+        ) {
+          return { error: 'cycle' };
+        }
         const id = nanoid();
         raw
           .prepare(
@@ -297,12 +346,14 @@ export function createCanvasStore(handle: DbHandle) {
       });
     },
 
-    deleteEdge(canvasId: string, id: string): { rev: number } | null {
+    deleteEdge(canvasId: string, id: string): { rev: number; targetId: string } | null {
       return tx(() => {
-        const existing = raw.prepare('SELECT id FROM canvas_edges WHERE canvas_id = ? AND id = ?').get(canvasId, id);
+        const existing = raw
+          .prepare('SELECT target_id AS t FROM canvas_edges WHERE canvas_id = ? AND id = ?')
+          .get(canvasId, id) as { t: string } | undefined;
         if (!existing) return null;
         raw.prepare('DELETE FROM canvas_edges WHERE canvas_id = ? AND id = ?').run(canvasId, id);
-        return { rev: nextRev(canvasId) };
+        return { rev: nextRev(canvasId), targetId: existing.t };
       });
     },
 

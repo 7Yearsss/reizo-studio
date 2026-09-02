@@ -363,6 +363,16 @@ pre,
   transform-origin: bottom;
 }
 
+/* A canvas node that is currently generating — soft accent breathing ring. */
+@keyframes canvas-node-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 40%, transparent); }
+  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent); }
+}
+.canvas-node-running {
+  animation: canvas-node-pulse 1.6s var(--ease-out) infinite;
+  border-color: var(--accent);
+}
+
 /* Global press feedback — respond on pointer-down, Apple-style. The
    `:has()` guard keeps a nested button from double-scaling its parent. */
 button,
@@ -384,6 +394,9 @@ button,
   .rise-in,
   .pop-in {
     animation: fade-in 180ms var(--ease-out);
+  }
+  .canvas-node-running {
+    animation: none;
   }
   .home-hero-canvas {
     transition: none;

@@ -7,6 +7,27 @@ import { createOpenAiProvider } from '../agent/provider/openai';
 import type { SettingsStore } from '../storage/settingsStore';
 import type { CanvasStore } from '../storage/canvasStore';
 import { getCanvasChannel } from './channel';
+import { inputHash } from './graph';
+
+/**
+ * Re-broadcast a node and its descendants (annotated) so their `dirty` badge
+ * reflects the just-changed inputs. Rides the `rev` of the mutation that
+ * triggered it — several envelopes may share a rev. `skipSelf` leaves the
+ * origin node alone (used after a param PATCH that already broadcast it).
+ */
+export function broadcastDownstreamDirty(
+  canvasStore: CanvasStore,
+  canvasId: string,
+  nodeId: string,
+  rev: number,
+  skipSelf = true,
+): void {
+  const channel = getCanvasChannel(canvasId);
+  for (const node of canvasStore.annotatedFrom(canvasId, nodeId)) {
+    if (skipSelf && node.id === nodeId) continue;
+    channel.broadcast(rev, { type: 'node_updated', node });
+  }
+}
 
 /** Where a canvas node's generated assets live on disk. */
 export function canvasAssetsDir(dataRoot: string, canvasId: string): string {
@@ -85,6 +106,7 @@ export async function runImageNode(options: {
         output: res.node.output ?? { error: message },
         runState: 'error',
       });
+      broadcastDownstreamDirty(canvasStore, canvasId, node.id, res.rev);
     }
   };
 
@@ -107,6 +129,7 @@ export async function runImageNode(options: {
     const baseUrl = stored.baseUrl || preset.baseUrl;
 
     const provider = createOpenAiProvider({ apiKey: stored.apiKey, baseUrl });
+    const upstream = canvasStore.upstreamNodes(canvasId, node.id);
     const images = await upstreamImageBytes(canvasStore, dataRoot, canvasId, node.id);
     const prompt = images.length > 0 ? { text: params.prompt, images } : params.prompt;
 
@@ -131,6 +154,7 @@ export async function runImageNode(options: {
     const done = canvasStore.updateNode(canvasId, node.id, {
       runState: 'done',
       output: { assets: rels },
+      paramsHash: inputHash(node, upstream),
     });
     if (done) {
       channel.broadcast(done.rev, {
@@ -139,6 +163,8 @@ export async function runImageNode(options: {
         output: done.node.output ?? { assets: rels },
         runState: 'done',
       });
+      // Include self: it just ran, so its own `dirty` clears.
+      broadcastDownstreamDirty(canvasStore, canvasId, node.id, done.rev, false);
     }
   } catch (err) {
     fail(err instanceof Error ? err.message : String(err));
