@@ -10,6 +10,7 @@ import type { ArtifactStore } from '../storage/artifactStore';
 import { getCanvasChannel } from '../canvas/channel';
 import { broadcastDownstreamDirty, canvasAssetsDir, readCanvasAsset, runImageNode } from '../canvas/imageExecutor';
 import { isCanvasRunning, runGraph, stopCanvasRun } from '../canvas/graphExecutor';
+import { runAgentNode } from '../canvas/agentExecutor';
 import { setCanvasSelection } from '../canvas/selection';
 
 const NODE_TYPES = new Set<CanvasNodeType>(['image', 'agent']);
@@ -165,8 +166,16 @@ export function createCanvasRouter(
       return c.json({ ok: true }, 202);
     }
 
-    // 'agent' node execution lands in P2.
-    return c.json({ error: 'Agent node execution is not available yet' }, 501);
+    // Agent node: a headless read-only sub-agent pass. Cheap (text only), so
+    // no spend gate — it streams its answer onto the node.
+    void runAgentNode({
+      canvasStore,
+      settingsStore,
+      canvasId,
+      node,
+      providerId: typeof body.providerId === 'string' ? body.providerId : undefined,
+    });
+    return c.json({ ok: true }, 202);
   });
 
   /**

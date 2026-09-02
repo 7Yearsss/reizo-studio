@@ -185,8 +185,9 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
   };
 
   const hasImage = storeNodes.some((n) => n.type === 'image');
+  const hasRunnable = storeNodes.some((n) => n.type === 'image' || n.type === 'agent');
   const runAll = () => {
-    if (!hasImage) return;
+    if (!hasRunnable) return;
     if (!confirmAll) {
       setConfirmAll(true);
       if (confirmTimer.current) clearTimeout(confirmTimer.current);
@@ -355,11 +356,11 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
             <button
               type="button"
               onClick={runAll}
-              disabled={!hasImage}
+              disabled={!hasRunnable}
               className={cn('canvas-tool', confirmAll ? '!border-accent !bg-accent !text-accent-ink' : '!bg-ink !text-paper-raised')}
             >
               <PlayCircle size={13} />
-              {confirmAll ? '确认运行整图（付费）' : '运行整图'}
+              {confirmAll ? (hasImage ? '确认运行整图（付费）' : '确认运行整图') : '运行整图'}
             </button>
           )}
         </Panel>
