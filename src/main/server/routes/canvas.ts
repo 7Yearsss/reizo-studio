@@ -13,9 +13,12 @@ import { isCanvasRunning, runGraph, stopCanvasRun } from '../canvas/graphExecuto
 import { runAgentNode } from '../canvas/agentExecutor';
 import { runVideoNode } from '../canvas/videoExecutor';
 import { setCanvasSelection } from '../canvas/selection';
+import { exportWorkflowZip } from '../canvas/exportWorkflow';
+import { importWorkflowZip } from '../canvas/importWorkflow';
 
-const NODE_TYPES = new Set<CanvasNodeType>(['image', 'agent', 'video']);
+const NODE_TYPES = new Set<CanvasNodeType>(['image', 'agent', 'video', 'note', 'group']);
 const IMPORT_MAX_BYTES = 12 * 1024 * 1024;
+const WORKFLOW_MAX_BYTES = 256 * 1024 * 1024;
 
 export function createCanvasRouter(
   canvasStore: CanvasStore,
@@ -59,7 +62,9 @@ export function createCanvasRouter(
     if (!canvasStore.getCanvas(canvasId)) return c.json({ error: 'Canvas not found' }, 404);
     const body = await c.req.json().catch((): null => null);
     const type = body?.type as CanvasNodeType;
-    if (!NODE_TYPES.has(type)) return c.json({ error: 'type must be "image" or "agent"' }, 400);
+    if (!NODE_TYPES.has(type)) {
+      return c.json({ error: `type must be one of ${[...NODE_TYPES].join(', ')}` }, 400);
+    }
     const box = defaultNodeBox(type);
     const { rev, node } = canvasStore.addNode(canvasId, {
       type,
@@ -210,12 +215,16 @@ export function createCanvasRouter(
     if (fromNodeId && !canvasStore.getNode(canvasId, fromNodeId)) {
       return c.json({ error: 'from node not found' }, 404);
     }
+    const nodeIds = Array.isArray(body.nodeIds)
+      ? body.nodeIds.filter((id: unknown): id is string => typeof id === 'string')
+      : undefined;
     void runGraph({
       canvasStore,
       settingsStore,
       dataRoot,
       canvasId,
       fromNodeId,
+      nodeIds,
       providerId: typeof body.providerId === 'string' ? body.providerId : undefined,
     });
     return c.json({ ok: true }, 202);
@@ -267,6 +276,56 @@ export function createCanvasRouter(
       });
     }
     return c.json({ node: withAsset?.node ?? node }, 201);
+  });
+
+  /** Download the whole canvas as a portable `.reizo.zip` (workflow.json + assets). */
+  router.get('/:canvasId/workflow/export', async (c) => {
+    const canvasId = c.req.param('canvasId');
+    const canvas = canvasStore.getCanvas(canvasId);
+    if (!canvas) return c.json({ error: 'Canvas not found' }, 404);
+    const session = await sessionStore.get(canvas.sessionId).catch((): null => null);
+    try {
+      const zip = await exportWorkflowZip({
+        canvasStore,
+        dataRoot,
+        canvasId,
+        title: session?.title || 'canvas',
+      });
+      return new Response(new Uint8Array(zip), {
+        status: 200,
+        headers: {
+          'content-type': 'application/zip',
+          'content-disposition': `attachment; filename="reizo-canvas-${canvasId.slice(0, 8)}.reizo.zip"`,
+        },
+      });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'export failed' }, 500);
+    }
+  });
+
+  /** Merge a `.reizo.zip` into this canvas with fresh ids. Body: `{ zipBase64 }`. */
+  router.post('/:canvasId/workflow/import', async (c) => {
+    const canvasId = c.req.param('canvasId');
+    if (!canvasStore.getCanvas(canvasId)) return c.json({ error: 'Canvas not found' }, 404);
+    const body = await c.req.json().catch((): null => null);
+    if (typeof body?.zipBase64 !== 'string') {
+      return c.json({ error: 'zipBase64 is required' }, 400);
+    }
+    const zip = Buffer.from(body.zipBase64, 'base64');
+    if (zip.byteLength === 0 || zip.byteLength > WORKFLOW_MAX_BYTES) {
+      return c.json({ error: `zip must be 1 byte – ${WORKFLOW_MAX_BYTES} bytes` }, 413);
+    }
+    try {
+      const result = await importWorkflowZip({
+        canvasStore,
+        dataRoot,
+        canvasId,
+        zip: new Uint8Array(zip),
+      });
+      return c.json(result, 201);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'import failed' }, 422);
+    }
   });
 
   /** Copy one of a node's output images into the session's Artifacts. */

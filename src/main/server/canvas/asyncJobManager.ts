@@ -13,6 +13,10 @@ interface ActiveJob {
   nodeId: string;
   startedAt: number;
   timer: ReturnType<typeof setInterval>;
+  deferred?: {
+    resolve: () => void;
+    reject: (err: Error) => void;
+  };
 }
 
 const activeJobs = new Map<string, ActiveJob>();
@@ -27,9 +31,32 @@ export function cancelVideoJob(canvasId: string, nodeId: string): boolean {
   if (job) {
     clearInterval(job.timer);
     activeJobs.delete(key);
+    job.deferred?.resolve();
     return true;
   }
   return false;
+}
+
+export function awaitVideoJob(canvasId: string, nodeId: string): Promise<void> {
+  const key = `${canvasId}:${nodeId}`;
+  const job = activeJobs.get(key);
+  if (!job) {
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve, reject) => {
+    const prevResolve = job.deferred?.resolve;
+    const prevReject = job.deferred?.reject;
+    job.deferred = {
+      resolve: () => {
+        prevResolve?.();
+        resolve();
+      },
+      reject: (err: Error) => {
+        prevReject?.(err);
+        reject(err);
+      },
+    };
+  });
 }
 
 export async function submitVideoJob(options: {
@@ -133,7 +160,7 @@ export async function submitVideoJob(options: {
         }
 
         if (pollRes.status === 'succeed') {
-          cancelVideoJob(canvasId, nodeId);
+          clearInterval(job.timer);
 
           let videoBuffer: Buffer;
           if (pollRes.videoBuffer) {
@@ -170,6 +197,9 @@ export async function submitVideoJob(options: {
             });
             broadcastDownstreamDirty(canvasStore, canvasId, nodeId, done.rev, false);
           }
+
+          cancelVideoJob(canvasId, nodeId);
+          return;
         }
       } catch (err) {
         fail(err instanceof Error ? err.message : String(err));

@@ -463,7 +463,7 @@ export async function getCanvas(sessionId: string): Promise<CanvasSnapshot> {
 
 export async function addCanvasNode(
   canvasId: string,
-  input: { type: CanvasNodeType; x?: number; y?: number; title?: string; params?: CanvasNodeParams },
+  input: { type: CanvasNodeType; x?: number; y?: number; w?: number; h?: number; title?: string; params?: CanvasNodeParams },
 ): Promise<CanvasNode> {
   const res = await api(`/api/canvas/${canvasId}/nodes`, {
     method: 'POST',
@@ -523,7 +523,7 @@ export async function runCanvasNode(
 
 export async function runCanvasGraph(
   canvasId: string,
-  options: { confirmedSpend?: boolean; from?: string; providerId?: string } = {},
+  options: { confirmedSpend?: boolean; from?: string; nodeIds?: string[]; providerId?: string } = {},
 ): Promise<void> {
   await api(`/api/canvas/${canvasId}/run`, {
     method: 'POST',
@@ -555,6 +555,28 @@ export async function saveCanvasAsset(canvasId: string, nodeId: string, assetInd
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ assetIndex }),
   });
+}
+
+export async function exportCanvasWorkflow(canvasId: string): Promise<Blob> {
+  const origin = await apiOrigin();
+  const res = await fetch(`${origin}/api/canvas/${canvasId}/workflow/export`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(body.error ?? '导出失败');
+  }
+  return res.blob();
+}
+
+export async function importCanvasWorkflow(
+  canvasId: string,
+  zipBase64: string,
+): Promise<{ nodeIds: string[]; edgeIds: string[]; warnings: string[] }> {
+  const res = await api(`/api/canvas/${canvasId}/workflow/import`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ zipBase64 }),
+  });
+  return res.json();
 }
 
 export async function setCanvasSelection(canvasId: string, ids: string[]): Promise<void> {

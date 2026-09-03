@@ -130,3 +130,78 @@ export function inputHash(node: CanvasNode, upstream: CanvasNode[]): string {
     .map((n) => ({ id: n.id, assets: n.output?.assets ?? [], text: n.output?.text ?? null }));
   return JSON.stringify({ params: node.params, up });
 }
+
+/**
+ * Returns waves of runnable node IDs in topological dependency order.
+ * Nodes in the same wave have no mutual dependencies and can execute in parallel.
+ *
+ * `inScope`: optional subset of node IDs to consider (e.g. fromNodeId descendants or group members).
+ * `isRunnable`: predicate testing if a node type can be executed.
+ */
+export function buildPipelineWaves(
+  nodes: { id: string; type: string }[],
+  edges: { sourceId: string; targetId: string }[],
+  isRunnable: (type: string) => boolean,
+  inScope?: Set<string>,
+): string[][] {
+  const runnableIds = new Set(
+    nodes
+      .filter((n) => isRunnable(n.type) && (!inScope || inScope.has(n.id)))
+      .map((n) => n.id),
+  );
+  if (runnableIds.size === 0) return [];
+
+  // Build direct upstream lookup
+  const upstreamMap = new Map<string, string[]>();
+  for (const edge of edges) {
+    if (!inScope || (inScope.has(edge.sourceId) && inScope.has(edge.targetId))) {
+      let list = upstreamMap.get(edge.targetId);
+      if (!list) {
+        list = [];
+        upstreamMap.set(edge.targetId, list);
+      }
+      list.push(edge.sourceId);
+    }
+  }
+
+  // Find upstream runnable dependencies for each runnable node (walking through intermediate non-runnables if any)
+  const deps = new Map<string, Set<string>>();
+  for (const id of runnableIds) {
+    const nodeDeps = new Set<string>();
+    const visited = new Set<string>();
+    const queue = [...(upstreamMap.get(id) ?? [])];
+    while (queue.length > 0) {
+      const curr = queue.shift()!;
+      if (visited.has(curr)) continue;
+      visited.add(curr);
+      if (runnableIds.has(curr)) {
+        nodeDeps.add(curr);
+        // Do not traverse past an upstream runnable node because that runnable node will enforce its own dependencies
+      } else {
+        queue.push(...(upstreamMap.get(curr) ?? []));
+      }
+    }
+    deps.set(id, nodeDeps);
+  }
+
+  const remaining = new Set(runnableIds);
+  const waves: string[][] = [];
+
+  while (remaining.size > 0) {
+    const wave = [...remaining].filter((id) =>
+      [...(deps.get(id) ?? [])].every((dep) => !remaining.has(dep)),
+    );
+    if (wave.length === 0) {
+      // Cycle guard: append all remaining nodes and exit
+      waves.push([...remaining]);
+      break;
+    }
+    waves.push(wave);
+    for (const id of wave) {
+      remaining.delete(id);
+    }
+  }
+
+  return waves;
+}
+

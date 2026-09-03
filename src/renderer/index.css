@@ -526,3 +526,18 @@ button,
 :root.dark .hljs-symbol {
   color: #f4f4f4;
 }
+
+/* ── @mention inline chip editor (canvas image / video prompt) ─────────────── */
+.mention-input:empty::before,
+.mention-input:has(> br:only-child)::before {
+  content: attr(data-placeholder);
+  color: var(--ink-muted);
+  opacity: 0.5;
+  pointer-events: none;
+}
+.mention-input .mention-chip {
+  line-height: 1.4;
+}
+.mention-input .mention-chip::selection {
+  background: transparent;
+}

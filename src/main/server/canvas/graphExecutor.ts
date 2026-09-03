@@ -4,10 +4,17 @@ import { getCanvasChannel } from './channel';
 import { runImageNode } from './imageExecutor';
 import { runAgentNode } from './agentExecutor';
 import { runVideoNode } from './videoExecutor';
-import { descendants, directUpstream, topoOrder } from './graph';
+import { descendants, directUpstream, topoOrder, buildPipelineWaves } from './graph';
 
 /** Node types the executor knows how to run. */
 const RUNNABLE = new Set(['image', 'agent', 'video']);
+
+/**
+ * Maximum concurrent node executions per wave.
+ * Capped at 3 to prevent provider rate-limiting (HTTP 429) while still
+ * delivering 3x faster multi-shot parallel generations.
+ */
+export const MAX_CONCURRENCY = 3;
 
 /** In-flight `runGraph` per canvas, so a "stop" can abort between nodes. */
 const activeRuns = new Map<string, AbortController>();
@@ -24,12 +31,11 @@ export function stopCanvasRun(canvasId: string): boolean {
 }
 
 /**
- * Run a canvas as a DAG: topological order, a node runs only after every
- * direct upstream is `done`. An upstream error marks this node `error` and
- * skips it. `fromNodeId` restricts the run to that node and its descendants.
- *
- * Sequential (image generation is the paid, slow step and providers rate-limit
- * hard); parallel independent branches land later if it matters.
+ * Run a canvas as a DAG: waves of independent nodes execute in parallel (up to MAX_CONCURRENCY).
+ * A node runs only after every direct upstream is `done`.
+ * An upstream error marks downstream nodes `error` and skips them.
+ * `fromNodeId`: restricts the run to that node and its descendants.
+ * `nodeIds`: restricts the run to an explicit whitelist of node IDs (e.g. running a group).
  */
 export async function runGraph(options: {
   canvasStore: CanvasStore;
@@ -37,29 +43,43 @@ export async function runGraph(options: {
   dataRoot: string;
   canvasId: string;
   fromNodeId?: string;
+  nodeIds?: string[];
   providerId?: string;
 }): Promise<void> {
-  const { canvasStore, settingsStore, dataRoot, canvasId, fromNodeId, providerId } = options;
+  const { canvasStore, settingsStore, dataRoot, canvasId, fromNodeId, nodeIds, providerId } = options;
   const snapshot = canvasStore.getSnapshot(canvasId);
   if (!snapshot) return;
   const { nodes, edges } = snapshot;
 
-  const { order, cycle } = topoOrder(nodes, edges);
-  if (cycle) return; // edges are rejected at creation time; belt-and-braces.
+  const { cycle } = topoOrder(nodes, edges);
+  if (cycle) return; // cycle guard
 
   const inScope = new Set<string>(nodes.map((n) => n.id));
-  if (fromNodeId) {
+  if (nodeIds && nodeIds.length > 0) {
+    const whitelist = new Set(nodeIds);
+    for (const id of [...inScope]) {
+      if (!whitelist.has(id)) inScope.delete(id);
+    }
+  } else if (fromNodeId) {
     const keep = descendants(edges, fromNodeId);
     keep.add(fromNodeId);
-    for (const id of [...inScope]) if (!keep.has(id)) inScope.delete(id);
+    for (const id of [...inScope]) {
+      if (!keep.has(id)) inScope.delete(id);
+    }
   }
 
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
   const channel = getCanvasChannel(canvasId);
   const failed = new Set<string>();
 
-  const runnable = order.filter((id) => inScope.has(id) && RUNNABLE.has(byId.get(id)?.type ?? ''));
-  const total = runnable.length;
+  const waves = buildPipelineWaves(
+    nodes,
+    edges,
+    (type) => RUNNABLE.has(type),
+    inScope,
+  );
+
+  const total = waves.reduce((acc, wave) => acc + wave.length, 0);
   if (total === 0) return;
 
   const abort = new AbortController();
@@ -70,11 +90,11 @@ export async function runGraph(options: {
 
   try {
     let done = 0;
-    for (const id of order) {
-      if (abort.signal.aborted) break;
-      if (!inScope.has(id)) continue;
+
+    const runOne = async (id: string): Promise<void> => {
+      if (abort.signal.aborted) return;
       const node = byId.get(id);
-      if (!node || !RUNNABLE.has(node.type)) continue;
+      if (!node || !RUNNABLE.has(node.type)) return;
 
       const brokenUpstream = directUpstream(edges, id).some((u) => failed.has(u));
       if (brokenUpstream) {
@@ -93,23 +113,64 @@ export async function runGraph(options: {
         }
         done += 1;
         channel.broadcast(rev(), { type: 'graph_run', running: true, done, total });
-        continue;
+        return;
       }
 
-      // `runImageNode` re-reads the node (upstream outputs may have changed
-      // during this run), so re-read rather than passing the stale snapshot.
+      // `runImageNode` / `runVideoNode` re-reads the node so re-read fresh snapshot
       const fresh = canvasStore.getNode(canvasId, id);
-      if (!fresh) continue;
-      if (fresh.type === 'agent') {
-        await runAgentNode({ canvasStore, settingsStore, dataRoot, canvasId, node: fresh, providerId, signal: abort.signal });
-      } else if (fresh.type === 'video') {
-        await runVideoNode({ canvasStore, settingsStore, dataRoot, canvasId, node: fresh, providerId });
-      } else {
-        await runImageNode({ canvasStore, settingsStore, dataRoot, canvasId, node: fresh, providerId });
+      if (!fresh) return;
+
+      try {
+        if (fresh.type === 'agent') {
+          await runAgentNode({
+            canvasStore,
+            settingsStore,
+            dataRoot,
+            canvasId,
+            node: fresh,
+            providerId,
+            signal: abort.signal,
+          });
+        } else if (fresh.type === 'video') {
+          await runVideoNode({
+            canvasStore,
+            settingsStore,
+            dataRoot,
+            canvasId,
+            node: fresh,
+            providerId,
+            waitForCompletion: true,
+          });
+        } else {
+          await runImageNode({
+            canvasStore,
+            settingsStore,
+            dataRoot,
+            canvasId,
+            node: fresh,
+            providerId,
+          });
+        }
+      } catch (err) {
+        console.warn(`[canvas] node ${id} execution error:`, err);
       }
-      if (canvasStore.getNode(canvasId, id)?.runState === 'error') failed.add(id);
+
+      if (canvasStore.getNode(canvasId, id)?.runState === 'error') {
+        failed.add(id);
+      }
       done += 1;
       channel.broadcast(rev(), { type: 'graph_run', running: true, done, total });
+    };
+
+    for (const wave of waves) {
+      if (abort.signal.aborted) break;
+
+      // Execute wave in batches up to MAX_CONCURRENCY
+      for (let i = 0; i < wave.length; i += MAX_CONCURRENCY) {
+        if (abort.signal.aborted) break;
+        const batch = wave.slice(i, i + MAX_CONCURRENCY);
+        await Promise.allSettled(batch.map((id) => runOne(id)));
+      }
     }
   } finally {
     if (activeRuns.get(canvasId) === abort) activeRuns.delete(canvasId);

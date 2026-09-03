@@ -2,7 +2,8 @@ import type { CanvasNode, CanvasVideoParams } from '../../../shared/canvas';
 import type { CanvasStore } from '../storage/canvasStore';
 import type { SettingsStore } from '../storage/settingsStore';
 import { readCanvasAsset } from './imageExecutor';
-import { submitVideoJob } from './asyncJobManager';
+import { awaitVideoJob, submitVideoJob } from './asyncJobManager';
+import { resolveMentions } from '../../../shared/resolveMentions';
 import type { VideoGenerateParams } from './videoDrivers';
 
 function isVideoParams(value: unknown): value is CanvasVideoParams {
@@ -16,6 +17,7 @@ export async function runVideoNode(options: {
   canvasId: string;
   node: CanvasNode;
   providerId?: string;
+  waitForCompletion?: boolean;
 }): Promise<void> {
   const { canvasStore, settingsStore, dataRoot, canvasId, node, providerId } = options;
 
@@ -53,8 +55,20 @@ export async function runVideoNode(options: {
     }
   }
 
+  let promptText = params.prompt;
+  if (promptText.includes('@')) {
+    const upstream = canvasStore.upstreamNodes(canvasId, node.id);
+    const candidates = upstream.map((u) => ({
+      id: u.id,
+      label: u.title || '',
+      assets: u.output?.assets ?? [],
+    }));
+    const { resolvedPrompt } = resolveMentions(promptText, candidates);
+    promptText = resolvedPrompt;
+  }
+
   const generateParams: VideoGenerateParams = {
-    prompt: params.prompt,
+    prompt: promptText,
     duration: params.duration || '5s',
     ratio: params.ratio || '16:9',
     cameraMotion: params.cameraMotion || 'none',
@@ -74,4 +88,8 @@ export async function runVideoNode(options: {
     params: generateParams,
     providerId,
   });
+
+  if (options.waitForCompletion !== false) {
+    await awaitVideoJob(canvasId, node.id);
+  }
 }

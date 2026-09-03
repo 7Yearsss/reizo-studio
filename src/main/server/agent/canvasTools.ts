@@ -21,6 +21,8 @@ function nodeBrief(node: CanvasNode) {
     prompt: typeof params.prompt === 'string' ? params.prompt : undefined,
     instruction: typeof params.instruction === 'string' ? params.instruction : undefined,
     size: typeof params.size === 'string' ? params.size : undefined,
+    // group containers: what they hold, so the agent can run / reason about one act
+    memberIds: Array.isArray(params.memberIds) ? (params.memberIds as string[]) : undefined,
     assets: node.output?.assets ?? [],
     error: node.output?.error,
   };
@@ -234,13 +236,64 @@ export function createCanvasTools(options: {
 
     run_graph: tool({
       description:
-        'Run the whole canvas as a pipeline (topological order; a node runs after its inputs). Pass `from` to run only that node and everything downstream. Returns immediately; results stream onto the canvas.',
-      inputSchema: z.object({ from: z.string().optional() }),
-      execute: async ({ from }) => {
+        'Run the canvas as a pipeline. Independent nodes in the same dependency layer run in parallel; a node starts only after its inputs are done. Pass `from` to run that node and everything downstream, or `nodeIds` to run only an explicit set (e.g. the members of one group). `from` and `nodeIds` are mutually exclusive — `nodeIds` wins. Returns immediately; results stream onto the canvas.',
+      inputSchema: z.object({
+        from: z.string().optional(),
+        nodeIds: z
+          .array(z.string())
+          .optional()
+          .describe("Explicit whitelist of node ids to run. Pass a group node's memberIds to run just that group."),
+      }),
+      execute: async ({ from, nodeIds }) => {
         const canvas = canvasStore.ensureCanvas(sessionId);
         if (from && !canvasStore.getNode(canvas.id, from)) return { error: `No canvas node "${from}"` };
-        void runGraph({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, fromNodeId: from });
-        return { ok: true, status: 'running' };
+        const missing = (nodeIds ?? []).filter((id) => !canvasStore.getNode(canvas.id, id));
+        if (missing.length > 0) return { error: `No canvas node(s) ${missing.join(', ')}` };
+        void runGraph({
+          canvasStore,
+          settingsStore,
+          dataRoot,
+          canvasId: canvas.id,
+          fromNodeId: from,
+          nodeIds,
+        });
+        return { ok: true, status: 'running', scope: nodeIds ? 'nodeIds' : from ? 'from' : 'all' };
+      },
+    }),
+
+    group_nodes: tool({
+      description:
+        'Wrap existing canvas nodes in a group container: a labelled, coloured box that can be dragged as a unit, locked, focused, and run on its own. Use it to keep one storyboard act / scene set tidy after building a multi-shot pipeline. Returns the new group node id.',
+      inputSchema: z.object({
+        nodeIds: z.array(z.string()).min(1).describe('Ids of the nodes to put in the group.'),
+        title: z.string().optional().describe('Group label, e.g. "第 1 幕：雨夜追踪".'),
+        color: z.string().optional().describe('Hex colour for the container, e.g. "#3b82f6".'),
+      }),
+      execute: async ({ nodeIds, title, color }) => {
+        const canvas = canvasStore.ensureCanvas(sessionId);
+        const members = nodeIds
+          .map((id) => canvasStore.getNode(canvas.id, id))
+          .filter((n): n is CanvasNode => Boolean(n) && n!.type !== 'group');
+        if (members.length === 0) return { error: 'None of those node ids exist on the canvas' };
+
+        const padding = 28;
+        const header = 42;
+        const minX = Math.min(...members.map((n) => n.x));
+        const minY = Math.min(...members.map((n) => n.y));
+        const maxX = Math.max(...members.map((n) => n.x + n.w));
+        const maxY = Math.max(...members.map((n) => n.y + n.h));
+
+        const { rev, node } = canvasStore.addNode(canvas.id, {
+          type: 'group',
+          x: Math.round(minX - padding),
+          y: Math.round(minY - header),
+          w: Math.round(maxX - minX + padding * 2),
+          h: Math.round(maxY - minY + header + padding),
+          title: title ?? '分镜组',
+          params: { memberIds: members.map((n) => n.id), color: color ?? '#3b82f6', locked: false },
+        });
+        getCanvasChannel(canvas.id).broadcast(rev, { type: 'node_added', node });
+        return { id: node.id, memberIds: members.map((n) => n.id) };
       },
     }),
 

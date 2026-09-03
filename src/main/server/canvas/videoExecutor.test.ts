@@ -4,7 +4,7 @@ import { createSqliteSessionStore } from '../storage/sqliteSessionStore';
 import { createCanvasStore } from '../storage/canvasStore';
 import type { SettingsStore } from '../storage/settingsStore';
 import { runVideoNode } from './videoExecutor';
-import { cancelVideoJob, getActiveJob } from './asyncJobManager';
+import { awaitVideoJob, cancelVideoJob, getActiveJob } from './asyncJobManager';
 import { getVideoDriver, mockDriver } from './videoDrivers';
 
 const settingsStore = {
@@ -72,6 +72,7 @@ describe('videoExecutor & asyncJobManager', () => {
       canvasId,
       node,
       providerId: 'mock',
+      waitForCompletion: false,
     });
 
     expect(submitSpy).toHaveBeenCalled();
@@ -82,5 +83,31 @@ describe('videoExecutor & asyncJobManager', () => {
     // Clean up timer
     cancelVideoJob(canvasId, node.id);
     expect(getActiveJob(canvasId, node.id)).toBeUndefined();
+  });
+
+  it('awaitVideoJob resolves cleanly when job is cancelled or completes', async () => {
+    const { canvas, canvasId } = await freshCanvas();
+    const node = canvas.addNode(canvasId, {
+      type: 'video',
+      x: 0,
+      y: 0,
+      w: 100,
+      h: 100,
+      params: { prompt: 'City lights time lapse' },
+    }).node;
+
+    await runVideoNode({
+      canvasStore: canvas,
+      settingsStore,
+      dataRoot: '/tmp/test',
+      canvasId,
+      node,
+      providerId: 'mock',
+      waitForCompletion: false,
+    });
+
+    const promise = awaitVideoJob(canvasId, node.id);
+    cancelVideoJob(canvasId, node.id);
+    await expect(promise).resolves.toBeUndefined();
   });
 });
