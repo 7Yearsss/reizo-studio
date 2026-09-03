@@ -13,6 +13,7 @@ import {
   type EdgeChange,
   type Connection,
   type NodeTypes,
+  type EdgeTypes,
   type Viewport,
 } from '@xyflow/react';
 import {
@@ -33,20 +34,33 @@ import {
   HelpCircle,
   StickyNote,
   Film,
+  Boxes,
+  AlignHorizontalDistributeCenter,
+  FileDown,
+  FileUp,
 } from 'lucide-react';
 import * as canvasStore from '../../state/canvasStore';
 import * as chatStore from '../../state/chatStore';
 import { useCanvasStore } from '../../state/useCanvasStore';
 import { cn } from '../../lib/cn';
 import { layoutGraph, wouldCycle } from '../../../shared/canvasGraph';
-import type { CanvasNodeType } from '../../../shared/canvas';
+import type { CanvasGroupParams, CanvasNodeType } from '../../../shared/canvas';
 import ImageNode, { type CanvasNodeData } from './ImageNode';
 import AgentNode from './AgentNode';
 import VideoNode from './VideoNode';
 import NoteNode from './NoteNode';
+import GroupNode from './GroupNode';
 import StoryboardModal from './StoryboardModal';
+import CuttableEdge from './edges/CuttableEdge';
 
-const NODE_TYPES: NodeTypes = { image: ImageNode, agent: AgentNode, video: VideoNode, note: NoteNode };
+const NODE_TYPES: NodeTypes = {
+  image: ImageNode,
+  agent: AgentNode,
+  video: VideoNode,
+  note: NoteNode,
+  group: GroupNode,
+};
+const EDGE_TYPES: EdgeTypes = { cuttable: CuttableEdge, default: CuttableEdge };
 const VIEWPORT_KEY = (sessionId: string) => `reizo:canvas-viewport:${sessionId}`;
 
 type Menu =
@@ -71,6 +85,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const confirmTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const dragStart = useRef<Record<string, { x: number; y: number }>>({});
+  const workflowFileRef = useRef<HTMLInputElement>(null);
 
   const flash = useCallback((msg: string) => {
     setToast(msg);
@@ -113,6 +128,18 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     rf.fitView({ padding: 0.2, maxZoom: 1 });
   };
 
+  /** Nodes sitting inside a *locked* group — pinned in place. */
+  const lockedMembers = useMemo(() => {
+    const out = new Set<string>();
+    for (const n of storeNodes) {
+      if (n.type !== 'group') continue;
+      const params = n.params as CanvasGroupParams;
+      if (!params.locked) continue;
+      for (const id of params.memberIds ?? []) out.add(id);
+    }
+    return out;
+  }, [storeNodes]);
+
   const nodes: Node<CanvasNodeData>[] = useMemo(
     () =>
       storeNodes.map((node) => ({
@@ -121,9 +148,13 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         position: { x: node.x, y: node.y },
         width: node.w,
         height: node.h,
+        // Containers render beneath their members and never intercept clicks
+        // meant for the nodes inside them.
+        zIndex: node.type === 'group' ? 0 : 1,
+        draggable: lockedMembers.has(node.id) ? false : undefined,
         data: { sessionId, node, highlighted: node.id === highlightId },
       })),
-    [storeNodes, sessionId, highlightId],
+    [storeNodes, sessionId, highlightId, lockedMembers],
   );
 
   const runningTargets = useMemo(
@@ -131,31 +162,61 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     [storeNodes],
   );
 
+  const nodeMap = useMemo(
+    () => new Map(storeNodes.map((n) => [n.id, n])),
+    [storeNodes],
+  );
+
+  const handleCutEdge = useCallback(
+    (edgeId: string) => {
+      void canvasStore.removeEdge(sessionId, edgeId);
+    },
+    [sessionId],
+  );
+
   const edges: Edge[] = useMemo(
     () =>
       storeEdges.map((edge) => {
         const isRunning = runningTargets.has(edge.targetId);
+        const sourceNode = nodeMap.get(edge.sourceId);
+        const targetNode = nodeMap.get(edge.targetId);
         return {
           id: edge.id,
+          type: 'cuttable',
           source: edge.sourceId,
           sourceHandle: edge.sourceHandle,
           target: edge.targetId,
           targetHandle: edge.targetHandle,
           animated: isRunning,
-          style: {
-            stroke: isRunning ? 'var(--accent, #6366f1)' : 'var(--line, #e2e8f0)',
-            strokeWidth: isRunning ? 2.5 : 1.8,
+          data: {
+            sourceType: sourceNode?.type,
+            targetType: targetNode?.type,
+            isRunning,
+            onCutEdge: handleCutEdge,
           },
         };
       }),
-    [storeEdges, runningTargets],
+    [storeEdges, runningTargets, nodeMap, handleCutEdge],
   );
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
       for (const change of changes) {
         if (change.type === 'position' && change.position) {
+          const before = canvasStore.nodeById(sessionId, change.id);
           canvasStore.moveNodeLive(sessionId, change.id, change.position.x, change.position.y);
+          // Dragging a group container moves everything inside it by the same
+          // delta, so members keep their relative layout.
+          if (before?.type === 'group') {
+            const dx = change.position.x - before.x;
+            const dy = change.position.y - before.y;
+            if (dx !== 0 || dy !== 0) {
+              for (const memberId of canvasStore.groupMemberIds(sessionId, change.id)) {
+                const member = canvasStore.nodeById(sessionId, memberId);
+                if (member) canvasStore.moveNodeLive(sessionId, memberId, member.x + dx, member.y + dy);
+              }
+            }
+          }
         } else if (change.type === 'remove') {
           void canvasStore.removeNode(sessionId, change.id);
         }
@@ -382,6 +443,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         nodes={nodes}
         edges={edges}
         nodeTypes={NODE_TYPES}
+        edgeTypes={EDGE_TYPES}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
@@ -390,16 +452,29 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         isValidConnection={isValidConnection}
         onSelectionChange={onSelectionChange}
         onNodeDragStart={(_, __, dragged) => {
-          for (const n of dragged) dragStart.current[n.id] = { x: n.position.x, y: n.position.y };
-        }}
-        onNodeDragStop={(_, __, dragged) => {
           for (const n of dragged) {
-            const from = dragStart.current[n.id];
-            if (from) {
-              canvasStore.commitMove(sessionId, n.id, from, n.position);
-              delete dragStart.current[n.id];
+            dragStart.current[n.id] = { x: n.position.x, y: n.position.y };
+            // A group drag also moves its members — snapshot them too so the
+            // whole gesture can be undone in one step.
+            for (const memberId of canvasStore.groupMemberIds(sessionId, n.id)) {
+              const member = canvasStore.nodeById(sessionId, memberId);
+              if (member) dragStart.current[memberId] = { x: member.x, y: member.y };
             }
           }
+        }}
+        onNodeDragStop={(_, __, dragged) => {
+          const moves: { id: string; from: { x: number; y: number }; to: { x: number; y: number } }[] = [];
+          const collect = (id: string) => {
+            const from = dragStart.current[id];
+            const now = canvasStore.nodeById(sessionId, id);
+            if (from && now) moves.push({ id, from, to: { x: now.x, y: now.y } });
+            delete dragStart.current[id];
+          };
+          for (const n of dragged) {
+            collect(n.id);
+            for (const memberId of canvasStore.groupMemberIds(sessionId, n.id)) collect(memberId);
+          }
+          canvasStore.commitMoveBatch(sessionId, moves);
         }}
         onInit={restoreViewport}
         onMoveEnd={(_, v) => {
@@ -528,6 +603,51 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           </button>
           <button
             type="button"
+            onClick={() => {
+              void canvasStore
+                .exportWorkflow(sessionId)
+                .then(() => flash('已导出工程 .reizo.zip'))
+                .catch((err: unknown) => flash(err instanceof Error ? err.message : '导出失败'));
+            }}
+            disabled={storeNodes.length === 0}
+            className="canvas-tool !px-1.5"
+            title="导出为便携工程包（含所有产物），可跨设备迁移或分享模板"
+          >
+            <FileDown size={13} />
+          </button>
+          <button
+            type="button"
+            onClick={() => workflowFileRef.current?.click()}
+            className="canvas-tool !px-1.5"
+            title="导入 .reizo.zip 工程包（节点会以新 id 合并进当前画布）"
+          >
+            <FileUp size={13} />
+          </button>
+          <input
+            ref={workflowFileRef}
+            type="file"
+            accept=".zip,.reizo.zip,application/zip"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              if (!file) return;
+              flash('正在导入工程…');
+              void canvasStore
+                .importWorkflow(sessionId, file)
+                .then(({ warnings, count }) => {
+                  flash(
+                    warnings.length > 0
+                      ? `已导入 ${count} 个节点，${warnings.length} 个资产缺失`
+                      : `已导入 ${count} 个节点`,
+                  );
+                  setTimeout(() => rf.fitView({ padding: 0.2, duration: 260 }), 120);
+                })
+                .catch((err: unknown) => flash(err instanceof Error ? err.message : '导入失败'));
+            }}
+          />
+          <button
+            type="button"
             onClick={() => void canvasStore.undo(sessionId)}
             disabled={!history?.canUndo}
             className="canvas-tool !px-1.5"
@@ -638,6 +758,49 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
               >
                 <GitBranchPlus size={12} className="text-accent" />
                 批量派生变体
+              </button>
+              <div className="h-3.5 w-px bg-line" />
+              <button
+                type="button"
+                onClick={() => {
+                  void canvasStore.arrangeSelectedNodes(sessionId, selectedNodeIds);
+                  setTimeout(() => rf.fitView({ padding: 0.25, duration: 260, nodes: selectedNodes.map((n) => ({ id: n.id })) }), 80);
+                  flash('已网格对齐所选节点');
+                }}
+                className="flex items-center gap-1.5 rounded-xl border border-line/70 bg-paper-inset/40 text-ink px-2.5 py-1.5 text-xs font-medium hover:bg-paper-inset/80 active:scale-95 transition-all"
+                title="按包围盒中心把所选节点排成紧凑网格"
+              >
+                <AlignHorizontalDistributeCenter size={12} className="text-accent" />
+                网格对齐
+              </button>
+              {selectedNodes.filter((n) => n.type !== 'group').length >= 2 ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const members = selectedNodes.filter((n) => n.type !== 'group').map((n) => n.id);
+                    void canvasStore.groupNodes(sessionId, members).then((gid) => {
+                      if (gid) flash(`已成组 ${members.length} 个节点`);
+                    });
+                  }}
+                  className="flex items-center gap-1.5 rounded-xl border border-line/70 bg-paper-inset/40 text-ink px-2.5 py-1.5 text-xs font-medium hover:bg-paper-inset/80 active:scale-95 transition-all"
+                  title="用一个容器包住所选节点，可整体拖动 / 锁定 / 仅运行本组"
+                >
+                  <Boxes size={12} className="text-accent" />
+                  成组
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => {
+                  void canvasStore.duplicateSelectedNodes(sessionId, selectedNodeIds).then((ids) => {
+                    flash(`已克隆 ${ids.length} 个节点（含内部连线）`);
+                  });
+                }}
+                className="flex items-center gap-1.5 rounded-xl border border-line/70 bg-paper-inset/40 text-ink px-2.5 py-1.5 text-xs font-medium hover:bg-paper-inset/80 active:scale-95 transition-all"
+                title="克隆所选节点，并保留它们之间的连线"
+              >
+                <Copy size={12} className="text-accent" />
+                批量克隆
               </button>
             </div>
           </Panel>

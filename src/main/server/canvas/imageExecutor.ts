@@ -9,6 +9,7 @@ import type { CanvasStore } from '../storage/canvasStore';
 import { getCanvasChannel } from './channel';
 import { inputHash } from './graph';
 import { classifyMediaError } from './mediaError';
+import { resolveMentions } from '../../../shared/resolveMentions';
 
 /**
  * Re-broadcast a node and its descendants (annotated) so their `dirty` badge
@@ -131,8 +132,38 @@ export async function runImageNode(options: {
 
     const provider = createOpenAiProvider({ apiKey: stored.apiKey, baseUrl });
     const upstream = canvasStore.upstreamNodes(canvasId, node.id);
-    const images = await upstreamImageBytes(canvasStore, dataRoot, canvasId, node.id);
-    const prompt = images.length > 0 ? { text: params.prompt, images } : params.prompt;
+    let rawPrompt = params.prompt;
+    let images: Uint8Array[] = [];
+
+    if (rawPrompt.includes('@')) {
+      // @-mentions resolve against the whole canvas by id (the chip picker and
+      // the agent can both reference a node that is not wired in as an edge).
+      const candidates = (canvasStore.getSnapshot(canvasId)?.nodes ?? [])
+        .filter((u) => u.id !== node.id)
+        .map((u) => ({
+          id: u.id,
+          label: u.title || '',
+          assets: u.output?.assets ?? [],
+        }));
+      const { resolvedPrompt, orderedAssetRefs } = resolveMentions(rawPrompt, candidates);
+      rawPrompt = resolvedPrompt;
+      if (orderedAssetRefs.length > 0) {
+        for (const rel of orderedAssetRefs) {
+          try {
+            const buf = await readCanvasAsset(dataRoot, rel);
+            images.push(new Uint8Array(buf));
+          } catch {
+            /* ignore unreadable asset */
+          }
+        }
+      }
+    }
+
+    if (images.length === 0) {
+      images = await upstreamImageBytes(canvasStore, dataRoot, canvasId, node.id);
+    }
+
+    const prompt = images.length > 0 ? { text: rawPrompt, images } : rawPrompt;
 
     const result = await generateImage({
       model: provider.image(modelId),

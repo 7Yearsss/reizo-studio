@@ -1,6 +1,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { CANVAS_IMAGE_SIZES, defaultNodeBox } from '../../../shared/canvas';
+import { serializeMention } from '../../../shared/resolveMentions';
 import type { SettingsStore } from '../storage/settingsStore';
 import type { CanvasStore } from '../storage/canvasStore';
 import { getCanvasChannel } from '../canvas/channel';
@@ -21,6 +22,8 @@ function nodeBrief(node: CanvasNode) {
     prompt: typeof params.prompt === 'string' ? params.prompt : undefined,
     instruction: typeof params.instruction === 'string' ? params.instruction : undefined,
     size: typeof params.size === 'string' ? params.size : undefined,
+    // group containers: what they hold, so the agent can run / reason about one act
+    memberIds: Array.isArray(params.memberIds) ? (params.memberIds as string[]) : undefined,
     assets: node.output?.assets ?? [],
     error: node.output?.error,
   };
@@ -43,7 +46,7 @@ export function createCanvasTools(options: {
   return {
     add_node: tool({
       description:
-        'Add a node to this session\'s canvas. type "image" generates an image from `prompt`; type "agent" is a research/critique sub-task described by `instruction`; type "video" generates video from `prompt`; type "note" is a screenplay/script sticky note. Returns the new node id. The canvas panel opens automatically.',
+        'Add a node to this session\'s canvas. type "image" generates an image from `prompt`; type "agent" is a research/critique sub-task described by `instruction`; type "video" generates video from `prompt`; type "note" is a screenplay/script sticky note. In an image/video `prompt` you may embed inline references to other canvas nodes as `@[label](canvas:<nodeId>)` — at run time each becomes an ordered reference image (`<<<image 1>>>`, ...) drawn from that node\'s latest output, so you can say e.g. "把 @[主角定妆](canvas:abc123) 放进 @[雨夜街道](canvas:def456)". Returns the new node id. The canvas panel opens automatically.',
       inputSchema: z.object({
         type: z.enum(['image', 'agent', 'video', 'note']),
         prompt: z.string().optional().describe('Prompt (type "image", "video", or "note").'),
@@ -102,6 +105,12 @@ export function createCanvasTools(options: {
           .max(8)
           .describe('List of scenes in chronological order'),
         autoRunFirstScene: z.boolean().default(false).describe('Whether to immediately trigger generation of the first scene'),
+        carryReference: z
+          .boolean()
+          .default(true)
+          .describe(
+            'When true, every scene after the first gets an inline @[镜头1关键帧](canvas:<id>) reference appended to its image and video prompts so the character / style stays consistent across shots.',
+          ),
       }),
       execute: async (input) => {
         const canvas = canvasStore.ensureCanvas(sessionId);
@@ -132,6 +141,12 @@ export function createCanvasTools(options: {
           const sc = input.scenes[i];
           const colX = 380 + i * 360;
 
+          // Character / style continuity: point later shots back at shot 1's keyframe.
+          const continuity =
+            input.carryReference && i > 0 && imageNodes[0]
+              ? ` 保持 ${serializeMention('镜头1关键帧', imageNodes[0].id)} 中主体的外形、服装与风格一致。`
+              : '';
+
           // Image Node (Keyframe)
           const imgBox = defaultNodeBox('image');
           const { rev: rImg, node: imgNode } = canvasStore.addNode(canvas.id, {
@@ -142,7 +157,7 @@ export function createCanvasTools(options: {
             h: imgBox.h,
             title: `镜头 ${i + 1} · 关键帧`,
             params: {
-              prompt: sc.imagePrompt,
+              prompt: sc.imagePrompt + continuity,
               size: input.ratio === '9:16' ? '1024x1536' : '1536x1024',
               model: 'flux-schnell',
             },
@@ -161,7 +176,7 @@ export function createCanvasTools(options: {
             h: vidBox.h,
             title: `镜头 ${i + 1} · 运镜`,
             params: {
-              prompt: sc.videoPrompt,
+              prompt: sc.videoPrompt + continuity,
               duration: sc.duration,
               ratio: input.ratio,
               cameraMotion: sc.camera,
@@ -234,13 +249,64 @@ export function createCanvasTools(options: {
 
     run_graph: tool({
       description:
-        'Run the whole canvas as a pipeline (topological order; a node runs after its inputs). Pass `from` to run only that node and everything downstream. Returns immediately; results stream onto the canvas.',
-      inputSchema: z.object({ from: z.string().optional() }),
-      execute: async ({ from }) => {
+        'Run the canvas as a pipeline. Independent nodes in the same dependency layer run in parallel; a node starts only after its inputs are done. Pass `from` to run that node and everything downstream, or `nodeIds` to run only an explicit set (e.g. the members of one group). `from` and `nodeIds` are mutually exclusive — `nodeIds` wins. Returns immediately; results stream onto the canvas.',
+      inputSchema: z.object({
+        from: z.string().optional(),
+        nodeIds: z
+          .array(z.string())
+          .optional()
+          .describe("Explicit whitelist of node ids to run. Pass a group node's memberIds to run just that group."),
+      }),
+      execute: async ({ from, nodeIds }) => {
         const canvas = canvasStore.ensureCanvas(sessionId);
         if (from && !canvasStore.getNode(canvas.id, from)) return { error: `No canvas node "${from}"` };
-        void runGraph({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, fromNodeId: from });
-        return { ok: true, status: 'running' };
+        const missing = (nodeIds ?? []).filter((id) => !canvasStore.getNode(canvas.id, id));
+        if (missing.length > 0) return { error: `No canvas node(s) ${missing.join(', ')}` };
+        void runGraph({
+          canvasStore,
+          settingsStore,
+          dataRoot,
+          canvasId: canvas.id,
+          fromNodeId: from,
+          nodeIds,
+        });
+        return { ok: true, status: 'running', scope: nodeIds ? 'nodeIds' : from ? 'from' : 'all' };
+      },
+    }),
+
+    group_nodes: tool({
+      description:
+        'Wrap existing canvas nodes in a group container: a labelled, coloured box that can be dragged as a unit, locked, focused, and run on its own. Use it to keep one storyboard act / scene set tidy after building a multi-shot pipeline. Returns the new group node id.',
+      inputSchema: z.object({
+        nodeIds: z.array(z.string()).min(1).describe('Ids of the nodes to put in the group.'),
+        title: z.string().optional().describe('Group label, e.g. "第 1 幕：雨夜追踪".'),
+        color: z.string().optional().describe('Hex colour for the container, e.g. "#3b82f6".'),
+      }),
+      execute: async ({ nodeIds, title, color }) => {
+        const canvas = canvasStore.ensureCanvas(sessionId);
+        const members = nodeIds
+          .map((id) => canvasStore.getNode(canvas.id, id))
+          .filter((n): n is CanvasNode => Boolean(n) && n!.type !== 'group');
+        if (members.length === 0) return { error: 'None of those node ids exist on the canvas' };
+
+        const padding = 28;
+        const header = 42;
+        const minX = Math.min(...members.map((n) => n.x));
+        const minY = Math.min(...members.map((n) => n.y));
+        const maxX = Math.max(...members.map((n) => n.x + n.w));
+        const maxY = Math.max(...members.map((n) => n.y + n.h));
+
+        const { rev, node } = canvasStore.addNode(canvas.id, {
+          type: 'group',
+          x: Math.round(minX - padding),
+          y: Math.round(minY - header),
+          w: Math.round(maxX - minX + padding * 2),
+          h: Math.round(maxY - minY + header + padding),
+          title: title ?? '分镜组',
+          params: { memberIds: members.map((n) => n.id), color: color ?? '#3b82f6', locked: false },
+        });
+        getCanvasChannel(canvas.id).broadcast(rev, { type: 'node_added', node });
+        return { id: node.id, memberIds: members.map((n) => n.id) };
       },
     }),
 
@@ -269,7 +335,7 @@ export function createCanvasTools(options: {
     }),
 
     update_node: tool({
-      description: 'Change a canvas node\'s params. For an image node pass `prompt` and/or `size`; for an agent node pass `instruction`. Also renames via `title`. Does not re-run the node.',
+      description: 'Change a canvas node\'s params. For an image node pass `prompt` and/or `size`; for an agent node pass `instruction`. Also renames via `title`. An image/video `prompt` may embed `@[label](canvas:<nodeId>)` references to other nodes — each resolves to an ordered reference image from that node\'s output at run time. Does not re-run the node.',
       inputSchema: z.object({
         id: z.string(),
         prompt: z.string().optional(),

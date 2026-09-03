@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CanvasEdge, CanvasNode } from '../../../shared/canvas';
-import { descendants, directUpstream, inputHash, layoutGraph, topoOrder, wouldCycle } from './graph';
+import { buildPipelineWaves, descendants, directUpstream, inputHash, layoutGraph, topoOrder, wouldCycle } from './graph';
 
 function node(id: string): CanvasNode {
   return {
@@ -67,5 +67,46 @@ describe('canvas graph helpers', () => {
     expect(inputHash(target, [up])).toBe(base);
     expect(inputHash({ ...target, params: { prompt: 'x', size: '1024x1024' } }, [up])).not.toBe(base);
     expect(inputHash(target, [{ ...up, output: { assets: ['c/x.png'] } }])).not.toBe(base);
+  });
+
+  describe('buildPipelineWaves', () => {
+    const isRunnable = (type: string) => type === 'image' || type === 'video' || type === 'agent';
+
+    it('groups independent root nodes into the same wave', () => {
+      const nodes = [node('a'), node('b'), node('c'), node('d')];
+      const waves = buildPipelineWaves(nodes, [], isRunnable);
+      expect(waves).toHaveLength(1);
+      expect(waves[0].sort()).toEqual(['a', 'b', 'c', 'd']);
+    });
+
+    it('builds topological waves for a diamond DAG', () => {
+      const nodes = [node('a'), node('b'), node('c'), node('d')];
+      const edges = [edge('a', 'b'), edge('a', 'c'), edge('b', 'd'), edge('c', 'd')];
+      const waves = buildPipelineWaves(nodes, edges, isRunnable);
+      expect(waves).toHaveLength(3);
+      expect(waves[0]).toEqual(['a']);
+      expect(waves[1].sort()).toEqual(['b', 'c']);
+      expect(waves[2]).toEqual(['d']);
+    });
+
+    it('respects dependencies passing through non-runnable nodes', () => {
+      const img1 = node('img1');
+      const noteNode: CanvasNode = { ...node('note1'), type: 'note' };
+      const img2 = node('img2');
+      const edges = [edge('img1', 'note1'), edge('note1', 'img2')];
+      const waves = buildPipelineWaves([img1, noteNode, img2], edges, isRunnable);
+      expect(waves).toHaveLength(2);
+      expect(waves[0]).toEqual(['img1']);
+      expect(waves[1]).toEqual(['img2']);
+    });
+
+    it('restricts wave construction to inScope nodes', () => {
+      const nodes = [node('a'), node('b'), node('c')];
+      const edges = [edge('a', 'b'), edge('b', 'c')];
+      const waves = buildPipelineWaves(nodes, edges, isRunnable, new Set(['b', 'c']));
+      expect(waves).toHaveLength(2);
+      expect(waves[0]).toEqual(['b']);
+      expect(waves[1]).toEqual(['c']);
+    });
   });
 });

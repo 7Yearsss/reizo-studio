@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Handle, NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
 import { Check, Copy, GitBranchPlus, Loader2, Play } from 'lucide-react';
 import type { CanvasAgentParams } from '../../../shared/canvas';
 import * as canvasStore from '../../state/canvasStore';
 import { cn } from '../../lib/cn';
 import { NodeTitle, type CanvasNodeData } from './ImageNode';
+import MissingInputWarning from './MissingInputWarning';
+import { nodeReadinessIssues } from '../../../shared/canvasReadiness';
 
 export default function AgentNode({ id, data, selected }: NodeProps) {
   const { sessionId, node, highlighted } = data as CanvasNodeData;
@@ -14,6 +16,7 @@ export default function AgentNode({ id, data, selected }: NodeProps) {
   const resizeStart = useRef<{ w: number; h: number } | null>(null);
   const running = node.runState === 'running';
   const answer = node.output?.text ?? '';
+  const readiness = useMemo(() => nodeReadinessIssues(node, [], new Map()), [node]);
 
   useEffect(() => {
     setInstruction((params.instruction as string) ?? '');
@@ -100,6 +103,7 @@ export default function AgentNode({ id, data, selected }: NodeProps) {
       <div className="mb-2 flex items-center justify-between gap-2">
         <NodeTitle sessionId={sessionId} nodeId={node.id} title={node.title} fallback="Agent 任务" />
         <div className="flex shrink-0 items-center gap-1">
+          {!running && readiness.length > 0 ? <MissingInputWarning messages={readiness} /> : null}
           {node.dirty && !running ? (
             <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">
               待更新

@@ -1,13 +1,17 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Handle, NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
-import { Download, FolderPlus, Loader2, Play, GitBranchPlus, Bot, Video } from 'lucide-react';
+import { Download, FolderPlus, Loader2, Play, GitBranchPlus, Bot, Video, Camera } from 'lucide-react';
 import type { CanvasVideoParams } from '../../../shared/canvas';
-import { CANVAS_VIDEO_RATIOS, CANVAS_VIDEO_CAMERAS, CANVAS_VIDEO_MODELS } from '../../../shared/canvas';
+import { CANVAS_VIDEO_CAMERAS, CANVAS_VIDEO_MODELS } from '../../../shared/canvas';
 import { canvasAssetUrl } from '../../api';
 import * as canvasStore from '../../state/canvasStore';
 import * as chatStore from '../../state/chatStore';
+import { useCanvasStore } from '../../state/useCanvasStore';
 import { cn } from '../../lib/cn';
 import { NodeTitle, type CanvasNodeData } from './ImageNode';
+import MentionTextArea from './MentionTextArea';
+import MissingInputWarning from './MissingInputWarning';
+import { nodeReadinessIssues } from '../../../shared/canvasReadiness';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 
 function useAssetUrl(rel: string | undefined): string | null {
@@ -38,6 +42,21 @@ export default function VideoNode({ id, data, selected }: NodeProps) {
   const assetUrl = useAssetUrl(current);
   const progress = node.output?.progress ?? 0;
 
+  const videoElRef = useRef<HTMLVideoElement>(null);
+  const [framePick, setFramePick] = useState<'start' | 'end' | 'current' | null>(null);
+  const [frameError, setFrameError] = useState<string | null>(null);
+
+  const allNodes = useCanvasStore((s) => s.nodesBySession[sessionId]) ?? [];
+  const allEdges = useCanvasStore((s) => s.edgesBySession[sessionId]) ?? [];
+  const candidates = useMemo(
+    () => allNodes.filter((n) => n.id !== node.id && (n.output?.assets?.length ?? 0) > 0),
+    [allNodes, node.id],
+  );
+  const readiness = useMemo(
+    () => nodeReadinessIssues(node, allEdges, new Map(allNodes.map((n) => [n.id, n]))),
+    [node, allEdges, allNodes],
+  );
+
   useEffect(() => {
     setPrompt((params.prompt as string) ?? '');
   }, [params.prompt]);
@@ -49,6 +68,20 @@ export default function VideoNode({ id, data, selected }: NodeProps) {
   const commitPrompt = () => {
     if (prompt === params.prompt) return;
     void canvasStore.updateNodeParams(sessionId, node.id, { ...params, prompt });
+  };
+
+  const extractFrame = (pick: 'start' | 'end' | 'current') => {
+    if (framePick || assets.length === 0) return;
+    setFrameError(null);
+    setFramePick(pick);
+    const at = pick === 'current' ? (videoElRef.current?.currentTime ?? 0) : 0;
+    void canvasStore
+      .extractVideoFrame(sessionId, node.id, pick, at, assetIdx)
+      .catch((err: unknown) => {
+        setFrameError(err instanceof Error ? err.message : '抽帧失败');
+        setTimeout(() => setFrameError(null), 3200);
+      })
+      .finally(() => setFramePick(null));
   };
 
   const run = () => {
@@ -180,6 +213,7 @@ export default function VideoNode({ id, data, selected }: NodeProps) {
           <NodeTitle sessionId={sessionId} nodeId={node.id} title={node.title} fallback="视频生成" />
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          {!running && readiness.length > 0 ? <MissingInputWarning messages={readiness} /> : null}
           {node.dirty && !running ? (
             <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">
               待更新
@@ -208,14 +242,15 @@ export default function VideoNode({ id, data, selected }: NodeProps) {
         </div>
       </div>
 
-      <textarea
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        onBlur={commitPrompt}
-        rows={2}
-        placeholder="描述画面动态与运镜（可连 1~2 个上游图片作为首尾关键帧）…"
-        className="nodrag mt-1 w-full resize-none rounded-xl border border-line/60 bg-paper-inset/40 p-2.5 text-xs text-ink placeholder:text-ink-muted/50 outline-none focus:border-accent focus:bg-paper-inset/70 focus:ring-1 focus:ring-accent/30 transition-all leading-relaxed"
-      />
+      <div className="mt-1">
+        <MentionTextArea
+          value={prompt}
+          onChange={setPrompt}
+          onCommit={commitPrompt}
+          candidates={candidates}
+          placeholder="描述画面动态与运镜（输入 @ 可引用画布节点）…"
+        />
+      </div>
 
       <div className="mt-2.5 flex flex-wrap items-center justify-between gap-1.5">
         <div className="flex flex-wrap items-center gap-1.5">
@@ -378,6 +413,7 @@ export default function VideoNode({ id, data, selected }: NodeProps) {
       {assetUrl ? (
         <div className="group relative mt-2 min-h-0 flex-1 overflow-hidden rounded-lg border border-line bg-black/5 flex items-center justify-center">
           <video
+            ref={videoElRef}
             src={assetUrl}
             controls
             playsInline
@@ -385,6 +421,39 @@ export default function VideoNode({ id, data, selected }: NodeProps) {
             preload="metadata"
             className="nodrag h-full w-full object-contain"
           />
+          <div className="nodrag absolute left-1.5 top-1.5 flex flex-col items-start gap-1 opacity-0 transition-opacity group-hover:opacity-100 z-10">
+            {(['start', 'end', 'current'] as const).map((pick) => (
+              <button
+                key={pick}
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  extractFrame(pick);
+                }}
+                disabled={framePick !== null}
+                className="inline-flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-1 text-[10px] font-medium text-white hover:bg-black/80 disabled:opacity-50"
+                title={
+                  pick === 'start'
+                    ? '抽取首帧为图片节点，用作下一镜的起始帧'
+                    : pick === 'end'
+                      ? '抽取尾帧为图片节点，用作下一镜的起始帧'
+                      : '抽取当前播放帧为图片节点'
+                }
+              >
+                {framePick === pick ? (
+                  <Loader2 size={11} className="animate-spin" />
+                ) : (
+                  <Camera size={11} />
+                )}
+                {pick === 'start' ? '抽首帧' : pick === 'end' ? '抽尾帧' : '抽当前帧'}
+              </button>
+            ))}
+          </div>
+          {frameError ? (
+            <div className="absolute inset-x-2 bottom-9 rounded bg-danger/90 px-2 py-1 text-[10px] text-white shadow">
+              {frameError}
+            </div>
+          ) : null}
           {assets.length > 1 ? (
             <div className="absolute inset-x-0 bottom-7 flex items-center justify-center gap-1 bg-black/40 py-0.5 backdrop-blur-[2px]">
               {assets.map((_, i) => (

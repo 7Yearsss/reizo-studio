@@ -5,7 +5,7 @@
  * but not executed in slice C).
  */
 
-export type CanvasNodeType = 'image' | 'agent' | 'video' | 'note';
+export type CanvasNodeType = 'image' | 'agent' | 'video' | 'note' | 'group';
 
 export type NodeRunState = 'idle' | 'running' | 'done' | 'error';
 
@@ -33,11 +33,18 @@ export interface CanvasNoteParams {
   color?: 'amber' | 'slate' | 'rose' | 'emerald' | 'violet';
 }
 
+export interface CanvasGroupParams {
+  memberIds: string[];
+  color?: string;
+  locked?: boolean;
+}
+
 export type CanvasNodeParams =
   | CanvasImageParams
   | CanvasAgentParams
   | CanvasVideoParams
   | CanvasNoteParams
+  | CanvasGroupParams
   | Record<string, unknown>;
 
 export interface CanvasNode {
@@ -124,5 +131,6 @@ export function defaultNodeBox(type: CanvasNodeType): { w: number; h: number } {
   if (type === 'image') return { w: 320, h: 380 };
   if (type === 'video') return { w: 340, h: 420 };
   if (type === 'note') return { w: 280, h: 220 };
+  if (type === 'group') return { w: 480, h: 360 };
   return { w: 320, h: 220 };
 }

@@ -1,13 +1,17 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Handle, NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
 import { Download, FolderPlus, Loader2, Play, GitBranchPlus, Bot } from 'lucide-react';
 import type { CanvasImageParams, CanvasNode } from '../../../shared/canvas';
-import { CANVAS_IMAGE_SIZES, CANVAS_IMAGE_MODELS } from '../../../shared/canvas';
+import { CANVAS_IMAGE_MODELS } from '../../../shared/canvas';
 import { canvasAssetUrl } from '../../api';
 import * as canvasStore from '../../state/canvasStore';
 import * as chatStore from '../../state/chatStore';
+import { useCanvasStore } from '../../state/useCanvasStore';
 import { cn } from '../../lib/cn';
 import Lightbox from './Lightbox';
+import MentionTextArea from './MentionTextArea';
+import MissingInputWarning from './MissingInputWarning';
+import { nodeReadinessIssues } from '../../../shared/canvasReadiness';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 
 export interface CanvasNodeData extends Record<string, unknown> {
@@ -93,6 +97,17 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
   const assets = node.output?.assets ?? [];
   const current = assets[Math.min(assetIdx, assets.length - 1)];
   const assetUrl = useAssetUrl(current);
+
+  const allNodes = useCanvasStore((s) => s.nodesBySession[sessionId]) ?? [];
+  const allEdges = useCanvasStore((s) => s.edgesBySession[sessionId]) ?? [];
+  const candidates = useMemo(
+    () => allNodes.filter((n) => n.id !== node.id && (n.output?.assets?.length ?? 0) > 0),
+    [allNodes, node.id],
+  );
+  const readiness = useMemo(
+    () => nodeReadinessIssues(node, allEdges, new Map(allNodes.map((n) => [n.id, n]))),
+    [node, allEdges, allNodes],
+  );
 
   useEffect(() => {
     setPrompt((params.prompt as string) ?? '');
@@ -193,6 +208,7 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
       <div className="mb-2 flex items-center justify-between gap-2">
         <NodeTitle sessionId={sessionId} nodeId={node.id} title={node.title} fallback="图片" />
         <div className="flex shrink-0 items-center gap-1">
+          {!running && readiness.length > 0 ? <MissingInputWarning messages={readiness} /> : null}
           {node.dirty && !running ? (
             <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">
               待更新
@@ -215,14 +231,15 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
         </div>
       </div>
 
-      <textarea
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        onBlur={commitPrompt}
-        rows={2}
-        placeholder="描述画面视觉风格、主体与光影细节…"
-        className="nodrag mt-1 w-full resize-none rounded-xl border border-line/60 bg-paper-inset/40 p-2.5 text-xs text-ink placeholder:text-ink-muted/50 outline-none focus:border-accent focus:bg-paper-inset/70 focus:ring-1 focus:ring-accent/30 transition-all leading-relaxed"
-      />
+      <div className="mt-1">
+        <MentionTextArea
+          value={prompt}
+          onChange={setPrompt}
+          onCommit={commitPrompt}
+          candidates={candidates}
+          placeholder="描述画面视觉风格、主体与光影细节（输入 @ 可引用画布节点）…"
+        />
+      </div>
 
       <div className="mt-2.5 flex items-center justify-between gap-1.5 flex-wrap">
         <div className="flex items-center gap-1.5 flex-wrap">
