@@ -377,6 +377,19 @@ pre,
   border-color: var(--accent);
 }
 
+/* Edge "energy flow" — dashes drift from source toward target. */
+@keyframes edge-flow {
+  to { stroke-dashoffset: -24; }
+}
+.edge-flow {
+  stroke-dasharray: 3 9;
+  animation: edge-flow 1.4s linear infinite;
+}
+.edge-flow-running {
+  stroke-dasharray: 4 6;
+  animation-duration: 0.55s;
+}
+
 /* Canvas toolbar buttons (React Flow Panel). */
 .canvas-tool {
   display: inline-flex;
@@ -432,6 +445,10 @@ button,
   }
   .node-action-bar {
     transition: none;
+  }
+  .edge-flow {
+    animation: none;
+    opacity: 0 !important;
   }
   .home-hero-canvas {
     transition: none;
