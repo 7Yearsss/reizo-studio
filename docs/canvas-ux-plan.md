@@ -1,7 +1,13 @@
 # Reizo 画布 UI/UX 编排规范 — Agent ↔ 画布 · 工具栏 · 节点内按钮
 
-Status: **规范草案**（2026-09-03）。姊妹文档：`docs/canvas-plan.md`（原始决策）、
-`docs/helios-borrowings-plan.md`（已实施）、`docs/studio-borrowings-plan.md`（竞品借鉴，待实施）。
+Status: **规范草案**（更新 2026-09-04）。姊妹文档：`docs/canvas-plan.md`（原始决策）、
+`docs/helios-borrowings-plan.md`（已实施）、`docs/studio-borrowings-plan.md`（竞品借鉴）。
+§0–§7 是初版编排；**§8「Runway 形态改造」是当前主线** —— 对标 Runway Workflows 的
+底部导航条 / 框选 / 强类型句柄 / 能量流动边，取代 §3 的顶部工具栏、并入 §4.4 句柄。
+
+已落地（`feat/helios-borrowings-canvas`）：UX-1 顶部 4 分区（`d2dacc4`，将被 §8 取代）、
+`studio` P0-1 动作条（`c4b0278`）、P0-2 变体宫格（`0ec6bda`）、P0-3 运镜（`b4b3d04`）、
+P1-1 参考图钉（`18f7471`）。
 
 本文件只谈**布局与交互**，不谈新功能。目标：把画布现在「按钮一字排开、动作藏在隐藏手势里、
 三种节点各画各的」收敛成一套**可解释、可扩展、跨节点一致**的编排。落地项与
@@ -222,20 +228,173 @@ Status: **规范草案**（2026-09-03）。姊妹文档：`docs/canvas-plan.md`�
 
 ---
 
+## 8. Runway 形态改造（RW-*）— 当前主线
+
+对标 Runway Workflows（用户提供截图）。四块：**底部导航条**、**框选/选中缩放**、
+**强类型句柄（塌缩/展开 + 渐进槽位）**、**能量流动边 + 两段式剪线**。
+取代 §3 的顶部工具栏；§4.4 句柄规范并入这里。
+
+### RW-1 · 底部浮动导航条 + 框选模式
+
+Runway 把「看画布」的操作全放屏幕**底部居中**一个浮动 pill，和「建节点」彻底分开。
+
+```
+┌───────────────────────────────────────────────┐
+│  ▷ 选择   ▨ 框选  │  ⊖ 缩小  ⊕ 放大  ⤢ 适应  ⊙ 选中缩放  │  ↶ 撤销  ↷ 重做  │
+└───────────────────────────────────────────────┘
+        (V)     (M)         (-)     (+)    (F)      (Z)              (⌘Z)   (⌘⇧Z)
+```
+
+- **选择 / 框选是一对互斥模式开关**：
+  - `选择`（默认）：`panOnDrag = true`，空白拖拽 = 平移画布。
+  - `框选`：`panOnDrag = false` + `selectionOnDrag = true`（React Flow 原生），空白拖拽 =
+    橡皮筋矩形多选。按住 `Space` 临时回到平移（现有 `panActivationKeyCode="Space"` 保留）。
+  - 键盘：`V` / `M` 切换；松开鼠标自动不切回（模式是粘的，像 Figma）。
+- `选中缩放 (Z)` = `rf.fitView({ nodes: 选中, padding: 0.3, duration: 250 })`；无选中时禁用。
+- `适应 (F)` = 现有全景 `fitView`。缩放 ± 走 `rf.zoomIn/zoomOut`。
+- 撤销 / 重做移到这里，顶部不再有。
+- React Flow 自带的左下 `<Controls>` **移除**（功能被这条覆盖），`<MiniMap>` 右下保留。
+
+**改动**：`CanvasPanel.tsx` 删 §3 的 `top-left` 工具栏与 `<Controls>`；新增
+`<Panel position="bottom-center">` 的 `CanvasNavBar`；新增 `interactionMode` 本地 state
+（`'select' | 'marquee'`）驱动 `<ReactFlow panOnDrag selectionOnDrag>`。
+`＋节点▾` 创建下拉移到 **左侧竖条**（见 RW-2）。运行整图 + `⋯更多` 移到 `top-left`
+单列（只剩这两个）。
+
+**验收**：
+1. 默认模式空白拖拽平移；点「框选」后空白拖拽画出矩形并多选框内节点；`Space` 临时平移。
+2. `V` / `M` 切换模式，按钮高亮同步。
+3. 选中 2+ 节点点「选中缩放」→ 平滑聚焦到这些节点的包围盒。
+4. 顶部不再有撤销/重做/整理/适应；它们都在底部条且行为不变。
+5. `prefers-reduced-motion` 下缩放无 `duration` 动画。
+
+### RW-2 · 左侧竖条（创建 / 插入）
+
+Runway 截图左侧一条竖 pill，只放「加东西」。Reizo 版：
+
+```
+┌──┐
+│＋ │  ＋节点 ▾（图片 / 视频 / Agent / 便签 / 参考图钉）
+│▤ │  成组 / Frame（选中≥2 时可用）
+│◫ │  素材栏开关（切换右上 AssetShelf 显隐）
+└──┘
+```
+
+**改动**：`<Panel position="top-left">`（或 `center-left`）一个窄竖条；复用现有
+`ToolbarDropdown`（`＋节点`）。删掉顶部横排创建按钮。
+
+### RW-3 · 强类型句柄（塌缩 / 展开 + 渐进槽位）
+
+Runway 句柄两态（截图对比）：
+
+| 态 | 表现 |
+|---|---|
+| **静止 / 未选中** | 句柄 = 一个空心小圆（`8px`），无标签，节点很干净 |
+| **选中 or 悬停** | 每个句柄弹出**带标签的实心彩色胶囊**：左侧输入、右侧输出 |
+
+规则：
+- **颜色按数据类型固定，同类型同色**（这是关键——用户明确要「Ref Video 都用红色，一眼看清」）：
+
+  | 类型 | 色 | token 名 | 举例 |
+  |---|---|---|---|
+  | 提示词 prompt | 绿 `#4ade80` | `EDGE_COLORS.prompt` | `Prompt *` |
+  | 图像 image | 靛蓝 `#818cf8` | `image` | `Ref Image` / 输出 `Image` |
+  | 首帧 / 尾帧 | 蓝 `#60a5fa` | `startFrame` | `First Frame` / `Last Frame` |
+  | 视频 video | 绯红 `#f43f5e` | `video`（改） | `Ref Video` / 输出 `Video` |
+  | 音频 audio | 琥珀 `#f59e0b` | `audio`（新） | `Ref Audio` / 输出 `Audio` |
+  | 参考图钉 anchor | 紫 `#a78bfa` | `reference` | `Ref Anchor` |
+  | 文本响应 | 绿 | `prompt` | 输出 `Response` |
+
+  → `edgeStyles.ts` 增 `audio`，`video` 由 sky 改绯红，边与句柄引用同一份。
+- **必填输入带 `*`**（`Prompt *`）；缺失且未运行时该胶囊描边转 danger（复用现有
+  `nodeReadinessIssues` / `MissingInputWarning` 的判定）。
+- **渐进式同类型槽位**：`Ref Video 1` 连上一条边后，下方**才**出现空的 `Ref Video 2`；
+  再连上才出 `3`（上限 3，可配）。未连的多余槽不渲染。底部提示文字
+  `Connect for more ref slots`（有可加槽时才显示）。
+  - 实现：一个 handle 组件按 `已连入该类型的边数 + 1` 渲染槽位；每个槽 `id`
+    形如 `ref_video_1` / `ref_video_2`。执行器按 `id` 前缀归类、按序号排序取图
+    （`imageExecutor` 的 anchor / `@mention` 排序逻辑扩展到带序号的 ref 槽）。
+- **命中区加宽**：胶囊 + 圆点外层套 `20px` 透明 padding，窄线也好连。
+
+**改动**：新增 `src/renderer/components/canvas/NodeHandle.tsx`（受控：`kind` / `label` /
+`required` / `index` / `collapsed`）；`ImageNode` / `VideoNode` / `AgentNode` /
+`AnchorNode` 的裸 `<Handle>` 全换成它。`edgeStyles.ts` 加 `audio`、改 `video` 色 +
+`HANDLE_LABEL` 表。执行器侧扩展 ref 槽按序取图。
+
+**验收**：
+1. 未选中节点只见空心圆；选中或悬停 → 弹出彩色标签胶囊，移开 140ms 收起（复用
+   `useHoverIntent`）。
+2. 两个视频参考节点连到同一节点：先只有 `Ref Video 1`；连上后冒出 `Ref Video 2`；
+   都是同一种绯红。
+3. `Prompt *` 未连且未运行 → 胶囊描边告警，与现有「缺输入」提示一致。
+4. 旧数据（`targetHandle: null` 的边）仍连在默认输入槽，不报错。
+5. 运行时执行器按 `ref_video_1/2/3` 顺序取图，与胶囊显示顺序一致。
+
+### RW-4 · 能量流动边 + 两段式剪线
+
+用户原话：「线可以点击之后变成虚线，这时候才出现剪刀来剪；线需要有感觉像能量一样传输到下一个节点」。
+
+**能量流动**（常态，不只运行时）：
+- 边上叠一层 `stroke-dasharray` 的高亮虚线，`stroke-dashoffset` 用 CSS
+  `@keyframes` 匀速位移，方向 = 源 → 目标，营造「能量往下游流」的观感。
+- 常态：低透明度（`opacity: 0.35`）、慢速（~3s/周期）、色 = 该边类型色。
+- 运行中（目标节点 `runState==='running'`）：不透明、快速（~0.8s）、加粗 —— 叠加在
+  类型色上，替换现有 `animated` 布尔。
+- `prefers-reduced-motion`：不流动，退化为静态实线。
+
+**两段式剪线**（改掉现在的「悬停即出剪刀」，用户说太容易误触）：
+1. 常态：实线，`onMouseMove` **不再**吸附剪刀。
+2. **单击边** → 进入「待剪」态：整条边转虚线 + 轻微放大描边 + 在中点显示 `✂` 徽章。
+3. 待剪态下：点 `✂` 徽章 → 播放 `stroke-dashoffset` 收起动画 → `canvasStore.removeEdge`
+   （保留撤销）。点边以外任意处 / `Esc` → 退回常态。
+4. 待剪态最多一条边（点另一条边转移）。
+5. `Delete` / `Backspace` 对「待剪」边同样可删（现有 `deleteKeyCode` 保留）。
+
+**改动**：`CuttableEdge.tsx` 重写：去掉 `onMouseMove` 最近点采样；加
+`armed` 本地态（点击进入）；`edgeStyles.ts` 加流动动画 class；`index.css` 加
+`@keyframes edge-flow` + reduced-motion 降级。`CanvasPanel` 点空白时清 `armed`
+（复用现有 pane-click 关菜单的位置）。
+
+**验收**：
+1. 静止时鼠标划过连线**不**出现剪刀（不会误删）。
+2. 单击连线 → 变虚线 + 中点出剪刀；点剪刀 → 收起动画后删除；`Ctrl+Z` 恢复该边。
+3. 待剪态点画布空白 / `Esc` → 恢复实线。
+4. 常态下边有低调的流动虚线（能量感）；目标节点运行中时流动加快加亮。
+5. `prefers-reduced-motion` 下无流动、剪线无收起动画（直接删）。
+
+### RW 落地顺序
+
+```
+RW-1 底部导航条 + 框选 ──────┐ (纯前端 CanvasPanel，取代 UX-1，先做)
+RW-2 左侧竖条 ───────────────┤ (跟 RW-1 同 PR 或紧随)
+RW-4 能量边 + 两段式剪线 ────┤ (CuttableEdge 重写 + index.css，独立)
+RW-3 强类型句柄 + 渐进槽位 ──┘ (最大，含执行器改动；依赖 edgeStyles 色板先定)
+```
+
+**PR 拆分**：RW-1+RW-2 一个（导航条 + 左条，删顶部工具栏）；RW-4 一个（边）；
+RW-3 一个（句柄组件 + 执行器 ref 槽）。RW-3 的 `edgeStyles` 色板调整可作前置小 PR。
+
+---
+
 ## 6. 落地清单（与 studio-borrowings-plan.md 对齐）
 
-| 项 | 内容 | 依赖 / 对应 | 优先级 |
+| 项 | 内容 | 依赖 / 对应 | 状态 |
 |---|---|---|---|
-| UX-1 | 工具栏 4 分区 + `＋节点▾` 下拉 + `⋯更多` 收纳（§3.1） | 纯 `CanvasPanel.tsx`，零风险 | P0 |
-| UX-2 | `NodeActionBar` 统一组件 + 定义表 + hover 触发（§4.1） | = `studio` **P0-1** | P0 |
-| UX-3 | 节点内按钮按"解剖图"归位：状态徽章 / 参数行 / 运行按钮文案统一（§4.2–4.3） | 跟随 UX-2 同 PR | P0 |
-| UX-4 | 底部上下文浮条收敛为「问Agent / 引用 / 变体×4 / 排版▾」（§3.3） | 依赖 `studio` **P0-2** `forkVariations` | P0 |
-| UX-5 | 句柄强类型配色 + 语义标注补全（§4.4） | 与 `studio` **P0-1** 的 `edgeStyles.ts` 共用 | P1 |
-| UX-6 | 右上「Agent 活动」薄条 + 多节点 fitView + Agent 徽章足迹（§2.3） | 读现有 `CanvasChannel` 事件，无新通道 | P1 |
-| UX-7 | 节点 → 对话收敛为 `问 Agent` / `引用` 两个动词（§2.4） | 跟随 UX-2 定义表 | P1 |
-| UX-8 | 右面板：作品 → 画布次级视图 / 窗口控制独立成组（§2.1–2.2） | `RightPanel.tsx` + `ChatPage.tsx`，纯前端 | P2 |
+| ~~UX-1~~ | 工具栏 4 分区（§3.1） | `d2dacc4` | ✅ 已合，**将被 RW-1 取代** |
+| UX-2 | `NodeActionBar` 统一组件 + hover 触发（§4.1） | `studio` P0-1 `c4b0278` | ✅ 已合 |
+| UX-3 | 节点内按钮按"解剖图"归位 | 跟随 RW-3 | 待做 |
+| UX-4 | 底部上下文浮条收敛为「问Agent / 引用 / 变体×4 / 排版▾」（§3.3） | `studio` P0-2 `0ec6bda` | 部分（变体已换 `forkVariations`），收敛待做 |
+| **RW-1** | 底部导航条 + 框选 / 选中缩放（§8） | 纯 `CanvasPanel.tsx`，取代 UX-1 | **主线，先做** |
+| **RW-2** | 左侧竖条（创建 / 成组 / 素材栏）（§8） | 跟 RW-1 同 PR | 主线 |
+| **RW-3** | 强类型句柄：塌缩/展开 + 同类型同色 + 渐进槽位 + `*`（§8） | `edgeStyles` 色板 + 执行器 ref 槽 | 主线，最大 |
+| **RW-4** | 能量流动边 + 两段式剪线（§8） | `CuttableEdge` 重写 + `index.css` | 主线，独立 |
+| UX-6 | 右上「Agent 活动」薄条 + 多节点 fitView + Agent 徽章足迹（§2.3） | 读现有 `CanvasChannel` 事件 | 待做 |
+| UX-7 | 节点 → 对话收敛为 `问 Agent` / `引用` 两个动词（§2.4） | 跟随 UX-2 定义表 | 待做 |
+| UX-8 | 右面板：作品 → 画布次级视图 / 窗口控制独立成组（§2.1–2.2） | `RightPanel.tsx` + `ChatPage.tsx` | 待做 |
 
-**PR 拆分**：UX-1 单独一个纯布局 PR 可先合（零风险、立竿见影）；UX-2/3/7 合一个 PR（动作条改造）；UX-4 跟在 `studio` P0-2 后；UX-5/6/8 各一个。
+**PR 拆分**：RW-1+RW-2 一个（导航条 + 左条，删顶部工具栏与 `<Controls>`）；
+RW-4 一个（能量边 + 两段式剪线）；RW-3 一个（`NodeHandle` 组件 + 执行器 ref 槽，
+`edgeStyles` 色板调整可作前置小 PR）。之后 UX-3/6/7/8 收尾。
 
 ---
 
