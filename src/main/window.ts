@@ -26,7 +26,7 @@ export function createMainWindow(): BrowserWindow {
     height: 840,
     minWidth: 900,
     minHeight: 600,
-    show: false,
+    show: true,
     frame: isMac,
     titleBarStyle: isMac ? 'hiddenInset' : undefined,
     trafficLightPosition: isMac ? { x: 16, y: 12 } : undefined,
@@ -68,6 +68,14 @@ export function createMainWindow(): BrowserWindow {
       mainWindow.setSize(width, height);
     }
   });
+
+  // Guarantee window visibility even if ready-to-show is delayed by hardware acceleration
+  setTimeout(() => {
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  }, 1000);
 
   mainWindow.on('close', (event) => {
     if (quitting) return;

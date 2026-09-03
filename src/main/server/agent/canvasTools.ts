@@ -6,6 +6,7 @@ import type { CanvasStore } from '../storage/canvasStore';
 import { getCanvasChannel } from '../canvas/channel';
 import { broadcastDownstreamDirty, runImageNode } from '../canvas/imageExecutor';
 import { runAgentNode } from '../canvas/agentExecutor';
+import { runVideoNode } from '../canvas/videoExecutor';
 import { runGraph } from '../canvas/graphExecutor';
 import type { CanvasNode } from '../../../shared/canvas';
 
@@ -42,10 +43,10 @@ export function createCanvasTools(options: {
   return {
     add_node: tool({
       description:
-        'Add a node to this session\'s canvas. type "image" generates an image from `prompt`; type "agent" is a research/critique sub-task described by `instruction`. Returns the new node id. The canvas panel opens automatically.',
+        'Add a node to this session\'s canvas. type "image" generates an image from `prompt`; type "agent" is a research/critique sub-task described by `instruction`; type "video" generates video from `prompt`; type "note" is a screenplay/script sticky note. Returns the new node id. The canvas panel opens automatically.',
       inputSchema: z.object({
-        type: z.enum(['image', 'agent']),
-        prompt: z.string().optional().describe('Image prompt (type "image").'),
+        type: z.enum(['image', 'agent', 'video', 'note']),
+        prompt: z.string().optional().describe('Prompt (type "image", "video", or "note").'),
         size: z.enum(CANVAS_IMAGE_SIZES as [string, ...string[]]).optional(),
         instruction: z.string().optional().describe('Task description (type "agent").'),
         title: z.string().optional(),
@@ -58,7 +59,11 @@ export function createCanvasTools(options: {
         const params =
           input.type === 'image'
             ? { prompt: input.prompt ?? '', size: input.size ?? '1024x1024' }
-            : { instruction: input.instruction ?? '' };
+            : input.type === 'video'
+              ? { prompt: input.prompt ?? '', duration: '5s', ratio: '16:9', cameraMotion: 'none' }
+              : input.type === 'note'
+                ? { content: input.instruction ?? input.prompt ?? '', color: 'amber' }
+                : { instruction: input.instruction ?? '' };
         const { rev, node } = canvasStore.addNode(canvas.id, {
           type: input.type,
           x: typeof input.x === 'number' ? input.x : 40,
@@ -73,16 +78,153 @@ export function createCanvasTools(options: {
       },
     }),
 
+    create_storyboard_pipeline: tool({
+      description:
+        'Autonomous Director: generate a complete multi-scene cinematic storyboard pipeline on the canvas from a narrative request. Automatically creates an overview script note, sequential keyframe image nodes, camera-motion video nodes, and establishes links between them in a clean horizontal timeline layout.',
+      inputSchema: z.object({
+        storyTitle: z.string().describe('Title of the storyboard or film concept'),
+        ratio: z.enum(['16:9', '9:16', '1:1']).default('16:9').describe('Aspect ratio for the scenes'),
+        scenes: z
+          .array(
+            z.object({
+              title: z.string().describe('Scene title e.g. "第 1 幕：雨夜追踪"'),
+              script: z.string().describe('Script lines or scene narrative description'),
+              imagePrompt: z.string().describe('Visual prompt for the keyframe image'),
+              videoPrompt: z.string().describe('Dynamic camera motion and motion description for video'),
+              camera: z
+                .enum(['none', 'zoom_in', 'zoom_out', 'pan_left', 'pan_right', 'orbit'])
+                .default('none')
+                .describe('Camera motion technique'),
+              duration: z.enum(['5s', '10s']).default('5s'),
+            }),
+          )
+          .min(1)
+          .max(8)
+          .describe('List of scenes in chronological order'),
+        autoRunFirstScene: z.boolean().default(false).describe('Whether to immediately trigger generation of the first scene'),
+      }),
+      execute: async (input) => {
+        const canvas = canvasStore.ensureCanvas(sessionId);
+        const channel = getCanvasChannel(canvas.id);
+
+        // 1. Create Overview Note card
+        const scriptOverview = `# ${input.storyTitle}\n\n画幅比例: ${input.ratio}\n分镜总数: ${input.scenes.length}\n\n${input.scenes
+          .map((s, idx) => `### 分镜 ${idx + 1}: ${s.title}\n${s.script}`)
+          .join('\n\n')}`;
+
+        const { rev: rNote, node: noteNode } = canvasStore.addNode(canvas.id, {
+          type: 'note',
+          x: 40,
+          y: 60,
+          w: 300,
+          h: 420,
+          title: `${input.storyTitle} (剧本大纲)`,
+          params: { content: scriptOverview, color: 'amber' },
+        });
+        channel.broadcast(rNote, { type: 'node_added', node: noteNode });
+
+        const createdSceneNodeIds: string[] = [];
+        const imageNodes: CanvasNode[] = [];
+        const videoNodes: CanvasNode[] = [];
+
+        // 2. Create sequential scenes
+        for (let i = 0; i < input.scenes.length; i++) {
+          const sc = input.scenes[i];
+          const colX = 380 + i * 360;
+
+          // Image Node (Keyframe)
+          const imgBox = defaultNodeBox('image');
+          const { rev: rImg, node: imgNode } = canvasStore.addNode(canvas.id, {
+            type: 'image',
+            x: colX,
+            y: 60,
+            w: imgBox.w,
+            h: imgBox.h,
+            title: `镜头 ${i + 1} · 关键帧`,
+            params: {
+              prompt: sc.imagePrompt,
+              size: input.ratio === '9:16' ? '1024x1536' : '1536x1024',
+              model: 'flux-schnell',
+            },
+          });
+          channel.broadcast(rImg, { type: 'node_added', node: imgNode });
+          imageNodes.push(imgNode);
+          createdSceneNodeIds.push(imgNode.id);
+
+          // Video Node (Motion)
+          const vidBox = defaultNodeBox('video');
+          const { rev: rVid, node: vidNode } = canvasStore.addNode(canvas.id, {
+            type: 'video',
+            x: colX,
+            y: 480,
+            w: vidBox.w,
+            h: vidBox.h,
+            title: `镜头 ${i + 1} · 运镜`,
+            params: {
+              prompt: sc.videoPrompt,
+              duration: sc.duration,
+              ratio: input.ratio,
+              cameraMotion: sc.camera,
+              model: 'kling-1.5',
+            },
+          });
+          channel.broadcast(rVid, { type: 'node_added', node: vidNode });
+          videoNodes.push(vidNode);
+          createdSceneNodeIds.push(vidNode.id);
+
+          // Edge: Image -> Video (start_frame)
+          const { rev: rEdge, edge } = canvasStore.addEdge(canvas.id, {
+            sourceId: imgNode.id,
+            targetId: vidNode.id,
+            targetHandle: 'start_frame',
+          });
+          channel.broadcast(rEdge, { type: 'edge_added', edge });
+
+          // If note is next to scene 1, connect note to image 1
+          if (i === 0) {
+            const { rev: rNoteEdge, edge: noteEdge } = canvasStore.addEdge(canvas.id, {
+              sourceId: noteNode.id,
+              targetId: imgNode.id,
+            });
+            channel.broadcast(rNoteEdge, { type: 'edge_added', edge: noteEdge });
+          } else {
+            // Connect previous video to current image for visual continuity
+            const prevVid = videoNodes[i - 1];
+            const { rev: rSeqEdge, edge: seqEdge } = canvasStore.addEdge(canvas.id, {
+              sourceId: prevVid.id,
+              targetId: imgNode.id,
+            });
+            channel.broadcast(rSeqEdge, { type: 'edge_added', edge: seqEdge });
+          }
+        }
+
+        if (input.autoRunFirstScene && imageNodes.length > 0) {
+          void runImageNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node: imageNodes[0] });
+        }
+
+        return {
+          ok: true,
+          storyTitle: input.storyTitle,
+          totalScenes: input.scenes.length,
+          noteId: noteNode.id,
+          createdNodeIds: createdSceneNodeIds,
+          summary: `已在画布上生成全套分镜编排流水线（包含 1 个剧本大纲卡、${input.scenes.length} 个关键帧图片卡、${input.scenes.length} 个运镜视频卡，并已完成全流水线自动连线）。`,
+        };
+      },
+    }),
+
     run_node: tool({
       description:
-        'Run a canvas node by id. An image node generates the image (a paid call); an agent node runs a read-only research/critique pass. Returns immediately; the result streams onto the canvas.',
+        'Run a canvas node by id. An image or video node generates the media; an agent node runs a read-only research/critique pass. Returns immediately; the result streams onto the canvas.',
       inputSchema: z.object({ id: z.string() }),
       execute: async ({ id }) => {
         const canvas = canvasStore.ensureCanvas(sessionId);
         const node = canvasStore.getNode(canvas.id, id);
         if (!node) return { error: `No canvas node "${id}"` };
         if (node.type === 'agent') {
-          void runAgentNode({ canvasStore, settingsStore, canvasId: canvas.id, node });
+          void runAgentNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node });
+        } else if (node.type === 'video') {
+          void runVideoNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node });
         } else {
           void runImageNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node });
         }

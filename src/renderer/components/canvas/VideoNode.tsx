@@ -1,20 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { Handle, NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
-import { Download, FolderPlus, Loader2, Play, GitBranchPlus, Bot } from 'lucide-react';
-import type { CanvasImageParams, CanvasNode } from '../../../shared/canvas';
-import { CANVAS_IMAGE_SIZES, CANVAS_IMAGE_MODELS } from '../../../shared/canvas';
+import { Download, FolderPlus, Loader2, Play, GitBranchPlus, Bot, Video } from 'lucide-react';
+import type { CanvasVideoParams } from '../../../shared/canvas';
+import { CANVAS_VIDEO_RATIOS, CANVAS_VIDEO_CAMERAS, CANVAS_VIDEO_MODELS } from '../../../shared/canvas';
 import { canvasAssetUrl } from '../../api';
 import * as canvasStore from '../../state/canvasStore';
 import * as chatStore from '../../state/chatStore';
 import { cn } from '../../lib/cn';
-import Lightbox from './Lightbox';
+import { NodeTitle, type CanvasNodeData } from './ImageNode';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-
-export interface CanvasNodeData extends Record<string, unknown> {
-  sessionId: string;
-  node: CanvasNode;
-  highlighted?: boolean;
-}
 
 function useAssetUrl(rel: string | undefined): string | null {
   const [url, setUrl] = useState<string | null>(null);
@@ -32,71 +26,22 @@ function useAssetUrl(rel: string | undefined): string | null {
   return url;
 }
 
-export function NodeTitle({
-  sessionId,
-  nodeId,
-  title,
-  fallback,
-}: {
-  sessionId: string;
-  nodeId: string;
-  title: string;
-  fallback: string;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(title);
-  useEffect(() => setDraft(title), [title]);
-  if (editing) {
-    return (
-      <input
-        autoFocus
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => {
-          setEditing(false);
-          void canvasStore.renameNode(sessionId, nodeId, draft.trim());
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-          if (e.key === 'Escape') {
-            setDraft(title);
-            setEditing(false);
-          }
-        }}
-        className="nodrag min-w-0 flex-1 rounded bg-paper-inset px-1 text-xs font-medium text-ink outline-none"
-      />
-    );
-  }
-  return (
-    <span
-      className="truncate font-medium text-ink-muted"
-      title="双击重命名"
-      onDoubleClick={() => {
-        setDraft(title);
-        setEditing(true);
-      }}
-    >
-      {title || fallback}
-    </span>
-  );
-}
-
-export default function ImageNode({ id, data, selected }: NodeProps) {
+export default function VideoNode({ id, data, selected }: NodeProps) {
   const { sessionId, node, highlighted } = data as CanvasNodeData;
-  const params = node.params as CanvasImageParams;
+  const params = (node.params as CanvasVideoParams) || { prompt: '' };
   const [prompt, setPrompt] = useState(params.prompt ?? '');
-  const [zoom, setZoom] = useState<string | null>(null);
   const [assetIdx, setAssetIdx] = useState(0);
   const resizeStart = useRef<{ w: number; h: number } | null>(null);
-  const size = params.size ?? '1024x1024';
   const running = node.runState === 'running';
   const assets = node.output?.assets ?? [];
   const current = assets[Math.min(assetIdx, assets.length - 1)];
   const assetUrl = useAssetUrl(current);
+  const progress = node.output?.progress ?? 0;
 
   useEffect(() => {
     setPrompt((params.prompt as string) ?? '');
   }, [params.prompt]);
+
   useEffect(() => {
     if (assetIdx >= assets.length) setAssetIdx(0);
   }, [assets.length, assetIdx]);
@@ -135,7 +80,7 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
               void canvasStore.forkNode(sessionId, node.id);
             }}
             className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-ink hover:bg-paper-inset"
-            title="克隆此节点为独立变体分支 (保持上游连接)"
+            title="克隆此视频节点为独立变体分支 (保持上游首尾帧连接)"
           >
             <GitBranchPlus size={11} className="text-accent" />
             变体分支
@@ -145,10 +90,14 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              void canvasStore.addDownstreamAgent(sessionId, node.id);
+              void canvasStore.addDownstreamAgent(
+                sessionId,
+                node.id,
+                '请评估该生成的视频分镜，从动作连贯性、光影、画面质感给出点评，并提供优化后的视频 Prompt。',
+              );
             }}
             className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-ink hover:bg-paper-inset"
-            title="在右侧添加连接的画面质检 Agent 节点"
+            title="在右侧添加连接的视频质检 Agent 节点"
           >
             <Bot size={11} className="text-accent" />
             + 质检 Agent
@@ -163,7 +112,7 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
                   void canvasStore.saveAsset(sessionId, node.id, assetIdx);
                 }}
                 className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-ink hover:bg-paper-inset"
-                title="将当前选中的画面存入作品库"
+                title="将当前视频存入作品库"
               >
                 <FolderPlus size={11} className="text-accent" />
                 存为产物
@@ -172,9 +121,10 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
           ) : null}
         </div>
       ) : null}
+
       <NodeResizer
-        minWidth={260}
-        minHeight={200}
+        minWidth={280}
+        minHeight={220}
         isVisible={selected}
         lineClassName="!border-accent/40"
         handleClassName="!h-2 !w-2 !rounded-sm !border-accent !bg-paper"
@@ -187,11 +137,48 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
           if (from) canvasStore.commitResize(sessionId, id, from, { w: p.width, h: p.height });
         }}
       />
-      <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-line !bg-paper" />
-      <Handle type="source" position={Position.Right} className="!h-2 !w-2 !border-line !bg-accent" />
+
+      <Handle
+        type="target"
+        id="start_frame"
+        position={Position.Left}
+        style={{ top: '65%' }}
+        className="!h-2.5 !w-2.5 !border-line !bg-accent"
+        title="连接图片作为首帧 (Start Frame)"
+      />
+      <span
+        style={{ top: '65%' }}
+        className="pointer-events-none absolute -left-8 -translate-y-1/2 text-[9px] font-medium text-ink-muted/80 select-none text-right w-6"
+      >
+        首帧
+      </span>
+
+      <Handle
+        type="target"
+        id="end_frame"
+        position={Position.Left}
+        style={{ top: '85%' }}
+        className="!h-2.5 !w-2.5 !border-line !bg-accent/80"
+        title="连接图片作为尾帧 (End Frame)"
+      />
+      <span
+        style={{ top: '85%' }}
+        className="pointer-events-none absolute -left-8 -translate-y-1/2 text-[9px] font-medium text-ink-muted/80 select-none text-right w-6"
+      >
+        尾帧
+      </span>
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="!h-2.5 !w-2.5 !border-line !bg-accent"
+        title="输出：视频产物输出"
+      />
 
       <div className="mb-2 flex items-center justify-between gap-2">
-        <NodeTitle sessionId={sessionId} nodeId={node.id} title={node.title} fallback="图片" />
+        <div className="flex items-center gap-1 min-w-0">
+          <Video size={13} className="text-accent shrink-0" />
+          <NodeTitle sessionId={sessionId} nodeId={node.id} title={node.title} fallback="视频生成" />
+        </div>
         <div className="flex shrink-0 items-center gap-1">
           {node.dirty && !running ? (
             <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">
@@ -206,11 +193,17 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
                 : node.runState === 'done'
                   ? 'bg-success/10 text-success'
                   : running
-                    ? 'bg-accent/10 text-accent'
+                    ? 'bg-accent/10 text-accent font-medium'
                     : 'bg-paper-inset text-ink-muted',
             )}
           >
-            {node.runState === 'idle' ? '未运行' : running ? '生成中' : node.runState === 'done' ? '完成' : '失败'}
+            {node.runState === 'idle'
+              ? '未运行'
+              : running
+                ? `生成中 ${progress > 0 ? `${progress}%` : '...'}`
+                : node.runState === 'done'
+                  ? '完成'
+                  : '失败'}
           </span>
         </div>
       </div>
@@ -220,14 +213,15 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
         onChange={(e) => setPrompt(e.target.value)}
         onBlur={commitPrompt}
         rows={2}
-        placeholder="描述画面视觉风格、主体与光影细节…"
+        placeholder="描述画面动态与运镜（可连 1~2 个上游图片作为首尾关键帧）…"
         className="nodrag mt-1 w-full resize-none rounded-xl border border-line/60 bg-paper-inset/40 p-2.5 text-xs text-ink placeholder:text-ink-muted/50 outline-none focus:border-accent focus:bg-paper-inset/70 focus:ring-1 focus:ring-accent/30 transition-all leading-relaxed"
       />
 
-      <div className="mt-2.5 flex items-center justify-between gap-1.5 flex-wrap">
-        <div className="flex items-center gap-1.5 flex-wrap">
+      <div className="mt-2.5 flex flex-wrap items-center justify-between gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {/* Video Model Selector */}
           <Select
-            value={params.model || 'flux-schnell'}
+            value={params.model || 'kling-1.5'}
             onValueChange={(val) =>
               void canvasStore.updateNodeParams(sessionId, node.id, {
                 ...params,
@@ -240,12 +234,12 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
               className="nodrag h-7 max-w-[140px] rounded-lg border-line/70 bg-paper-inset/40 px-2 py-1 text-[11px] font-medium text-ink hover:border-accent hover:bg-paper-inset/70 transition-colors"
             >
               <div className="flex items-center gap-1 truncate">
-                <span className="text-accent text-[10px]">⚡</span>
-                <SelectValue placeholder="模型选择" />
+                <span className="text-accent text-[10px]">🎬</span>
+                <SelectValue placeholder="视频模型" />
               </div>
             </SelectTrigger>
-            <SelectContent className="min-w-[160px] rounded-xl border border-line bg-paper-raised/95 shadow-xl backdrop-blur-xl p-1 text-xs">
-              {CANVAS_IMAGE_MODELS.map((m) => (
+            <SelectContent className="min-w-[170px] rounded-xl border border-line bg-paper-raised/95 shadow-xl backdrop-blur-xl p-1 text-xs">
+              {CANVAS_VIDEO_MODELS.map((m) => (
                 <SelectItem key={m.id} value={m.id} className="text-xs py-1.5 cursor-pointer rounded-lg hover:bg-paper-inset">
                   <div className="flex items-center justify-between w-full gap-2">
                     <span>{m.name}</span>
@@ -260,57 +254,104 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
             </SelectContent>
           </Select>
 
-          {/* Segmented Pill Group for Size (1:1, 16:9, 9:16) */}
+          {/* Camera Motion Selector */}
+          <Select
+            value={params.cameraMotion || 'none'}
+            onValueChange={(val) =>
+              void canvasStore.updateNodeParams(sessionId, node.id, {
+                ...params,
+                cameraMotion: val as CanvasVideoParams['cameraMotion'],
+              })
+            }
+          >
+            <SelectTrigger
+              size="sm"
+              className="nodrag h-7 max-w-[110px] rounded-lg border-line/70 bg-paper-inset/40 px-2 py-1 text-[11px] text-ink hover:border-accent hover:bg-paper-inset/70 transition-colors"
+            >
+              <div className="flex items-center gap-1 truncate">
+                <span className="text-ink-muted text-[10px]">🎥</span>
+                <SelectValue />
+              </div>
+            </SelectTrigger>
+            <SelectContent className="min-w-[130px] rounded-xl border border-line bg-paper-raised/95 shadow-xl backdrop-blur-xl p-1 text-xs">
+              {CANVAS_VIDEO_CAMERAS.map((c) => (
+                <SelectItem key={c.id} value={c.id} className="text-xs py-1.5 cursor-pointer rounded-lg hover:bg-paper-inset">
+                  {c.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Ratio Segmented Pills (16:9, 9:16, 1:1) */}
           <div className="flex items-center rounded-lg border border-line/60 bg-paper-inset/50 p-0.5">
-            {[
-              { id: '1024x1024', label: '1:1' },
-              { id: '1536x1024', label: '16:9' },
-              { id: '1024x1536', label: '9:16' },
-            ].map((opt) => (
+            {['16:9', '9:16', '1:1'].map((r) => (
               <button
-                key={opt.id}
+                key={r}
                 type="button"
                 onClick={() =>
                   void canvasStore.updateNodeParams(sessionId, node.id, {
                     ...params,
-                    size: opt.id as CanvasImageParams['size'],
+                    ratio: r as CanvasVideoParams['ratio'],
                   })
                 }
                 className={cn(
                   'nodrag rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-all',
-                  size === opt.id
+                  (params.ratio || '16:9') === r
                     ? 'bg-paper-raised text-ink border border-line/60 shadow-xs font-semibold dark:bg-white/15 dark:text-white dark:border-white/20'
                     : 'text-ink-muted hover:text-ink',
                 )}
-                title={`画幅比例: ${opt.label}`}
+                title={`画幅比例: ${r}`}
               >
-                {opt.label}
+                {r}
+              </button>
+            ))}
+          </div>
+
+          {/* Duration Segmented Pills (5s, 10s) */}
+          <div className="flex items-center rounded-lg border border-line/60 bg-paper-inset/50 p-0.5">
+            {['5s', '10s'].map((d) => (
+              <button
+                key={d}
+                type="button"
+                onClick={() =>
+                  void canvasStore.updateNodeParams(sessionId, node.id, {
+                    ...params,
+                    duration: d as CanvasVideoParams['duration'],
+                  })
+                }
+                className={cn(
+                  'nodrag rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-all',
+                  (params.duration || '5s') === d
+                    ? 'bg-paper-raised text-ink border border-line/60 shadow-xs font-semibold dark:bg-white/15 dark:text-white dark:border-white/20'
+                    : 'text-ink-muted hover:text-ink',
+                )}
+                title={`视频时长: ${d}`}
+              >
+                {d}
               </button>
             ))}
           </div>
         </div>
 
-        <div className="flex items-center gap-1 ml-auto">
-          <button
-            type="button"
-            onClick={() => void canvasStore.runGraph(sessionId, node.id)}
-            disabled={running}
-            className="nodrag rounded-lg border border-line/70 px-2 py-1 text-[11px] text-ink-muted hover:bg-paper-inset hover:text-ink transition-colors disabled:opacity-40"
-            title="从这里往下重新运行整条流水线"
-          >
-            向下跑
-          </button>
-          <button
-            type="button"
-            onClick={run}
-            disabled={running || !prompt.trim()}
-            className="nodrag inline-flex items-center gap-1 rounded-lg bg-accent text-accent-ink px-3 py-1 text-[11px] font-medium shadow-xs hover:opacity-90 active:scale-95 transition-all disabled:opacity-40"
-          >
-            {running ? <Loader2 size={12} className="animate-spin" /> : <Play size={11} className="fill-current" />}
-            生成
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={run}
+          disabled={running || !prompt.trim()}
+          className="nodrag ml-auto inline-flex items-center gap-1.5 rounded-lg bg-accent text-accent-ink px-3 py-1 text-[11px] font-medium shadow-xs hover:opacity-90 active:scale-95 transition-all disabled:opacity-40"
+        >
+          {running ? <Loader2 size={12} className="animate-spin" /> : <Play size={11} className="fill-current" />}
+          生成视频
+        </button>
       </div>
+
+      {running ? (
+        <div className="mt-2 w-full overflow-hidden rounded-full bg-paper-inset">
+          <div
+            className="h-1.5 rounded-full bg-accent transition-all duration-300"
+            style={{ width: `${Math.max(5, progress)}%` }}
+          />
+        </div>
+      ) : null}
 
       {node.output?.error ? (
         <div className="mt-2 flex flex-col gap-1 rounded-lg bg-danger/10 p-2 text-[11px] text-danger">
@@ -321,7 +362,7 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
               e.stopPropagation();
               void chatStore.sendMessage(
                 sessionId,
-                `画布上的图片节点「${node.title || node.id}」运行报错：\n“${node.output?.error}”\n当前 Prompt 为：“${prompt}”。\n请分析报错原因（如违禁词/格式/网络原因），并帮我生成优化修正后的可用 Prompt。`,
+                `画布上的视频节点「${node.title || node.id}」生成报错：\n“${node.output?.error}”\n当前 Prompt 为：“${prompt}”。\n请分析报错原因（如违禁词/运镜参数冲突/模型超时），并帮我生成修改后的视频 Prompt 与参数建议。`,
                 [],
                 {},
               );
@@ -335,15 +376,17 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
       ) : null}
 
       {assetUrl ? (
-        <div className="group relative mt-2 min-h-0 flex-1 overflow-hidden rounded-lg border border-line">
-          <img
+        <div className="group relative mt-2 min-h-0 flex-1 overflow-hidden rounded-lg border border-line bg-black/5 flex items-center justify-center">
+          <video
             src={assetUrl}
-            alt=""
-            onClick={() => setZoom(assetUrl)}
-            className="nodrag h-full w-full cursor-zoom-in object-contain"
+            controls
+            playsInline
+            loop
+            preload="metadata"
+            className="nodrag h-full w-full object-contain"
           />
           {assets.length > 1 ? (
-            <div className="absolute inset-x-0 bottom-1 flex items-center justify-center gap-1 bg-black/40 py-0.5 backdrop-blur-[2px]">
+            <div className="absolute inset-x-0 bottom-7 flex items-center justify-center gap-1 bg-black/40 py-0.5 backdrop-blur-[2px]">
               {assets.map((_, i) => (
                 <button
                   key={i}
@@ -354,22 +397,24 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
                   }}
                   className={cn(
                     'nodrag rounded px-1.5 py-0.5 text-[9px] font-medium transition-colors',
-                    i === assetIdx ? 'bg-accent text-accent-ink font-semibold shadow-sm' : 'bg-black/60 text-white/80 hover:bg-black/80',
+                    i === assetIdx
+                      ? 'bg-accent text-accent-ink font-semibold shadow-sm'
+                      : 'bg-black/60 text-white/80 hover:bg-black/80',
                   )}
-                  title={`版本 v${assets.length - i} (点击切换当前视图)`}
+                  title={`版本 v${assets.length - i} (点击切换当前视频)`}
                 >
                   v{assets.length - i}
                 </button>
               ))}
             </div>
           ) : null}
-          <div className="absolute right-1.5 top-1.5 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+          <div className="absolute right-1.5 top-1.5 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 z-10">
             <a
               href={assetUrl}
               download
               onClick={(e) => e.stopPropagation()}
-              className="nodrag rounded-md bg-black/50 p-1 text-white hover:bg-black/70"
-              title="下载"
+              className="nodrag rounded-md bg-black/60 p-1 text-white hover:bg-black/80"
+              title="下载视频"
             >
               <Download size={12} />
             </a>
@@ -379,16 +424,14 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
                 e.stopPropagation();
                 void canvasStore.saveAsset(sessionId, node.id, assetIdx);
               }}
-              className="nodrag rounded-md bg-black/50 p-1 text-white hover:bg-black/70"
-              title="存到作品"
+              className="nodrag rounded-md bg-black/60 p-1 text-white hover:bg-black/80"
+              title="存到作品库"
             >
               <FolderPlus size={12} />
             </button>
           </div>
         </div>
       ) : null}
-
-      {zoom ? <Lightbox src={zoom} onClose={() => setZoom(null)} /> : null}
     </div>
   );
 }

@@ -60,8 +60,8 @@
   --ink: #f4f4f4;
   --ink-muted: #8a8a8a;
   --line: #2a2a2a;
-  --accent: #f4f4f4;
-  --accent-ink: #0d0d0d;
+  --accent: #e07a3f;
+  --accent-ink: #ffffff;
   --success: #2dd4bf;
   --success-bg: #0d4e4a;
   --danger: #fb7185;
@@ -82,7 +82,7 @@
   --secondary-foreground: var(--ink);
   --accent-foreground: var(--accent-ink);
   --destructive: var(--danger);
-  --ring: color-mix(in srgb, var(--ink) 22%, transparent);
+  --ring: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 @theme {

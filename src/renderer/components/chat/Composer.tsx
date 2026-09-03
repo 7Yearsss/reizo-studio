@@ -194,9 +194,18 @@ export default function Composer({
         {sessionId && (
           <QueuePanel items={queue} onRemove={(id) => chatStore.removeQueuedTurn(sessionId, id)} />
         )}
-        {mentionQuery !== null && workspacePath && (
+        {mentionQuery !== null && (
           <MentionMenu
             query={mentionQuery}
+            sessionId={sessionId}
+            onPickNode={(node) => {
+              const replaced = draft.replace(/@([^\s@]*)$/, '');
+              setDraft(replaced);
+              if (sessionId) {
+                const label = (node.title || (node.params as Record<string, string>)?.prompt || node.type).slice(0, 24);
+                chatStore.addNodeRef(sessionId, { id: node.id, label });
+              }
+            }}
             onPick={(path) => {
               const replaced = draft.replace(/@([^\s@]*)$/, `@${path} `);
               setDraft(replaced);

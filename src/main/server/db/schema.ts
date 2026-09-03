@@ -100,7 +100,7 @@ export const canvasNodes = sqliteTable(
     canvasId: text('canvas_id')
       .notNull()
       .references(() => canvases.id, { onDelete: 'cascade' }),
-    type: text('type', { enum: ['image', 'agent'] }).notNull(),
+    type: text('type', { enum: ['image', 'agent', 'video', 'note'] }).notNull(),
     x: integer('x').notNull(),
     y: integer('y').notNull(),
     w: integer('w').notNull(),
