@@ -1,0 +1,77 @@
+import type { CanvasNode, CanvasVideoParams } from '../../../shared/canvas';
+import type { CanvasStore } from '../storage/canvasStore';
+import type { SettingsStore } from '../storage/settingsStore';
+import { readCanvasAsset } from './imageExecutor';
+import { submitVideoJob } from './asyncJobManager';
+import type { VideoGenerateParams } from './videoDrivers';
+
+function isVideoParams(value: unknown): value is CanvasVideoParams {
+  return Boolean(value && typeof value === 'object' && typeof (value as CanvasVideoParams).prompt === 'string');
+}
+
+export async function runVideoNode(options: {
+  canvasStore: CanvasStore;
+  settingsStore: SettingsStore;
+  dataRoot: string;
+  canvasId: string;
+  node: CanvasNode;
+  providerId?: string;
+}): Promise<void> {
+  const { canvasStore, settingsStore, dataRoot, canvasId, node, providerId } = options;
+
+  if (!isVideoParams(node.params) || !node.params.prompt.trim()) {
+    throw new Error('Video node has no prompt');
+  }
+  const params = node.params;
+
+  // Extract upstream images for start / end frame interpolation (handle-aware)
+  const snap = canvasStore.getSnapshot(canvasId);
+  const incomingEdges = snap ? snap.edges.filter((e) => e.targetId === node.id) : [];
+
+  let startImageBytes: Uint8Array | undefined;
+  let endImageBytes: Uint8Array | undefined;
+
+  for (const edge of incomingEdges) {
+    const up = canvasStore.getNode(canvasId, edge.sourceId);
+    if (!up || up.type !== 'image') continue;
+    const rel = up.output?.assets?.[0];
+    if (!rel) continue;
+    try {
+      const buf = await readCanvasAsset(dataRoot, rel);
+      const bytes = new Uint8Array(buf);
+      if (edge.targetHandle === 'end_frame') {
+        endImageBytes = bytes;
+      } else if (edge.targetHandle === 'start_frame') {
+        startImageBytes = bytes;
+      } else if (!startImageBytes) {
+        startImageBytes = bytes;
+      } else if (!endImageBytes) {
+        endImageBytes = bytes;
+      }
+    } catch {
+      /* ignore unreadable asset */
+    }
+  }
+
+  const generateParams: VideoGenerateParams = {
+    prompt: params.prompt,
+    duration: params.duration || '5s',
+    ratio: params.ratio || '16:9',
+    cameraMotion: params.cameraMotion || 'none',
+    startImageBytes,
+    endImageBytes,
+  };
+
+  const driverId = params.provider || providerId || 'mock';
+
+  await submitVideoJob({
+    canvasStore,
+    settingsStore,
+    dataRoot,
+    canvasId,
+    nodeId: node.id,
+    driverId,
+    params: generateParams,
+    providerId,
+  });
+}

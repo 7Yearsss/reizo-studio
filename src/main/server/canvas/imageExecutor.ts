@@ -152,16 +152,19 @@ export async function runImageNode(options: {
       n += 1;
     }
 
+    const prevAssets = node.output?.assets ?? [];
+    const combinedAssets = [...rels, ...prevAssets.filter((p) => !rels.includes(p))].slice(0, 10);
+
     const done = canvasStore.updateNode(canvasId, node.id, {
       runState: 'done',
-      output: { assets: rels },
+      output: { assets: combinedAssets },
       paramsHash: inputHash(node, upstream),
     });
     if (done) {
       channel.broadcast(done.rev, {
         type: 'node_output',
         id: node.id,
-        output: done.node.output ?? { assets: rels },
+        output: done.node.output ?? { assets: combinedAssets },
         runState: 'done',
       });
       // Include self: it just ran, so its own `dirty` clears.

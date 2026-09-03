@@ -3,10 +3,11 @@ import type { CanvasStore } from '../storage/canvasStore';
 import { getCanvasChannel } from './channel';
 import { runImageNode } from './imageExecutor';
 import { runAgentNode } from './agentExecutor';
+import { runVideoNode } from './videoExecutor';
 import { descendants, directUpstream, topoOrder } from './graph';
 
 /** Node types the executor knows how to run. */
-const RUNNABLE = new Set(['image', 'agent']);
+const RUNNABLE = new Set(['image', 'agent', 'video']);
 
 /** In-flight `runGraph` per canvas, so a "stop" can abort between nodes. */
 const activeRuns = new Map<string, AbortController>();
@@ -100,7 +101,9 @@ export async function runGraph(options: {
       const fresh = canvasStore.getNode(canvasId, id);
       if (!fresh) continue;
       if (fresh.type === 'agent') {
-        await runAgentNode({ canvasStore, settingsStore, canvasId, node: fresh, providerId, signal: abort.signal });
+        await runAgentNode({ canvasStore, settingsStore, dataRoot, canvasId, node: fresh, providerId, signal: abort.signal });
+      } else if (fresh.type === 'video') {
+        await runVideoNode({ canvasStore, settingsStore, dataRoot, canvasId, node: fresh, providerId });
       } else {
         await runImageNode({ canvasStore, settingsStore, dataRoot, canvasId, node: fresh, providerId });
       }

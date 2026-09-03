@@ -6,7 +6,7 @@ import { createOpenAiModel } from '../agent/provider/openai';
 import type { SettingsStore } from '../storage/settingsStore';
 import type { CanvasStore } from '../storage/canvasStore';
 import { getCanvasChannel } from './channel';
-import { broadcastDownstreamDirty } from './imageExecutor';
+import { broadcastDownstreamDirty, readCanvasAsset } from './imageExecutor';
 import { inputHash } from './graph';
 
 /** How often streaming text is flushed onto the canvas channel. */
@@ -75,6 +75,32 @@ function upstreamContext(canvasStore: CanvasStore, canvasId: string, nodeId: str
   return `Connected input nodes:\n${lines.join('\n')}`;
 }
 
+async function collectUpstreamImages(
+  canvasStore: CanvasStore,
+  dataRoot: string | undefined,
+  canvasId: string,
+  nodeId: string,
+): Promise<Array<{ bytes: Uint8Array; mediaType: string }>> {
+  if (!dataRoot) return [];
+  const upstream = canvasStore.upstreamNodes(canvasId, nodeId);
+  const out: Array<{ bytes: Uint8Array; mediaType: string }> = [];
+  for (const node of upstream) {
+    if (node.type !== 'image') continue;
+    const assets = node.output?.assets ?? [];
+    for (const rel of assets.slice(0, 2)) {
+      try {
+        const buf = await readCanvasAsset(dataRoot, rel);
+        const lower = rel.toLowerCase();
+        const mediaType = lower.endsWith('.jpg') || lower.endsWith('.jpeg') ? 'image/jpeg' : 'image/png';
+        out.push({ bytes: new Uint8Array(buf), mediaType });
+      } catch {
+        /* skip unreadable asset */
+      }
+    }
+  }
+  return out;
+}
+
 /**
  * Run one "agent" canvas node: a headless, isolated sub-agent pass with a
  * read-only toolset (`read_canvas` / `read_node`). It does not see the chat
@@ -90,8 +116,9 @@ export async function runAgentNode(options: {
   node: CanvasNode;
   providerId?: string;
   signal?: AbortSignal;
+  dataRoot?: string;
 }): Promise<void> {
-  const { canvasStore, settingsStore, canvasId, node, signal } = options;
+  const { canvasStore, settingsStore, canvasId, node, signal, dataRoot } = options;
   const channel = getCanvasChannel(canvasId);
 
   const fail = (message: string) => {
@@ -139,17 +166,34 @@ export async function runAgentNode(options: {
     const context = upstreamContext(canvasStore, canvasId, node.id);
     const model = createOpenAiModel({ apiKey: stored.apiKey, modelId, baseUrl });
 
+    const upstreamImages = await collectUpstreamImages(canvasStore, dataRoot, canvasId, node.id);
+    const textPrompt = context ? `${instruction}\n\n${context}` : instruction;
+
+    type UserPart = { type: 'text'; text: string } | { type: 'image'; image: Uint8Array; mediaType?: string };
+    const userContent: string | UserPart[] =
+      upstreamImages.length > 0
+        ? [
+            { type: 'text', text: textPrompt },
+            ...upstreamImages.map((img) => ({
+              type: 'image' as const,
+              image: img.bytes,
+              mediaType: img.mediaType,
+            })),
+          ]
+        : textPrompt;
+
     const result = streamText({
       model,
       instructions:
         'You are a research / critique sidecar attached to a node on a visual canvas. ' +
+        'When images are provided in the input, inspect their visual composition, aesthetics, lighting, character details, and style. ' +
         'Do the task the user describes and reply with a concise, directly useful answer ' +
-        '(findings, a critique, or rewritten text — no preamble). You can call read_canvas / ' +
+        '(findings, a visual critique, or rewritten prompt/text — no preamble). You can call read_canvas / ' +
         'read_node to inspect other nodes, but you cannot change anything.',
       messages: [
         {
           role: 'user',
-          content: context ? `${instruction}\n\n${context}` : instruction,
+          content: userContent as unknown as string,
         },
       ],
       tools: readOnlyCanvasTools(canvasStore, canvasId),

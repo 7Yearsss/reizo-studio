@@ -1,5 +1,5 @@
 import * as api from '../api';
-import type { CanvasNode, CanvasEdge, CanvasNodeParams, CanvasSnapshot } from '../../shared/canvas';
+import type { CanvasNode, CanvasEdge, CanvasNodeParams, CanvasNodeType, CanvasSnapshot } from '../../shared/canvas';
 import type { CanvasEvent } from '../../shared/canvasStream';
 
 export interface GraphRun {
@@ -221,7 +221,7 @@ export function focusNode(sessionId: string, nodeId: string): void {
 
 async function _addNode(
   sessionId: string,
-  spec: { type: 'image' | 'agent'; x: number; y: number; title?: string; params?: CanvasNodeParams },
+  spec: { type: CanvasNodeType; x: number; y: number; title?: string; params?: CanvasNodeParams },
 ): Promise<string | null> {
   const id = canvasId(sessionId);
   if (!id) return null;
@@ -266,10 +266,16 @@ async function _setNode(
   if (id) await api.patchCanvasNode(id, nodeId, patch).catch((): void => undefined);
 }
 
-async function _addEdge(sessionId: string, sourceId: string, targetId: string): Promise<string | null> {
+async function _addEdge(
+  sessionId: string,
+  sourceId: string,
+  targetId: string,
+  sourceHandle?: string | null,
+  targetHandle?: string | null,
+): Promise<string | null> {
   const id = canvasId(sessionId);
   if (!id) return null;
-  const edge = await api.addCanvasEdge(id, { sourceId, targetId });
+  const edge = await api.addCanvasEdge(id, { sourceId, targetId, sourceHandle, targetHandle });
   applyEvent(sessionId, { type: 'edge_added', edge });
   return edge.id;
 }
@@ -284,7 +290,7 @@ async function _deleteEdge(sessionId: string, edgeId: string): Promise<void> {
 
 export async function addNode(
   sessionId: string,
-  type: 'image' | 'agent',
+  type: CanvasNodeType,
   at: { x: number; y: number },
   params?: CanvasNodeParams,
 ): Promise<void> {
@@ -317,6 +323,68 @@ export async function duplicateNode(sessionId: string, nodeId: string): Promise<
       currentId = await _addNode(sessionId, spec);
     },
   });
+}
+
+export async function forkNode(sessionId: string, nodeId: string): Promise<string | null> {
+  const source = nodeById(sessionId, nodeId);
+  if (!source) return null;
+  const spec = {
+    type: source.type,
+    x: source.x + source.w + 32,
+    y: source.y,
+    title: source.title ? `${source.title} (变体)` : `${source.type === 'image' ? '图片' : 'Agent'} (变体)`,
+    params: { ...(source.params as Record<string, unknown>) },
+  };
+  const newId = await _addNode(sessionId, spec);
+  if (!newId) return null;
+
+  const edges = state.edgesBySession[sessionId] ?? [];
+  const incoming = edges.filter((e) => e.targetId === nodeId);
+  for (const edge of incoming) {
+    await _addEdge(sessionId, edge.sourceId, newId);
+  }
+
+  record(sessionId, {
+    undo: () => (newId ? _deleteNode(sessionId, newId) : Promise.resolve()),
+    redo: async () => {
+      const recreated = await _addNode(sessionId, spec);
+      if (recreated) {
+        for (const edge of incoming) {
+          await _addEdge(sessionId, edge.sourceId, recreated);
+        }
+      }
+    },
+  });
+
+  return newId;
+}
+
+export async function addDownstreamAgent(
+  sessionId: string,
+  sourceId: string,
+  instruction = '请评估该图片，从画面构图、细节与质感给出点评，并提供优化后的 Prompt 建议。',
+): Promise<string | null> {
+  const source = nodeById(sessionId, sourceId);
+  if (!source) return null;
+  const spec = {
+    type: 'agent' as const,
+    x: source.x + source.w + 40,
+    y: source.y,
+    title: '画面质检',
+    params: { instruction },
+  };
+  const agentId = await _addNode(sessionId, spec);
+  if (!agentId) return null;
+  await _addEdge(sessionId, sourceId, agentId);
+
+  record(sessionId, {
+    undo: () => (agentId ? _deleteNode(sessionId, agentId) : Promise.resolve()),
+    redo: async () => {
+      const id = await _addNode(sessionId, spec);
+      if (id) await _addEdge(sessionId, sourceId, id);
+    },
+  });
+  return agentId;
 }
 
 export async function removeNode(sessionId: string, nodeId: string): Promise<void> {
@@ -400,16 +468,47 @@ export async function renameNode(sessionId: string, nodeId: string, title: strin
 }
 
 /** Throws with a readable message when the server rejects the connection. */
-export async function connectNodes(sessionId: string, sourceId: string, targetId: string): Promise<void> {
+export async function connectNodes(
+  sessionId: string,
+  sourceId: string,
+  targetId: string,
+  sourceHandle?: string | null,
+  targetHandle?: string | null,
+): Promise<void> {
   if (sourceId === targetId) return;
-  const edgeId = await _addEdge(sessionId, sourceId, targetId);
+  const edgeId = await _addEdge(sessionId, sourceId, targetId, sourceHandle, targetHandle);
   if (!edgeId) return;
   record(sessionId, {
     undo: () => _deleteEdge(sessionId, edgeId),
     redo: async () => {
-      await _addEdge(sessionId, sourceId, targetId).catch((): null => null);
+      await _addEdge(sessionId, sourceId, targetId, sourceHandle, targetHandle).catch((): null => null);
     },
   });
+}
+
+export async function addNodeAndConnect(
+  sessionId: string,
+  spec: { type: CanvasNodeType; x: number; y: number; title?: string; params?: CanvasNodeParams },
+  sourceId: string,
+  sourceHandle?: string | null,
+  targetHandle?: string | null,
+): Promise<string | null> {
+  const newNodeId = await _addNode(sessionId, spec);
+  if (!newNodeId) return null;
+  const edgeId = await _addEdge(sessionId, sourceId, newNodeId, sourceHandle, targetHandle);
+  record(sessionId, {
+    undo: async () => {
+      if (edgeId) await _deleteEdge(sessionId, edgeId);
+      await _deleteNode(sessionId, newNodeId);
+    },
+    redo: async () => {
+      const recreated = await _addNode(sessionId, spec);
+      if (recreated) {
+        await _addEdge(sessionId, sourceId, recreated, sourceHandle, targetHandle).catch((): null => null);
+      }
+    },
+  });
+  return newNodeId;
 }
 
 export async function removeEdge(sessionId: string, edgeId: string): Promise<void> {

@@ -11,9 +11,10 @@ import { getCanvasChannel } from '../canvas/channel';
 import { broadcastDownstreamDirty, canvasAssetsDir, readCanvasAsset, runImageNode } from '../canvas/imageExecutor';
 import { isCanvasRunning, runGraph, stopCanvasRun } from '../canvas/graphExecutor';
 import { runAgentNode } from '../canvas/agentExecutor';
+import { runVideoNode } from '../canvas/videoExecutor';
 import { setCanvasSelection } from '../canvas/selection';
 
-const NODE_TYPES = new Set<CanvasNodeType>(['image', 'agent']);
+const NODE_TYPES = new Set<CanvasNodeType>(['image', 'agent', 'video']);
 const IMPORT_MAX_BYTES = 12 * 1024 * 1024;
 
 export function createCanvasRouter(
@@ -166,11 +167,27 @@ export function createCanvasRouter(
       return c.json({ ok: true }, 202);
     }
 
+    if (node.type === 'video') {
+      if (body?.confirmedSpend !== true) {
+        return c.json({ error: 'confirmedSpend required for a paid generation' }, 402);
+      }
+      void runVideoNode({
+        canvasStore,
+        settingsStore,
+        dataRoot,
+        canvasId,
+        node,
+        providerId: typeof body.providerId === 'string' ? body.providerId : undefined,
+      });
+      return c.json({ ok: true }, 202);
+    }
+
     // Agent node: a headless read-only sub-agent pass. Cheap (text only), so
     // no spend gate — it streams its answer onto the node.
     void runAgentNode({
       canvasStore,
       settingsStore,
+      dataRoot,
       canvasId,
       node,
       providerId: typeof body.providerId === 'string' ? body.providerId : undefined,
