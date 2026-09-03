@@ -1,6 +1,7 @@
 import * as api from '../api';
 import type { CanvasNode, CanvasEdge, CanvasNodeParams, CanvasNodeType, CanvasSnapshot, CanvasGroupParams } from '../../shared/canvas';
 import { gridArrange } from '../../shared/arrangeNodes';
+import { variantGrid } from '../../shared/variantLayout';
 import { grabVideoFrameBlob, type FramePick } from '../lib/videoFrame';
 import { notifyJobDone, primeNotifications } from '../lib/notify';
 import type { CanvasEvent } from '../../shared/canvasStream';
@@ -370,7 +371,7 @@ export async function forkNode(sessionId: string, nodeId: string): Promise<strin
   const edges = state.edgesBySession[sessionId] ?? [];
   const incoming = edges.filter((e) => e.targetId === nodeId);
   for (const edge of incoming) {
-    await _addEdge(sessionId, edge.sourceId, newId);
+    await _addEdge(sessionId, edge.sourceId, newId, edge.sourceHandle, edge.targetHandle);
   }
 
   record(sessionId, {
@@ -379,13 +380,132 @@ export async function forkNode(sessionId: string, nodeId: string): Promise<strin
       const recreated = await _addNode(sessionId, spec);
       if (recreated) {
         for (const edge of incoming) {
-          await _addEdge(sessionId, edge.sourceId, recreated);
+          await _addEdge(sessionId, edge.sourceId, recreated, edge.sourceHandle, edge.targetHandle);
         }
       }
     },
   });
 
   return newId;
+}
+
+/** Human label a fork/variant title is built from. */
+function forkBaseTitle(node: CanvasNode): string {
+  if (node.title) return node.title;
+  if (node.type === 'image') return '图片';
+  if (node.type === 'video') return '视频';
+  if (node.type === 'agent') return 'Agent';
+  return node.type;
+}
+
+/**
+ * Fork `count` sibling variants of a node — same params, same incoming edges
+ * (handles preserved) — laid out as a grid to the right that dodges every
+ * existing node. The whole batch is one history entry.
+ */
+export async function forkVariations(
+  sessionId: string,
+  nodeId: string,
+  count = 4,
+): Promise<string[]> {
+  const source = nodeById(sessionId, nodeId);
+  if (!source) return [];
+
+  const nodes = state.nodesBySession[sessionId] ?? [];
+  const edges = state.edgesBySession[sessionId] ?? [];
+  const incoming = edges.filter((e) => e.targetId === nodeId);
+  const positions = variantGrid(
+    { x: source.x, y: source.y, w: source.w, h: source.h },
+    count,
+    nodes.map((n) => ({ x: n.x, y: n.y, w: n.w, h: n.h })),
+  );
+  const base = forkBaseTitle(source);
+  const specs = positions.map((pos, i) => ({
+    type: source.type,
+    x: pos.x,
+    y: pos.y,
+    w: source.w,
+    h: source.h,
+    title: `${base} (变体 ${i + 1})`,
+    params: { ...(source.params as Record<string, unknown>) },
+  }));
+
+  const create = async (): Promise<string[]> => {
+    const made: string[] = [];
+    for (const spec of specs) {
+      const id = await _addNode(sessionId, spec);
+      if (!id) continue;
+      made.push(id);
+      for (const edge of incoming) {
+        await _addEdge(sessionId, edge.sourceId, id, edge.sourceHandle, edge.targetHandle);
+      }
+    }
+    return made;
+  };
+
+  let ids = await create();
+  if (ids.length === 0) return [];
+  record(sessionId, {
+    undo: async () => {
+      for (const id of ids) await _deleteNode(sessionId, id);
+    },
+    redo: async () => {
+      ids = await create();
+    },
+  });
+  return ids;
+}
+
+/**
+ * Fork one variant of each selected node as a single history entry — the
+ * multi-select toolbar's "batch fork" (was N separate undo steps).
+ */
+export async function forkSelected(sessionId: string, nodeIds: string[]): Promise<string[]> {
+  const plans = nodeIds
+    .map((id) => {
+      const source = nodeById(sessionId, id);
+      if (!source) return null;
+      const edges = state.edgesBySession[sessionId] ?? [];
+      return {
+        incoming: edges.filter((e) => e.targetId === id),
+        spec: {
+          type: source.type,
+          x: source.x + source.w + 32,
+          y: source.y,
+          w: source.w,
+          h: source.h,
+          title: `${forkBaseTitle(source)} (变体)`,
+          params: { ...(source.params as Record<string, unknown>) },
+        },
+      };
+    })
+    .filter((p): p is NonNullable<typeof p> => p !== null);
+  if (plans.length === 0) return [];
+
+  const create = async (): Promise<string[]> => {
+    const made: string[] = [];
+    for (const plan of plans) {
+      const id = await _addNode(sessionId, plan.spec);
+      if (!id) continue;
+      made.push(id);
+      for (const edge of plan.incoming) {
+        await _addEdge(sessionId, edge.sourceId, id, edge.sourceHandle, edge.targetHandle);
+      }
+    }
+    return made;
+  };
+
+  let ids = await create();
+  if (ids.length === 0) return [];
+  record(sessionId, {
+    undo: async () => {
+      for (const id of ids) await _deleteNode(sessionId, id);
+    },
+    redo: async () => {
+      ids = await create();
+    },
+  });
+  return ids;
 }
 
 export async function addDownstreamAgent(

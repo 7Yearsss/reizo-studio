@@ -115,9 +115,9 @@ export default function VideoNode({ id, data, selected }: NodeProps) {
           {
             id: 'variations',
             icon: <GitBranchPlus size={11} className="text-accent" />,
-            label: '变体分支',
-            title: '克隆此视频节点为独立变体分支（保持上游首尾帧连接）',
-            onClick: () => void canvasStore.forkNode(sessionId, node.id),
+            label: '变体 ×4',
+            title: '在右侧并排派生 4 个继承参数与首尾帧连线的变体',
+            onClick: () => void canvasStore.forkVariations(sessionId, node.id),
           },
           ...((assets.length > 0
             ? [

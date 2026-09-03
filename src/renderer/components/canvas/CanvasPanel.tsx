@@ -759,9 +759,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
               <button
                 type="button"
                 onClick={() => {
-                  for (const n of selectedNodes) {
-                    void canvasStore.forkNode(sessionId, n.id);
-                  }
+                  void canvasStore.forkSelected(sessionId, selectedNodeIds);
                   flash(`已派生 ${selectedNodes.length} 个变体分支`);
                 }}
                 className="flex items-center gap-1.5 rounded-xl border border-line/70 bg-paper-inset/40 text-ink px-2.5 py-1.5 text-xs font-medium hover:bg-paper-inset/80 active:scale-95 transition-all"
