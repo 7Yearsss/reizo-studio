@@ -3,7 +3,6 @@ import {
   ReactFlow,
   ReactFlowProvider,
   Background,
-  Controls,
   MiniMap,
   Panel,
   useReactFlow,
@@ -43,6 +42,11 @@ import {
   MoreHorizontal,
   ChevronDown,
   Pin,
+  MousePointer2,
+  BoxSelect,
+  ZoomIn,
+  ZoomOut,
+  Focus,
 } from 'lucide-react';
 import * as canvasStore from '../../state/canvasStore';
 import * as chatStore from '../../state/chatStore';
@@ -86,6 +90,8 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
 
   const [menu, setMenu] = useState<Menu | null>(null);
   const [openTool, setOpenTool] = useState<'create' | 'more' | null>(null);
+  // Runway-style canvas interaction mode: pan-on-drag vs marquee box-select.
+  const [mode, setMode] = useState<'select' | 'marquee'>('select');
   const [toast, setToast] = useState<string | null>(null);
   const [confirmAll, setConfirmAll] = useState(false);
   const [highlightId, setHighlightId] = useState<string | null>(null);
@@ -353,6 +359,11 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     setTimeout(() => rf.fitView({ padding: 0.2, duration: 250 }), 60);
   };
 
+  const zoomToSelection = useCallback(() => {
+    if (selectedNodeIds.length === 0) return;
+    rf.fitView({ nodes: selectedNodeIds.map((id) => ({ id })), padding: 0.3, duration: 250, maxZoom: 1.4 });
+  }, [rf, selectedNodeIds]);
+
   const askAgent = (nodeId: string) => {
     const node = storeNodes.find((n) => n.id === nodeId);
     if (!node) return;
@@ -424,6 +435,16 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           e.preventDefault();
           rf.fitView({ padding: 0.2, duration: 250 });
           flash('全景居中 (F)');
+        } else if (k === 'v') {
+          e.preventDefault();
+          setMode('select');
+        } else if (k === 'm') {
+          e.preventDefault();
+          setMode('marquee');
+          flash('框选模式：空白拖拽多选 (M)');
+        } else if (k === 'z') {
+          e.preventDefault();
+          zoomToSelection();
         } else if (k === 'r') {
           if (selectedNodeIds.length === 1) {
             e.preventDefault();
@@ -433,7 +454,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         }
       }
     },
-    [sessionId, storeNodes, selectedNodeIds, rf, flash],
+    [sessionId, storeNodes, selectedNodeIds, rf, flash, zoomToSelection],
   );
 
   return (
@@ -520,10 +541,11 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         proOptions={{ hideAttribution: true }}
         deleteKeyCode={['Backspace', 'Delete']}
         panActivationKeyCode="Space"
+        panOnDrag={mode === 'marquee' ? [1] : true}
+        selectionOnDrag={mode === 'marquee'}
         className="bg-paper"
       >
         <Background gap={16} color="var(--line)" />
-        <Controls showInteractive={false} />
         <MiniMap pannable zoomable className="!bg-paper-inset" />
         <AssetShelf sessionId={sessionId} selectedTargetIds={selectedNodeIds} flash={flash} />
 
@@ -580,14 +602,14 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           </Panel>
         ) : null}
 
-        <Panel position="top-left" className="flex flex-wrap items-center gap-1.5">
-          {/* 创建 */}
+        {/* Left rail — create / organise / run (Runway RW-2). */}
+        <Panel position="top-left" className="flex flex-col items-center gap-1">
           <ToolbarDropdown
             open={openTool === 'create'}
             onToggle={() => setOpenTool((v) => (v === 'create' ? null : 'create'))}
-            icon={<Plus size={13} />}
-            label="节点"
+            icon={<Plus size={14} />}
             primary
+            compact
             items={[
               { icon: <ImageIcon size={13} />, label: '图片生成', onClick: () => addNode('image') },
               { icon: <Video size={13} />, label: '运镜视频', onClick: () => addNode('video') },
@@ -596,69 +618,39 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
               { icon: <Pin size={13} />, label: '参考图钉', onClick: () => addNode('anchor') },
             ]}
           />
-
-          <ToolbarDivider />
-
-          {/* 编辑 */}
-          <button type="button" onClick={tidy} disabled={storeNodes.length === 0} className="canvas-tool" title="按依赖分层自动整理布局">
+          <button
+            type="button"
+            onClick={tidy}
+            disabled={storeNodes.length === 0}
+            className="canvas-tool !px-1.5"
+            title="按依赖分层自动整理布局"
+          >
             <LayoutGrid size={13} />
-            整理
-          </button>
-          <button
-            type="button"
-            onClick={() => void canvasStore.undo(sessionId)}
-            disabled={!history?.canUndo}
-            className="canvas-tool"
-            title="撤销 (Ctrl+Z)"
-          >
-            <Undo2 size={13} />
-            撤销
-          </button>
-          <button
-            type="button"
-            onClick={() => void canvasStore.redo(sessionId)}
-            disabled={!history?.canRedo}
-            className="canvas-tool"
-            title="重做 (Ctrl+Shift+Z)"
-          >
-            <Redo2 size={13} />
-            重做
           </button>
 
-          <ToolbarDivider />
+          <span className="my-0.5 h-px w-5 bg-line" aria-hidden />
 
-          {/* 视图 */}
-          <button
-            type="button"
-            onClick={() => rf.fitView({ padding: 0.2, duration: 250 })}
-            className="canvas-tool"
-            title="全景居中 (F)"
-          >
-            <Maximize size={13} />
-            适应
-          </button>
-
-          <ToolbarDivider />
-
-          {/* 运行 */}
           {graphRun?.running ? (
             <button
               type="button"
               onClick={() => void canvasStore.stopGraph(sessionId)}
-              className="canvas-tool !border-danger/30 !bg-danger/10 !text-danger"
+              className="canvas-tool !px-1.5 !border-danger/30 !bg-danger/10 !text-danger"
+              title={`停止 · ${graphRun.done}/${graphRun.total}`}
             >
               <Square size={12} />
-              停止 · {graphRun.done}/{graphRun.total}
             </button>
           ) : (
             <button
               type="button"
               onClick={runAll}
               disabled={!hasRunnable}
-              className={cn('canvas-tool', confirmAll ? '!border-accent !bg-accent !text-accent-ink' : '!bg-ink !text-paper-raised')}
+              className={cn(
+                'canvas-tool !px-1.5',
+                confirmAll ? '!border-accent !bg-accent !text-accent-ink' : '!bg-ink !text-paper-raised',
+              )}
+              title={confirmAll ? (hasImage ? '再点一次确认运行整图（付费）' : '再点一次确认运行整图') : '运行整图'}
             >
               <PlayCircle size={13} />
-              {confirmAll ? (hasImage ? '确认运行整图（付费）' : '确认运行整图') : '运行整图'}
             </button>
           )}
           <ToolbarDropdown
@@ -710,8 +702,44 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           />
         </Panel>
 
+        {/* Bottom nav bar — pan/marquee + zoom + history (Runway RW-1). */}
+        <Panel position="bottom-center" className="pb-3">
+          <div className="flex items-center gap-0.5 rounded-xl border border-line bg-paper-raised/95 px-1 py-1 shadow-xl backdrop-blur-md">
+            <NavButton active={mode === 'select'} onClick={() => setMode('select')} title="选择 / 平移 (V)">
+              <MousePointer2 size={14} />
+            </NavButton>
+            <NavButton active={mode === 'marquee'} onClick={() => setMode('marquee')} title="框选：空白拖拽多选 (M)">
+              <BoxSelect size={14} />
+            </NavButton>
+            <span className="mx-0.5 h-4 w-px bg-line" aria-hidden />
+            <NavButton onClick={() => rf.zoomOut({ duration: 150 })} title="缩小">
+              <ZoomOut size={14} />
+            </NavButton>
+            <NavButton onClick={() => rf.zoomIn({ duration: 150 })} title="放大">
+              <ZoomIn size={14} />
+            </NavButton>
+            <NavButton onClick={() => rf.fitView({ padding: 0.2, duration: 250 })} title="适应全景 (F)">
+              <Maximize size={14} />
+            </NavButton>
+            <NavButton
+              onClick={zoomToSelection}
+              disabled={selectedNodeIds.length === 0}
+              title="缩放到选中 (Z)"
+            >
+              <Focus size={14} />
+            </NavButton>
+            <span className="mx-0.5 h-4 w-px bg-line" aria-hidden />
+            <NavButton onClick={() => void canvasStore.undo(sessionId)} disabled={!history?.canUndo} title="撤销 (Ctrl+Z)">
+              <Undo2 size={14} />
+            </NavButton>
+            <NavButton onClick={() => void canvasStore.redo(sessionId)} disabled={!history?.canRedo} title="重做 (Ctrl+Shift+Z)">
+              <Redo2 size={14} />
+            </NavButton>
+          </div>
+        </Panel>
+
         {selectedNodes.length > 0 ? (
-          <Panel position="bottom-center" className="pointer-events-auto pb-4">
+          <Panel position="bottom-center" className="pointer-events-auto pb-16">
             <div className="flex items-center gap-2 rounded-2xl border border-line bg-paper-raised/95 px-3.5 py-2 text-xs shadow-2xl backdrop-blur-md">
               <span className="font-semibold text-ink">已选 {selectedNodes.length} 个节点</span>
               <div className="h-3.5 w-px bg-line" />
@@ -821,7 +849,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         ) : null}
 
         {toast ? (
-          <Panel position="bottom-center" className="pointer-events-none pb-4">
+          <Panel position="top-center" className="pointer-events-none mt-3">
             <div className="rounded-lg bg-ink px-3 py-1.5 text-xs text-paper-raised shadow-lg">{toast}</div>
           </Panel>
         ) : null}
@@ -1042,9 +1070,35 @@ function MenuItem({
   );
 }
 
-/** Thin vertical rule that separates the toolbar's usage zones. */
-function ToolbarDivider() {
-  return <span className="mx-0.5 h-4 w-px shrink-0 bg-line" aria-hidden />;
+/** A single icon button in the bottom nav bar. */
+function NavButton({
+  children,
+  onClick,
+  title,
+  active,
+  disabled,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  title: string;
+  active?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      aria-pressed={active}
+      className={cn(
+        'flex h-7 w-7 items-center justify-center rounded-lg text-ink-muted transition-colors hover:bg-paper-inset hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent',
+        active && '!bg-paper-inset !text-ink',
+      )}
+    >
+      {children}
+    </button>
+  );
 }
 
 type ToolbarItem = { icon: React.ReactNode; label: string; onClick: () => void; disabled?: boolean };
