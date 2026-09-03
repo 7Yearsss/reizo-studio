@@ -38,6 +38,10 @@ import {
   AlignHorizontalDistributeCenter,
   FileDown,
   FileUp,
+  Plus,
+  Maximize,
+  MoreHorizontal,
+  ChevronDown,
 } from 'lucide-react';
 import * as canvasStore from '../../state/canvasStore';
 import * as chatStore from '../../state/chatStore';
@@ -77,6 +81,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
   const rf = useReactFlow();
 
   const [menu, setMenu] = useState<Menu | null>(null);
+  const [openTool, setOpenTool] = useState<'create' | 'more' | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [confirmAll, setConfirmAll] = useState(false);
   const [highlightId, setHighlightId] = useState<string | null>(null);
@@ -437,6 +442,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       onClick={() => {
         if (menu) setMenu(null);
         if (dropConnectMenu) setDropConnectMenu(null);
+        if (openTool) setOpenTool(null);
       }}
     >
       <ReactFlow
@@ -569,60 +575,110 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           </Panel>
         ) : null}
 
-        <Panel position="top-left" className="flex flex-wrap gap-1.5">
-          <button type="button" onClick={() => addNode('image')} className="canvas-tool">
-            <ImageIcon size={13} />
-            图片
-          </button>
-          <button type="button" onClick={() => addNode('video')} className="canvas-tool">
-            <Video size={13} />
-            视频
-          </button>
-          <button type="button" onClick={() => addNode('agent')} className="canvas-tool">
-            <Bot size={13} />
-            Agent
-          </button>
-          <button type="button" onClick={() => addNode('note')} className="canvas-tool">
-            <StickyNote size={13} />
-            便签
-          </button>
-          {storeNodes.some((n) => n.type === 'video') ? (
-            <button
-              type="button"
-              onClick={() => setShowStoryboard(true)}
-              className="canvas-tool font-semibold text-accent hover:border-accent/60"
-              title="连续播放所有分镜短片"
-            >
-              <Film size={13} />
-              串联审片
-            </button>
-          ) : null}
-          <button type="button" onClick={tidy} disabled={storeNodes.length === 0} className="canvas-tool">
+        <Panel position="top-left" className="flex flex-wrap items-center gap-1.5">
+          {/* 创建 */}
+          <ToolbarDropdown
+            open={openTool === 'create'}
+            onToggle={() => setOpenTool((v) => (v === 'create' ? null : 'create'))}
+            icon={<Plus size={13} />}
+            label="节点"
+            primary
+            items={[
+              { icon: <ImageIcon size={13} />, label: '图片生成', onClick: () => addNode('image') },
+              { icon: <Video size={13} />, label: '运镜视频', onClick: () => addNode('video') },
+              { icon: <Bot size={13} />, label: 'Agent 任务', onClick: () => addNode('agent') },
+              { icon: <StickyNote size={13} />, label: '灵感便签', onClick: () => addNode('note') },
+            ]}
+          />
+
+          <ToolbarDivider />
+
+          {/* 编辑 */}
+          <button type="button" onClick={tidy} disabled={storeNodes.length === 0} className="canvas-tool" title="按依赖分层自动整理布局">
             <LayoutGrid size={13} />
             整理
           </button>
           <button
             type="button"
-            onClick={() => {
-              void canvasStore
-                .exportWorkflow(sessionId)
-                .then(() => flash('已导出工程 .reizo.zip'))
-                .catch((err: unknown) => flash(err instanceof Error ? err.message : '导出失败'));
-            }}
-            disabled={storeNodes.length === 0}
-            className="canvas-tool !px-1.5"
-            title="导出为便携工程包（含所有产物），可跨设备迁移或分享模板"
+            onClick={() => void canvasStore.undo(sessionId)}
+            disabled={!history?.canUndo}
+            className="canvas-tool"
+            title="撤销 (Ctrl+Z)"
           >
-            <FileDown size={13} />
+            <Undo2 size={13} />
+            撤销
           </button>
           <button
             type="button"
-            onClick={() => workflowFileRef.current?.click()}
-            className="canvas-tool !px-1.5"
-            title="导入 .reizo.zip 工程包（节点会以新 id 合并进当前画布）"
+            onClick={() => void canvasStore.redo(sessionId)}
+            disabled={!history?.canRedo}
+            className="canvas-tool"
+            title="重做 (Ctrl+Shift+Z)"
           >
-            <FileUp size={13} />
+            <Redo2 size={13} />
+            重做
           </button>
+
+          <ToolbarDivider />
+
+          {/* 视图 */}
+          <button
+            type="button"
+            onClick={() => rf.fitView({ padding: 0.2, duration: 250 })}
+            className="canvas-tool"
+            title="全景居中 (F)"
+          >
+            <Maximize size={13} />
+            适应
+          </button>
+
+          <ToolbarDivider />
+
+          {/* 运行 */}
+          {graphRun?.running ? (
+            <button
+              type="button"
+              onClick={() => void canvasStore.stopGraph(sessionId)}
+              className="canvas-tool !border-danger/30 !bg-danger/10 !text-danger"
+            >
+              <Square size={12} />
+              停止 · {graphRun.done}/{graphRun.total}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={runAll}
+              disabled={!hasRunnable}
+              className={cn('canvas-tool', confirmAll ? '!border-accent !bg-accent !text-accent-ink' : '!bg-ink !text-paper-raised')}
+            >
+              <PlayCircle size={13} />
+              {confirmAll ? (hasImage ? '确认运行整图（付费）' : '确认运行整图') : '运行整图'}
+            </button>
+          )}
+          <ToolbarDropdown
+            open={openTool === 'more'}
+            onToggle={() => setOpenTool((v) => (v === 'more' ? null : 'more'))}
+            icon={<MoreHorizontal size={13} />}
+            compact
+            items={[
+              ...(storeNodes.some((n) => n.type === 'video')
+                ? [{ icon: <Film size={13} />, label: '串联审片', onClick: () => setShowStoryboard(true) }]
+                : []),
+              {
+                icon: <FileDown size={13} />,
+                label: '导出工程 .zip',
+                disabled: storeNodes.length === 0,
+                onClick: () => {
+                  void canvasStore
+                    .exportWorkflow(sessionId)
+                    .then(() => flash('已导出工程 .reizo.zip'))
+                    .catch((err: unknown) => flash(err instanceof Error ? err.message : '导出失败'));
+                },
+              },
+              { icon: <FileUp size={13} />, label: '导入工程 .zip', onClick: () => workflowFileRef.current?.click() },
+              { icon: <HelpCircle size={13} />, label: '快捷键速查', onClick: () => setShowShortcuts((s) => !s) },
+            ]}
+          />
           <input
             ref={workflowFileRef}
             type="file"
@@ -646,52 +702,6 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
                 .catch((err: unknown) => flash(err instanceof Error ? err.message : '导入失败'));
             }}
           />
-          <button
-            type="button"
-            onClick={() => void canvasStore.undo(sessionId)}
-            disabled={!history?.canUndo}
-            className="canvas-tool !px-1.5"
-            title="撤销 (Ctrl+Z)"
-          >
-            <Undo2 size={13} />
-          </button>
-          <button
-            type="button"
-            onClick={() => void canvasStore.redo(sessionId)}
-            disabled={!history?.canRedo}
-            className="canvas-tool !px-1.5"
-            title="重做 (Ctrl+Shift+Z)"
-          >
-            <Redo2 size={13} />
-          </button>
-          {graphRun?.running ? (
-            <button
-              type="button"
-              onClick={() => void canvasStore.stopGraph(sessionId)}
-              className="canvas-tool !border-danger/30 !bg-danger/10 !text-danger"
-            >
-              <Square size={12} />
-              停止 · {graphRun.done}/{graphRun.total}
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={runAll}
-              disabled={!hasRunnable}
-              className={cn('canvas-tool', confirmAll ? '!border-accent !bg-accent !text-accent-ink' : '!bg-ink !text-paper-raised')}
-            >
-              <PlayCircle size={13} />
-              {confirmAll ? (hasImage ? '确认运行整图（付费）' : '确认运行整图') : '运行整图'}
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => setShowShortcuts((s) => !s)}
-            className={cn('canvas-tool !px-1.5', showShortcuts && '!bg-paper-inset !text-ink')}
-            title="快捷键速查表"
-          >
-            <HelpCircle size={13} />
-          </button>
         </Panel>
 
         {selectedNodes.length > 0 ? (
@@ -1025,6 +1035,76 @@ function MenuItem({
       {icon}
       {label}
     </button>
+  );
+}
+
+/** Thin vertical rule that separates the toolbar's usage zones. */
+function ToolbarDivider() {
+  return <span className="mx-0.5 h-4 w-px shrink-0 bg-line" aria-hidden />;
+}
+
+type ToolbarItem = { icon: React.ReactNode; label: string; onClick: () => void; disabled?: boolean };
+
+/**
+ * A toolbar button that opens a small dropdown of {@link ToolbarItem}s below it.
+ * `primary` renders it as the filled accent action (the `＋节点` create button);
+ * `compact` drops the text label (the `⋯更多` overflow button). Closing is
+ * handled by the pane-level click handler in `CanvasInner` (`openTool` reset).
+ */
+function ToolbarDropdown({
+  open,
+  onToggle,
+  icon,
+  label,
+  items,
+  primary,
+  compact,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  icon: React.ReactNode;
+  label?: string;
+  items: ToolbarItem[];
+  primary?: boolean;
+  compact?: boolean;
+}) {
+  return (
+    <div className="relative" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        onClick={onToggle}
+        className={cn(
+          'canvas-tool',
+          compact && '!px-1.5',
+          primary && '!bg-ink !text-paper-raised',
+          open && !primary && '!bg-paper-inset !text-ink',
+        )}
+        aria-expanded={open}
+      >
+        {icon}
+        {label && !compact ? label : null}
+        {!compact ? <ChevronDown size={11} className={cn('transition-transform', open && 'rotate-180')} /> : null}
+      </button>
+      {open ? (
+        <div className="absolute left-0 top-full z-50 mt-1 min-w-40 overflow-hidden rounded-lg border border-line bg-paper-raised py-1 text-xs shadow-xl">
+          {items.map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              disabled={item.disabled}
+              onClick={() => {
+                onToggle();
+                item.onClick();
+              }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-ink hover:bg-paper-inset disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              {item.icon}
+              {item.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
