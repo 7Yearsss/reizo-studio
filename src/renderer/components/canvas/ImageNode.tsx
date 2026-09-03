@@ -12,6 +12,7 @@ import Lightbox from './Lightbox';
 import MentionTextArea from './MentionTextArea';
 import NodeActionBar, { useHoverIntent, type NodeAction } from './NodeActionBar';
 import NodeHandle, { ProgressiveRefHandles } from './NodeHandle';
+import AgentMark from './AgentMark';
 import MissingInputWarning from './MissingInputWarning';
 import { nodeReadinessIssues } from '../../../shared/canvasReadiness';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
@@ -20,6 +21,8 @@ export interface CanvasNodeData extends Record<string, unknown> {
   sessionId: string;
   node: CanvasNode;
   highlighted?: boolean;
+  /** The agent wrote this node in the last ~8s. */
+  agentMark?: boolean;
 }
 
 function useAssetUrl(rel: string | undefined): string | null {
@@ -88,7 +91,7 @@ export function NodeTitle({
 }
 
 export default function ImageNode({ id, data, selected }: NodeProps) {
-  const { sessionId, node, highlighted } = data as CanvasNodeData;
+  const { sessionId, node, highlighted, agentMark } = data as CanvasNodeData;
   const params = node.params as CanvasImageParams;
   const [prompt, setPrompt] = useState(params.prompt ?? '');
   const [zoom, setZoom] = useState<string | null>(null);
@@ -150,6 +153,7 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
         highlighted && 'canvas-node-highlight',
       )}
     >
+      <AgentMark show={agentMark} />
       <NodeActionBar
         visible={selected || hovered}
         actions={[

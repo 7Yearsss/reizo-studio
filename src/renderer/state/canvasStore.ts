@@ -2,6 +2,7 @@ import * as api from '../api';
 import type { CanvasNode, CanvasEdge, CanvasNodeParams, CanvasNodeType, CanvasSnapshot, CanvasGroupParams } from '../../shared/canvas';
 import { gridArrange } from '../../shared/arrangeNodes';
 import { variantGrid } from '../../shared/variantLayout';
+import type { AgentTrailEntry } from '../../shared/agentTrail';
 import { grabVideoFrameBlob, type FramePick } from '../lib/videoFrame';
 import { notifyJobDone, primeNotifications } from '../lib/notify';
 import type { CanvasEvent } from '../../shared/canvasStream';
@@ -18,10 +19,14 @@ export interface CanvasState {
   edgesBySession: Record<string, CanvasEdge[]>;
   loadedBySession: Record<string, boolean>;
   graphRunBySession: Record<string, GraphRun | undefined>;
-  /** Node the agent just touched — the canvas pans to it briefly. */
-  focusBySession: Record<string, { id: string; at: number } | undefined>;
+  /** Node(s) the agent just touched — the canvas pans / fits to them briefly. */
+  spotlightBySession: Record<string, { ids: string[]; at: number } | undefined>;
+  /** Recent agent canvas writes (newest last), derived from chat tool events. */
+  trailBySession: Record<string, AgentTrailEntry[]>;
   historyBySession: Record<string, { canUndo: boolean; canRedo: boolean }>;
 }
+
+const TRAIL_CAP = 30;
 
 let state: CanvasState = {
   canvasIdBySession: {},
@@ -29,7 +34,8 @@ let state: CanvasState = {
   edgesBySession: {},
   loadedBySession: {},
   graphRunBySession: {},
-  focusBySession: {},
+  spotlightBySession: {},
+  trailBySession: {},
   historyBySession: {},
 };
 
@@ -234,9 +240,35 @@ export function nodeById(sessionId: string, nodeId: string): CanvasNode | undefi
   return (state.nodesBySession[sessionId] ?? []).find((n) => n.id === nodeId);
 }
 
+/** Pan (single) or fit (multi) the canvas to these nodes with a brief pulse. */
+export function spotlight(sessionId: string, ids: string[]): void {
+  const present = ids.filter((id) => nodeById(sessionId, id));
+  if (present.length === 0) return;
+  setState({
+    spotlightBySession: { ...state.spotlightBySession, [sessionId]: { ids: present, at: Date.now() } },
+  });
+}
+
+/** Back-compat thin wrapper — existing callers pass one id. */
 export function focusNode(sessionId: string, nodeId: string): void {
-  if (!nodeById(sessionId, nodeId)) return;
-  setState({ focusBySession: { ...state.focusBySession, [sessionId]: { id: nodeId, at: Date.now() } } });
+  spotlight(sessionId, [nodeId]);
+}
+
+/**
+ * Record one agent canvas write in the activity trail (deduped by tool-call id,
+ * newest last, capped). Reads (`trailEntryFromTool` returns null for those)
+ * never reach here. Does NOT touch the undo stack — that's `recordAgentBatch`.
+ */
+export function pushTrail(sessionId: string, entry: AgentTrailEntry): void {
+  const list = state.trailBySession[sessionId] ?? [];
+  const next = list.filter((e) => e.id !== entry.id);
+  next.push(entry);
+  setState({
+    trailBySession: {
+      ...state.trailBySession,
+      [sessionId]: next.slice(-TRAIL_CAP),
+    },
+  });
 }
 
 // --- internal mutations (no history) ---
@@ -506,6 +538,86 @@ export async function forkSelected(sessionId: string, nodeIds: string[]): Promis
     },
   });
   return ids;
+}
+
+const agentBatchRecorded = new Set<string>();
+
+/**
+ * P0-2 — put one agent structural tool-call into the renderer undo stack so
+ * `Ctrl+Z` undoes the whole batch (13 storyboard nodes = one undo).
+ *
+ * The tool result and the `node_added` / `edge_added` channel events are two
+ * separate streams, so the batch's nodes may not be in `state` yet. We check;
+ * if some are missing we retry once after a beat and record only what arrived
+ * — never block, never poll.
+ *
+ * `redo` rebuilds via `_addNode` / `_addEdge` (fresh ids, closure refreshed —
+ * same pattern as `forkVariations`). The agent-trail entry then points at stale
+ * ids; the activity strip greys that row rather than erroring.
+ */
+export function recordAgentBatch(sessionId: string, entry: AgentTrailEntry): void {
+  if (agentBatchRecorded.has(entry.id)) return;
+
+  const attempt = (retriesLeft: number): void => {
+    const present = entry.nodeIds.filter((id) => nodeById(sessionId, id));
+    if (present.length < entry.nodeIds.length && retriesLeft > 0) {
+      setTimeout(() => attempt(retriesLeft - 1), 120);
+      return;
+    }
+    if (present.length === 0) return;
+    agentBatchRecorded.add(entry.id);
+
+    const idSet = new Set(present);
+    const nodeSpecs = present
+      .map((id) => nodeById(sessionId, id))
+      .filter((n): n is CanvasNode => Boolean(n))
+      .map((n) => ({
+        type: n.type,
+        x: n.x,
+        y: n.y,
+        w: n.w,
+        h: n.h,
+        title: n.title,
+        params: n.params as CanvasNodeParams,
+      }));
+    // Any edge that touches the batch — inner edges and edges to outside nodes.
+    const edgeSpecs = (state.edgesBySession[sessionId] ?? [])
+      .filter((e) => idSet.has(e.sourceId) || idSet.has(e.targetId))
+      .map((e) => ({
+        sourceId: e.sourceId,
+        targetId: e.targetId,
+        sourceHandle: e.sourceHandle,
+        targetHandle: e.targetHandle,
+      }));
+
+    let liveIds = [...present];
+
+    record(sessionId, {
+      undo: async () => {
+        for (const id of liveIds) await _deleteNode(sessionId, id);
+      },
+      redo: async () => {
+        const oldToNew = new Map<string, string>();
+        const remade: string[] = [];
+        for (let i = 0; i < nodeSpecs.length; i += 1) {
+          const newId = await _addNode(sessionId, nodeSpecs[i]);
+          if (!newId) continue;
+          oldToNew.set(present[i], newId);
+          remade.push(newId);
+        }
+        for (const e of edgeSpecs) {
+          const s = oldToNew.get(e.sourceId) ?? e.sourceId;
+          const t = oldToNew.get(e.targetId) ?? e.targetId;
+          if (nodeById(sessionId, s) && nodeById(sessionId, t)) {
+            await _addEdge(sessionId, s, t, e.sourceHandle, e.targetHandle).catch((): null => null);
+          }
+        }
+        liveIds = remade;
+      },
+    });
+  };
+
+  attempt(1);
 }
 
 export async function addDownstreamAgent(

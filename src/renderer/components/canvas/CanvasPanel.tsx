@@ -61,6 +61,7 @@ import NoteNode from './NoteNode';
 import GroupNode from './GroupNode';
 import AnchorNode from './AnchorNode';
 import AssetShelf from './AssetShelf';
+import AgentActivityStrip from './AgentActivityStrip';
 import StoryboardModal from './StoryboardModal';
 import CuttableEdge from './edges/CuttableEdge';
 
@@ -85,7 +86,8 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
   const loaded = useCanvasStore((s) => s.loadedBySession[sessionId]) ?? false;
   const graphRun = useCanvasStore((s) => s.graphRunBySession[sessionId]);
   const history = useCanvasStore((s) => s.historyBySession[sessionId]);
-  const focus = useCanvasStore((s) => s.focusBySession[sessionId]);
+  const spot = useCanvasStore((s) => s.spotlightBySession[sessionId]);
+  const trail = useCanvasStore((s) => s.trailBySession[sessionId]);
   const rf = useReactFlow();
 
   const [menu, setMenu] = useState<Menu | null>(null);
@@ -94,7 +96,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
   const [mode, setMode] = useState<'select' | 'marquee'>('select');
   const [toast, setToast] = useState<string | null>(null);
   const [confirmAll, setConfirmAll] = useState(false);
-  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const [highlightIds, setHighlightIds] = useState<string[]>([]);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showStoryboard, setShowStoryboard] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -113,16 +115,32 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     return () => canvasStore.closeCanvas(sessionId);
   }, [sessionId]);
 
-  // The agent touched a node -> pan to it and pulse a highlight.
+  // The agent touched node(s) -> pan (one) or fit (many) and pulse a highlight.
   useEffect(() => {
-    if (!focus) return;
-    const node = storeNodes.find((n) => n.id === focus.id);
-    if (!node) return;
-    rf.setCenter(node.x + node.w / 2, node.y + node.h / 2, { zoom: rf.getZoom(), duration: 300 });
-    setHighlightId(focus.id);
-    const t = setTimeout(() => setHighlightId(null), 1800);
+    if (!spot || spot.ids.length === 0) return;
+    const present = spot.ids.filter((id) => storeNodes.some((n) => n.id === id));
+    if (present.length === 0) return;
+    const reduced =
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const one = present.length === 1 ? storeNodes.find((n) => n.id === present[0]) : null;
+    if (one) {
+      rf.setCenter(one.x + one.w / 2, one.y + one.h / 2, {
+        zoom: rf.getZoom(),
+        duration: reduced ? 0 : 300,
+      });
+    } else {
+      rf.fitView({
+        nodes: present.map((id) => ({ id })),
+        padding: 0.25,
+        maxZoom: 1,
+        duration: reduced ? 0 : 400,
+      });
+    }
+    setHighlightIds(present);
+    const t = setTimeout(() => setHighlightIds([]), 1800);
     return () => clearTimeout(t);
-  }, [focus?.id, focus?.at, storeNodes, rf]);
+  }, [spot?.at, storeNodes, rf]);
 
   const restoredRef = useRef(false);
   const restoreViewport = () => {
@@ -155,6 +173,26 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     return out;
   }, [storeNodes]);
 
+  // Nodes the agent wrote in the last 8s get a `✦` mark. Re-tick while any is fresh.
+  const [markTick, setMarkTick] = useState(0);
+  const agentMarkedIds = useMemo(() => {
+    // markTick in deps: forces recompute on the 1s tick so stale marks drop off.
+    void markTick;
+    const cutoff = Date.now() - 8000;
+    const out = new Set<string>();
+    for (const entry of trail ?? []) {
+      if (entry.at >= cutoff && entry.status !== 'error') {
+        for (const id of entry.nodeIds) out.add(id);
+      }
+    }
+    return out;
+  }, [trail, markTick]);
+  useEffect(() => {
+    if (agentMarkedIds.size === 0) return;
+    const t = setTimeout(() => setMarkTick((n) => n + 1), 1000);
+    return () => clearTimeout(t);
+  }, [agentMarkedIds, markTick]);
+
   const nodes: Node<CanvasNodeData>[] = useMemo(
     () =>
       storeNodes.map((node) => ({
@@ -167,9 +205,14 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         // meant for the nodes inside them.
         zIndex: node.type === 'group' ? 0 : 1,
         draggable: lockedMembers.has(node.id) ? false : undefined,
-        data: { sessionId, node, highlighted: node.id === highlightId },
+        data: {
+          sessionId,
+          node,
+          highlighted: highlightIds.includes(node.id),
+          agentMark: agentMarkedIds.has(node.id),
+        },
       })),
-    [storeNodes, sessionId, highlightId, lockedMembers],
+    [storeNodes, sessionId, highlightIds, lockedMembers, agentMarkedIds],
   );
 
   const runningTargets = useMemo(
@@ -548,6 +591,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         <Background gap={16} color="var(--line)" />
         <MiniMap pannable zoomable className="!bg-paper-inset" />
         <AssetShelf sessionId={sessionId} selectedTargetIds={selectedNodeIds} flash={flash} />
+        <AgentActivityStrip sessionId={sessionId} />
 
         {storeNodes.length === 0 ? (
           <Panel position="top-center" className="mt-24 pointer-events-none select-none">

@@ -7,11 +7,12 @@ import { cn } from '../../lib/cn';
 import { NodeTitle, type CanvasNodeData } from './ImageNode';
 import NodeActionBar, { useHoverIntent, type NodeAction } from './NodeActionBar';
 import NodeHandle from './NodeHandle';
+import AgentMark from './AgentMark';
 import MissingInputWarning from './MissingInputWarning';
 import { nodeReadinessIssues } from '../../../shared/canvasReadiness';
 
 export default function AgentNode({ id, data, selected }: NodeProps) {
-  const { sessionId, node, highlighted } = data as CanvasNodeData;
+  const { sessionId, node, highlighted, agentMark } = data as CanvasNodeData;
   const params = node.params as CanvasAgentParams;
   const [instruction, setInstruction] = useState(params.instruction ?? '');
   const [copied, setCopied] = useState(false);
@@ -54,6 +55,7 @@ export default function AgentNode({ id, data, selected }: NodeProps) {
         highlighted && 'canvas-node-highlight',
       )}
     >
+      <AgentMark show={agentMark} />
       <NodeActionBar
         visible={selected || hovered}
         actions={[

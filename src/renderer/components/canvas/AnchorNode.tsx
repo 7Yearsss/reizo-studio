@@ -12,6 +12,7 @@ import * as canvasStore from '../../state/canvasStore';
 import { cn } from '../../lib/cn';
 import { NodeTitle, type CanvasNodeData } from './ImageNode';
 import NodeHandle from './NodeHandle';
+import AgentMark from './AgentMark';
 import { useHoverIntent } from './NodeActionBar';
 
 function useAssetUrl(rel: string | undefined): string | null {
@@ -36,7 +37,7 @@ function useAssetUrl(rel: string | undefined): string | null {
  * attached anchors first and prepends a semantic prompt prefix.
  */
 export default function AnchorNode({ data, selected }: NodeProps) {
-  const { sessionId, node, highlighted } = data as CanvasNodeData;
+  const { sessionId, node, highlighted, agentMark } = data as CanvasNodeData;
   const params = (node.params as CanvasAnchorParams) ?? { role: 'character', strength: 'mid' };
   const role = params.role ?? 'character';
   const strength = params.strength ?? 'mid';
@@ -57,6 +58,7 @@ export default function AnchorNode({ data, selected }: NodeProps) {
       )}
       style={{ borderColor: selected ? undefined : EDGE_COLORS.reference }}
     >
+      <AgentMark show={agentMark} />
       <NodeHandle
         type="source"
         position={Position.Right}

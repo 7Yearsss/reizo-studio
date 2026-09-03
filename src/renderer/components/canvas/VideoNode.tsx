@@ -14,6 +14,7 @@ import MentionTextArea from './MentionTextArea';
 import CameraDial from './CameraDial';
 import NodeActionBar, { useHoverIntent, type NodeAction } from './NodeActionBar';
 import NodeHandle from './NodeHandle';
+import AgentMark from './AgentMark';
 import MissingInputWarning from './MissingInputWarning';
 import { nodeReadinessIssues } from '../../../shared/canvasReadiness';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
@@ -35,7 +36,7 @@ function useAssetUrl(rel: string | undefined): string | null {
 }
 
 export default function VideoNode({ id, data, selected }: NodeProps) {
-  const { sessionId, node, highlighted } = data as CanvasNodeData;
+  const { sessionId, node, highlighted, agentMark } = data as CanvasNodeData;
   const params = (node.params as CanvasVideoParams) || { prompt: '' };
   const [prompt, setPrompt] = useState(params.prompt ?? '');
   const [assetIdx, setAssetIdx] = useState(0);
@@ -111,6 +112,7 @@ export default function VideoNode({ id, data, selected }: NodeProps) {
         highlighted && 'canvas-node-highlight',
       )}
     >
+      <AgentMark show={agentMark} />
       <NodeActionBar
         visible={selected || hovered}
         actions={[

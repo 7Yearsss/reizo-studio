@@ -390,6 +390,17 @@ pre,
   animation-duration: 0.55s;
 }
 
+/* `✦` mark on a node the agent just wrote — pops in, holds, fades over 8s. */
+@keyframes agent-mark-fade {
+  0% { opacity: 0; transform: scale(0.5); }
+  8% { opacity: 1; transform: scale(1); }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: scale(0.9); }
+}
+.agent-mark {
+  animation: agent-mark-fade 8s var(--ease-out) forwards;
+}
+
 /* Canvas toolbar buttons (React Flow Panel). */
 .canvas-tool {
   display: inline-flex;
@@ -449,6 +460,10 @@ button,
   .edge-flow {
     animation: none;
     opacity: 0 !important;
+  }
+  .agent-mark {
+    animation: none;
+    opacity: 1;
   }
   .home-hero-canvas {
     transition: none;
