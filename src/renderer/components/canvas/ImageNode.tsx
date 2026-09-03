@@ -10,6 +10,8 @@ import { useCanvasStore } from '../../state/useCanvasStore';
 import { cn } from '../../lib/cn';
 import Lightbox from './Lightbox';
 import MentionTextArea from './MentionTextArea';
+import MissingInputWarning from './MissingInputWarning';
+import { nodeReadinessIssues } from '../../../shared/canvasReadiness';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 
 export interface CanvasNodeData extends Record<string, unknown> {
@@ -97,9 +99,14 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
   const assetUrl = useAssetUrl(current);
 
   const allNodes = useCanvasStore((s) => s.nodesBySession[sessionId]) ?? [];
+  const allEdges = useCanvasStore((s) => s.edgesBySession[sessionId]) ?? [];
   const candidates = useMemo(
     () => allNodes.filter((n) => n.id !== node.id && (n.output?.assets?.length ?? 0) > 0),
     [allNodes, node.id],
+  );
+  const readiness = useMemo(
+    () => nodeReadinessIssues(node, allEdges, new Map(allNodes.map((n) => [n.id, n]))),
+    [node, allEdges, allNodes],
   );
 
   useEffect(() => {
@@ -201,6 +208,7 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
       <div className="mb-2 flex items-center justify-between gap-2">
         <NodeTitle sessionId={sessionId} nodeId={node.id} title={node.title} fallback="图片" />
         <div className="flex shrink-0 items-center gap-1">
+          {!running && readiness.length > 0 ? <MissingInputWarning messages={readiness} /> : null}
           {node.dirty && !running ? (
             <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">
               待更新

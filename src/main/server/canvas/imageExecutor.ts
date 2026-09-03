@@ -136,11 +136,15 @@ export async function runImageNode(options: {
     let images: Uint8Array[] = [];
 
     if (rawPrompt.includes('@')) {
-      const candidates = upstream.map((u) => ({
-        id: u.id,
-        label: u.title || '',
-        assets: u.output?.assets ?? [],
-      }));
+      // @-mentions resolve against the whole canvas by id (the chip picker and
+      // the agent can both reference a node that is not wired in as an edge).
+      const candidates = (canvasStore.getSnapshot(canvasId)?.nodes ?? [])
+        .filter((u) => u.id !== node.id)
+        .map((u) => ({
+          id: u.id,
+          label: u.title || '',
+          assets: u.output?.assets ?? [],
+        }));
       const { resolvedPrompt, orderedAssetRefs } = resolveMentions(rawPrompt, candidates);
       rawPrompt = resolvedPrompt;
       if (orderedAssetRefs.length > 0) {

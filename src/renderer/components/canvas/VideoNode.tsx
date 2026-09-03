@@ -10,6 +10,8 @@ import { useCanvasStore } from '../../state/useCanvasStore';
 import { cn } from '../../lib/cn';
 import { NodeTitle, type CanvasNodeData } from './ImageNode';
 import MentionTextArea from './MentionTextArea';
+import MissingInputWarning from './MissingInputWarning';
+import { nodeReadinessIssues } from '../../../shared/canvasReadiness';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 
 function useAssetUrl(rel: string | undefined): string | null {
@@ -45,9 +47,14 @@ export default function VideoNode({ id, data, selected }: NodeProps) {
   const [frameError, setFrameError] = useState<string | null>(null);
 
   const allNodes = useCanvasStore((s) => s.nodesBySession[sessionId]) ?? [];
+  const allEdges = useCanvasStore((s) => s.edgesBySession[sessionId]) ?? [];
   const candidates = useMemo(
     () => allNodes.filter((n) => n.id !== node.id && (n.output?.assets?.length ?? 0) > 0),
     [allNodes, node.id],
+  );
+  const readiness = useMemo(
+    () => nodeReadinessIssues(node, allEdges, new Map(allNodes.map((n) => [n.id, n]))),
+    [node, allEdges, allNodes],
   );
 
   useEffect(() => {
@@ -206,6 +213,7 @@ export default function VideoNode({ id, data, selected }: NodeProps) {
           <NodeTitle sessionId={sessionId} nodeId={node.id} title={node.title} fallback="视频生成" />
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          {!running && readiness.length > 0 ? <MissingInputWarning messages={readiness} /> : null}
           {node.dirty && !running ? (
             <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">
               待更新

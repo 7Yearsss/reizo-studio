@@ -1,6 +1,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { CANVAS_IMAGE_SIZES, defaultNodeBox } from '../../../shared/canvas';
+import { serializeMention } from '../../../shared/resolveMentions';
 import type { SettingsStore } from '../storage/settingsStore';
 import type { CanvasStore } from '../storage/canvasStore';
 import { getCanvasChannel } from '../canvas/channel';
@@ -45,7 +46,7 @@ export function createCanvasTools(options: {
   return {
     add_node: tool({
       description:
-        'Add a node to this session\'s canvas. type "image" generates an image from `prompt`; type "agent" is a research/critique sub-task described by `instruction`; type "video" generates video from `prompt`; type "note" is a screenplay/script sticky note. Returns the new node id. The canvas panel opens automatically.',
+        'Add a node to this session\'s canvas. type "image" generates an image from `prompt`; type "agent" is a research/critique sub-task described by `instruction`; type "video" generates video from `prompt`; type "note" is a screenplay/script sticky note. In an image/video `prompt` you may embed inline references to other canvas nodes as `@[label](canvas:<nodeId>)` — at run time each becomes an ordered reference image (`<<<image 1>>>`, ...) drawn from that node\'s latest output, so you can say e.g. "把 @[主角定妆](canvas:abc123) 放进 @[雨夜街道](canvas:def456)". Returns the new node id. The canvas panel opens automatically.',
       inputSchema: z.object({
         type: z.enum(['image', 'agent', 'video', 'note']),
         prompt: z.string().optional().describe('Prompt (type "image", "video", or "note").'),
@@ -104,6 +105,12 @@ export function createCanvasTools(options: {
           .max(8)
           .describe('List of scenes in chronological order'),
         autoRunFirstScene: z.boolean().default(false).describe('Whether to immediately trigger generation of the first scene'),
+        carryReference: z
+          .boolean()
+          .default(true)
+          .describe(
+            'When true, every scene after the first gets an inline @[镜头1关键帧](canvas:<id>) reference appended to its image and video prompts so the character / style stays consistent across shots.',
+          ),
       }),
       execute: async (input) => {
         const canvas = canvasStore.ensureCanvas(sessionId);
@@ -134,6 +141,12 @@ export function createCanvasTools(options: {
           const sc = input.scenes[i];
           const colX = 380 + i * 360;
 
+          // Character / style continuity: point later shots back at shot 1's keyframe.
+          const continuity =
+            input.carryReference && i > 0 && imageNodes[0]
+              ? ` 保持 ${serializeMention('镜头1关键帧', imageNodes[0].id)} 中主体的外形、服装与风格一致。`
+              : '';
+
           // Image Node (Keyframe)
           const imgBox = defaultNodeBox('image');
           const { rev: rImg, node: imgNode } = canvasStore.addNode(canvas.id, {
@@ -144,7 +157,7 @@ export function createCanvasTools(options: {
             h: imgBox.h,
             title: `镜头 ${i + 1} · 关键帧`,
             params: {
-              prompt: sc.imagePrompt,
+              prompt: sc.imagePrompt + continuity,
               size: input.ratio === '9:16' ? '1024x1536' : '1536x1024',
               model: 'flux-schnell',
             },
@@ -163,7 +176,7 @@ export function createCanvasTools(options: {
             h: vidBox.h,
             title: `镜头 ${i + 1} · 运镜`,
             params: {
-              prompt: sc.videoPrompt,
+              prompt: sc.videoPrompt + continuity,
               duration: sc.duration,
               ratio: input.ratio,
               cameraMotion: sc.camera,
@@ -322,7 +335,7 @@ export function createCanvasTools(options: {
     }),
 
     update_node: tool({
-      description: 'Change a canvas node\'s params. For an image node pass `prompt` and/or `size`; for an agent node pass `instruction`. Also renames via `title`. Does not re-run the node.',
+      description: 'Change a canvas node\'s params. For an image node pass `prompt` and/or `size`; for an agent node pass `instruction`. Also renames via `title`. An image/video `prompt` may embed `@[label](canvas:<nodeId>)` references to other nodes — each resolves to an ordered reference image from that node\'s output at run time. Does not re-run the node.',
       inputSchema: z.object({
         id: z.string(),
         prompt: z.string().optional(),

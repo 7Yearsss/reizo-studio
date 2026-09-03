@@ -57,12 +57,14 @@ export async function runVideoNode(options: {
 
   let promptText = params.prompt;
   if (promptText.includes('@')) {
-    const upstream = canvasStore.upstreamNodes(canvasId, node.id);
-    const candidates = upstream.map((u) => ({
-      id: u.id,
-      label: u.title || '',
-      assets: u.output?.assets ?? [],
-    }));
+    // Resolve @-mentions against the whole canvas by id, not just wired-in nodes.
+    const candidates = (canvasStore.getSnapshot(canvasId)?.nodes ?? [])
+      .filter((u) => u.id !== node.id)
+      .map((u) => ({
+        id: u.id,
+        label: u.title || '',
+        assets: u.output?.assets ?? [],
+      }));
     const { resolvedPrompt } = resolveMentions(promptText, candidates);
     promptText = resolvedPrompt;
   }

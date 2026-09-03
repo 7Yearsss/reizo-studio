@@ -2,6 +2,7 @@ import * as api from '../api';
 import type { CanvasNode, CanvasEdge, CanvasNodeParams, CanvasNodeType, CanvasSnapshot, CanvasGroupParams } from '../../shared/canvas';
 import { gridArrange } from '../../shared/arrangeNodes';
 import { grabVideoFrameBlob, type FramePick } from '../lib/videoFrame';
+import { notifyJobDone, primeNotifications } from '../lib/notify';
 import type { CanvasEvent } from '../../shared/canvasStream';
 
 export interface GraphRun {
@@ -130,6 +131,18 @@ function applyEvent(sessionId: string, event: CanvasEvent): void {
     case 'node_updated':
     case 'node_output':
     case 'run_state': {
+      // A single node finishing (done/error) outside a graph run, while the app
+      // is unfocused, is worth an OS ping — batch runs get their own below.
+      if (event.type !== 'node_updated' && !state.graphRunBySession[sessionId]?.running) {
+        const prev = nodes.find((n) => n.id === event.id);
+        if (prev?.runState === 'running' && (event.runState === 'done' || event.runState === 'error')) {
+          const label = prev.title || (prev.type === 'video' ? '视频' : prev.type === 'image' ? '图片' : '节点');
+          notifyJobDone(
+            event.runState === 'done' ? '生成完成' : '生成失败',
+            event.runState === 'done' ? `「${label}」已就绪` : `「${label}」运行失败`,
+          );
+        }
+      }
       const patched = nodes.map((n) => {
         if (event.type === 'node_updated') return n.id === event.node.id ? event.node : n;
         if (n.id !== event.id) return n;
@@ -148,7 +161,11 @@ function applyEvent(sessionId: string, event: CanvasEvent): void {
     case 'edge_deleted':
       setEdges(sessionId, edges.filter((e) => e.id !== event.id));
       break;
-    case 'graph_run':
+    case 'graph_run': {
+      const wasRunning = state.graphRunBySession[sessionId]?.running ?? false;
+      if (wasRunning && !event.running) {
+        notifyJobDone('画布流水线完成', `已生成 ${event.total} 个节点`);
+      }
       setState({
         graphRunBySession: {
           ...state.graphRunBySession,
@@ -156,6 +173,7 @@ function applyEvent(sessionId: string, event: CanvasEvent): void {
         },
       });
       break;
+    }
     case 'heartbeat':
       break;
   }
@@ -189,6 +207,7 @@ async function runStream(sessionId: string, canvasId: string, signal: AbortSigna
 
 export async function openCanvas(sessionId: string): Promise<void> {
   if (streamAborts.has(sessionId)) return;
+  primeNotifications();
   const abort = new AbortController();
   streamAborts.set(sessionId, abort);
   try {
