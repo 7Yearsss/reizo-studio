@@ -9,6 +9,7 @@ import PermissionPrompt from './PermissionPrompt';
 import AskUserPrompt from './AskUserPrompt';
 import QueuePanel from './QueuePanel';
 import TodoCard from './TodoCard';
+import NextStepStrip from './NextStepStrip';
 import ReplyStatusBar, { type ReplyPhase } from './ReplyStatusBar';
 import InterruptedTurnBanner from './InterruptedTurnBanner';
 import SelectField from '../ui/SelectField';
@@ -41,6 +42,7 @@ export default function Composer({
   interruptRequested = false,
   turnOutcome = null,
   turnError = null,
+  loopNotice = null,
   showInterruptBanner = false,
   onRetryTurn,
   onDismissInterrupt,
@@ -63,6 +65,7 @@ export default function Composer({
   interruptRequested?: boolean;
   turnOutcome?: TurnOutcome | null;
   turnError?: string | null;
+  loopNotice?: string | null;
   showInterruptBanner?: boolean;
   onRetryTurn?: () => void;
   onDismissInterrupt?: () => void;
@@ -173,7 +176,21 @@ export default function Composer({
         {!sending && showInterruptBanner && onRetryTurn && onDismissInterrupt && (
           <InterruptedTurnBanner onRetry={onRetryTurn} onDismiss={onDismissInterrupt} />
         )}
+        {loopNotice && (
+          <div
+            className="mb-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-ink"
+            role="status"
+          >
+            ⚠ {loopNotice}
+          </div>
+        )}
         {sessionId && <TodoCard items={todos} />}
+        {sessionId && !sending && turnOutcome === 'completed' && (
+          <NextStepStrip
+            sessionId={sessionId}
+            onPick={(prompt) => onSend(prompt, [], {})}
+          />
+        )}
         {sessionId && (
           <QueuePanel items={queue} onRemove={(id) => chatStore.removeQueuedTurn(sessionId, id)} />
         )}
@@ -213,8 +230,20 @@ export default function Composer({
               if (e.dataTransfer.files.length) void addDroppedFiles(e.dataTransfer.files);
             }}
           >
-            {(activeSkill || attachments.length > 0 || nodeRefs.length > 0) && (
+            {(activeSkill || attachments.length > 0 || nodeRefs.length > 0 || mentions.length > 0) && (
               <div className="mb-2 flex flex-wrap gap-1.5">
+                {mentions.map((m) => (
+                  <span key={m} className="rounded-full bg-paper-inset px-2 py-0.5 text-[11px] text-ink">
+                    @{m.split(/[/\\]/).pop() || m}
+                    <button
+                      type="button"
+                      className="ml-1 text-ink-muted"
+                      onClick={() => setMentions((items) => items.filter((item) => item !== m))}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
                 {sessionId &&
                   nodeRefs.map((ref) => (
                     <span key={ref.id} className="rounded-full bg-accent/10 px-2 py-0.5 text-[11px] text-accent">

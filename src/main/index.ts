@@ -75,6 +75,11 @@ async function bootstrap(): Promise<void> {
   stopScheduler = startScheduler({ dataRoot, scheduleStore, settingsStore, skillsDirs });
 
   ipcMain.handle(IPC.GET_API_ORIGIN, () => runningServer?.origin);
+  ipcMain.handle(IPC.EXPORT_PDF, async (_e, html: string) => {
+    const { exportHtmlToPdf } = await import('./pdfExport');
+    const bytes = await exportHtmlToPdf(String(html ?? ''));
+    return bytes.toString('base64');
+  });
   registerWindowIpc();
   registerWorkspaceIpc(settingsStore);
   registerSkillIpc(path.join(dataRoot, 'skills'));

@@ -8,12 +8,14 @@ import { createCanvasTools } from './canvasTools';
 import { getCanvasSelection } from '../canvas/selection';
 import type { CanvasStore } from '../storage/canvasStore';
 import type { CanvasImageParams } from '../../../shared/canvas';
-import { startAgentTurn } from './session';
+import { startAgentTurn, abortChatTurn } from './session';
+import { createToolLoopGuard } from './toolLoopGuard';
 import { consumeInteractions, waitForInteractions } from './permissions';
 import { translateOpenAiChunk } from './translators/openai';
 import { compactAssistantParts, compactModelMessages } from './modelHistory';
 import { CONTINUE_USER_MESSAGE, MAX_CONTINUE_PASSES, shouldContinueAgentPass } from './continuePass';
 import { readWorkspaceMemory } from '../../workspaceMemory';
+import { redactSecrets } from '../../../shared/redactSecrets';
 import type { Skill } from '../../skills';
 import type { ChatMessage, SessionStore, ToolCallPart } from '../../../shared/chat';
 import type { SettingsStore } from '../storage/settingsStore';
@@ -41,7 +43,7 @@ const PROVIDER_TIMEOUT = {
   stepMs: 5 * 60_000,
 } as const;
 
-export { abortChatTurn } from './session';
+export { abortChatTurn };
 
 export async function runChatTurn(options: {
   sessionStore: SessionStore;
@@ -135,7 +137,12 @@ export async function runChatTurn(options: {
     pathMentions.length > 0 ? `Referenced workspace paths:\n${pathMentions.map((m) => `- ${m}`).join('\n')}` : '',
     canvasRefBlock,
     attachments.length > 0
-      ? attachments.map((file) => `Attached file ${file.name}:\n\`\`\`\n${file.content.slice(0, 20_000)}\n\`\`\``).join('\n\n')
+      ? attachments
+          .map(
+            (file) =>
+              `Attached file ${file.name}:\n\`\`\`\n${redactSecrets(file.content.slice(0, 20_000))}\n\`\`\``,
+          )
+          .join('\n\n')
       : '',
   ]
     .filter(Boolean)
@@ -218,7 +225,8 @@ export async function runChatTurn(options: {
       ? 'When the user wants to generate or iterate on images, use the canvas: add_node (type "image") to place a node, then run_node to generate. add_node (type "agent") places a read-only research/critique node — wire it downstream of other nodes and run_node to have it comment on their outputs. The canvas panel opens automatically.'
       : '',
     canvasSummary,
-    memory ? `Workspace MEMORY.md:\n${memory}` : '',
+    'When a request needs a visual direction (mood, palette, typography) before you generate or design something, call ask_user with kind:"direction" and 2-4 `directions` cards (title, palette hex list, displayFont/bodyFont stacks, one-line mood, real-world references) so the user picks by looking.',
+    memory ? `Workspace MEMORY.md:\n${redactSecrets(memory)}` : '',
     skill ? `The user invoked skill "${skill.name}". Follow this skill:\n${skill.body}` : '',
     projectInstructions ? `Project "${projectName}" working rules:\n${projectInstructions}` : '',
   ].filter(Boolean);
@@ -246,6 +254,7 @@ export async function runChatTurn(options: {
   // created here need the reference up front (todos / permission side-channel).
   let emit: (event: ChatStreamEvent) => void = () => undefined;
   const todos: TodoItem[] = [];
+  const loopGuard = createToolLoopGuard();
 
   const toolset = workspacePath
     ? createWorkspaceTools({
@@ -256,12 +265,15 @@ export async function runChatTurn(options: {
         todos,
         onFileWritten: artifactStore
           ? async (relativePath, content) => {
-              await artifactStore.create({
+              // Same file rewritten in a later turn → append a version tagged
+              // with the prompt that caused it, not a fresh row.
+              await artifactStore.createOrAddVersion({
                 sessionId,
                 projectId: session.projectId,
                 name: relativePath.split(/[/\\]/).pop() || relativePath,
                 content,
                 source: 'generated',
+                origin: { surface: 'chat', prompt: userText.slice(0, 400) },
               });
             }
           : undefined,
@@ -301,7 +313,26 @@ export async function runChatTurn(options: {
     translate: translateOpenAiChunk,
     largeValues: largeValueStore,
     onReady: (send) => {
-      emit = send;
+      // Watch completed tool calls for a stuck-agent loop. `warn` surfaces a
+      // banner; `halt` also aborts the turn (it settles as `interrupted` — the
+      // tool_loop event carries the reason).
+      emit = (event) => {
+        if (
+          event.type === 'tool' &&
+          (event.result !== undefined || event.error !== undefined)
+        ) {
+          const verdict = loopGuard.record({
+            name: event.name,
+            args: event.args,
+            ok: event.error === undefined,
+          });
+          if (verdict && verdict.tier !== 'ok') {
+            send({ type: 'tool_loop', tier: verdict.tier, reason: verdict.reason });
+            if (verdict.tier === 'halt') setTimeout(() => abortChatTurn(sessionId), 0);
+          }
+        }
+        send(event);
+      };
     },
     createStream: (signal) => buildStream(history, signal),
     onAwaitingInteraction: async ({ sessionId: sid, signal, emitToolResult, getAssistant }) => {

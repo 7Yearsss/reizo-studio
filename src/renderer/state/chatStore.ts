@@ -69,6 +69,8 @@ export interface ChatState {
   errorBySession: Record<string, string | null>;
   interactionBySession: Record<string, ChatInteraction | null>;
   todosBySession: Record<string, TodoItem[]>;
+  /** Transient "this run may be stuck" notice from the tool-loop guard. */
+  loopNoticeBySession: Record<string, string | null>;
   queueBySession: Record<string, QueuedTurn[]>;
   composerSeedBySession: Record<string, ComposerSeed | undefined>;
   /** Canvas nodes the user pulled into the composer as `@`-style references. */
@@ -96,6 +98,7 @@ let state: ChatState = {
   errorBySession: {},
   interactionBySession: {},
   todosBySession: {},
+  loopNoticeBySession: {},
   queueBySession: {},
   composerSeedBySession: {},
   nodeRefsBySession: {},
@@ -677,6 +680,14 @@ function makeEventFolder(
       case 'todos':
         setState({ todosBySession: { ...state.todosBySession, [sessionId]: event.items } });
         break;
+      case 'tool_loop':
+        setState({
+          loopNoticeBySession: {
+            ...state.loopNoticeBySession,
+            [sessionId]: event.tier === 'halt' ? `已停止：${event.reason}` : `这一轮可能卡住了：${event.reason}`,
+          },
+        });
+        break;
       case 'error':
         setState({
           errorBySession: { ...state.errorBySession, [sessionId]: event.error },
@@ -786,6 +797,7 @@ async function dispatchTurn(
     turnOutcomeBySession: { ...state.turnOutcomeBySession, [sessionId]: null },
     interruptRequestedBySession: { ...state.interruptRequestedBySession, [sessionId]: false },
     errorBySession: { ...state.errorBySession, [sessionId]: null },
+    loopNoticeBySession: { ...state.loopNoticeBySession, [sessionId]: null },
     interactionBySession: { ...state.interactionBySession, [sessionId]: null },
     interruptDismissedBySession: { ...state.interruptDismissedBySession, [sessionId]: false },
   });

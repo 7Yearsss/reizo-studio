@@ -24,4 +24,5 @@ contextBridge.exposeInMainWorld('reizo', {
   gitStatus: () => ipcRenderer.invoke(IPC.WORKSPACE_GIT),
   installSkill: () => ipcRenderer.invoke(IPC.SKILL_INSTALL),
   uninstallSkill: (id: string) => ipcRenderer.invoke(IPC.SKILL_UNINSTALL, id),
+  exportPdf: (html: string): Promise<string> => ipcRenderer.invoke(IPC.EXPORT_PDF, html),
 });

@@ -26,6 +26,8 @@ export interface ReizoBridge {
   }>;
   installSkill(): Promise<{ id: string } | null>;
   uninstallSkill(id: string): Promise<void>;
+  /** Render an HTML document to PDF; resolves to base64 bytes. */
+  exportPdf(html: string): Promise<string>;
 }
 
 declare global {

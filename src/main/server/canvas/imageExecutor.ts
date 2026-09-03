@@ -8,6 +8,7 @@ import type { SettingsStore } from '../storage/settingsStore';
 import type { CanvasStore } from '../storage/canvasStore';
 import { getCanvasChannel } from './channel';
 import { inputHash } from './graph';
+import { classifyMediaError } from './mediaError';
 
 /**
  * Re-broadcast a node and its descendants (annotated) so their `dirty` badge
@@ -167,6 +168,10 @@ export async function runImageNode(options: {
       broadcastDownstreamDirty(canvasStore, canvasId, node.id, done.rev, false);
     }
   } catch (err) {
-    fail(err instanceof Error ? err.message : String(err));
+    const classified = classifyMediaError(err);
+    if (classified.raw !== classified.message) {
+      console.warn(`[canvas] image node ${node.id} failed: ${classified.raw}`);
+    }
+    fail(classified.message);
   }
 }

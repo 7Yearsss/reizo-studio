@@ -9,6 +9,28 @@ export interface AskQuestion {
   prompt: string;
   options?: string[];
   multi?: boolean;
+  /**
+   * `direction` renders `directions` as pick-by-looking cards (palette + type
+   * sample + mood) instead of a radio list. Anything else is the default
+   * choice / free-text control.
+   */
+  kind?: 'choice' | 'text' | 'direction';
+  directions?: DirectionCard[];
+}
+
+/** A visual-direction option the user picks by looking, not reading. */
+export interface DirectionCard {
+  id: string;
+  title: string;
+  /** 2–6 hex swatches. */
+  palette?: string[];
+  /** CSS font-family stack for the heading "Aa" sample. */
+  displayFont?: string;
+  /** CSS font-family stack for the body sample. */
+  bodyFont?: string;
+  mood?: string;
+  /** Real-world exemplars, e.g. ["Monocle", "FT Weekend"]. */
+  references?: string[];
 }
 
 export type ReplyPhase = 'preparing' | 'thinking' | 'tools' | 'replying' | 'waiting';
@@ -51,6 +73,7 @@ export type ChatStreamEvent =
   | { type: 'permission'; id: string; name: string; args: Record<string, unknown>; preview?: FileDiffPreview }
   | { type: 'ask'; id: string; questions: AskQuestion[] }
   | { type: 'todos'; items: TodoItem[] }
+  | { type: 'tool_loop'; tier: 'warn' | 'halt'; reason: string }
   | { type: 'error'; error: string }
   | { type: 'done'; outcome: TurnOutcome; aborted?: boolean; error?: string };
 

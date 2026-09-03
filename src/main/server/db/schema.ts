@@ -139,8 +139,68 @@ export const canvasEdges = sqliteTable(
   }),
 );
 
+/**
+ * Session-scoped work-products (artifacts). Replaces the JSON-file store.
+ * `artifacts` holds one row per logical deliverable; `artifact_versions` is
+ * append-only history, each version tagged with the origin (`origin_json`)
+ * that produced it — the prompt, surface, model. Text versions store content
+ * inline (`content`); blob versions (images, video, audio) store a relative
+ * `blob_path` under `<dataRoot>/artifacts/blobs/`.
+ */
+export const artifacts = sqliteTable(
+  'artifacts',
+  {
+    id: text('id').primaryKey(),
+    // No FK: the JSON-only test app keeps sessions outside SQLite; cleanup runs
+    // via removeBySession from the sessions router.
+    sessionId: text('session_id').notNull(),
+    projectId: text('project_id'),
+    name: text('name').notNull(),
+    kind: text('kind').notNull(),
+    renderer: text('renderer').notNull(),
+    status: text('status', { enum: ['streaming', 'complete', 'error'] })
+      .notNull()
+      .default('complete'),
+    mimeType: text('mime_type').notNull(),
+    source: text('source', { enum: ['attachment', 'generated', 'manual'] }).notNull(),
+    currentVersion: integer('current_version').notNull().default(1),
+    byteSize: integer('byte_size').notNull().default(0),
+    originJson: text('origin_json'),
+    metadataJson: text('metadata_json'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => ({
+    bySession: index('artifacts_session_idx').on(t.sessionId, t.updatedAt),
+  }),
+);
+
+export const artifactVersions = sqliteTable(
+  'artifact_versions',
+  {
+    rowid: integer('rowid').primaryKey({ autoIncrement: true }),
+    artifactId: text('artifact_id')
+      .notNull()
+      .references(() => artifacts.id, { onDelete: 'cascade' }),
+    n: integer('n').notNull(),
+    label: text('label').notNull(),
+    originJson: text('origin_json').notNull(),
+    byteSize: integer('byte_size').notNull(),
+    contentDigest: text('content_digest').notNull(),
+    storage: text('storage', { enum: ['inline', 'blob'] }).notNull(),
+    content: text('content'),
+    blobPath: text('blob_path'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => ({
+    byArtifact: index('artifact_versions_artifact_idx').on(t.artifactId, t.n),
+  }),
+);
+
 export type SessionRow = typeof sessions.$inferSelect;
 export type MessageRow = typeof messages.$inferSelect;
 export type CanvasRow = typeof canvases.$inferSelect;
 export type CanvasNodeRow = typeof canvasNodes.$inferSelect;
 export type CanvasEdgeRow = typeof canvasEdges.$inferSelect;
+export type ArtifactRow = typeof artifacts.$inferSelect;
+export type ArtifactVersionRow = typeof artifactVersions.$inferSelect;

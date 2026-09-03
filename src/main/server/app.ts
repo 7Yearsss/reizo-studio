@@ -17,7 +17,7 @@ import { createArtifactsRouter, createSessionArtifactsRouter } from './routes/ar
 import { createRefsRouter } from './routes/refs';
 import { createCanvasRouter } from './routes/canvas';
 import { createCanvasStore } from './storage/canvasStore';
-import type { DbHandle } from './db/client';
+import { openDb, type DbHandle } from './db/client';
 
 export interface CreateAppOptions {
   /** Directory the local session/settings JSON files live under. */
@@ -121,10 +121,14 @@ export function createApp(options: CreateAppOptions) {
   const sessionStore = options.sessionStore ?? createFileSessionStore(options.dataRoot);
   const settingsStore = options.settingsStore ?? createSettingsStore(options.dataRoot);
   const projectStore = createProjectStore(options.dataRoot);
-  const artifactStore = createArtifactStore(options.dataRoot);
   const largeValueStore = createLargeValueStore(options.dataRoot);
 
-  const canvasStore = options.db ? createCanvasStore(options.db) : undefined;
+  // The artifact store and canvas need SQLite. The main process always passes a
+  // handle; the JSON-only test app gets an ephemeral in-memory db so both
+  // features work under `test:api` too.
+  const db = options.db ?? openDb(':memory:');
+  const artifactStore = createArtifactStore(db, options.dataRoot);
+  const canvasStore = createCanvasStore(db);
 
   const app = new Hono();
   app.use('*', originGuard(options));
