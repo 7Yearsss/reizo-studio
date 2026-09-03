@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Position, type NodeProps } from '@xyflow/react';
 import { Pin } from 'lucide-react';
 import {
   ANCHOR_ROLES,
@@ -11,6 +11,8 @@ import { canvasAssetUrl } from '../../api';
 import * as canvasStore from '../../state/canvasStore';
 import { cn } from '../../lib/cn';
 import { NodeTitle, type CanvasNodeData } from './ImageNode';
+import NodeHandle from './NodeHandle';
+import { useHoverIntent } from './NodeActionBar';
 
 function useAssetUrl(rel: string | undefined): string | null {
   const [url, setUrl] = useState<string | null>(null);
@@ -39,6 +41,7 @@ export default function AnchorNode({ data, selected }: NodeProps) {
   const role = params.role ?? 'character';
   const strength = params.strength ?? 'mid';
   const assetUrl = useAssetUrl(node.output?.assets?.[0]);
+  const { hovered, hoverProps } = useHoverIntent();
 
   const set = (patch: Partial<CanvasAnchorParams>): void => {
     void canvasStore.updateNodeParams(sessionId, node.id, { ...params, ...patch });
@@ -46,6 +49,7 @@ export default function AnchorNode({ data, selected }: NodeProps) {
 
   return (
     <div
+      {...hoverProps}
       className={cn(
         'relative flex h-full w-full flex-col rounded-xl border bg-paper-raised p-2 text-xs shadow-sm',
         selected ? 'border-accent ring-1 ring-accent/20' : 'border-line',
@@ -53,12 +57,12 @@ export default function AnchorNode({ data, selected }: NodeProps) {
       )}
       style={{ borderColor: selected ? undefined : EDGE_COLORS.reference }}
     >
-      <Handle
+      <NodeHandle
         type="source"
         position={Position.Right}
-        className="!h-2.5 !w-2.5 !border-line"
-        style={{ background: EDGE_COLORS.reference }}
-        title="连到图片 / 视频节点的「参考」输入"
+        kind="reference"
+        label="参考"
+        expanded={selected || hovered}
       />
 
       <div className="mb-1.5 flex items-center gap-1">

@@ -154,7 +154,16 @@ export async function runImageNode(options: {
     // Reference anchors: attached `anchor` nodes are ordered first (character →
     // style → content) and described by a semantic prefix. NOT IP-Adapter —
     // just an ordered pile + wording (see referenceAnchors.ts / docs).
-    const anchorNodes = upstream.filter((u) => u.type === 'anchor');
+    // Within a role, honour the `ref_N` slot number the edge carries.
+    const slotByAnchor = new Map<string, number>();
+    for (const e of canvasStore.getSnapshot(canvasId)?.edges ?? []) {
+      if (e.targetId !== node.id) continue;
+      const m = /^ref_(\d+)$/.exec(e.targetHandle ?? '');
+      if (m) slotByAnchor.set(e.sourceId, Number(m[1]));
+    }
+    const anchorNodes = upstream
+      .filter((u) => u.type === 'anchor')
+      .sort((a, b) => (slotByAnchor.get(a.id) ?? 99) - (slotByAnchor.get(b.id) ?? 99));
     const { orderedAssetRefs: anchorRefs, promptPrefix } = planAnchors(
       anchorNodes.map((a) => {
         const ap = a.params as { role?: AnchorRole; strength?: AnchorStrength; note?: string };

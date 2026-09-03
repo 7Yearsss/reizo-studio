@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Handle, NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
+import { NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
 import { Download, FolderPlus, Loader2, Play, GitBranchPlus, Bot, Video } from 'lucide-react';
 import type { CanvasImageParams, CanvasNode } from '../../../shared/canvas';
 import { CANVAS_IMAGE_MODELS } from '../../../shared/canvas';
@@ -11,6 +11,7 @@ import { cn } from '../../lib/cn';
 import Lightbox from './Lightbox';
 import MentionTextArea from './MentionTextArea';
 import NodeActionBar, { useHoverIntent, type NodeAction } from './NodeActionBar';
+import NodeHandle, { ProgressiveRefHandles } from './NodeHandle';
 import MissingInputWarning from './MissingInputWarning';
 import { nodeReadinessIssues } from '../../../shared/canvasReadiness';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
@@ -110,6 +111,11 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
     () => nodeReadinessIssues(node, allEdges, new Map(allNodes.map((n) => [n.id, n]))),
     [node, allEdges, allNodes],
   );
+  const expanded = selected || hovered;
+  const refCount = useMemo(
+    () => allEdges.filter((e) => e.targetId === node.id && (e.targetHandle ?? '').startsWith('ref_')).length,
+    [allEdges, node.id],
+  );
 
   useEffect(() => {
     setPrompt((params.prompt as string) ?? '');
@@ -196,16 +202,9 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
           if (from) canvasStore.commitResize(sessionId, id, from, { w: p.width, h: p.height });
         }}
       />
-      <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-line !bg-paper" />
-      <Handle
-        type="target"
-        id="reference"
-        position={Position.Left}
-        style={{ top: '78%' }}
-        className="!h-2.5 !w-2.5 !border-line !bg-violet-400"
-        title="连接「参考图钉」以锁定角色 / 风格一致性"
-      />
-      <Handle type="source" position={Position.Right} className="!h-2 !w-2 !border-line !bg-accent" />
+      <NodeHandle type="target" position={Position.Left} kind="image" label="图生图" expanded={expanded} top="14%" />
+      <ProgressiveRefHandles connectedCount={refCount} expanded={expanded} />
+      <NodeHandle type="source" position={Position.Right} kind="image" label="图像" expanded={expanded} />
 
       <div className="mb-2 flex items-center justify-between gap-2">
         <NodeTitle sessionId={sessionId} nodeId={node.id} title={node.title} fallback="图片" />

@@ -416,11 +416,21 @@ export function createCanvasTools(options: {
             .filter((e) => e.sourceId === anchorId)
             .map((e) => e.targetId),
         );
+        const refSlotCount = (tid: string): number =>
+          (canvasStore.getSnapshot(canvas.id)?.edges ?? []).filter(
+            (e) => e.targetId === tid && (e.targetHandle ?? '').startsWith('ref_'),
+          ).length;
         let attached = 0;
         for (const targetId of targetIds) {
           const target = canvasStore.getNode(canvas.id, targetId);
           if (!target || (target.type !== 'image' && target.type !== 'video') || existing.has(targetId)) continue;
-          const res = canvasStore.addEdge(canvas.id, { sourceId: anchorId, targetId, targetHandle: 'reference' });
+          const slot = refSlotCount(targetId) + 1;
+          if (slot > 3) continue;
+          const res = canvasStore.addEdge(canvas.id, {
+            sourceId: anchorId,
+            targetId,
+            targetHandle: `ref_${slot}`,
+          });
           if (res.error || !res.edge || res.rev === undefined) continue;
           channel.broadcast(res.rev, { type: 'edge_added', edge: res.edge });
           broadcastDownstreamDirty(canvasStore, canvas.id, targetId, res.rev);

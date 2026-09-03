@@ -1037,17 +1037,24 @@ export async function attachAnchor(
   const nodes = state.nodesBySession[sessionId] ?? [];
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const edges = state.edgesBySession[sessionId] ?? [];
+  const REF_SLOT_MAX = 3;
+  const refSlotCount = (tid: string): number =>
+    (state.edgesBySession[sessionId] ?? []).filter(
+      (e) => e.targetId === tid && (e.targetHandle ?? '').startsWith('ref_'),
+    ).length;
   const targets = targetIds.filter((tid) => {
     const t = byId.get(tid);
     if (!t || (t.type !== 'image' && t.type !== 'video')) return false;
-    return !edges.some((e) => e.sourceId === anchorId && e.targetId === tid);
+    if (edges.some((e) => e.sourceId === anchorId && e.targetId === tid)) return false;
+    return refSlotCount(tid) < REF_SLOT_MAX;
   });
   if (targets.length === 0) return 0;
 
   const connect = async (): Promise<string[]> => {
     const made: string[] = [];
     for (const tid of targets) {
-      const eid = await _addEdge(sessionId, anchorId, tid, null, 'reference');
+      const slot = Math.min(REF_SLOT_MAX, refSlotCount(tid) + 1);
+      const eid = await _addEdge(sessionId, anchorId, tid, null, `ref_${slot}`);
       if (eid) made.push(eid);
     }
     return made;

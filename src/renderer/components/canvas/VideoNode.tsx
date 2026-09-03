@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Handle, NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
+import { NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
 import { Download, FolderPlus, Loader2, Play, GitBranchPlus, Bot, Video, Camera } from 'lucide-react';
 import type { CanvasVideoParams } from '../../../shared/canvas';
 import { CANVAS_VIDEO_MODELS } from '../../../shared/canvas';
@@ -13,6 +13,7 @@ import { NodeTitle, type CanvasNodeData } from './ImageNode';
 import MentionTextArea from './MentionTextArea';
 import CameraDial from './CameraDial';
 import NodeActionBar, { useHoverIntent, type NodeAction } from './NodeActionBar';
+import NodeHandle from './NodeHandle';
 import MissingInputWarning from './MissingInputWarning';
 import { nodeReadinessIssues } from '../../../shared/canvasReadiness';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
@@ -49,6 +50,7 @@ export default function VideoNode({ id, data, selected }: NodeProps) {
   const [framePick, setFramePick] = useState<'start' | 'end' | 'current' | null>(null);
   const [frameError, setFrameError] = useState<string | null>(null);
   const { hovered, hoverProps } = useHoverIntent();
+  const expanded = selected || hovered;
 
   const allNodes = useCanvasStore((s) => s.nodesBySession[sessionId]) ?? [];
   const allEdges = useCanvasStore((s) => s.edgesBySession[sessionId]) ?? [];
@@ -172,56 +174,34 @@ export default function VideoNode({ id, data, selected }: NodeProps) {
         }}
       />
 
-      <Handle
+      <NodeHandle
         type="target"
         id="reference"
         position={Position.Left}
-        style={{ top: '38%' }}
-        className="!h-2.5 !w-2.5 !border-line !bg-violet-400"
-        title="连接「参考图钉」（仅作文字风格约束，不作垫图）"
+        kind="reference"
+        label="参考"
+        expanded={expanded}
+        top="38%"
       />
-      <span
-        style={{ top: '38%' }}
-        className="pointer-events-none absolute -left-8 -translate-y-1/2 text-[9px] font-medium text-ink-muted/80 select-none text-right w-6"
-      >
-        参考
-      </span>
-
-      <Handle
+      <NodeHandle
         type="target"
         id="start_frame"
         position={Position.Left}
-        style={{ top: '65%' }}
-        className="!h-2.5 !w-2.5 !border-line !bg-accent"
-        title="连接图片作为首帧 (Start Frame)"
+        kind="startFrame"
+        label="首帧"
+        expanded={expanded}
+        top="65%"
       />
-      <span
-        style={{ top: '65%' }}
-        className="pointer-events-none absolute -left-8 -translate-y-1/2 text-[9px] font-medium text-ink-muted/80 select-none text-right w-6"
-      >
-        首帧
-      </span>
-
-      <Handle
+      <NodeHandle
         type="target"
         id="end_frame"
         position={Position.Left}
-        style={{ top: '85%' }}
-        className="!h-2.5 !w-2.5 !border-line !bg-accent/80"
-        title="连接图片作为尾帧 (End Frame)"
+        kind="endFrame"
+        label="尾帧"
+        expanded={expanded}
+        top="85%"
       />
-      <span
-        style={{ top: '85%' }}
-        className="pointer-events-none absolute -left-8 -translate-y-1/2 text-[9px] font-medium text-ink-muted/80 select-none text-right w-6"
-      >
-        尾帧
-      </span>
-      <Handle
-        type="source"
-        position={Position.Right}
-        className="!h-2.5 !w-2.5 !border-line !bg-accent"
-        title="输出：视频产物输出"
-      />
+      <NodeHandle type="source" position={Position.Right} kind="video" label="视频" expanded={expanded} />
 
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1 min-w-0">

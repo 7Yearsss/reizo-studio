@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Handle, NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
+import { NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
 import { Check, Copy, GitBranchPlus, Loader2, Play } from 'lucide-react';
 import type { CanvasAgentParams } from '../../../shared/canvas';
 import * as canvasStore from '../../state/canvasStore';
 import { cn } from '../../lib/cn';
 import { NodeTitle, type CanvasNodeData } from './ImageNode';
 import NodeActionBar, { useHoverIntent, type NodeAction } from './NodeActionBar';
+import NodeHandle from './NodeHandle';
 import MissingInputWarning from './MissingInputWarning';
 import { nodeReadinessIssues } from '../../../shared/canvasReadiness';
 
@@ -16,6 +17,7 @@ export default function AgentNode({ id, data, selected }: NodeProps) {
   const [copied, setCopied] = useState(false);
   const resizeStart = useRef<{ w: number; h: number } | null>(null);
   const { hovered, hoverProps } = useHoverIntent();
+  const expanded = selected || hovered;
   const running = node.runState === 'running';
   const answer = node.output?.text ?? '';
   const readiness = useMemo(() => nodeReadinessIssues(node, [], new Map()), [node]);
@@ -94,8 +96,8 @@ export default function AgentNode({ id, data, selected }: NodeProps) {
           if (from) canvasStore.commitResize(sessionId, id, from, { w: p.width, h: p.height });
         }}
       />
-      <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-line !bg-paper" />
-      <Handle type="source" position={Position.Right} className="!h-2 !w-2 !border-line !bg-accent" />
+      <NodeHandle type="target" position={Position.Left} kind="image" label="上游输入" expanded={expanded} />
+      <NodeHandle type="source" position={Position.Right} kind="prompt" label="文本" expanded={expanded} />
 
       <div className="mb-2 flex items-center justify-between gap-2">
         <NodeTitle sessionId={sessionId} nodeId={node.id} title={node.title} fallback="Agent 任务" />
