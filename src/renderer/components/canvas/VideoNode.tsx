@@ -12,6 +12,7 @@ import { cn } from '../../lib/cn';
 import { NodeTitle, type CanvasNodeData } from './ImageNode';
 import MentionTextArea from './MentionTextArea';
 import CameraDial from './CameraDial';
+import NodeActionBar, { useHoverIntent, type NodeAction } from './NodeActionBar';
 import MissingInputWarning from './MissingInputWarning';
 import { nodeReadinessIssues } from '../../../shared/canvasReadiness';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
@@ -47,6 +48,7 @@ export default function VideoNode({ id, data, selected }: NodeProps) {
   const videoElRef = useRef<HTMLVideoElement>(null);
   const [framePick, setFramePick] = useState<'start' | 'end' | 'current' | null>(null);
   const [frameError, setFrameError] = useState<string | null>(null);
+  const { hovered, hoverProps } = useHoverIntent();
 
   const allNodes = useCanvasStore((s) => s.nodesBySession[sessionId]) ?? [];
   const allEdges = useCanvasStore((s) => s.edgesBySession[sessionId]) ?? [];
@@ -99,6 +101,7 @@ export default function VideoNode({ id, data, selected }: NodeProps) {
 
   return (
     <div
+      {...hoverProps}
       className={cn(
         'relative flex h-full w-full flex-col rounded-xl border bg-paper-raised p-3 text-xs shadow-sm transition-shadow',
         selected ? 'border-accent ring-1 ring-accent/20' : 'border-line',
@@ -106,56 +109,52 @@ export default function VideoNode({ id, data, selected }: NodeProps) {
         highlighted && 'canvas-node-highlight',
       )}
     >
-      {selected ? (
-        <div className="nodrag absolute -top-8 left-0 z-20 flex items-center gap-1 rounded-lg border border-line bg-paper-raised px-1 py-0.5 shadow-md">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              void canvasStore.forkNode(sessionId, node.id);
-            }}
-            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-ink hover:bg-paper-inset"
-            title="克隆此视频节点为独立变体分支 (保持上游首尾帧连接)"
-          >
-            <GitBranchPlus size={11} className="text-accent" />
-            变体分支
-          </button>
-          <div className="h-3 w-px bg-line" />
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
+      <NodeActionBar
+        visible={selected || hovered}
+        actions={[
+          {
+            id: 'variations',
+            icon: <GitBranchPlus size={11} className="text-accent" />,
+            label: '变体分支',
+            title: '克隆此视频节点为独立变体分支（保持上游首尾帧连接）',
+            onClick: () => void canvasStore.forkNode(sessionId, node.id),
+          },
+          ...((assets.length > 0
+            ? [
+                {
+                  id: 'carryFrame',
+                  icon: <Camera size={11} className="text-accent" />,
+                  label: '抽尾帧续拍',
+                  title: '把尾帧抽成图片节点，用作下一镜的起始帧',
+                  onClick: () => extractFrame('end'),
+                },
+              ]
+            : []) as NodeAction[]),
+          {
+            id: 'qa',
+            icon: <Bot size={11} className="text-accent" />,
+            label: '质检 Agent',
+            title: '在右侧添加连接的视频质检 Agent 节点',
+            onClick: () =>
               void canvasStore.addDownstreamAgent(
                 sessionId,
                 node.id,
                 '请评估该生成的视频分镜，从动作连贯性、光影、画面质感给出点评，并提供优化后的视频 Prompt。',
-              );
-            }}
-            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-ink hover:bg-paper-inset"
-            title="在右侧添加连接的视频质检 Agent 节点"
-          >
-            <Bot size={11} className="text-accent" />
-            + 质检 Agent
-          </button>
-          {assets.length > 0 ? (
-            <>
-              <div className="h-3 w-px bg-line" />
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void canvasStore.saveAsset(sessionId, node.id, assetIdx);
-                }}
-                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-ink hover:bg-paper-inset"
-                title="将当前视频存入作品库"
-              >
-                <FolderPlus size={11} className="text-accent" />
-                存为产物
-              </button>
-            </>
-          ) : null}
-        </div>
-      ) : null}
+              ),
+          },
+          ...((assets.length > 0
+            ? [
+                {
+                  id: 'save',
+                  icon: <FolderPlus size={11} className="text-accent" />,
+                  label: '存为产物',
+                  title: '将当前视频存入作品库',
+                  onClick: () => void canvasStore.saveAsset(sessionId, node.id, assetIdx),
+                },
+              ]
+            : []) as NodeAction[]),
+        ]}
+      />
 
       <NodeResizer
         minWidth={280}

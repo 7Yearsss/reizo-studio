@@ -397,6 +397,11 @@ pre,
   opacity: 0.4;
 }
 
+/* Shared node floating action bar — fades on hover/selection. */
+.node-action-bar {
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
 /* Global press feedback — respond on pointer-down, Apple-style. The
    `:has()` guard keeps a nested button from double-scaling its parent. */
 button,
@@ -423,6 +428,9 @@ button,
     animation: none;
   }
   .canvas-tool {
+    transition: none;
+  }
+  .node-action-bar {
     transition: none;
   }
   .home-hero-canvas {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Handle, NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
-import { Download, FolderPlus, Loader2, Play, GitBranchPlus, Bot } from 'lucide-react';
+import { Download, FolderPlus, Loader2, Play, GitBranchPlus, Bot, Video } from 'lucide-react';
 import type { CanvasImageParams, CanvasNode } from '../../../shared/canvas';
 import { CANVAS_IMAGE_MODELS } from '../../../shared/canvas';
 import { canvasAssetUrl } from '../../api';
@@ -10,6 +10,7 @@ import { useCanvasStore } from '../../state/useCanvasStore';
 import { cn } from '../../lib/cn';
 import Lightbox from './Lightbox';
 import MentionTextArea from './MentionTextArea';
+import NodeActionBar, { useHoverIntent, type NodeAction } from './NodeActionBar';
 import MissingInputWarning from './MissingInputWarning';
 import { nodeReadinessIssues } from '../../../shared/canvasReadiness';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
@@ -92,6 +93,7 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
   const [zoom, setZoom] = useState<string | null>(null);
   const [assetIdx, setAssetIdx] = useState(0);
   const resizeStart = useRef<{ w: number; h: number } | null>(null);
+  const { hovered, hoverProps } = useHoverIntent();
   const size = params.size ?? '1024x1024';
   const running = node.runState === 'running';
   const assets = node.output?.assets ?? [];
@@ -134,6 +136,7 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
 
   return (
     <div
+      {...hoverProps}
       className={cn(
         'relative flex h-full w-full flex-col rounded-xl border bg-paper-raised p-3 text-xs shadow-sm transition-shadow',
         selected ? 'border-accent ring-1 ring-accent/20' : 'border-line',
@@ -141,52 +144,43 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
         highlighted && 'canvas-node-highlight',
       )}
     >
-      {selected ? (
-        <div className="nodrag absolute -top-8 left-0 z-20 flex items-center gap-1 rounded-lg border border-line bg-paper-raised px-1 py-0.5 shadow-md">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              void canvasStore.forkNode(sessionId, node.id);
-            }}
-            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-ink hover:bg-paper-inset"
-            title="克隆此节点为独立变体分支 (保持上游连接)"
-          >
-            <GitBranchPlus size={11} className="text-accent" />
-            变体分支
-          </button>
-          <div className="h-3 w-px bg-line" />
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              void canvasStore.addDownstreamAgent(sessionId, node.id);
-            }}
-            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-ink hover:bg-paper-inset"
-            title="在右侧添加连接的画面质检 Agent 节点"
-          >
-            <Bot size={11} className="text-accent" />
-            + 质检 Agent
-          </button>
-          {assets.length > 0 ? (
-            <>
-              <div className="h-3 w-px bg-line" />
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void canvasStore.saveAsset(sessionId, node.id, assetIdx);
-                }}
-                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-ink hover:bg-paper-inset"
-                title="将当前选中的画面存入作品库"
-              >
-                <FolderPlus size={11} className="text-accent" />
-                存为产物
-              </button>
-            </>
-          ) : null}
-        </div>
-      ) : null}
+      <NodeActionBar
+        visible={selected || hovered}
+        actions={[
+          {
+            id: 'variations',
+            icon: <GitBranchPlus size={11} className="text-accent" />,
+            label: '变体分支',
+            title: '克隆此节点为独立变体分支（保持上游连接）',
+            onClick: () => void canvasStore.forkNode(sessionId, node.id),
+          },
+          {
+            id: 'animate',
+            icon: <Video size={11} className="text-accent" />,
+            label: '转视频',
+            title: '在右侧生成以此图为首帧的运镜视频节点',
+            onClick: () => void canvasStore.animateFromImage(sessionId, node.id),
+          },
+          {
+            id: 'qa',
+            icon: <Bot size={11} className="text-accent" />,
+            label: '质检 Agent',
+            title: '在右侧添加连接的画面质检 Agent 节点',
+            onClick: () => void canvasStore.addDownstreamAgent(sessionId, node.id),
+          },
+          ...((assets.length > 0
+            ? [
+                {
+                  id: 'save',
+                  icon: <FolderPlus size={11} className="text-accent" />,
+                  label: '存为产物',
+                  title: '将当前选中的画面存入作品库',
+                  onClick: () => void canvasStore.saveAsset(sessionId, node.id, assetIdx),
+                },
+              ]
+            : []) as NodeAction[]),
+        ]}
+      />
       <NodeResizer
         minWidth={260}
         minHeight={200}

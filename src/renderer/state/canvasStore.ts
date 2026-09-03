@@ -416,6 +416,29 @@ export async function addDownstreamAgent(
   return agentId;
 }
 
+/**
+ * "Animate" an image node: drop a video node to its right, pre-wired to the
+ * image node's `start_frame` handle. Same structure the drop-a-wire menu
+ * produces, as one undo entry.
+ */
+export async function animateFromImage(sessionId: string, imageNodeId: string): Promise<string | null> {
+  const src = nodeById(sessionId, imageNodeId);
+  if (!src || src.type !== 'image') return null;
+  return addNodeAndConnect(
+    sessionId,
+    {
+      type: 'video',
+      x: src.x + src.w + 56,
+      y: src.y,
+      title: src.title ? `${src.title} · 运镜` : '视频生成',
+      params: { prompt: '', duration: '5s', ratio: '16:9', cameraMotion: 'none' },
+    },
+    imageNodeId,
+    null,
+    'start_frame',
+  );
+}
+
 export async function removeNode(sessionId: string, nodeId: string): Promise<void> {
   const node = nodeById(sessionId, nodeId);
   if (!node) return;

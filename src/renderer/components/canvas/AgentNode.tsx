@@ -5,6 +5,7 @@ import type { CanvasAgentParams } from '../../../shared/canvas';
 import * as canvasStore from '../../state/canvasStore';
 import { cn } from '../../lib/cn';
 import { NodeTitle, type CanvasNodeData } from './ImageNode';
+import NodeActionBar, { useHoverIntent, type NodeAction } from './NodeActionBar';
 import MissingInputWarning from './MissingInputWarning';
 import { nodeReadinessIssues } from '../../../shared/canvasReadiness';
 
@@ -14,6 +15,7 @@ export default function AgentNode({ id, data, selected }: NodeProps) {
   const [instruction, setInstruction] = useState(params.instruction ?? '');
   const [copied, setCopied] = useState(false);
   const resizeStart = useRef<{ w: number; h: number } | null>(null);
+  const { hovered, hoverProps } = useHoverIntent();
   const running = node.runState === 'running';
   const answer = node.output?.text ?? '';
   const readiness = useMemo(() => nodeReadinessIssues(node, [], new Map()), [node]);
@@ -42,6 +44,7 @@ export default function AgentNode({ id, data, selected }: NodeProps) {
 
   return (
     <div
+      {...hoverProps}
       className={cn(
         'relative flex h-full w-full flex-col rounded-xl border bg-paper-raised p-3 text-xs shadow-sm transition-shadow',
         selected ? 'border-accent ring-1 ring-accent/20' : 'border-line',
@@ -49,39 +52,33 @@ export default function AgentNode({ id, data, selected }: NodeProps) {
         highlighted && 'canvas-node-highlight',
       )}
     >
-      {selected ? (
-        <div className="nodrag absolute -top-8 left-0 z-20 flex items-center gap-1 rounded-lg border border-line bg-paper-raised px-1 py-0.5 shadow-md">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              void canvasStore.forkNode(sessionId, node.id);
-            }}
-            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-ink hover:bg-paper-inset"
-            title="克隆此任务为独立变体分支 (保持上游连接)"
-          >
-            <GitBranchPlus size={11} className="text-accent" />
-            变体分支
-          </button>
-          {answer ? (
-            <>
-              <div className="h-3 w-px bg-line" />
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  copyAnswer();
-                }}
-                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-ink hover:bg-paper-inset"
-                title="复制此节点的输出文本"
-              >
-                {copied ? <Check size={11} className="text-success" /> : <Copy size={11} className="text-accent" />}
-                {copied ? '已复制' : '复制结果'}
-              </button>
-            </>
-          ) : null}
-        </div>
-      ) : null}
+      <NodeActionBar
+        visible={selected || hovered}
+        actions={[
+          {
+            id: 'variations',
+            icon: <GitBranchPlus size={11} className="text-accent" />,
+            label: '变体分支',
+            title: '克隆此任务为独立变体分支（保持上游连接）',
+            onClick: () => void canvasStore.forkNode(sessionId, node.id),
+          },
+          ...((answer
+            ? [
+                {
+                  id: 'copy',
+                  icon: copied ? (
+                    <Check size={11} className="text-success" />
+                  ) : (
+                    <Copy size={11} className="text-accent" />
+                  ),
+                  label: copied ? '已复制' : '复制结果',
+                  title: '复制此节点的输出文本',
+                  onClick: copyAnswer,
+                },
+              ]
+            : []) as NodeAction[]),
+        ]}
+      />
       <NodeResizer
         minWidth={240}
         minHeight={160}
