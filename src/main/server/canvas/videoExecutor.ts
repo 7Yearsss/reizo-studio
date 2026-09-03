@@ -4,6 +4,7 @@ import type { SettingsStore } from '../storage/settingsStore';
 import { readCanvasAsset } from './imageExecutor';
 import { awaitVideoJob, submitVideoJob } from './asyncJobManager';
 import { resolveMentions } from '../../../shared/resolveMentions';
+import { cameraFromPreset, cameraToPrompt, normalizeCamera } from '../../../shared/cameraMotion';
 import type { VideoGenerateParams } from './videoDrivers';
 
 function isVideoParams(value: unknown): value is CanvasVideoParams {
@@ -69,11 +70,17 @@ export async function runVideoNode(options: {
     promptText = resolvedPrompt;
   }
 
+  // `camera` is authoritative; a node that only has the legacy `cameraMotion`
+  // preset is lifted into the structured form. The natural-language suffix is
+  // appended for every driver (kling also gets a structured `camera_control`).
+  const camera = normalizeCamera(params.camera ?? cameraFromPreset(params.cameraMotion));
+  const cameraHint = cameraToPrompt(camera);
   const generateParams: VideoGenerateParams = {
-    prompt: promptText,
+    prompt: cameraHint ? `${promptText}\n${cameraHint}` : promptText,
     duration: params.duration || '5s',
     ratio: params.ratio || '16:9',
     cameraMotion: params.cameraMotion || 'none',
+    camera,
     startImageBytes,
     endImageBytes,
   };

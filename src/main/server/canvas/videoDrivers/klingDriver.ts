@@ -1,3 +1,4 @@
+import { cameraFromPreset, cameraToKlingConfig } from '../../../../shared/cameraMotion';
 import type { VideoDriver, VideoGenerateParams, VideoJobStatus } from './types';
 
 /**
@@ -28,8 +29,12 @@ export const klingDriver: VideoDriver = {
       aspect_ratio: params.ratio || '16:9',
     };
 
-    if (params.cameraMotion && params.cameraMotion !== 'none') {
-      body.camera_control = { type: params.cameraMotion };
+    // Kling `simple` wants the magnitude under `config` (one non-zero axis,
+    // each −10..10). The old code sent `{ type: 'zoom_in' }` etc., which is not
+    // a valid `camera_control.type` and was silently dropped by the API.
+    const klingCamera = cameraToKlingConfig(params.camera ?? cameraFromPreset(params.cameraMotion));
+    if (klingCamera) {
+      body.camera_control = klingCamera;
     }
 
     if (params.startImageBytes) {

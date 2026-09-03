@@ -5,6 +5,10 @@
  * but not executed in slice C).
  */
 
+import type { CameraControl } from './cameraMotion';
+
+export type { CameraControl } from './cameraMotion';
+
 export type CanvasNodeType = 'image' | 'agent' | 'video' | 'note' | 'group';
 
 export type NodeRunState = 'idle' | 'running' | 'done' | 'error';
@@ -23,7 +27,14 @@ export interface CanvasVideoParams {
   prompt: string;
   duration?: '5s' | '10s';
   ratio?: '16:9' | '9:16' | '1:1';
+  /**
+   * @deprecated Legacy quick-preset enum. Kept for back-compat, preset chips
+   * and old `.reizo.zip` imports; `camera` is authoritative whenever present.
+   * A node with only `cameraMotion` is read via `cameraFromPreset(cameraMotion)`.
+   */
   cameraMotion?: 'none' | 'zoom_in' | 'zoom_out' | 'pan_left' | 'pan_right' | 'orbit';
+  /** Structured camera motion (each axis −10..10). Falls back to `cameraFromPreset(cameraMotion)`. */
+  camera?: CameraControl;
   provider?: string;
   model?: string;
 }

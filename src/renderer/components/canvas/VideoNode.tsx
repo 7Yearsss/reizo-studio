@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Handle, NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
 import { Download, FolderPlus, Loader2, Play, GitBranchPlus, Bot, Video, Camera } from 'lucide-react';
 import type { CanvasVideoParams } from '../../../shared/canvas';
-import { CANVAS_VIDEO_CAMERAS, CANVAS_VIDEO_MODELS } from '../../../shared/canvas';
+import { CANVAS_VIDEO_MODELS } from '../../../shared/canvas';
+import { cameraFromPreset } from '../../../shared/cameraMotion';
 import { canvasAssetUrl } from '../../api';
 import * as canvasStore from '../../state/canvasStore';
 import * as chatStore from '../../state/chatStore';
@@ -10,6 +11,7 @@ import { useCanvasStore } from '../../state/useCanvasStore';
 import { cn } from '../../lib/cn';
 import { NodeTitle, type CanvasNodeData } from './ImageNode';
 import MentionTextArea from './MentionTextArea';
+import CameraDial from './CameraDial';
 import MissingInputWarning from './MissingInputWarning';
 import { nodeReadinessIssues } from '../../../shared/canvasReadiness';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
@@ -289,33 +291,13 @@ export default function VideoNode({ id, data, selected }: NodeProps) {
             </SelectContent>
           </Select>
 
-          {/* Camera Motion Selector */}
-          <Select
-            value={params.cameraMotion || 'none'}
-            onValueChange={(val) =>
-              void canvasStore.updateNodeParams(sessionId, node.id, {
-                ...params,
-                cameraMotion: val as CanvasVideoParams['cameraMotion'],
-              })
+          {/* Visual camera-motion controller (direction + intensity per axis) */}
+          <CameraDial
+            value={params.camera ?? cameraFromPreset(params.cameraMotion)}
+            onChange={(camera) =>
+              void canvasStore.updateNodeParams(sessionId, node.id, { ...params, camera })
             }
-          >
-            <SelectTrigger
-              size="sm"
-              className="nodrag h-7 max-w-[110px] rounded-lg border-line/70 bg-paper-inset/40 px-2 py-1 text-[11px] text-ink hover:border-accent hover:bg-paper-inset/70 transition-colors"
-            >
-              <div className="flex items-center gap-1 truncate">
-                <span className="text-ink-muted text-[10px]">🎥</span>
-                <SelectValue />
-              </div>
-            </SelectTrigger>
-            <SelectContent className="min-w-[130px] rounded-xl border border-line bg-paper-raised/95 shadow-xl backdrop-blur-xl p-1 text-xs">
-              {CANVAS_VIDEO_CAMERAS.map((c) => (
-                <SelectItem key={c.id} value={c.id} className="text-xs py-1.5 cursor-pointer rounded-lg hover:bg-paper-inset">
-                  {c.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          />
 
           {/* Ratio Segmented Pills (16:9, 9:16, 1:1) */}
           <div className="flex items-center rounded-lg border border-line/60 bg-paper-inset/50 p-0.5">
