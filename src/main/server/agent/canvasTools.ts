@@ -25,6 +25,9 @@ function nodeBrief(node: CanvasNode) {
     size: typeof params.size === 'string' ? params.size : undefined,
     // group containers: what they hold, so the agent can run / reason about one act
     memberIds: Array.isArray(params.memberIds) ? (params.memberIds as string[]) : undefined,
+    // reference anchors: what the pin locks and how strictly
+    role: typeof params.role === 'string' ? params.role : undefined,
+    strength: typeof params.strength === 'string' ? params.strength : undefined,
     assets: node.output?.assets ?? [],
     error: node.output?.error,
   };
@@ -47,12 +50,14 @@ export function createCanvasTools(options: {
   return {
     add_node: tool({
       description:
-        'Add a node to this session\'s canvas. type "image" generates an image from `prompt`; type "agent" is a research/critique sub-task described by `instruction`; type "video" generates video from `prompt`; type "note" is a screenplay/script sticky note. In an image/video `prompt` you may embed inline references to other canvas nodes as `@[label](canvas:<nodeId>)` — at run time each becomes an ordered reference image (`<<<image 1>>>`, ...) drawn from that node\'s latest output, so you can say e.g. "把 @[主角定妆](canvas:abc123) 放进 @[雨夜街道](canvas:def456)". Returns the new node id. The canvas panel opens automatically.',
+        'Add a node to this session\'s canvas. type "image" generates an image from `prompt`; type "agent" is a research/critique sub-task described by `instruction`; type "video" generates video from `prompt`; type "note" is a screenplay/script sticky note; type "anchor" is a reference pin (the user drops an image onto it) whose `role`/`strength` lock a character or style across shots. In an image/video `prompt` you may embed inline references to other canvas nodes as `@[label](canvas:<nodeId>)` — at run time each becomes an ordered reference image (`<<<image 1>>>`, ...) drawn from that node\'s latest output, so you can say e.g. "把 @[主角定妆](canvas:abc123) 放进 @[雨夜街道](canvas:def456)". Returns the new node id. The canvas panel opens automatically.',
       inputSchema: z.object({
-        type: z.enum(['image', 'agent', 'video', 'note']),
+        type: z.enum(['image', 'agent', 'video', 'note', 'anchor']),
         prompt: z.string().optional().describe('Prompt (type "image", "video", or "note").'),
         size: z.enum(CANVAS_IMAGE_SIZES as [string, ...string[]]).optional(),
         instruction: z.string().optional().describe('Task description (type "agent").'),
+        role: z.enum(['character', 'style', 'content']).optional().describe('type "anchor": what the pin locks.'),
+        strength: z.enum(['low', 'mid', 'high']).optional().describe('type "anchor": how strictly to hold it.'),
         title: z.string().optional(),
         x: z.number().optional(),
         y: z.number().optional(),
@@ -67,7 +72,9 @@ export function createCanvasTools(options: {
               ? { prompt: input.prompt ?? '', duration: '5s', ratio: '16:9', cameraMotion: 'none' }
               : input.type === 'note'
                 ? { content: input.instruction ?? input.prompt ?? '', color: 'amber' }
-                : { instruction: input.instruction ?? '' };
+                : input.type === 'anchor'
+                  ? { role: input.role ?? 'character', strength: input.strength ?? 'mid' }
+                  : { instruction: input.instruction ?? '' };
         const { rev, node } = canvasStore.addNode(canvas.id, {
           type: input.type,
           x: typeof input.x === 'number' ? input.x : 40,
@@ -389,6 +396,37 @@ export function createCanvasTools(options: {
         channel.broadcast(res.rev, { type: 'edge_added', edge: res.edge });
         broadcastDownstreamDirty(canvasStore, canvas.id, source, res.rev);
         return { edgeId: res.edge.id };
+      },
+    }),
+
+    attach_reference: tool({
+      description:
+        'Wire a reference `anchor` node into one or more image/video nodes so its character/style is held across them. Skips targets already attached. Returns how many edges landed.',
+      inputSchema: z.object({
+        anchorId: z.string(),
+        targetIds: z.array(z.string()).min(1),
+      }),
+      execute: async ({ anchorId, targetIds }) => {
+        const canvas = canvasStore.ensureCanvas(sessionId);
+        const anchor = canvasStore.getNode(canvas.id, anchorId);
+        if (!anchor || anchor.type !== 'anchor') return { error: `No anchor node "${anchorId}"` };
+        const channel = getCanvasChannel(canvas.id);
+        const existing = new Set(
+          (canvasStore.getSnapshot(canvas.id)?.edges ?? [])
+            .filter((e) => e.sourceId === anchorId)
+            .map((e) => e.targetId),
+        );
+        let attached = 0;
+        for (const targetId of targetIds) {
+          const target = canvasStore.getNode(canvas.id, targetId);
+          if (!target || (target.type !== 'image' && target.type !== 'video') || existing.has(targetId)) continue;
+          const res = canvasStore.addEdge(canvas.id, { sourceId: anchorId, targetId, targetHandle: 'reference' });
+          if (res.error || !res.edge || res.rev === undefined) continue;
+          channel.broadcast(res.rev, { type: 'edge_added', edge: res.edge });
+          broadcastDownstreamDirty(canvasStore, canvas.id, targetId, res.rev);
+          attached += 1;
+        }
+        return { attached };
       },
     }),
 

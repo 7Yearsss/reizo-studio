@@ -1,9 +1,10 @@
-import type { CanvasNode, CanvasVideoParams } from '../../../shared/canvas';
+import type { AnchorRole, AnchorStrength, CanvasNode, CanvasVideoParams } from '../../../shared/canvas';
 import type { CanvasStore } from '../storage/canvasStore';
 import type { SettingsStore } from '../storage/settingsStore';
 import { readCanvasAsset } from './imageExecutor';
 import { awaitVideoJob, submitVideoJob } from './asyncJobManager';
 import { resolveMentions } from '../../../shared/resolveMentions';
+import { planAnchors } from '../../../shared/referenceAnchors';
 import { cameraFromPreset, cameraToPrompt, normalizeCamera } from '../../../shared/cameraMotion';
 import type { VideoGenerateParams } from './videoDrivers';
 
@@ -57,10 +58,33 @@ export async function runVideoNode(options: {
   }
 
   let promptText = params.prompt;
+
+  // Reference anchors on a video node only shape the prompt text — the driver's
+  // image slots are reserved for start/end frames (documented degrade).
+  const anchorNodes = incomingEdges
+    .map((e) => canvasStore.getNode(canvasId, e.sourceId))
+    .filter((u): u is NonNullable<typeof u> => !!u && u.type === 'anchor');
+  if (anchorNodes.length > 0) {
+    const { promptPrefix } = planAnchors(
+      anchorNodes.map((a) => {
+        const ap = a.params as { role?: AnchorRole; strength?: AnchorStrength; note?: string };
+        return {
+          id: a.id,
+          role: ap.role ?? 'character',
+          strength: ap.strength ?? 'mid',
+          note: ap.note,
+          title: a.title || '',
+          assets: a.output?.assets ?? [],
+        };
+      }),
+    );
+    if (promptPrefix) promptText = `${promptPrefix}\n${promptText}`;
+  }
+
   if (promptText.includes('@')) {
     // Resolve @-mentions against the whole canvas by id, not just wired-in nodes.
     const candidates = (canvasStore.getSnapshot(canvasId)?.nodes ?? [])
-      .filter((u) => u.id !== node.id)
+      .filter((u) => u.id !== node.id && u.type !== 'anchor')
       .map((u) => ({
         id: u.id,
         label: u.title || '',

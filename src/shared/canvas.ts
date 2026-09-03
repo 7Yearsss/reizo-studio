@@ -9,7 +9,7 @@ import type { CameraControl } from './cameraMotion';
 
 export type { CameraControl } from './cameraMotion';
 
-export type CanvasNodeType = 'image' | 'agent' | 'video' | 'note' | 'group';
+export type CanvasNodeType = 'image' | 'agent' | 'video' | 'note' | 'group' | 'anchor';
 
 export type NodeRunState = 'idle' | 'running' | 'done' | 'error';
 
@@ -50,12 +50,36 @@ export interface CanvasGroupParams {
   locked?: boolean;
 }
 
+/** What a reference anchor pins: the subject, the look, or the composition. */
+export type AnchorRole = 'character' | 'style' | 'content';
+export type AnchorStrength = 'low' | 'mid' | 'high';
+
+export interface CanvasAnchorParams {
+  role: AnchorRole;
+  strength: AnchorStrength;
+  /** Free note, e.g. 「女主 · 红色风衣」; folded into the prompt prefix. */
+  note?: string;
+}
+
+export const ANCHOR_ROLES: Array<{ id: AnchorRole; label: string; hint: string }> = [
+  { id: 'character', label: '角色', hint: '锁定人物外形 / 服装 / 面部' },
+  { id: 'style', label: '风格', hint: '锁定色调 / 笔触 / 材质' },
+  { id: 'content', label: '内容', hint: '锁定构图 / 场景元素' },
+];
+
+export const ANCHOR_STRENGTHS: Array<{ id: AnchorStrength; label: string }> = [
+  { id: 'low', label: '弱' },
+  { id: 'mid', label: '中' },
+  { id: 'high', label: '强' },
+];
+
 export type CanvasNodeParams =
   | CanvasImageParams
   | CanvasAgentParams
   | CanvasVideoParams
   | CanvasNoteParams
   | CanvasGroupParams
+  | CanvasAnchorParams
   | Record<string, unknown>;
 
 export interface CanvasNode {
@@ -143,5 +167,6 @@ export function defaultNodeBox(type: CanvasNodeType): { w: number; h: number } {
   if (type === 'video') return { w: 340, h: 420 };
   if (type === 'note') return { w: 280, h: 220 };
   if (type === 'group') return { w: 480, h: 360 };
+  if (type === 'anchor') return { w: 200, h: 250 };
   return { w: 320, h: 220 };
 }

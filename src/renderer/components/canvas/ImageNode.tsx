@@ -197,6 +197,14 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
         }}
       />
       <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-line !bg-paper" />
+      <Handle
+        type="target"
+        id="reference"
+        position={Position.Left}
+        style={{ top: '78%' }}
+        className="!h-2.5 !w-2.5 !border-line !bg-violet-400"
+        title="连接「参考图钉」以锁定角色 / 风格一致性"
+      />
       <Handle type="source" position={Position.Right} className="!h-2 !w-2 !border-line !bg-accent" />
 
       <div className="mb-2 flex items-center justify-between gap-2">

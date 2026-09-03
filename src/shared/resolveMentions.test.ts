@@ -94,6 +94,18 @@ describe('resolveMentions — canonical @[label](canvas:id) syntax', () => {
     expect(r.resolvedPrompt).toBe('<<<image 1>>> 与 <<<image 2>>>');
     expect(r.orderedAssetRefs).toEqual(['c1/a.png', 'c1/b.png']);
   });
+
+  it('offsets <<<image N>>> numbering by startIndex (reference anchors ahead)', () => {
+    const prompt = '让 @女主特写 站在 @雨夜街道';
+    const r = resolveMentions(prompt, candidates, 3);
+    expect(r.resolvedPrompt).toBe('让 <<<image 3>>> 站在 <<<image 4>>>');
+    expect(r.orderedAssetRefs).toEqual(['c1/a.png', 'c1/b.png']);
+  });
+
+  it('defaults startIndex to 1 (existing callers unchanged)', () => {
+    const r = resolveMentions('用 @女主特写 的脸', candidates);
+    expect(r.resolvedPrompt).toBe('用 <<<image 1>>> 的脸');
+  });
 });
 
 describe('parseMentionTokens / serializeMention', () => {

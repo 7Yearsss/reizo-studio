@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { generateImage } from 'ai';
-import type { CanvasImageParams, CanvasNode } from '../../../shared/canvas';
+import type { AnchorRole, AnchorStrength, CanvasImageParams, CanvasNode } from '../../../shared/canvas';
 import { getProviderPreset } from '../../../shared/providers';
 import { createOpenAiProvider } from '../agent/provider/openai';
 import type { SettingsStore } from '../storage/settingsStore';
@@ -10,6 +10,14 @@ import { getCanvasChannel } from './channel';
 import { inputHash } from './graph';
 import { classifyMediaError } from './mediaError';
 import { resolveMentions } from '../../../shared/resolveMentions';
+import { planAnchors } from '../../../shared/referenceAnchors';
+
+/**
+ * Cap on reference images sent to the model (anchors + @mentions + img2img
+ * fallback combined). Most providers reject or ignore more than a handful;
+ * Leonardo tops out at 6, we stay conservative.
+ */
+const MAX_REFERENCE_IMAGES = 4;
 
 /**
  * Re-broadcast a node and its descendants (annotated) so their `dirty` badge
@@ -135,34 +143,55 @@ export async function runImageNode(options: {
     let rawPrompt = params.prompt;
     let images: Uint8Array[] = [];
 
+    const readRefBytes = async (rel: string): Promise<void> => {
+      try {
+        images.push(new Uint8Array(await readCanvasAsset(dataRoot, rel)));
+      } catch {
+        /* ignore unreadable asset */
+      }
+    };
+
+    // Reference anchors: attached `anchor` nodes are ordered first (character →
+    // style → content) and described by a semantic prefix. NOT IP-Adapter —
+    // just an ordered pile + wording (see referenceAnchors.ts / docs).
+    const anchorNodes = upstream.filter((u) => u.type === 'anchor');
+    const { orderedAssetRefs: anchorRefs, promptPrefix } = planAnchors(
+      anchorNodes.map((a) => {
+        const ap = a.params as { role?: AnchorRole; strength?: AnchorStrength; note?: string };
+        return {
+          id: a.id,
+          role: ap.role ?? 'character',
+          strength: ap.strength ?? 'mid',
+          note: ap.note,
+          title: a.title || '',
+          assets: a.output?.assets ?? [],
+        };
+      }),
+      1,
+    );
+    for (const rel of anchorRefs) await readRefBytes(rel);
+    if (promptPrefix) rawPrompt = `${promptPrefix}\n${rawPrompt}`;
+
     if (rawPrompt.includes('@')) {
       // @-mentions resolve against the whole canvas by id (the chip picker and
       // the agent can both reference a node that is not wired in as an edge).
       const candidates = (canvasStore.getSnapshot(canvasId)?.nodes ?? [])
-        .filter((u) => u.id !== node.id)
+        .filter((u) => u.id !== node.id && u.type !== 'anchor')
         .map((u) => ({
           id: u.id,
           label: u.title || '',
           assets: u.output?.assets ?? [],
         }));
-      const { resolvedPrompt, orderedAssetRefs } = resolveMentions(rawPrompt, candidates);
+      const { resolvedPrompt, orderedAssetRefs } = resolveMentions(rawPrompt, candidates, anchorRefs.length + 1);
       rawPrompt = resolvedPrompt;
-      if (orderedAssetRefs.length > 0) {
-        for (const rel of orderedAssetRefs) {
-          try {
-            const buf = await readCanvasAsset(dataRoot, rel);
-            images.push(new Uint8Array(buf));
-          } catch {
-            /* ignore unreadable asset */
-          }
-        }
-      }
+      for (const rel of orderedAssetRefs) await readRefBytes(rel);
     }
 
     if (images.length === 0) {
       images = await upstreamImageBytes(canvasStore, dataRoot, canvasId, node.id);
     }
 
+    images = images.slice(0, MAX_REFERENCE_IMAGES);
     const prompt = images.length > 0 ? { text: rawPrompt, images } : rawPrompt;
 
     const result = await generateImage({

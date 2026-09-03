@@ -174,6 +174,21 @@ export default function VideoNode({ id, data, selected }: NodeProps) {
 
       <Handle
         type="target"
+        id="reference"
+        position={Position.Left}
+        style={{ top: '38%' }}
+        className="!h-2.5 !w-2.5 !border-line !bg-violet-400"
+        title="连接「参考图钉」（仅作文字风格约束，不作垫图）"
+      />
+      <span
+        style={{ top: '38%' }}
+        className="pointer-events-none absolute -left-8 -translate-y-1/2 text-[9px] font-medium text-ink-muted/80 select-none text-right w-6"
+      >
+        参考
+      </span>
+
+      <Handle
+        type="target"
         id="start_frame"
         position={Position.Left}
         style={{ top: '65%' }}

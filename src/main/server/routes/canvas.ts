@@ -16,7 +16,7 @@ import { setCanvasSelection } from '../canvas/selection';
 import { exportWorkflowZip } from '../canvas/exportWorkflow';
 import { importWorkflowZip } from '../canvas/importWorkflow';
 
-const NODE_TYPES = new Set<CanvasNodeType>(['image', 'agent', 'video', 'note', 'group']);
+const NODE_TYPES = new Set<CanvasNodeType>(['image', 'agent', 'video', 'note', 'group', 'anchor']);
 const IMPORT_MAX_BYTES = 12 * 1024 * 1024;
 const WORKFLOW_MAX_BYTES = 256 * 1024 * 1024;
 
@@ -248,15 +248,22 @@ export function createCanvasRouter(
       return c.json({ error: `Image must be 1 byte – ${IMPORT_MAX_BYTES} bytes` }, 413);
     }
     const ext = (body.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
-    const box = defaultNodeBox('image');
+    // Default path drops an image node; `type: 'anchor'` (+ optional `params`)
+    // makes it a reference pin instead. Any other type is rejected.
+    const nodeType: CanvasNodeType = body.type === 'anchor' ? 'anchor' : 'image';
+    const box = defaultNodeBox(nodeType);
+    const defaultParams =
+      nodeType === 'anchor'
+        ? { role: 'character', strength: 'mid' }
+        : { prompt: '', size: '1024x1024' };
     const { rev, node } = canvasStore.addNode(canvasId, {
-      type: 'image',
+      type: nodeType,
       x: typeof body.x === 'number' ? body.x : 40,
       y: typeof body.y === 'number' ? body.y : 40,
       w: box.w,
       h: box.h,
       title: body.name.slice(0, 80),
-      params: { prompt: '', size: '1024x1024' },
+      params: body.params && typeof body.params === 'object' ? { ...defaultParams, ...body.params } : defaultParams,
     });
     const dir = canvasAssetsDir(dataRoot, canvasId);
     await mkdir(dir, { recursive: true });

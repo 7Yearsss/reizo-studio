@@ -997,6 +997,75 @@ export async function importImage(sessionId: string, file: File, at: { x: number
   });
 }
 
+/** Drop an image onto the canvas as a reference `anchor` pin (character by default). */
+export async function addAnchorFromFile(
+  sessionId: string,
+  file: File,
+  at: { x: number; y: number },
+): Promise<string | null> {
+  const id = canvasId(sessionId);
+  if (!id) return null;
+  const buffer = await file.arrayBuffer();
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+  const node = await api.importCanvasImage(id, {
+    name: file.name || 'anchor.png',
+    dataBase64: btoa(binary),
+    x: at.x,
+    y: at.y,
+    type: 'anchor',
+    params: { role: 'character', strength: 'mid' },
+  });
+  applyEvent(sessionId, { type: 'node_added', node });
+  record(sessionId, {
+    undo: () => _deleteNode(sessionId, node.id),
+    redo: () => Promise.resolve(),
+  });
+  return node.id;
+}
+
+/**
+ * Wire a reference anchor into every image/video node in `targetIds` (skipping
+ * ones already connected), as one history entry. Returns how many edges landed.
+ */
+export async function attachAnchor(
+  sessionId: string,
+  anchorId: string,
+  targetIds: string[],
+): Promise<number> {
+  const nodes = state.nodesBySession[sessionId] ?? [];
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const edges = state.edgesBySession[sessionId] ?? [];
+  const targets = targetIds.filter((tid) => {
+    const t = byId.get(tid);
+    if (!t || (t.type !== 'image' && t.type !== 'video')) return false;
+    return !edges.some((e) => e.sourceId === anchorId && e.targetId === tid);
+  });
+  if (targets.length === 0) return 0;
+
+  const connect = async (): Promise<string[]> => {
+    const made: string[] = [];
+    for (const tid of targets) {
+      const eid = await _addEdge(sessionId, anchorId, tid, null, 'reference');
+      if (eid) made.push(eid);
+    }
+    return made;
+  };
+
+  let edgeIds = await connect();
+  if (edgeIds.length === 0) return 0;
+  record(sessionId, {
+    undo: async () => {
+      for (const eid of edgeIds) await _deleteEdge(sessionId, eid);
+    },
+    redo: async () => {
+      edgeIds = await connect();
+    },
+  });
+  return edgeIds.length;
+}
+
 /**
  * Grab a still frame from a finished `video` node and drop it on the canvas as
  * a `done` image node, wired `video -> image` for provenance. That image can

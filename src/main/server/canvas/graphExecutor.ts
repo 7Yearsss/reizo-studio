@@ -7,6 +7,9 @@ import { runVideoNode } from './videoExecutor';
 import { descendants, directUpstream, topoOrder, buildPipelineWaves } from './graph';
 
 /** Node types the executor knows how to run. */
+// `note` / `group` / `anchor` are inert: `anchor` is a reference pin consumed
+// by imageExecutor, never executed, and `buildPipelineWaves` already walks
+// dependencies through non-runnable nodes.
 const RUNNABLE = new Set(['image', 'agent', 'video']);
 
 /**

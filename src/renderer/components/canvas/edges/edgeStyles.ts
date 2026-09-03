@@ -4,6 +4,7 @@ export const EDGE_COLORS = {
   startFrame: '#f59e0b', // 首帧 (amber)
   endFrame: '#f59e0b', // 尾帧 (amber)
   video: '#38bdf8', // 视频产物 (sky)
+  reference: '#a78bfa', // 参考图钉 (violet)
   default: '#94a3b8', // 默认 (slate)
 } as const;
 
@@ -19,6 +20,7 @@ export function edgeKind(
   sourceHandle: string | null | undefined,
   targetHandle: string | null | undefined,
 ): EdgeKind {
+  if (sourceType === 'anchor' || targetHandle === 'reference') return 'reference';
   if (sourceHandle === 'start_frame' || targetHandle === 'start_frame' || sourceHandle === 'startFrame') {
     return 'startFrame';
   }
@@ -35,6 +37,7 @@ export function edgeKind(
 }
 
 export function getSourceHandleColor(sourceType?: string, sourceHandle?: string | null): string {
+  if (sourceType === 'anchor') return EDGE_COLORS.reference;
   if (sourceHandle === 'start_frame' || sourceHandle === 'startFrame') return EDGE_COLORS.startFrame;
   if (sourceHandle === 'end_frame' || sourceHandle === 'endFrame') return EDGE_COLORS.endFrame;
   if (sourceHandle === 'prompt' || sourceHandle === 'textOut') return EDGE_COLORS.prompt;
@@ -45,6 +48,7 @@ export function getSourceHandleColor(sourceType?: string, sourceHandle?: string 
 }
 
 export function getTargetHandleColor(targetType?: string, targetHandle?: string | null): string {
+  if (targetHandle === 'reference') return EDGE_COLORS.reference;
   if (targetHandle === 'start_frame' || targetHandle === 'startFrame') return EDGE_COLORS.startFrame;
   if (targetHandle === 'end_frame' || targetHandle === 'endFrame') return EDGE_COLORS.endFrame;
   if (targetHandle === 'prompt') return EDGE_COLORS.prompt;

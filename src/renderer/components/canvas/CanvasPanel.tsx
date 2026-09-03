@@ -42,6 +42,7 @@ import {
   Maximize,
   MoreHorizontal,
   ChevronDown,
+  Pin,
 } from 'lucide-react';
 import * as canvasStore from '../../state/canvasStore';
 import * as chatStore from '../../state/chatStore';
@@ -54,6 +55,8 @@ import AgentNode from './AgentNode';
 import VideoNode from './VideoNode';
 import NoteNode from './NoteNode';
 import GroupNode from './GroupNode';
+import AnchorNode from './AnchorNode';
+import AssetShelf from './AssetShelf';
 import StoryboardModal from './StoryboardModal';
 import CuttableEdge from './edges/CuttableEdge';
 
@@ -63,6 +66,7 @@ const NODE_TYPES: NodeTypes = {
   video: VideoNode,
   note: NoteNode,
   group: GroupNode,
+  anchor: AnchorNode,
 };
 const EDGE_TYPES: EdgeTypes = { cuttable: CuttableEdge, default: CuttableEdge };
 const VIEWPORT_KEY = (sessionId: string) => `reizo:canvas-viewport:${sessionId}`;
@@ -521,6 +525,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         <Background gap={16} color="var(--line)" />
         <Controls showInteractive={false} />
         <MiniMap pannable zoomable className="!bg-paper-inset" />
+        <AssetShelf sessionId={sessionId} selectedTargetIds={selectedNodeIds} flash={flash} />
 
         {storeNodes.length === 0 ? (
           <Panel position="top-center" className="mt-24 pointer-events-none select-none">
@@ -588,6 +593,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
               { icon: <Video size={13} />, label: '运镜视频', onClick: () => addNode('video') },
               { icon: <Bot size={13} />, label: 'Agent 任务', onClick: () => addNode('agent') },
               { icon: <StickyNote size={13} />, label: '灵感便签', onClick: () => addNode('note') },
+              { icon: <Pin size={13} />, label: '参考图钉', onClick: () => addNode('anchor') },
             ]}
           />
 
