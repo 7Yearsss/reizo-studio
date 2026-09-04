@@ -34,6 +34,48 @@ function isOfficialOpenAi(baseUrl?: string): boolean {
   }
 }
 
+const MAX_TRANSPORT_RETRIES = 2;
+
+function sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new Error('Aborted'));
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer);
+        reject(new Error('Aborted'));
+      },
+      { once: true },
+    );
+  });
+}
+
+function getRetryDelay(status: number, attempt: number, headers?: Headers): number {
+  if (status === 429 && headers?.get('retry-after')) {
+    const headerVal = headers.get('retry-after');
+    const seconds = Number(headerVal);
+    if (Number.isFinite(seconds) && seconds > 0) {
+      return Math.min(seconds * 1000, 10_000);
+    }
+  }
+  const base = status === 429 ? 1000 : 500;
+  const backoff = base * Math.pow(2, attempt);
+  const jitter = Math.random() * 250;
+  return backoff + jitter;
+}
+
+function isRetryableStatus(status: number): boolean {
+  return (
+    status === 408 ||
+    status === 429 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504 ||
+    status === 524
+  );
+}
+
 /**
  * The bare `@ai-sdk/openai` provider, with request logging wired in. Callers
  * pick the surface: `.chat(id)` / `(id)` for language models, `.image(id)` for
@@ -45,15 +87,44 @@ export function createOpenAiProvider(options: { apiKey: string; baseUrl?: string
     const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
     const startedAt = Date.now();
     console.info(`[chat] provider request sent method=${method} url=${url}${describeBody(init?.body)}`);
-    try {
-      const response = await globalThis.fetch(input, init);
-      console.info(`[chat] provider response status=${response.status} durationMs=${Date.now() - startedAt}`);
-      return response;
-    } catch (error) {
-      console.info(
-        `[chat] provider transport error durationMs=${Date.now() - startedAt} error=${error instanceof Error ? error.message : String(error)}`,
-      );
-      throw error;
+
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const response = await globalThis.fetch(input, init);
+        console.info(
+          `[chat] provider response status=${response.status} durationMs=${Date.now() - startedAt}${attempt > 0 ? ` attempt=${attempt}` : ''}`,
+        );
+
+        // Fast-fail non-retryable authentication errors without wasting retries
+        if (response.status === 401 || response.status === 403) {
+          return response;
+        }
+
+        if (isRetryableStatus(response.status) && attempt < MAX_TRANSPORT_RETRIES) {
+          const delay = getRetryDelay(response.status, attempt, response.headers);
+          console.warn(
+            `[chat] retryable HTTP ${response.status}, backing off ${Math.round(delay)}ms before retry ${attempt + 1}`,
+          );
+          await sleep(delay, init?.signal);
+          continue;
+        }
+
+        return response;
+      } catch (error) {
+        if (init?.signal?.aborted) throw error;
+        if (attempt < MAX_TRANSPORT_RETRIES) {
+          const delay = 500 * Math.pow(2, attempt) + Math.random() * 250;
+          console.warn(
+            `[chat] transport error, backing off ${Math.round(delay)}ms before retry ${attempt + 1}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          await sleep(delay, init?.signal);
+          continue;
+        }
+        console.info(
+          `[chat] provider transport error durationMs=${Date.now() - startedAt} error=${error instanceof Error ? error.message : String(error)}`,
+        );
+        throw error;
+      }
     }
   };
   return createOpenAI({

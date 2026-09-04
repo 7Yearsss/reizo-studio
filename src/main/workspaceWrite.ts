@@ -39,6 +39,11 @@ export async function editWorkspaceFile(
   const before = await readFile(abs, 'utf8');
   const count = before.split(oldString).length - 1;
   if (count === 0) throw new Error('oldString was not found in the file');
+  if (count > 1 && !replaceAll) {
+    throw new Error(
+      `Found ${count} occurrences of oldString. oldString must uniquely match exactly one block of text, or set replaceAll to true. Include more surrounding lines in oldString to make it unique.`,
+    );
+  }
   const after = replaceAll ? before.split(oldString).join(newString) : before.replace(oldString, newString);
   if (Buffer.byteLength(after, 'utf8') > WRITE_FILE_MAX_BYTES) {
     throw new Error(`File exceeds ${WRITE_FILE_MAX_BYTES} byte write limit`);

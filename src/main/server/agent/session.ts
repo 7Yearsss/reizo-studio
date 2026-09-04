@@ -503,7 +503,9 @@ class AgentSession {
         if (!interrupted && !terminalError && !persister.hasContent()) {
           terminalError = 'Provider ended without an assistant result';
         }
-        if (persister.hasContent()) {
+        if (terminalError) {
+          persister.rollback();
+        } else if (persister.hasContent()) {
           await persister.commit({ aborted: false });
         }
         if (terminalError && !errorEmitted) {
@@ -520,6 +522,7 @@ class AgentSession {
           ...(terminalError ? { error: terminalError } : {}),
         });
       } catch (err) {
+        persister.rollback();
         if (this.turnDone) return;
         const thrownError = formatProviderError(err);
         const supersededByNewerTurn = this.turnGeneration !== generation;
