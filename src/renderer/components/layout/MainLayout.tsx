@@ -1,38 +1,29 @@
-import { useState } from 'react';
 import CustomTitleBar from './CustomTitleBar';
 import Sidebar from './Sidebar';
 import RightPanel from '../workspace/RightPanel';
-import { useSettingsStore } from '../../state/useSettingsStore';
 import { useTabStore } from '../../state/useTabStore';
 import { useUiStore } from '../../state/useUiStore';
+import * as uiStore from '../../state/uiStore';
 import HomePage from '../../pages/HomePage';
 import ChatPage from '../../pages/ChatPage';
 import SettingsPage from '../../pages/SettingsPage';
 import AutomationPage from '../../pages/AutomationPage';
 import PluginsPage from '../../pages/PluginsPage';
 import ArtifactsPage from '../../pages/ArtifactsPage';
+import ToastContainer from '../ui/ToastContainer';
+import GlobalCommandPalette from './GlobalCommandPalette';
 
 /**
- * Mounts every open workspace tab at once and hides inactive ones with an
- * inline `display: none` (same keep-alive trick as winlume WorkspaceTabsHost).
- * Switching tabs therefore never remounts ChatPage — composer drafts, scroll
- * position, and in-flight streams all survive.
+ * The full app shell: title bar, sidebar, and tab-switched main stage.
  */
 export default function MainLayout() {
   const tabs = useTabStore((s) => s.tabs);
   const activeTabId = useTabStore((s) => s.activeTabId);
   const activeTab = tabs.find((t) => t.id === activeTabId);
-  const workspacePath = useSettingsStore((s) => s.settings.workspacePath);
   const mode = useUiStore((s) => s.mode);
-  const [treeOpen, setTreeOpen] = useState(true);
+  const rightPanelTab = useUiStore((s) => s.rightPanelTab);
   const isChatView = mode === 'chat' || mode === 'projects';
-  const isWorkbench = isChatView && (activeTab?.kind === 'chat' || activeTab?.kind === 'launcher');
-  const showWorkspace = Boolean(workspacePath) && isWorkbench && treeOpen;
-  const artifactsOpen = useUiStore((s) => s.artifactsOpen);
-  const canvasOpen = useUiStore((s) => s.canvasOpen);
-  const showArtifacts = isChatView && activeTab?.kind === 'chat' && artifactsOpen;
-  const showCanvas = isChatView && activeTab?.kind === 'chat' && canvasOpen;
-  const showRight = showWorkspace || showArtifacts || showCanvas;
+  const showRight = isChatView && rightPanelTab !== null;
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-paper text-ink">
@@ -54,8 +45,8 @@ export default function MainLayout() {
                     <ChatPage
                       sessionId={tab.sessionId}
                       active={active}
-                      onToggleTree={() => setTreeOpen((o) => !o)}
-                      treeOpen={showWorkspace}
+                      onToggleTree={() => uiStore.toggleRightPanelTab('files')}
+                      treeOpen={rightPanelTab === 'files'}
                     />
                   )}
                 </div>
@@ -71,14 +62,15 @@ export default function MainLayout() {
             </div>
           )}
         </main>
-        {showRight && (
+        {showRight && rightPanelTab && (
           <RightPanel
             sessionId={activeTab?.kind === 'chat' ? activeTab.sessionId : undefined}
-            showWorkspace={showWorkspace}
-            preferCanvas={showCanvas && !showArtifacts}
+            activeTab={rightPanelTab}
           />
         )}
       </div>
+      <ToastContainer />
+      <GlobalCommandPalette />
     </div>
   );
 }

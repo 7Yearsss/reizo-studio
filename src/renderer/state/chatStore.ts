@@ -15,7 +15,7 @@ import * as settingsStore from './settingsStore';
 import * as tabStore from './tabStore';
 import * as uiStore from './uiStore';
 import * as canvasStore from './canvasStore';
-import { trailEntryFromTool, UNDOABLE_TRAIL_VERBS } from '../../shared/agentTrail';
+import { isCanvasTool, trailEntryFromTool, UNDOABLE_TRAIL_VERBS } from '../../shared/agentTrail';
 import * as artifactStore from './artifactStore';
 import { appendTerminalLine } from './terminalStore';
 
@@ -612,14 +612,17 @@ function makeEventFolder(
         finishThinkingActivity(acc);
         const part = upsertToolPart(acc, event);
         upsertToolActivity(acc, part);
-        // The agent touched the canvas — record a trail entry, spotlight the
+        // The agent touched the canvas — open panel, record a trail entry, spotlight the
         // affected nodes, and (P0-2) batch structural writes into the undo stack.
         {
+          if (
+            event.name === 'open_canvas' ||
+            (isCanvasTool(event.name) && event.name !== 'read_canvas' && event.name !== 'read_node')
+          ) {
+            uiStore.setRightPanelTab('canvas');
+          }
           const trail = trailEntryFromTool(event);
           if (trail) {
-            if (event.name === 'add_node' || event.name === 'create_storyboard_pipeline') {
-              uiStore.setCanvasOpen(true);
-            }
             canvasStore.pushTrail(sessionId, trail);
             if (trail.nodeIds.length > 0) canvasStore.spotlight(sessionId, trail.nodeIds);
             if (trail.status === 'done' && UNDOABLE_TRAIL_VERBS.has(trail.verb)) {

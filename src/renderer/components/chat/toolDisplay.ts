@@ -32,6 +32,10 @@ export function toolLabel(name: string): string {
     case 'run_command': return '运行命令';
     case 'todo_write': return '更新计划';
     case 'ask_user': return '等待你的回答';
+    case 'open_canvas': return '打开画布';
+    case 'create_storyboard_pipeline': return '编排分镜流水线';
+    case 'attach_reference': return '挂载参考图';
+    case 'group_nodes': return '成组节点';
     case 'add_node': return '画布加节点';
     case 'run_node': return '运行画布节点';
     case 'run_graph': return '运行画布';

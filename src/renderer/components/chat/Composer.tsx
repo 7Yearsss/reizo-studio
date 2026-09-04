@@ -339,7 +339,7 @@ export default function Composer({
                     ? [{ value: 'mention', label: '引用文件', description: '插入 @ 路径', icon: <AtSign size={14} /> }]
                     : []),
                   ...(onToggleTree && workspacePath
-                    ? [{ value: 'tree', label: '右侧面板', icon: <FolderTree size={14} /> }]
+                    ? [{ value: 'tree', label: '工作区文件', icon: <FolderTree size={14} /> }]
                     : []),
                 ]}
                 onAction={(action) => {

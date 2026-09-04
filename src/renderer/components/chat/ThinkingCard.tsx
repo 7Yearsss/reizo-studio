@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ChevronRight, Sparkles } from 'lucide-react';
 import { cn } from '../../lib/cn';
+import { ReasoningText } from '../agents/loading-states/reasoning-text';
 
 /** `Xs` for under a minute, `Xm Ys` above. Floors at 1s so it's never "0s". */
 export function formatThinkingDuration(ms: number): string {
@@ -11,11 +12,16 @@ export function formatThinkingDuration(ms: number): string {
   return s === 0 ? `${m}m` : `${m}m ${s}s`;
 }
 
+const THINKING_PHRASES = [
+  '正在推理分析',
+  '正在检索上下文',
+  '连接逻辑与约束',
+  '推导最佳方案',
+  '组织回复语言',
+];
+
 /**
- * Collapsible model-reasoning block, shown above the assistant's answer.
- * Mirrors cindy's ThinkingCard: chromeless header row, collapsed by default
- * in every state, a live elapsed counter while streaming, a frozen
- * "已思考 Xs" once done, and a left-railed italic body when expanded.
+ * Collapsible model-reasoning block with beUI ReasoningText.
  */
 export default function ThinkingCard({
   content,
@@ -34,13 +40,11 @@ export default function ThinkingCard({
   useEffect(() => {
     if (!streaming || !startedAt) return;
     setElapsed(Date.now() - startedAt);
-    const id = setInterval(() => setElapsed(Date.now() - startedAt), 500);
+    const id = setInterval(() => setElapsed(Date.now() - startedAt), 250);
     return () => clearInterval(id);
   }, [streaming, startedAt]);
 
-  const shownMs = streaming
-    ? elapsed
-    : (durationMs ?? (startedAt ? Date.now() - startedAt : 0));
+  const shownMs = streaming ? elapsed : durationMs ?? (startedAt ? Date.now() - startedAt : 0);
 
   return (
     <div className="w-full">
@@ -48,19 +52,25 @@ export default function ThinkingCard({
         type="button"
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
-        className="flex w-full select-none items-center gap-1.5 py-0.5 text-left text-ink-muted transition-opacity duration-150 hover:opacity-80"
+        className="flex w-full select-none items-center gap-2 py-1 text-left text-ink-muted transition-opacity duration-150 hover:opacity-80"
       >
-        <Sparkles size={13} className="shrink-0" />
-        <span className="text-[13px]">{streaming ? '思考中' : `已思考 ${formatThinkingDuration(shownMs)}`}</span>
-        {streaming && (
-          <span className="flex items-center gap-[3px]">
-            <Dot delay={0} />
-            <Dot delay={150} />
-            <Dot delay={300} />
-          </span>
-        )}
-        {streaming && startedAt && (
-          <span className="font-mono text-[11px] tabular-nums">{formatThinkingDuration(shownMs)}</span>
+        <Sparkles size={13} className="shrink-0 text-accent" />
+        {streaming ? (
+          <div className="flex items-center gap-2">
+            <ReasoningText
+              phrases={THINKING_PHRASES}
+              variant="swap"
+              interval={2600}
+              className="text-[12px] text-ink"
+            />
+            {startedAt && (
+              <span className="font-mono text-[11px] tabular-nums text-ink-muted">
+                {formatThinkingDuration(shownMs)}
+              </span>
+            )}
+          </div>
+        ) : (
+          <span className="text-[12px]">已思考 {formatThinkingDuration(shownMs)}</span>
         )}
         <ChevronRight
           size={13}
@@ -69,9 +79,9 @@ export default function ThinkingCard({
       </button>
 
       {expanded && (
-        <div className="mt-1 border-l-2 border-line py-1 pl-3">
+        <div className="mt-1.5 border-l-2 border-line/70 py-1 pl-3">
           {content ? (
-            <p className="text-[13px] leading-relaxed whitespace-pre-wrap text-ink-muted italic select-text">
+            <p className="text-[13px] leading-relaxed whitespace-pre-wrap text-ink-muted/90 italic select-text font-serif">
               {content}
             </p>
           ) : (
@@ -80,14 +90,5 @@ export default function ThinkingCard({
         </div>
       )}
     </div>
-  );
-}
-
-function Dot({ delay }: { delay: number }) {
-  return (
-    <span
-      className="size-1 animate-pulse rounded-full bg-ink-muted"
-      style={{ animationDelay: `${delay}ms` }}
-    />
   );
 }

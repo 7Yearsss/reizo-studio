@@ -83,6 +83,8 @@ import AgentActivityStrip from './AgentActivityStrip';
 import StoryboardModal from './StoryboardModal';
 import CuttableEdge from './edges/CuttableEdge';
 import ErrorBoundary from '../ErrorBoundary';
+import Tooltip from '../ui/Tooltip';
+import { motion, AnimatePresence } from 'motion/react';
 
 const NODE_TYPES: NodeTypes = {
   image: ImageNode,
@@ -1831,19 +1833,21 @@ function NavButton({
   disabled?: boolean;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      aria-pressed={active}
-      className={cn(
-        'flex h-7 w-7 items-center justify-center rounded-lg text-ink-muted transition-colors hover:bg-paper-inset hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent',
-        active && '!bg-paper-inset !text-ink',
-      )}
-    >
-      {children}
-    </button>
+    <Tooltip content={title} side="top">
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        aria-label={title}
+        aria-pressed={active}
+        className={cn(
+          'flex h-7 w-7 items-center justify-center rounded-lg text-ink-muted transition-colors hover:bg-paper-inset hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent',
+          active && '!bg-paper-inset !text-ink',
+        )}
+      >
+        {children}
+      </button>
+    </Tooltip>
   );
 }
 
@@ -1878,7 +1882,7 @@ function ToolbarDropdown({
         type="button"
         onClick={onToggle}
         className={cn(
-          'canvas-tool',
+          'canvas-tool transition-colors',
           compact && '!px-1.5',
           primary && '!bg-ink !text-paper-raised',
           open && !primary && '!bg-paper-inset !text-ink',
@@ -1887,27 +1891,35 @@ function ToolbarDropdown({
       >
         {icon}
         {label && !compact ? label : null}
-        {!compact ? <ChevronDown size={11} className={cn('transition-transform', open && 'rotate-180')} /> : null}
+        {!compact ? <ChevronDown size={11} className={cn('transition-transform duration-150', open && 'rotate-180')} /> : null}
       </button>
-      {open ? (
-        <div className="absolute left-0 top-full z-50 mt-1 min-w-40 overflow-hidden rounded-lg border border-line bg-paper-raised py-1 text-xs shadow-xl">
-          {items.map((item) => (
-            <button
-              key={item.label}
-              type="button"
-              disabled={item.disabled}
-              onClick={() => {
-                onToggle();
-                item.onClick();
-              }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-ink hover:bg-paper-inset disabled:opacity-40 disabled:hover:bg-transparent"
-            >
-              {item.icon}
-              {item.label}
-            </button>
-          ))}
-        </div>
-      ) : null}
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: 6, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 4, scale: 0.96 }}
+            transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
+            className="absolute left-0 top-full z-50 mt-1 min-w-40 overflow-hidden rounded-xl border border-line bg-paper-raised p-1 text-xs shadow-xl backdrop-blur-xl"
+          >
+            {items.map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                disabled={item.disabled}
+                onClick={() => {
+                  onToggle();
+                  item.onClick();
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-ink hover:bg-paper-inset disabled:opacity-40 disabled:hover:bg-transparent transition-colors"
+              >
+                {item.icon}
+                <span>{item.label}</span>
+              </button>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

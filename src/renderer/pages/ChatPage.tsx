@@ -1,14 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FolderKanban, Search, Workflow } from 'lucide-react';
 import * as chatStore from '../state/chatStore';
-import * as uiStore from '../state/uiStore';
+import * as tabStore from '../state/tabStore';
 import { useChatStore } from '../state/useChatStore';
-import { useUiStore } from '../state/useUiStore';
 import MessageList from '../components/chat/MessageList';
 import Composer from '../components/chat/Composer';
 import ChatSearchPanel from '../components/chat/ChatSearchPanel';
+import TopRightToolbar from '../components/chat/TopRightToolbar';
 import { collectMessageMatches } from '../lib/highlightText';
-import { cn } from '../lib/cn';
 import type { ReplyPhase } from '../components/chat/ReplyStatusBar';
 import { liveReplyPhase } from '../state/liveReply';
 
@@ -48,8 +46,6 @@ export default function ChatPage({
     const ended = summary.lastTurnEndedAt ? Date.parse(summary.lastTurnEndedAt) : 0;
     return started > ended && !s.sendingBySession[sessionId] && !s.interruptDismissedBySession[sessionId];
   });
-  const artifactsOpen = useUiStore((s) => s.artifactsOpen);
-  const canvasOpen = useUiStore((s) => s.canvasOpen);
   const [renaming, setRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState(session?.title ?? '');
   const [searchOpen, setSearchOpen] = useState(false);
@@ -143,42 +139,21 @@ export default function ChatPage({
             {session?.title ?? '对话'}
           </button>
         )}
-        <button
-          type="button"
-          onClick={() => setSearchOpen((open) => !open)}
-          className={cn(
-            'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] transition-colors duration-150',
-            searchOpen ? 'bg-paper-inset text-ink' : 'text-ink-muted hover:bg-paper-inset/70 hover:text-ink',
-          )}
-          title="搜索对话 (Ctrl/⌘F)"
-        >
-          <Search size={13} />
-          搜索
-        </button>
-        <button
-          type="button"
-          onClick={() => uiStore.toggleArtifacts()}
-          className={cn(
-            'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] transition-colors duration-150',
-            artifactsOpen ? 'bg-paper-inset text-ink' : 'text-ink-muted hover:bg-paper-inset/70 hover:text-ink',
-          )}
-          title="本会话作品"
-        >
-          <FolderKanban size={13} />
-          作品
-        </button>
-        <button
-          type="button"
-          onClick={() => uiStore.toggleCanvas()}
-          className={cn(
-            'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] transition-colors duration-150',
-            canvasOpen ? 'bg-paper-inset text-ink' : 'text-ink-muted hover:bg-paper-inset/70 hover:text-ink',
-          )}
-          title="画布"
-        >
-          <Workflow size={13} />
-          画布
-        </button>
+        <TopRightToolbar
+          sessionId={sessionId}
+          onSearch={() => setSearchOpen((open) => !open)}
+          searchOpen={searchOpen}
+          onRename={() => {
+            setTitleDraft(session?.title ?? '');
+            setRenaming(true);
+          }}
+          onDelete={() => {
+            if (confirm('确定要删除此对话吗？')) {
+              tabStore.closeSessionTabs(sessionId);
+              void chatStore.deleteSession(sessionId);
+            }
+          }}
+        />
       </header>
       {searchOpen && (
         <ChatSearchPanel

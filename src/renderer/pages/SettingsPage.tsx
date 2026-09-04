@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Check, FolderOpen, KeyRound } from 'lucide-react';
+import { motion } from 'motion/react';
 import { cn } from '../lib/cn';
 import { APP_NAME, APP_VERSION } from '../../shared/constants';
 import type { Appearance, PermissionMode, PublicProvider } from '../../shared/settings';
@@ -8,6 +9,9 @@ import * as settingsStore from '../state/settingsStore';
 import * as api from '../api';
 import * as tabStore from '../state/tabStore';
 import * as uiStore from '../state/uiStore';
+import { toast } from '../lib/toast';
+import { StatefulButton, type ButtonState } from '../components/motion/button/stateful';
+import { Input } from '../components/motion/input';
 
 type SectionId = 'general' | 'providers' | 'about';
 
@@ -29,14 +33,25 @@ export default function SettingsPage() {
             key={id}
             onClick={() => setSection(id)}
             className={cn(
-              'relative w-full rounded-lg px-3 py-2 text-left text-sm text-ink-muted hover:bg-paper-inset/70',
-              section === id && 'bg-paper-inset/80 font-medium text-ink',
+              'relative w-full rounded-lg px-3 py-2 text-left text-sm transition-colors duration-150',
+              section === id ? 'font-medium text-ink' : 'text-ink-muted hover:bg-paper-inset/70 hover:text-ink',
             )}
           >
             {section === id && (
-              <span className="absolute top-1/2 left-0 h-4 w-0.5 -translate-y-1/2 rounded-full bg-accent" />
+              <motion.span
+                layoutId="settings-nav-active"
+                className="absolute inset-0 rounded-lg bg-paper-inset/80"
+                transition={{ type: 'spring', stiffness: 450, damping: 35 }}
+              />
             )}
-            {label}
+            {section === id && (
+              <motion.span
+                layoutId="settings-nav-indicator"
+                className="absolute top-1/2 left-0 h-4 w-0.5 -translate-y-1/2 rounded-full bg-accent"
+                transition={{ type: 'spring', stiffness: 450, damping: 35 }}
+              />
+            )}
+            <span className="relative z-10">{label}</span>
           </button>
         ))}
       </nav>
@@ -57,7 +72,7 @@ function GeneralSection() {
     <div className="max-w-2xl">
       <h1 className="mb-1 text-xl font-semibold tracking-tight">通用</h1>
       <p className="mb-8 text-sm text-ink-muted">
-        外观和工作区。数据保存在本机。全局快捷键 Ctrl/⌘+Shift+Space 唤起窗口。
+        外观和工作区。数据保存在本机。全局快捷键 Ctrl/⌘+K 呼出命令面板。
       </p>
 
       <h2 className="mb-3 text-sm font-medium">外观</h2>
@@ -66,18 +81,28 @@ function GeneralSection() {
           ['system', '跟随系统'],
           ['light', '浅色'],
           ['dark', '深色'],
-        ] as [Appearance, string][]).map(([id, label]) => (
-          <button
-            key={id}
-            onClick={() => void settingsStore.patchSettings({ appearance: id })}
-            className={cn(
-              'rounded-full px-4 py-1.5 text-sm',
-              settings.appearance === id ? 'bg-ink text-paper-raised' : 'bg-paper-inset text-ink hover:bg-paper-inset/80',
-            )}
-          >
-            {label}
-          </button>
-        ))}
+        ] as [Appearance, string][]).map(([id, label]) => {
+          const active = settings.appearance === id;
+          return (
+            <button
+              key={id}
+              onClick={() => void settingsStore.patchSettings({ appearance: id })}
+              className={cn(
+                'relative rounded-full px-4 py-1.5 text-sm transition-colors duration-150',
+                active ? 'font-medium text-paper-raised' : 'text-ink hover:bg-paper-inset/80',
+              )}
+            >
+              {active && (
+                <motion.span
+                  layoutId="appearance-active"
+                  className="absolute inset-0 rounded-full bg-ink"
+                  transition={{ type: 'spring', stiffness: 450, damping: 35 }}
+                />
+              )}
+              <span className="relative z-10">{label}</span>
+            </button>
+          );
+        })}
       </div>
 
       <h2 className="mb-3 text-sm font-medium">权限</h2>
@@ -87,18 +112,28 @@ function GeneralSection() {
           ['ask', '每次询问'],
           ['workspace', '工作区可写，命令仍询问'],
           ['full', '工作区内全部允许'],
-        ] as [PermissionMode, string][]).map(([id, label]) => (
-          <button
-            key={id}
-            onClick={() => void settingsStore.patchSettings({ permissionMode: id })}
-            className={cn(
-              'rounded-full px-4 py-1.5 text-sm',
-              settings.permissionMode === id ? 'bg-ink text-paper-raised' : 'bg-paper-inset text-ink hover:bg-paper-inset/80',
-            )}
-          >
-            {label}
-          </button>
-        ))}
+        ] as [PermissionMode, string][]).map(([id, label]) => {
+          const active = settings.permissionMode === id;
+          return (
+            <button
+              key={id}
+              onClick={() => void settingsStore.patchSettings({ permissionMode: id })}
+              className={cn(
+                'relative rounded-full px-4 py-1.5 text-sm transition-colors duration-150',
+                active ? 'font-medium text-paper-raised' : 'text-ink hover:bg-paper-inset/80',
+              )}
+            >
+              {active && (
+                <motion.span
+                  layoutId="permission-active"
+                  className="absolute inset-0 rounded-full bg-ink"
+                  transition={{ type: 'spring', stiffness: 450, damping: 35 }}
+                />
+              )}
+              <span className="relative z-10">{label}</span>
+            </button>
+          );
+        })}
       </div>
 
       <h2 className="mb-3 text-sm font-medium">工作区</h2>
@@ -110,7 +145,10 @@ function GeneralSection() {
         <button
           onClick={async () => {
             const path = await api.pickFolder();
-            if (path) await settingsStore.patchSettings({ workspacePath: path });
+            if (path) {
+              await settingsStore.patchSettings({ workspacePath: path });
+              toast.success('工作区已更新');
+            }
           }}
           className="rounded-full bg-paper-inset px-3 py-2 text-sm text-ink hover:bg-paper-inset/80"
         >
@@ -118,7 +156,10 @@ function GeneralSection() {
         </button>
         {settings.workspacePath && (
           <button
-            onClick={() => void settingsStore.patchSettings({ workspacePath: null })}
+            onClick={() => {
+              void settingsStore.patchSettings({ workspacePath: null });
+              toast.info('已清除工作区绑定');
+            }}
             className="text-sm text-danger"
           >
             清除
@@ -152,34 +193,52 @@ function ProviderCard({ provider }: { provider: PublicProvider }) {
   const [editing, setEditing] = useState(!provider.hasKey);
   const [baseUrl, setBaseUrl] = useState(provider.baseUrl);
   const [customModel, setCustomModel] = useState(provider.model);
+  const [saveState, setSaveState] = useState<ButtonState>('idle');
 
   async function handleSave() {
-    if (provider.allowCustomBaseUrl) {
+    setSaveState('loading');
+    try {
+      if (provider.allowCustomBaseUrl) {
+        await settingsStore.patchSettings({
+          provider: {
+            id: provider.id,
+            apiKey: keyInput.trim() || undefined,
+            baseUrl,
+            model: customModel,
+          },
+          activeProviderId: provider.id,
+        });
+        setKeyInput('');
+        setEditing(false);
+        setSaveState('success');
+        toast.success(`${provider.name} 配置已保存`);
+        setTimeout(() => setSaveState('idle'), 2000);
+        return;
+      }
+      if (!keyInput.trim()) {
+        setSaveState('idle');
+        return;
+      }
       await settingsStore.patchSettings({
-        provider: {
-          id: provider.id,
-          apiKey: keyInput.trim() || undefined,
-          baseUrl,
-          model: customModel,
-        },
+        provider: { id: provider.id, apiKey: keyInput.trim() },
         activeProviderId: provider.id,
       });
       setKeyInput('');
       setEditing(false);
-      return;
+      setSaveState('success');
+      toast.success(`${provider.name} 密钥已保存`);
+      setTimeout(() => setSaveState('idle'), 2000);
+    } catch {
+      setSaveState('error');
+      toast.error('保存失败，请检查配置');
+      setTimeout(() => setSaveState('idle'), 2500);
     }
-    if (!keyInput.trim()) return;
-    await settingsStore.patchSettings({
-      provider: { id: provider.id, apiKey: keyInput.trim() },
-      activeProviderId: provider.id,
-    });
-    setKeyInput('');
-    setEditing(false);
   }
 
   async function handleClear() {
     await settingsStore.patchSettings({ provider: { id: provider.id, apiKey: '' } });
     setEditing(true);
+    toast.info(`${provider.name} 密钥已移除`);
   }
 
   return (
@@ -196,17 +255,17 @@ function ProviderCard({ provider }: { provider: PublicProvider }) {
 
       {provider.allowCustomBaseUrl && (
         <div className="mb-3 space-y-2">
-          <input
+          <Input
             value={baseUrl}
-            onChange={(e) => setBaseUrl(e.target.value)}
+            onChange={(val) => setBaseUrl(val)}
             placeholder="Base URL，例如 https://api.example.com/v1"
-            className="w-full rounded-full bg-paper px-3 py-2 text-sm text-ink outline-none"
+            className="w-full text-xs"
           />
-          <input
+          <Input
             value={customModel}
-            onChange={(e) => setCustomModel(e.target.value)}
-            placeholder="模型 id"
-            className="w-full rounded-full bg-paper px-3 py-2 text-sm text-ink outline-none"
+            onChange={(val) => setCustomModel(val)}
+            placeholder="模型 ID，例如 deepseek-chat"
+            className="w-full text-xs"
           />
         </div>
       )}
@@ -222,25 +281,29 @@ function ProviderCard({ provider }: { provider: PublicProvider }) {
           </span>
         </div>
       ) : (
-        <div className="flex items-center gap-2 rounded-full bg-paper px-3 py-2.5 focus-within:ring-1 focus-within:ring-accent">
-          <KeyRound size={14} className="shrink-0 text-ink-muted" />
-          <input
-            type="password"
-            value={keyInput}
-            onChange={(e) => setKeyInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void handleSave();
-            }}
-            placeholder={provider.id === 'reizo' ? '粘贴虚拟 sk-... 密钥' : '输入 API Key'}
-            className="flex-1 bg-transparent text-sm text-ink placeholder:text-ink-muted focus:outline-none"
-          />
-          <button
+        <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <Input
+              type="password"
+              value={keyInput}
+              onChange={(val) => setKeyInput(val)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void handleSave();
+              }}
+              placeholder={provider.id === 'reizo' ? '粘贴虚拟 sk-... 密钥' : '输入 API Key'}
+              leftIcon={<KeyRound size={14} className="text-ink-muted" />}
+              className="w-full text-sm"
+            />
+          </div>
+          <StatefulButton
+            state={saveState}
             onClick={() => void handleSave()}
             disabled={!provider.allowCustomBaseUrl && !keyInput.trim()}
-            className="text-xs font-medium text-accent disabled:opacity-30"
+            size="sm"
+            className="shrink-0"
           >
             保存
-          </button>
+          </StatefulButton>
         </div>
       )}
 

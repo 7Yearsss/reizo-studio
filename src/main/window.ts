@@ -1,4 +1,5 @@
-import { BrowserWindow, nativeTheme } from 'electron';
+import { app, BrowserWindow, nativeTheme } from 'electron';
+import fs from 'node:fs';
 import path from 'node:path';
 
 let mainWindow: BrowserWindow | null = null;
@@ -12,6 +13,22 @@ export function isQuitting(): boolean {
   return quitting;
 }
 
+export function getAppIcon(): string | undefined {
+  const iconName = process.platform === 'win32' ? 'icon.ico' : 'icon.png';
+  const candidates = [
+    path.join(process.cwd(), 'resources', iconName),
+    path.join(app.getAppPath(), 'resources', iconName),
+    path.resolve(__dirname, '../../resources', iconName),
+    path.resolve(__dirname, '../resources', iconName),
+    path.join(process.cwd(), 'resources', 'icon.png'),
+    path.join(app.getAppPath(), 'resources', 'icon.png'),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return undefined;
+}
+
 export function createMainWindow(): BrowserWindow {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.show();
@@ -20,6 +37,7 @@ export function createMainWindow(): BrowserWindow {
   }
 
   const isMac = process.platform === 'darwin';
+  const iconPath = getAppIcon();
 
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -28,6 +46,7 @@ export function createMainWindow(): BrowserWindow {
     minHeight: 600,
     show: false,
     frame: isMac,
+    icon: iconPath,
     titleBarStyle: isMac ? 'hiddenInset' : undefined,
     trafficLightPosition: isMac ? { x: 16, y: 12 } : undefined,
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#0d0d0d' : '#faf6ee',
@@ -39,6 +58,10 @@ export function createMainWindow(): BrowserWindow {
       sandbox: true,
     },
   });
+
+  if (iconPath && process.platform === 'win32') {
+    mainWindow.setIcon(iconPath);
+  }
 
   mainWindow.webContents.on('did-fail-load', (_event, code, desc, url) => {
     console.error('[did-fail-load]', code, desc, url);
