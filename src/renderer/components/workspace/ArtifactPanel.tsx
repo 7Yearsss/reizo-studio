@@ -7,7 +7,6 @@ import {
   FileText,
   FolderKanban,
   Image as ImageIcon,
-  LoaderCircle,
   RefreshCw,
   Square,
   Trash2,
@@ -21,6 +20,9 @@ import * as api from '../../api';
 import { useArtifactStore } from '../../state/useArtifactStore';
 import * as artifactStore from '../../state/artifactStore';
 import ArtifactPreview from './ArtifactPreview';
+import Tooltip from '../ui/Tooltip';
+import { Loader } from '../motion/loader';
+import { toast } from '../../lib/toast';
 
 const KIND_LABELS: Record<ArtifactKind, string> = {
   markdown: 'Markdown',
@@ -102,7 +104,10 @@ export default function ArtifactPanel({ sessionId }: { sessionId: string }) {
       })
       .catch(swallowNull);
     await artifactStore.loadSessionArtifacts(sessionId);
-    if (created) setSelectedId(created.id);
+    if (created) {
+      setSelectedId(created.id);
+      toast.success(`已创建「${tpl.fileName}」`);
+    }
   }
 
   useEffect(() => {
@@ -142,6 +147,7 @@ export default function ArtifactPanel({ sessionId }: { sessionId: string }) {
       }),
     );
     await artifactStore.loadSessionArtifacts(sessionId);
+    toast.success(`已上传 ${list.length} 个作品`);
   }
 
   function toggleCheck(id: string) {
@@ -159,6 +165,7 @@ export default function ArtifactPanel({ sessionId }: { sessionId: string }) {
     await Promise.all(ids.map((id) => api.deleteArtifact(id).catch(swallow)));
     setChecked(new Set());
     await artifactStore.loadSessionArtifacts(sessionId);
+    toast.success(`已删除 ${ids.length} 个作品`);
   }
 
   async function downloadChecked() {
@@ -216,14 +223,15 @@ export default function ArtifactPanel({ sessionId }: { sessionId: string }) {
           )}
         </h2>
         <div className="relative flex items-center gap-0.5">
-          <button
-            type="button"
-            onClick={() => setNewMenu((v) => !v)}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-paper-inset hover:text-ink"
-            title="新建文档"
-          >
-            <FilePlus2 className="h-3.5 w-3.5" />
-          </button>
+          <Tooltip content="新建文档">
+            <button
+              type="button"
+              onClick={() => setNewMenu((v) => !v)}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-paper-inset hover:text-ink transition-colors"
+            >
+              <FilePlus2 className="h-3.5 w-3.5" />
+            </button>
+          </Tooltip>
           {newMenu && (
             <div className="absolute right-0 top-8 z-20 w-36 rounded-lg border border-line bg-paper-raised py-1 shadow-lg">
               {DOC_TEMPLATES.map((t) => (
@@ -238,34 +246,37 @@ export default function ArtifactPanel({ sessionId }: { sessionId: string }) {
               ))}
             </div>
           )}
-          <button
-            type="button"
-            onClick={() => fileInput.current?.click()}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-paper-inset hover:text-ink"
-            title="上传文件"
-          >
-            <Upload className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setPicking((v) => !v)}
-            className={cn(
-              'inline-flex h-7 w-7 items-center justify-center rounded-md hover:bg-paper-inset hover:text-ink',
-              selecting ? 'text-accent' : 'text-ink-muted',
-            )}
-            title="多选"
-          >
-            <CheckSquare className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => void artifactStore.loadSessionArtifacts(sessionId)}
-            disabled={loading}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-paper-inset hover:text-ink disabled:opacity-50"
-            title="刷新"
-          >
-            <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
-          </button>
+          <Tooltip content="上传文件">
+            <button
+              type="button"
+              onClick={() => fileInput.current?.click()}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-paper-inset hover:text-ink transition-colors"
+            >
+              <Upload className="h-3.5 w-3.5" />
+            </button>
+          </Tooltip>
+          <Tooltip content="多选模式">
+            <button
+              type="button"
+              onClick={() => setPicking((v) => !v)}
+              className={cn(
+                'inline-flex h-7 w-7 items-center justify-center rounded-md hover:bg-paper-inset hover:text-ink transition-colors',
+                selecting ? 'text-accent' : 'text-ink-muted',
+              )}
+            >
+              <CheckSquare className="h-3.5 w-3.5" />
+            </button>
+          </Tooltip>
+          <Tooltip content="刷新列表">
+            <button
+              type="button"
+              onClick={() => void artifactStore.loadSessionArtifacts(sessionId)}
+              disabled={loading}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-paper-inset hover:text-ink disabled:opacity-50 transition-colors"
+            >
+              <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
+            </button>
+          </Tooltip>
         </div>
       </div>
 
@@ -291,7 +302,7 @@ export default function ArtifactPanel({ sessionId }: { sessionId: string }) {
       <div className="min-h-0 flex-1 overflow-y-auto">
         {loading && artifacts.length === 0 ? (
           <div className="flex items-center gap-2 px-3 py-6 text-xs text-ink-muted">
-            <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+            <Loader variant="spinner" size={14} />
             加载中…
           </div>
         ) : artifacts.length === 0 ? (

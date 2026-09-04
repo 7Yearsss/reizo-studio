@@ -21,6 +21,10 @@ if (started) {
   app.quit();
 }
 
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.reizo.studio');
+}
+
 // Containerized/headless dev sandboxes often can't launch Chromium's GPU/
 // zygote sandbox at all. Opt-in only (never set in a real user's packaged
 // build) via REIZO_DEV_NO_SANDBOX=1, purely so `npm start` is testable here.

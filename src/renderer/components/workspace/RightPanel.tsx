@@ -1,5 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
-import { Maximize2, Minimize2, X } from 'lucide-react';
+import { useRef } from 'react';
+import {
+  Maximize2,
+  Minimize2,
+  X,
+  Workflow,
+  FolderKanban,
+  FolderTree,
+  GitBranch,
+  Terminal,
+} from 'lucide-react';
+import { motion } from 'motion/react';
 import { cn } from '../../lib/cn';
 import * as uiStore from '../../state/uiStore';
 import { useUiStore } from '../../state/useUiStore';
@@ -8,43 +18,29 @@ import GitPanel from './GitPanel';
 import TerminalPanel from './TerminalPanel';
 import ArtifactPanel from './ArtifactPanel';
 import CanvasPanel from '../canvas/CanvasPanel';
+import Tooltip from '../ui/Tooltip';
 
-type PanelTab = 'canvas' | 'artifacts' | 'files' | 'git' | 'terminal';
-
-const LABELS: Record<PanelTab, string> = {
-  canvas: '画布',
-  artifacts: '作品',
-  files: '文件',
-  git: 'Git',
-  terminal: '终端',
+const PANEL_METAS: Record<
+  uiStore.RightPanelTab,
+  { label: string; icon: React.ComponentType<{ size?: number; className?: string }> }
+> = {
+  canvas: { label: '画布', icon: Workflow },
+  artifacts: { label: '作品', icon: FolderKanban },
+  files: { label: '文件', icon: FolderTree },
+  git: { label: 'Git', icon: GitBranch },
+  terminal: { label: '终端', icon: Terminal },
 };
 
 export default function RightPanel({
   sessionId,
-  showWorkspace,
-  preferCanvas,
+  activeTab,
 }: {
   sessionId?: string;
-  showWorkspace?: boolean;
-  preferCanvas?: boolean;
+  activeTab: uiStore.RightPanelTab;
 }) {
-  const workspace = Boolean(showWorkspace);
   const storedWidth = useUiStore((s) => s.rightPanelWidth);
   const maximized = useUiStore((s) => s.rightPanelMaximized);
   const width = maximized ? Math.min(1200, Math.round(window.innerWidth * 0.78)) : storedWidth;
-  const visible: PanelTab[] = [
-    ...(sessionId ? (['canvas', 'artifacts'] as const) : []),
-    ...(workspace ? (['files', 'git', 'terminal'] as const) : []),
-  ];
-  const [tab, setTab] = useState<PanelTab>(
-    preferCanvas && sessionId ? 'canvas' : sessionId ? 'artifacts' : visible[0] ?? 'files',
-  );
-  const active = visible.includes(tab) ? tab : visible[0];
-
-  // When the agent auto-opens the canvas, surface that tab.
-  useEffect(() => {
-    if (preferCanvas && sessionId) setTab('canvas');
-  }, [preferCanvas, sessionId]);
 
   const dragging = useRef(false);
   const startX = useRef(0);
@@ -65,8 +61,6 @@ export default function RightPanel({
     (e.target as HTMLElement).releasePointerCapture(e.pointerId);
   };
 
-  if (visible.length === 0) return null;
-
   return (
     <aside
       className="relative flex h-full shrink-0 flex-col border-l border-line bg-sidebar"
@@ -83,50 +77,71 @@ export default function RightPanel({
           <span className="h-8 w-1 rounded-full bg-line opacity-0 transition-opacity group-hover:opacity-100" />
         </div>
       )}
-      <div className="flex items-center gap-1 px-2 pt-2">
-        {visible.map((id) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setTab(id)}
-            className={cn(
-              'rounded-full px-3 py-1 text-xs',
-              active === id ? 'bg-paper text-ink' : 'text-ink-muted hover:bg-paper-inset/70',
-            )}
-          >
-            {LABELS[id]}
-          </button>
-        ))}
-        <div className="ml-auto flex items-center gap-0.5">
-          <button
-            type="button"
-            onClick={() => uiStore.toggleRightPanelMaximized()}
-            className="rounded-full p-1.5 text-ink-muted hover:bg-paper-inset/70"
-            title={maximized ? '还原宽度' : '最大化面板'}
-          >
-            {maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-          </button>
-          {sessionId && (
+      <div className="flex h-10 items-center justify-between border-b border-line/60 px-2.5">
+        <div className="flex items-center gap-0.5">
+          {(Object.keys(PANEL_METAS) as uiStore.RightPanelTab[]).map((tabKey) => {
+            const item = PANEL_METAS[tabKey];
+            const ItemIcon = item.icon;
+            const active = activeTab === tabKey;
+            return (
+              <Tooltip key={tabKey} content={item.label} side="bottom">
+                <button
+                  type="button"
+                  onClick={() => uiStore.setRightPanelTab(tabKey)}
+                  className={cn(
+                    'relative flex h-7 items-center gap-1.5 rounded-lg px-2 text-xs transition-colors duration-150',
+                    active ? 'font-medium text-ink' : 'text-ink-muted hover:bg-paper-inset/70 hover:text-ink',
+                  )}
+                >
+                  {active && (
+                    <motion.span
+                      layoutId="right-panel-tab-active"
+                      className="absolute inset-0 rounded-lg bg-paper-raised shadow-xs"
+                      transition={{ type: 'spring', stiffness: 450, damping: 35 }}
+                    />
+                  )}
+                  <ItemIcon
+                    size={13}
+                    className={cn(
+                      'relative z-10',
+                      active ? (tabKey === 'canvas' ? 'text-accent' : 'text-ink') : 'opacity-70',
+                    )}
+                  />
+                  {active && <span className="relative z-10 text-[11px]">{item.label}</span>}
+                </button>
+              </Tooltip>
+            );
+          })}
+        </div>
+        <div className="flex items-center gap-0.5">
+          <Tooltip content={maximized ? '还原宽度' : '最大化面板'} side="bottom">
             <button
               type="button"
-              onClick={() => {
-                uiStore.setCanvasOpen(false);
-                uiStore.setArtifactsOpen(false);
-              }}
-              className="rounded-full p-1.5 text-ink-muted hover:bg-paper-inset/70"
-              title="关闭面板"
+              onClick={() => uiStore.toggleRightPanelMaximized()}
+              className="rounded-full p-1.5 text-ink-muted hover:bg-paper-inset/70 hover:text-ink transition-colors"
+              aria-label={maximized ? '还原宽度' : '最大化面板'}
+            >
+              {maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+            </button>
+          </Tooltip>
+          <Tooltip content="关闭面板" side="bottom">
+            <button
+              type="button"
+              onClick={() => uiStore.closeRightPanel()}
+              className="rounded-full p-1.5 text-ink-muted hover:bg-paper-inset/70 hover:text-ink transition-colors"
+              aria-label="关闭面板"
             >
               <X size={13} />
             </button>
-          )}
+          </Tooltip>
         </div>
       </div>
       <div className="min-h-0 flex-1">
-        {active === 'canvas' && sessionId && <CanvasPanel key={sessionId} sessionId={sessionId} />}
-        {active === 'artifacts' && sessionId && <ArtifactPanel sessionId={sessionId} />}
-        {active === 'files' && workspace && <DirectoryPanel embedded />}
-        {active === 'git' && workspace && <GitPanel />}
-        {active === 'terminal' && workspace && <TerminalPanel />}
+        {activeTab === 'canvas' && sessionId && <CanvasPanel key={sessionId} sessionId={sessionId} />}
+        {activeTab === 'artifacts' && sessionId && <ArtifactPanel sessionId={sessionId} />}
+        {activeTab === 'files' && <DirectoryPanel embedded />}
+        {activeTab === 'git' && <GitPanel />}
+        {activeTab === 'terminal' && <TerminalPanel />}
       </div>
     </aside>
   );

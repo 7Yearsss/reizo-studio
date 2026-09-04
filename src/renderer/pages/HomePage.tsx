@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { FolderOpen, FolderPlus } from 'lucide-react';
-import HomeHero from '../components/home/HomeHero';
 import ReizoWordmark from '../components/home/ReizoWordmark';
 import PromptCard from '../components/chat/PromptCard';
 import ModelPicker from '../components/chat/ModelPicker';
 import MentionMenu, { extractMentionQuery } from '../components/chat/MentionMenu';
+import TopRightToolbar from '../components/chat/TopRightToolbar';
 import * as chatStore from '../state/chatStore';
 import * as tabStore from '../state/tabStore';
 import * as settingsStore from '../state/settingsStore';
@@ -18,6 +18,7 @@ export default function HomePage({ active = true }: { active?: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [mentions, setMentions] = useState<string[]>([]);
   const [composerReady, setComposerReady] = useState(false);
+  const handleWordmarkSettled = useCallback(() => setComposerReady(true), []);
   const workspacePath = useSettingsStore((s) => s.settings.workspacePath);
   const mentionQuery = extractMentionQuery(draft);
   const folderName = workspacePath?.split(/[/\\]/).filter(Boolean).pop();
@@ -53,75 +54,93 @@ export default function HomePage({ active = true }: { active?: boolean }) {
     if (path) await settingsStore.patchSettings({ workspacePath: path });
   }
 
-  return (
-    <div className="flex h-full flex-col items-center justify-center px-6">
-      <div className="relative">
-        <HomeHero active={active} />
-        <ReizoWordmark active={active} onSettled={() => setComposerReady(true)} />
-      </div>
-      <p className="mt-3 text-sm text-ink-muted">今天，想干点啥？</p>
+  async function handleOpenCanvas() {
+    if (creating) return;
+    setCreating(true);
+    try {
+      const session = await chatStore.createSession('新分镜画布');
+      uiStore.setMode('chat');
+      tabStore.openChatTab(session.id, session.title, true);
+      uiStore.setRightPanelTab('canvas');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCreating(false);
+    }
+  }
 
-      <div className="relative mt-10 w-full max-w-2xl">
-        {mentionQuery !== null && workspacePath && (
-          <MentionMenu
-            query={mentionQuery}
-            onPick={(path) => {
-              setDraft((d) => d.replace(/@([^\s@]*)$/, `@${path} `));
-              setMentions((m) => (m.includes(path) ? m : [...m, path]));
-            }}
+  return (
+    <div className="relative flex h-full min-w-0 flex-col">
+      <header className="flex h-12 shrink-0 items-center justify-end px-8 pt-2">
+        <TopRightToolbar onOpenCanvas={() => void handleOpenCanvas()} />
+      </header>
+      <div className="flex flex-1 flex-col items-center justify-center px-6 pb-12">
+        <div className="relative">
+          <ReizoWordmark active={active} onSettled={handleWordmarkSettled} />
+        </div>
+
+        <div className="relative mt-10 w-full max-w-2xl">
+          {mentionQuery !== null && workspacePath && (
+            <MentionMenu
+              query={mentionQuery}
+              onPick={(path) => {
+                setDraft((d) => d.replace(/@([^\s@]*)$/, `@${path} `));
+                setMentions((m) => (m.includes(path) ? m : [...m, path]));
+              }}
+            />
+          )}
+          <PromptCard
+            value={draft}
+            onChange={setDraft}
+            onSubmit={() => void handleSubmit()}
+            placeholder="输入消息，/ 调用技能，@ 引用文件…"
+            disabled={creating}
+            autoFocus={composerReady}
+            toolbar={
+              <>
+                <button
+                  type="button"
+                  onClick={() => void handlePickWorkspace()}
+                  className="flex max-w-[220px] items-center gap-1.5 rounded-full bg-paper px-3 py-1 text-xs text-ink hover:bg-paper-inset"
+                >
+                  {folderName ? <FolderOpen size={13} /> : <FolderPlus size={13} />}
+                  <span className="truncate">{folderName ?? '选择工作区'}</span>
+                </button>
+                <ModelPicker />
+              </>
+            }
           />
-        )}
-        <PromptCard
-          value={draft}
-          onChange={setDraft}
-          onSubmit={() => void handleSubmit()}
-          placeholder="今天，想干点啥？"
-          disabled={creating}
-          autoFocus={composerReady}
-          toolbar={
-            <>
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
+            {pills.map((pill) => (
+              <button
+                key={pill.skillId}
+                type="button"
+                disabled={creating}
+                onClick={() => void handleSubmit(pill.text, { skillId: pill.skillId })}
+                className="rounded-full bg-paper-inset px-3 py-1 text-xs text-ink hover:bg-paper-inset/80"
+              >
+                {pill.label}
+              </button>
+            ))}
+          </div>
+          {error && (
+            <p className="mt-4 text-center text-xs text-danger">
+              发送失败：{error}
+            </p>
+          )}
+          {!hasAnyKey && (
+            <p className="mt-4 text-center text-xs text-ink-muted">
+              还没有 API Key。
               <button
                 type="button"
-                onClick={() => void handlePickWorkspace()}
-                className="flex max-w-[220px] items-center gap-1.5 rounded-full bg-paper px-3 py-1 text-xs text-ink hover:bg-paper-inset"
+                onClick={() => uiStore.setMode('settings')}
+                className="ml-1 text-accent hover:opacity-80"
               >
-                {folderName ? <FolderOpen size={13} /> : <FolderPlus size={13} />}
-                <span className="truncate">{folderName ?? '选择工作区'}</span>
+                去设置
               </button>
-              <ModelPicker />
-            </>
-          }
-        />
-        <div className="mt-4 flex flex-wrap justify-center gap-2">
-          {pills.map((pill) => (
-            <button
-              key={pill.skillId}
-              type="button"
-              disabled={creating}
-              onClick={() => void handleSubmit(pill.text, { skillId: pill.skillId })}
-              className="rounded-full bg-paper-inset px-3 py-1 text-xs text-ink hover:bg-paper-inset/80"
-            >
-              {pill.label}
-            </button>
-          ))}
+            </p>
+          )}
         </div>
-        {error && (
-          <p className="mt-4 text-center text-xs text-danger">
-            发送失败：{error}
-          </p>
-        )}
-        {!hasAnyKey && (
-          <p className="mt-4 text-center text-xs text-ink-muted">
-            还没有 API Key。
-            <button
-              type="button"
-              onClick={() => uiStore.setMode('settings')}
-              className="ml-1 text-accent hover:opacity-80"
-            >
-              去设置
-            </button>
-          </p>
-        )}
       </div>
     </div>
   );

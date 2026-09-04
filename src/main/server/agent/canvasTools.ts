@@ -48,6 +48,16 @@ export function createCanvasTools(options: {
   const { sessionId, canvasStore, settingsStore, dataRoot } = options;
 
   return {
+    open_canvas: tool({
+      description:
+        'Open and display the canvas panel in the user interface. Call this whenever the user asks to see, open, or switch to the canvas.',
+      inputSchema: z.object({}),
+      execute: async () => {
+        const canvas = canvasStore.ensureCanvas(sessionId);
+        return { ok: true, canvasId: canvas.id };
+      },
+    }),
+
     add_node: tool({
       description:
         'Add a node to this session\'s canvas. type "image" generates an image from `prompt`; type "agent" is a research/critique sub-task described by `instruction`; type "video" generates video from `prompt`; type "note" is a screenplay/script sticky note; type "anchor" is a reference pin (the user drops an image onto it) whose `role`/`strength` lock a character or style across shots. In an image/video `prompt` you may embed inline references to other canvas nodes as `@[label](canvas:<nodeId>)` — at run time each becomes an ordered reference image (`<<<image 1>>>`, ...) drawn from that node\'s latest output, so you can say e.g. "把 @[主角定妆](canvas:abc123) 放进 @[雨夜街道](canvas:def456)". Returns the new node id. The canvas panel opens automatically.',

@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
-import { FileCode2, FileJson, FileText, Image as ImageIcon, LayoutGrid, LoaderCircle, RefreshCw } from 'lucide-react';
+import { FileCode2, FileJson, FileText, Image as ImageIcon, LayoutGrid, RefreshCw } from 'lucide-react';
 import type { Artifact, ArtifactKind } from '../../shared/artifact';
 import * as api from '../api';
 import ArtifactPreview from '../components/workspace/ArtifactPreview';
+import Tooltip from '../components/ui/Tooltip';
+import { Loader } from '../components/motion/loader';
+import { toast } from '../lib/toast';
 
 const KIND_LABELS: Record<ArtifactKind, string> = {
   markdown: 'Markdown',
@@ -45,12 +48,15 @@ export default function ArtifactsPage() {
   const [selected, setSelected] = useState<Artifact | null>(null);
   const [loading, setLoading] = useState(true);
 
-  async function refresh() {
+  async function refresh(showToast = false) {
     setLoading(true);
     try {
       const next = await api.listArtifacts();
       setArtifacts(next);
       setSelected((current) => (current && next.some((item) => item.id === current.id) ? current : null));
+      if (showToast) toast.success(`已刷新作品列表（${next.length} 个）`);
+    } catch {
+      if (showToast) toast.error('刷新失败');
     } finally {
       setLoading(false);
     }
@@ -64,29 +70,30 @@ export default function ArtifactsPage() {
     <div className="flex h-full min-w-0 flex-col overflow-hidden">
       <header className="flex shrink-0 items-center justify-between border-b border-line px-8 py-5">
         <div>
-          <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight">
+          <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight text-ink">
             <LayoutGrid className="h-5 w-5 text-accent" />
             我的作品
           </h1>
           <p className="mt-1 text-sm text-ink-muted">集中查看所有会话生成的文件和附件。</p>
         </div>
-        <button
-          type="button"
-          onClick={() => void refresh()}
-          disabled={loading}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-muted hover:bg-paper-inset hover:text-ink disabled:opacity-50"
-          title="刷新作品"
-          aria-label="刷新作品"
-        >
-          <RefreshCw className={loading ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
-        </button>
+        <Tooltip content="刷新作品列表">
+          <button
+            type="button"
+            onClick={() => void refresh(true)}
+            disabled={loading}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-muted hover:bg-paper-inset hover:text-ink disabled:opacity-50 transition-colors"
+            aria-label="刷新作品"
+          >
+            <RefreshCw className={loading ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
+          </button>
+        </Tooltip>
       </header>
 
       <div className="flex min-h-0 flex-1">
         <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-8 py-6">
           {loading && artifacts.length === 0 ? (
             <div className="flex items-center gap-2 text-sm text-ink-muted">
-              <LoaderCircle className="h-4 w-4 animate-spin" />
+              <Loader variant="spinner" size={16} />
               加载中…
             </div>
           ) : artifacts.length === 0 ? (

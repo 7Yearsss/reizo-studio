@@ -10,6 +10,7 @@ import {
 } from '../../../shared/cameraMotion';
 import { CANVAS_VIDEO_CAMERAS } from '../../../shared/canvas';
 import { cn } from '../../lib/cn';
+import { BubbleSlider } from '../motion/range-slider-bubble';
 
 const PRIMARY = CAMERA_AXES.slice(0, 4); // pan · tilt · zoom · roll
 const ADVANCED = CAMERA_AXES.slice(4); // horizontal track · vertical boom
@@ -192,19 +193,22 @@ function AxisSlider({
           {value > 0 ? `+${value}` : value}
         </span>
       </div>
-      <input
-        type="range"
+      <BubbleSlider
+        compact
+        bipolar
         min={-CAMERA_LIMIT}
         max={CAMERA_LIMIT}
         step={1}
         value={value}
-        onChange={(e) => onDraft(Number(e.target.value))}
-        onPointerUp={(e) => onCommit(Number((e.target as HTMLInputElement).value))}
-        onKeyUp={(e) => onCommit(Number((e.target as HTMLInputElement).value))}
-        onBlur={(e) => onCommit(Number(e.target.value))}
-        onDoubleClick={() => onCommit(0)}
-        className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-paper-inset accent-accent"
-        title={`${axis.negLabel} ← → ${axis.posLabel}（双击归零）`}
+        onValueChange={onDraft}
+        onValueCommit={onCommit}
+        onDoubleClick={() => {
+          onDraft(0);
+          onCommit(0);
+        }}
+        format={(v) => (v > 0 ? `+${v}` : `${v}`)}
+        aria-label={axis.label}
+        className="h-6 px-1 pb-0.5"
       />
       <div className="mt-0.5 flex justify-between text-[9px] text-ink-muted/70">
         <span>{axis.negLabel}</span>

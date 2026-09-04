@@ -1,12 +1,15 @@
 export type SidebarMode = 'chat' | 'projects' | 'skills' | 'artifacts' | 'automation' | 'settings';
+export type RightPanelTab = 'canvas' | 'artifacts' | 'files' | 'git' | 'terminal';
 
 export interface UiState {
   mode: SidebarMode;
   selectedProjectId: string | null;
   artifactsOpen: boolean;
   canvasOpen: boolean;
+  rightPanelTab: RightPanelTab | null;
   rightPanelWidth: number;
   rightPanelMaximized: boolean;
+  sidebarCollapsed: boolean;
 }
 
 const MODE_KEY = 'reizo:sidebar-mode';
@@ -14,6 +17,8 @@ const PROJECT_KEY = 'reizo:selected-project';
 const ARTIFACTS_KEY = 'reizo:artifacts-open';
 const CANVAS_KEY = 'reizo:canvas-open';
 const RIGHT_WIDTH_KEY = 'reizo:right-panel-width';
+const RIGHT_TAB_KEY = 'reizo:right-panel-tab';
+const SIDEBAR_COLLAPSED_KEY = 'reizo:sidebar-collapsed';
 
 export const RIGHT_PANEL_MIN = 320;
 export const RIGHT_PANEL_MAX = 960;
@@ -40,14 +45,33 @@ function readRightWidth(): number {
   return Math.min(RIGHT_PANEL_MAX, Math.max(RIGHT_PANEL_MIN, raw));
 }
 
+function readRightTab(): RightPanelTab | null {
+  if (typeof localStorage === 'undefined') return null;
+  const raw = localStorage.getItem(RIGHT_TAB_KEY);
+  if (raw === 'canvas' || raw === 'artifacts' || raw === 'files' || raw === 'git' || raw === 'terminal') {
+    return raw;
+  }
+  if (localStorage.getItem(CANVAS_KEY) === '1') return 'canvas';
+  if (localStorage.getItem(ARTIFACTS_KEY) === '1') return 'artifacts';
+  return null;
+}
+
+function readSidebarCollapsed(): boolean {
+  if (typeof localStorage === 'undefined') return false;
+  return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
+}
+
+const initialTab = readRightTab();
+
 let state: UiState = {
   mode: readMode(),
   selectedProjectId: typeof localStorage !== 'undefined' ? localStorage.getItem(PROJECT_KEY) : null,
-  // Default closed; only an explicit localStorage '1' opens artifacts on load.
-  artifactsOpen: typeof localStorage !== 'undefined' && localStorage.getItem(ARTIFACTS_KEY) === '1',
-  canvasOpen: typeof localStorage !== 'undefined' && localStorage.getItem(CANVAS_KEY) === '1',
+  artifactsOpen: initialTab === 'artifacts',
+  canvasOpen: initialTab === 'canvas',
+  rightPanelTab: initialTab,
   rightPanelWidth: readRightWidth(),
   rightPanelMaximized: false,
+  sidebarCollapsed: readSidebarCollapsed(),
 };
 
 const listeners = new Set<() => void>();
@@ -61,7 +85,10 @@ function setState(patch: Partial<UiState>): void {
       else localStorage.removeItem(PROJECT_KEY);
       localStorage.setItem(ARTIFACTS_KEY, state.artifactsOpen ? '1' : '0');
       localStorage.setItem(CANVAS_KEY, state.canvasOpen ? '1' : '0');
+      if (state.rightPanelTab) localStorage.setItem(RIGHT_TAB_KEY, state.rightPanelTab);
+      else localStorage.removeItem(RIGHT_TAB_KEY);
       localStorage.setItem(RIGHT_WIDTH_KEY, String(state.rightPanelWidth));
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, state.sidebarCollapsed ? '1' : '0');
     } catch {
       /* ignore */
     }
@@ -86,21 +113,43 @@ export function selectProject(id: string | null): void {
   setState({ selectedProjectId: id });
 }
 
+export function setRightPanelTab(tab: RightPanelTab | null): void {
+  if (state.rightPanelTab === tab) return;
+  setState({
+    rightPanelTab: tab,
+    canvasOpen: tab === 'canvas',
+    artifactsOpen: tab === 'artifacts',
+  });
+}
+
+export function toggleRightPanelTab(tab: RightPanelTab): void {
+  if (state.rightPanelTab === tab) {
+    setRightPanelTab(null);
+  } else {
+    setRightPanelTab(tab);
+  }
+}
+
+export function closeRightPanel(): void {
+  setRightPanelTab(null);
+}
+
 export function setArtifactsOpen(open: boolean): void {
-  setState({ artifactsOpen: open });
+  if (open) setRightPanelTab('artifacts');
+  else if (state.rightPanelTab === 'artifacts') setRightPanelTab(null);
 }
 
 export function toggleArtifacts(): void {
-  setState({ artifactsOpen: !state.artifactsOpen });
+  toggleRightPanelTab('artifacts');
 }
 
 export function setCanvasOpen(open: boolean): void {
-  if (state.canvasOpen === open) return;
-  setState({ canvasOpen: open });
+  if (open) setRightPanelTab('canvas');
+  else if (state.rightPanelTab === 'canvas') setRightPanelTab(null);
 }
 
 export function toggleCanvas(): void {
-  setState({ canvasOpen: !state.canvasOpen });
+  toggleRightPanelTab('canvas');
 }
 
 export function setRightPanelWidth(width: number): void {
@@ -112,4 +161,12 @@ export function setRightPanelWidth(width: number): void {
 
 export function toggleRightPanelMaximized(): void {
   setState({ rightPanelMaximized: !state.rightPanelMaximized });
+}
+
+export function toggleSidebar(): void {
+  setState({ sidebarCollapsed: !state.sidebarCollapsed });
+}
+
+export function setSidebarCollapsed(collapsed: boolean): void {
+  setState({ sidebarCollapsed: collapsed });
 }

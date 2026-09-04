@@ -4,10 +4,7 @@ import {
   CirclePlus,
   FolderKanban,
   LayoutGrid,
-  PanelLeftClose,
-  PanelLeftOpen,
   Plus,
-  Search,
   Settings,
   Sparkles,
   SquarePen,
@@ -29,6 +26,9 @@ import * as uiStore from '../../state/uiStore';
 import * as api from '../../api';
 import type { DirEntry } from '../../../shared/workspace';
 import ProjectDialog from './ProjectDialog';
+import { openGlobalCommandPalette } from './GlobalCommandPalette';
+import { toast } from '../../lib/toast';
+import Tooltip from '../ui/Tooltip';
 
 const COLLAPSE_KEY = 'reizo:sidebar-collapsed';
 const PROJECTS_FOLD_KEY = 'reizo:sidebar-projects';
@@ -48,7 +48,7 @@ export default function Sidebar() {
   const projectsLoaded = useProjectStore((s) => s.loaded);
   const mode = useUiStore((s) => s.mode);
   const selectedProjectId = useUiStore((s) => s.selectedProjectId);
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === '1');
+  const collapsed = useUiStore((s) => s.sidebarCollapsed);
   const [query, setQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [fileHits, setFileHits] = useState<DirEntry[]>([]);
@@ -57,13 +57,9 @@ export default function Sidebar() {
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
   const [projectsOpen, setProjectsOpen] = useState(() => localStorage.getItem(PROJECTS_FOLD_KEY) !== '0');
   const [chatsOpen, setChatsOpen] = useState(() => localStorage.getItem(CHATS_FOLD_KEY) !== '0');
-  const searchModHint = isMacPlatform() ? '⌘K' : 'Ctrl+K';
 
-  // The title bar lives outside the content row, so publish the current rail
-  // width for its leading spacer. This keeps tabs aligned with the work area
-  // when the sidebar is collapsed or expanded.
   useEffect(() => {
-    document.documentElement.style.setProperty('--sidebar-width', `${collapsed ? 40 : 248}px`);
+    document.documentElement.style.setProperty('--sidebar-width', `${collapsed ? 0 : 248}px`);
   }, [collapsed]);
 
   useEffect(() => {
@@ -93,25 +89,17 @@ export default function Sidebar() {
         target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
       if ((event.key === 'k' || event.key === 'K') && (event.metaKey || event.ctrlKey)) {
         event.preventDefault();
-        if (collapsed) {
-          localStorage.setItem(COLLAPSE_KEY, '0');
-          setCollapsed(false);
-        }
-        setSearchOpen(true);
+        openGlobalCommandPalette();
         return;
       }
       if (event.key === '/' && !event.metaKey && !event.ctrlKey && !event.altKey && !typing) {
         event.preventDefault();
-        if (collapsed) {
-          localStorage.setItem(COLLAPSE_KEY, '0');
-          setCollapsed(false);
-        }
-        setSearchOpen(true);
+        openGlobalCommandPalette();
       }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [collapsed]);
+  }, []);
 
   const visibleSessions = (
     workspacePath ? sessions.filter((s) => !s.workspacePath || s.workspacePath === workspacePath) : sessions
@@ -122,11 +110,7 @@ export default function Sidebar() {
     : [];
 
   function toggleCollapsed() {
-    setCollapsed((c) => {
-      const next = !c;
-      localStorage.setItem(COLLAPSE_KEY, next ? '1' : '0');
-      return next;
-    });
+    uiStore.toggleSidebar();
   }
 
   function toggleProjectsOpen() {
@@ -156,72 +140,17 @@ export default function Sidebar() {
 
   return (
     <aside
-      className="relative flex h-full shrink-0 flex-col overflow-hidden border-r border-line/70 bg-sidebar transition-[width] duration-[var(--duration-base)] ease-[var(--ease-drawer)] motion-reduce:transition-none"
-      style={{ width: collapsed ? 40 : 248 }}
-    >
-      {collapsed && (
-        <div className="anim-fade flex flex-col items-center py-3">
-          <button
-            type="button"
-            onClick={toggleCollapsed}
-            title="展开侧栏"
-            aria-label="展开侧栏"
-            aria-expanded={false}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-paper-inset/70 hover:text-ink"
-          >
-            <PanelLeftOpen size={16} />
-          </button>
-        </div>
+      className={cn(
+        'relative flex h-full shrink-0 flex-col overflow-hidden bg-sidebar transition-[width] duration-[var(--duration-base)] ease-[var(--ease-drawer)] motion-reduce:transition-none',
+        collapsed ? 'border-r-0' : 'border-r border-line/70',
       )}
+      style={{ width: collapsed ? 0 : 248 }}
+    >
       <div
-        className="anim-fade flex h-full w-[248px] flex-col px-3 py-3"
+        className="anim-fade flex h-full w-[248px] flex-col px-3 py-2.5"
         style={collapsed ? { display: 'none' } : undefined}
       >
-      <div className="mb-3 flex items-center gap-1 px-1">
-        <span className="flex-1 truncate px-2 text-[15px] font-semibold tracking-tight text-ink">Reizo</span>
-        <button
-          type="button"
-          onClick={toggleCollapsed}
-          title="收起侧栏"
-          aria-label="收起侧栏"
-          aria-expanded
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-paper-inset/70 hover:text-ink"
-        >
-          <PanelLeftClose size={16} />
-        </button>
-      </div>
-
-      {searchOpen ? (
-        <div className="mb-2 flex h-10 items-center gap-2 rounded-[14px] bg-paper px-3">
-          <Search size={16} className="shrink-0 text-ink-muted" strokeWidth={1.8} />
-          <input
-            autoFocus
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onBlur={() => {
-              if (!query.trim()) setSearchOpen(false);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                setQuery('');
-                setSearchOpen(false);
-              }
-            }}
-            placeholder="搜索会话和文件"
-            className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none"
-          />
-        </div>
-      ) : (
-        <button type="button" onClick={() => setSearchOpen(true)} className={cn(navRow(false), 'mb-2')}>
-          <Search size={18} className="shrink-0" strokeWidth={1.8} />
-          快速搜索
-          <kbd className="ml-auto inline-flex h-[18px] items-center justify-center rounded-[5px] border border-line/80 bg-paper px-1.5 text-[10.5px] font-medium text-ink-muted">
-            {searchModHint}
-          </kbd>
-        </button>
-      )}
-
-      <nav className="flex flex-col gap-0.5" aria-label="Studio 导航">
+        <nav className="flex flex-col gap-0.5" aria-label="Studio 导航">
         <button
           type="button"
           onClick={() => {
@@ -458,6 +387,7 @@ export default function Sidebar() {
                         e.preventDefault();
                         e.stopPropagation();
                         void chatStore.deleteSession(session.id);
+                        toast.info(`已删除会话「${session.title}」`);
                       }}
                       className="mt-0.5 shrink-0 self-start rounded p-1 text-ink-muted opacity-0 transition-opacity duration-[140ms] hover:bg-paper hover:text-danger group-hover:opacity-100"
                       aria-label="删除会话"
