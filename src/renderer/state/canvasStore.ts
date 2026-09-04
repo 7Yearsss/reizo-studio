@@ -778,10 +778,12 @@ export function containerMemberIds(sessionId: string, containerId: string): stri
   }
   if (container.type === 'section') {
     const params = container.params as CanvasSectionParams;
-    const explicitIds = (params?.memberIds ?? []).filter((id) => nodeById(sessionId, id));
-    if (explicitIds.length > 0) return explicitIds;
+    // Explicit memberIds takes strict precedence when defined (preventing accidental boundary suction)
+    if (params && Array.isArray(params.memberIds)) {
+      return params.memberIds.filter((id) => nodeById(sessionId, id));
+    }
 
-    // Physical containment fallback:
+    // Physical containment fallback (only for legacy sections where memberIds is completely absent):
     const all = state.nodesBySession[sessionId] ?? [];
     return all
       .filter(
@@ -1028,6 +1030,25 @@ export async function connectNodes(
 
   const edgeId = await _addEdge(sessionId, sourceId, targetId, sourceHandle, targetHandle);
   if (!edgeId) return;
+
+  // Mention sync: if connecting into an image/video prompt node via reference/image,
+  // ensure the prompt includes the mention token so graph and prompt remain in sync!
+  if (
+    targetNode &&
+    (targetNode.type === 'image' || targetNode.type === 'video') &&
+    (targetHandle === 'reference' || targetHandle === 'image' || !targetHandle) &&
+    sourceNode &&
+    (sourceNode.type === 'image' || sourceNode.type === 'anchor' || sourceNode.type === 'video')
+  ) {
+    const p = (targetNode.params as { prompt?: string }) ?? {};
+    const currPrompt = p.prompt ?? '';
+    const mentionToken = `@[${sourceNode.title || '节点'}](canvas:${sourceNode.id})`;
+    if (!currPrompt.includes(sourceNode.id)) {
+      const nextPrompt = currPrompt.trim() ? `${currPrompt} ${mentionToken}` : mentionToken;
+      void updateNodeParams(sessionId, targetId, { ...p, prompt: nextPrompt });
+    }
+  }
+
   record(sessionId, {
     undo: () => _deleteEdge(sessionId, edgeId),
     redo: async () => {

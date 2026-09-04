@@ -5,6 +5,7 @@ import type { SettingsStore } from '../storage/settingsStore';
 import { getCanvasChannel } from './channel';
 import { broadcastDownstreamDirty, canvasAssetsDir } from './imageExecutor';
 import { getVideoDriver, type VideoGenerateParams } from './videoDrivers';
+import { inputHash } from './graph';
 
 interface ActiveJob {
   taskId: string;
@@ -183,9 +184,17 @@ export async function submitVideoJob(options: {
           const prevAssets = existingNode?.output?.assets ?? [];
           const combinedAssets = [relPath, ...prevAssets.filter((p) => p !== relPath)].slice(0, 10);
 
+          const snap = canvasStore.getSnapshot(canvasId);
+          const incoming = snap ? snap.edges.filter((e) => e.targetId === nodeId).map((e) => e.sourceId) : [];
+          const upstream = incoming
+            .map((id) => canvasStore.getNode(canvasId, id))
+            .filter((n): n is NonNullable<typeof n> => !!n);
+          const paramsHash = existingNode ? inputHash(existingNode, upstream) : null;
+
           const done = canvasStore.updateNode(canvasId, nodeId, {
             runState: 'done',
             output: { assets: combinedAssets, progress: 100 },
+            paramsHash,
           });
 
           if (done) {

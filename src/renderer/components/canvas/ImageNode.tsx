@@ -3,6 +3,7 @@ import { NodeResizer, Position, type NodeProps, type ResizeParams, useStore } fr
 import { Download, FolderPlus, Loader2, Play, GitBranchPlus, Bot, Video } from 'lucide-react';
 import type { CanvasImageParams, CanvasNode } from '../../../shared/canvas';
 import { CANVAS_IMAGE_MODELS } from '../../../shared/canvas';
+import { estimateNodeCost } from '../../../shared/canvasPricing';
 import { canvasAssetUrl } from '../../api';
 import * as canvasStore from '../../state/canvasStore';
 import * as chatStore from '../../state/chatStore';
@@ -250,6 +251,9 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
           onCommit={commitPrompt}
           candidates={candidates}
           placeholder="描述画面视觉风格、主体与光影细节（输入 @ 可引用画布节点）…"
+          onMentionSelect={(refNode) => {
+            void canvasStore.connectNodes(sessionId, refNode.id, node.id, 'reference');
+          }}
         />
       </div>
 
@@ -333,12 +337,12 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
             type="button"
             onClick={run}
             disabled={running || !prompt.trim()}
-            title="生成图片 (单次预计消耗约 1 算力点)"
+            title={`生成图片 (单次预计消耗约 ${estimateNodeCost(node)} 算力点)`}
             className="nodrag inline-flex items-center gap-1 rounded-lg bg-accent text-accent-ink px-3 py-1 text-[11px] font-medium shadow-xs hover:opacity-90 active:scale-95 transition-all disabled:opacity-40"
           >
             {running ? <Loader2 size={12} className="animate-spin" /> : <Play size={11} className="fill-current" />}
             生成
-            <span className="text-[9px] opacity-75 font-normal ml-0.5">(~1点)</span>
+            <span className="text-[9px] opacity-75 font-normal ml-0.5">(~{estimateNodeCost(node)}点)</span>
           </button>
         </div>
       </div>

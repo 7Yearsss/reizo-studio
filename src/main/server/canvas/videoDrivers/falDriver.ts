@@ -27,9 +27,16 @@ export const falDriver: VideoDriver = {
 
     if (params.startImageBytes) {
       body.image_url = `data:image/png;base64,${Buffer.from(params.startImageBytes).toString('base64')}`;
+    } else if (params.referenceImages && params.referenceImages.length > 0) {
+      body.image_url = `data:image/png;base64,${Buffer.from(params.referenceImages[0].bytes).toString('base64')}`;
     }
     if (params.endImageBytes) {
       body.end_image_url = `data:image/png;base64,${Buffer.from(params.endImageBytes).toString('base64')}`;
+    }
+    if (params.referenceImages && params.referenceImages.length > 0) {
+      body.reference_image_urls = params.referenceImages.map(
+        (ref) => `data:image/png;base64,${Buffer.from(ref.bytes).toString('base64')}`,
+      );
     }
 
     const res = await fetch(modelEndpoint, {

@@ -12,6 +12,8 @@ export interface VideoGenerateParams {
   camera?: CameraControl;
   startImageBytes?: Uint8Array;
   endImageBytes?: Uint8Array;
+  /** Reference images for multimodal conditioning (e.g. character / style references) */
+  referenceImages?: Array<{ bytes: Uint8Array; role?: string }>;
 }
 
 export interface VideoJobStatus {

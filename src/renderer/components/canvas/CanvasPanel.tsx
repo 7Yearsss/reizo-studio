@@ -56,12 +56,15 @@ import {
   FolderKanban,
   Layers,
   Clock,
+  Mouse,
+  Laptop,
 } from 'lucide-react';
 import * as canvasStore from '../../state/canvasStore';
 import * as chatStore from '../../state/chatStore';
 import { useCanvasStore } from '../../state/useCanvasStore';
 import { cn } from '../../lib/cn';
 import { layoutGraph, wouldCycle } from '../../../shared/canvasGraph';
+import { estimateGraphCost } from '../../../shared/canvasPricing';
 import type { CanvasGroupParams, CanvasNodeType } from '../../../shared/canvas';
 import { extractSubgraph, formatSubgraphForPrompt } from '../../../shared/canvasSubgraph';
 import ImageNode, { type CanvasNodeData } from './ImageNode';
@@ -117,6 +120,14 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
   >(null);
   // Runway-style canvas interaction mode: pan-on-drag vs marquee box-select.
   const [mode, setMode] = useState<'select' | 'marquee'>('select');
+  // Navigation mode: mouse (wheel zooms) vs trackpad (two-finger scroll pans).
+  const [navMode, setNavMode] = useState<'mouse' | 'trackpad'>(() => {
+    try {
+      return (localStorage.getItem('reizo:canvas-nav-mode') as 'mouse' | 'trackpad') || 'mouse';
+    } catch {
+      return 'mouse';
+    }
+  });
   const [toast, setToast] = useState<string | null>(null);
   const [confirmAll, setConfirmAll] = useState(false);
   const [highlightIds, setHighlightIds] = useState<string[]>([]);
@@ -552,6 +563,23 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     void canvasStore.addNode(sessionId, type, at ?? { x: 60 + offset, y: 60 + offset });
   };
 
+  const toggleNavMode = useCallback(() => {
+    setNavMode((prev) => {
+      const next = prev === 'mouse' ? 'trackpad' : 'mouse';
+      try {
+        localStorage.setItem('reizo:canvas-nav-mode', next);
+      } catch {
+        /* ignore */
+      }
+      flash(next === 'trackpad' ? '已切换至触控板模式 (双指滚动平移)' : '已切换至鼠标模式 (滚轮缩放画布)');
+      return next;
+    });
+  }, [flash]);
+
+  const costEstimate = useMemo(() => {
+    return estimateGraphCost(storeNodes, storeEdges);
+  }, [storeNodes, storeEdges]);
+
   const hasImage = storeNodes.some((n) => n.type === 'image');
   const hasRunnable = storeNodes.some((n) => n.type === 'image' || n.type === 'agent' || n.type === 'video');
   const runAll = () => {
@@ -559,7 +587,9 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     if (!confirmAll) {
       setConfirmAll(true);
       if (confirmTimer.current) clearTimeout(confirmTimer.current);
-      confirmTimer.current = setTimeout(() => setConfirmAll(false), 3000);
+      confirmTimer.current = setTimeout(() => setConfirmAll(false), 4500);
+      const cachedMsg = costEstimate.cachedCount > 0 ? ` (跳过 ${costEstimate.cachedCount} 个已缓存)` : '';
+      flash(`准备运行 ${costEstimate.runnableCount} 个待生成节点${cachedMsg}，预计消耗约 ${costEstimate.totalPoints} 算力点。再次点击以确认运行。`);
       return;
     }
     setConfirmAll(false);
@@ -781,6 +811,9 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         panActivationKeyCode="Space"
         panOnDrag={mode === 'marquee' ? [1] : true}
         selectionOnDrag={mode === 'marquee'}
+        panOnScroll={navMode === 'trackpad'}
+        zoomOnScroll={navMode === 'mouse'}
+        zoomOnPinch={true}
         className="bg-paper"
       >
         <Background gap={16} color="var(--line)" />
@@ -915,7 +948,11 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
                 'canvas-tool !px-1.5',
                 confirmAll ? '!border-accent !bg-accent !text-accent-ink' : '!bg-ink !text-paper-raised',
               )}
-              title={confirmAll ? (hasImage ? '再点一次确认运行整图（付费）' : '再点一次确认运行整图') : '运行整图'}
+              title={
+                confirmAll
+                  ? `确认运行：${costEstimate.runnableCount} 个待跑${costEstimate.cachedCount > 0 ? ` (${costEstimate.cachedCount} 已缓存)` : ''}，消耗 ~${costEstimate.totalPoints} 算力点`
+                  : `运行整图 (${costEstimate.runnableCount} 待跑 · ~${costEstimate.totalPoints} 点)`
+              }
             >
               <PlayCircle size={13} />
             </button>
@@ -977,6 +1014,17 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
             </NavButton>
             <NavButton active={mode === 'marquee'} onClick={() => setMode('marquee')} title="框选：空白拖拽多选 (M)">
               <BoxSelect size={14} />
+            </NavButton>
+            <NavButton
+              active={navMode === 'trackpad'}
+              onClick={toggleNavMode}
+              title={
+                navMode === 'trackpad'
+                  ? '导航：触控板模式 (双指滚动平移，点击切为鼠标)'
+                  : '导航：鼠标模式 (滚轮缩放画布，点击切为触控板)'
+              }
+            >
+              {navMode === 'trackpad' ? <Laptop size={14} /> : <Mouse size={14} />}
             </NavButton>
             <span className="mx-0.5 h-4 w-px bg-line" aria-hidden />
             <NavButton onClick={() => rf.zoomOut({ duration: 150 })} title="缩小">
