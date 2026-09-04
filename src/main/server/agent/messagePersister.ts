@@ -37,6 +37,13 @@ export interface TurnPersister {
   snapshot(): { text: string; parts: ToolCallPart[] };
   /** Serialized append of the assistant row. No-op when aborted / empty. */
   commit(opts: { aborted: boolean }): Promise<void>;
+  /**
+   * Discard accumulated state without persisting. Called on provider stream
+   * crashes (HTTP 524 / mid-flight abort) so the session DB never contains a
+   * half-built assistant row with orphaned tool-call stubs. Inspired by
+   * Claude Code's tombstone pattern.
+   */
+  rollback(): void;
 }
 
 export function createTurnPersister(deps: {
@@ -114,5 +121,10 @@ export function createTurnPersister(deps: {
     onToolPart,
     hasContent,
     commit,
+    rollback: () => {
+      text = '';
+      reasoning = '';
+      parts.length = 0;
+    },
   };
 }

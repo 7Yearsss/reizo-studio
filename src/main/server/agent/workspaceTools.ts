@@ -215,15 +215,23 @@ function buildTools(options: {
       },
     }),
     edit_file: tool({
-      description: 'Replace text in an existing workspace file. Fails if oldString is not found.',
+      description:
+        'Replace text in an existing workspace file. Fails if oldString is not found or occurs multiple times (when replaceAll is false). Include surrounding lines to make oldString unique.',
       inputSchema: z.object({
         path: z.string(),
-        oldString: z.string().describe('Exact text to find.'),
+        oldString: z.string().describe('Exact text to find. Must be unique unless replaceAll is true.'),
         newString: z.string().describe('Replacement text.'),
         replaceAll: z.boolean().optional(),
       }),
       execute: async (input, toolOptions) => {
         const priorContent = await readWorkspaceFileOrEmpty(workspacePath, input.path);
+        const count = input.oldString ? priorContent.split(input.oldString).length - 1 : 0;
+        if (count === 0) throw new Error('oldString was not found in the file');
+        if (count > 1 && !input.replaceAll) {
+          throw new Error(
+            `Found ${count} occurrences of oldString. oldString must uniquely match exactly one block of text, or set replaceAll to true. Include more surrounding lines in oldString to make it unique.`,
+          );
+        }
         await approve(sessionId, 'edit_file', input, permissionMode, {
           ...toolOptions,
           preview: buildFileDiffPreview(
