@@ -37,7 +37,7 @@ export async function runVideoNode(options: {
 
   for (const edge of incomingEdges) {
     const up = canvasStore.getNode(canvasId, edge.sourceId);
-    if (!up || up.type !== 'image') continue;
+    if (!up || (up.type !== 'image' && up.type !== 'frameExtractor')) continue;
     const rel = up.output?.assets?.[0];
     if (!rel) continue;
     try {

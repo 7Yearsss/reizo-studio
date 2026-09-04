@@ -20,6 +20,8 @@ export default function NodeHandle({
   label,
   required,
   missing,
+  disabled,
+  disabledReason,
   expanded,
   top,
 }: {
@@ -30,11 +32,13 @@ export default function NodeHandle({
   label: string;
   required?: boolean;
   missing?: boolean;
+  disabled?: boolean;
+  disabledReason?: string;
   expanded: boolean;
   /** Vertical placement, e.g. '65%'. Defaults to centre. */
   top?: string;
 }) {
-  const color = colorForKind(kind);
+  const activeColor = disabled ? 'var(--line-strong, #71717a)' : colorForKind(kind);
   const isLeft = position === Position.Left;
 
   return (
@@ -43,26 +47,34 @@ export default function NodeHandle({
         type={type}
         id={id}
         position={position}
-        style={{ top, ...(expanded ? { background: color, borderColor: color } : undefined) }}
+        style={{ top, ...(expanded ? { background: activeColor, borderColor: activeColor } : undefined) }}
         className={cn(
           'transition-all',
+          disabled && 'opacity-40 !cursor-not-allowed',
           expanded ? '!h-2.5 !w-2.5 !border' : '!h-2 !w-2 !border-line !bg-paper',
         )}
       />
       {expanded ? (
         <span
-          style={{ top, borderColor: missing ? 'var(--danger, #ef4444)' : color }}
+          style={{
+            top,
+            borderColor: disabled ? 'var(--line, #52525b)' : missing ? 'var(--danger, #ef4444)' : activeColor,
+          }}
           className={cn(
             'pointer-events-none absolute z-10 flex -translate-y-1/2 items-center gap-0.5 whitespace-nowrap rounded-md border bg-paper-raised px-1 py-px text-[9px] font-medium leading-none text-ink shadow-sm select-none',
+            disabled && 'opacity-60 text-ink-muted bg-paper-inset',
             isLeft ? 'right-full mr-1.5' : 'left-full ml-1.5',
           )}
         >
           <span
             className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
-            style={{ background: missing ? 'var(--danger, #ef4444)' : color }}
+            style={{
+              background: disabled ? 'var(--line-strong, #71717a)' : missing ? 'var(--danger, #ef4444)' : activeColor,
+            }}
           />
           {label}
-          {required ? <span style={{ color: 'var(--danger, #ef4444)' }}>*</span> : null}
+          {disabled ? <span className="text-[8px] text-amber-500 font-normal">({disabledReason || '当前模型不支持'})</span> : null}
+          {required && !disabled ? <span style={{ color: 'var(--danger, #ef4444)' }}>*</span> : null}
         </span>
       ) : null}
     </>

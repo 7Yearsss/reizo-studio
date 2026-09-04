@@ -1,4 +1,4 @@
-import type { CanvasEdge, CanvasNode } from './canvas';
+import { getVideoModelCapabilities, type CanvasEdge, type CanvasNode } from './canvas';
 import { CANONICAL_MENTION_RE } from './resolveMentions';
 
 /**
@@ -35,15 +35,32 @@ export function nodeReadinessIssues(
   }
 
   if (node.type === 'video') {
+    const model = typeof params.model === 'string' ? params.model : undefined;
+    const caps = getVideoModelCapabilities(model);
     const frameEdges = edges.filter(
       (e) =>
         e.targetId === node.id &&
         (e.targetHandle === 'start_frame' || e.targetHandle === 'end_frame'),
     );
     for (const e of frameEdges) {
+      if (e.targetHandle === 'end_frame' && !caps.endFrame) {
+        issues.push(`当前模型不支持尾帧插值`);
+      }
       const src = nodesById.get(e.sourceId);
       if (src && (src.output?.assets?.length ?? 0) === 0) {
         issues.push(`${e.targetHandle === 'start_frame' ? '首帧' : '尾帧'}来源「${src.title || '上游节点'}」尚未生成`);
+      }
+    }
+  }
+
+  if (node.type === 'frameExtractor') {
+    const inEdge = edges.find((e) => e.targetId === node.id);
+    if (!inEdge) {
+      issues.push('未连接上游视频源');
+    } else {
+      const src = nodesById.get(inEdge.sourceId);
+      if (!src || (src.output?.assets?.length ?? 0) === 0) {
+        issues.push(`上游视频「${src?.title || '视频源'}」尚未生成`);
       }
     }
   }

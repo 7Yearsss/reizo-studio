@@ -509,6 +509,20 @@ export async function deleteCanvasEdge(canvasId: string, id: string): Promise<vo
   await api(`/api/canvas/${canvasId}/edges/${id}`, { method: 'DELETE' });
 }
 
+export async function setCanvasNodeAsset(
+  canvasId: string,
+  id: string,
+  input: { name?: string; dataBase64: string },
+): Promise<CanvasNode> {
+  const res = await api(`/api/canvas/${canvasId}/nodes/${id}/asset`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const { node } = await res.json();
+  return node;
+}
+
 export async function runCanvasNode(
   canvasId: string,
   id: string,

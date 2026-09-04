@@ -292,6 +292,10 @@ export async function runChatTurn(options: {
 
   const model = createOpenAiModel({ apiKey, modelId, baseUrl });
 
+  let lastSeenNodeCount = -1;
+  const initialSnap = canvasStore ? canvasStore.getSnapshotBySession(sessionId) : null;
+  if (initialSnap) lastSeenNodeCount = initialSnap.nodes.length;
+
   const buildStream = (messages: ModelMessage[], signal: AbortSignal) =>
     streamText({
       model,
@@ -302,9 +306,22 @@ export async function runChatTurn(options: {
       maxRetries: PROVIDER_MAX_RETRIES,
       timeout: PROVIDER_TIMEOUT,
       abortSignal: signal,
-      prepareStep: ({ messages: stepMessages }) => ({
-        messages: compactModelMessages(stepMessages as ModelMessage[]),
-      }),
+      prepareStep: ({ messages: stepMessages }) => {
+        const compacted = compactModelMessages(stepMessages as ModelMessage[]);
+        if (canvasStore && lastSeenNodeCount >= 0) {
+          const snap = canvasStore.getSnapshotBySession(sessionId);
+          if (snap && snap.nodes.length !== lastSeenNodeCount) {
+            const diff = snap.nodes.length - lastSeenNodeCount;
+            lastSeenNodeCount = snap.nodes.length;
+            const deltaNote: ModelMessage = {
+              role: 'system',
+              content: `[画布状态增量: 当前共有 ${snap.nodes.length} 个节点 (${diff > 0 ? `+${diff}` : diff})，最新: ${snap.nodes.slice(-2).map((n) => `「${n.title || n.id}」(${n.type})`).join(', ')}]`,
+            };
+            compacted.push(deltaNote);
+          }
+        }
+        return { messages: compacted };
+      },
     });
 
   return startAgentTurn({

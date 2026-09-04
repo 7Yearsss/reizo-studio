@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
+import { NodeResizer, Position, type NodeProps, type ResizeParams, useStore } from '@xyflow/react';
 import { Download, FolderPlus, Loader2, Play, GitBranchPlus, Bot, Video } from 'lucide-react';
 import type { CanvasImageParams, CanvasNode } from '../../../shared/canvas';
 import { CANVAS_IMAGE_MODELS } from '../../../shared/canvas';
@@ -23,6 +23,8 @@ export interface CanvasNodeData extends Record<string, unknown> {
   highlighted?: boolean;
   /** The agent wrote this node in the last ~8s. */
   agentMark?: boolean;
+  /** The node is in Agent proposal review state. */
+  isProposal?: boolean;
 }
 
 function useAssetUrl(rel: string | undefined): string | null {
@@ -91,7 +93,11 @@ export function NodeTitle({
 }
 
 export default function ImageNode({ id, data, selected }: NodeProps) {
-  const { sessionId, node, highlighted, agentMark } = data as CanvasNodeData;
+  const { sessionId, node, highlighted, agentMark, isProposal } = data as CanvasNodeData;
+  const isLowLOD = useStore((s) => s.transform[2] < 0.35);
+  const isMoodboard = useCanvasStore((s) => s.moodboardBySession[sessionId] ?? false);
+  const hideControls = isLowLOD || isMoodboard;
+
   const params = node.params as CanvasImageParams;
   const [prompt, setPrompt] = useState(params.prompt ?? '');
   const [zoom, setZoom] = useState<string | null>(null);
@@ -151,6 +157,7 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
         selected ? 'border-accent ring-1 ring-accent/20' : 'border-line',
         running && 'canvas-node-running',
         highlighted && 'canvas-node-highlight',
+        isProposal && 'border-dashed !border-2 !border-accent shadow-[0_0_15px_rgba(99,102,241,0.35)] animate-pulse-subtle',
       )}
     >
       <AgentMark show={agentMark} />
@@ -326,10 +333,12 @@ export default function ImageNode({ id, data, selected }: NodeProps) {
             type="button"
             onClick={run}
             disabled={running || !prompt.trim()}
+            title="生成图片 (单次预计消耗约 1 算力点)"
             className="nodrag inline-flex items-center gap-1 rounded-lg bg-accent text-accent-ink px-3 py-1 text-[11px] font-medium shadow-xs hover:opacity-90 active:scale-95 transition-all disabled:opacity-40"
           >
             {running ? <Loader2 size={12} className="animate-spin" /> : <Play size={11} className="fill-current" />}
             生成
+            <span className="text-[9px] opacity-75 font-normal ml-0.5">(~1点)</span>
           </button>
         </div>
       </div>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, memo } from 'react';
 import { NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
 import { Check, Copy, GitBranchPlus, Loader2, Play } from 'lucide-react';
 import type { CanvasAgentParams } from '../../../shared/canvas';
@@ -11,7 +11,7 @@ import AgentMark from './AgentMark';
 import MissingInputWarning from './MissingInputWarning';
 import { nodeReadinessIssues } from '../../../shared/canvasReadiness';
 
-export default function AgentNode({ id, data, selected }: NodeProps) {
+function AgentNode({ id, data, selected }: NodeProps) {
   const { sessionId, node, highlighted, agentMark } = data as CanvasNodeData;
   const params = node.params as CanvasAgentParams;
   const [instruction, setInstruction] = useState(params.instruction ?? '');
@@ -164,3 +164,5 @@ export default function AgentNode({ id, data, selected }: NodeProps) {
     </div>
   );
 }
+
+export default memo(AgentNode);

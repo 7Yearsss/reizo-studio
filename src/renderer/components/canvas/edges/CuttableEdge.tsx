@@ -8,6 +8,7 @@ export interface CuttableEdgeData extends Record<string, unknown> {
   targetType?: string;
   isRunning?: boolean;
   onCutEdge?: (edgeId: string) => void;
+  onRerouteEdge?: (edgeId: string, screenPos: { x: number; y: number }) => void;
 }
 
 /** Only one edge is "armed" (dashed, showing scissors) at a time. */
@@ -36,7 +37,7 @@ export default function CuttableEdge({
   targetHandleId,
   data,
 }: EdgeProps) {
-  const { sourceType, targetType, isRunning, onCutEdge } = (data as CuttableEdgeData) || {};
+  const { sourceType, targetType, isRunning, onCutEdge, onRerouteEdge } = (data as CuttableEdgeData) || {};
 
   const [armed, setArmed] = useState(false);
   const [dying, setDying] = useState(false);
@@ -105,6 +106,14 @@ export default function CuttableEdge({
     [dying, id],
   );
 
+  const handleDoubleClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      onRerouteEdge?.(id, { x: e.clientX, y: e.clientY });
+    },
+    [id, onRerouteEdge],
+  );
+
   const cut = useCallback(() => {
     if (dying) return;
     if (prefersReducedMotion()) {
@@ -149,26 +158,27 @@ export default function CuttableEdge({
         }}
       />
 
-      {/* energy flow overlay */}
-      {!dying && !armed && !reduced && (
+      {/* energy flow overlay — only active when running to avoid ambient noise */}
+      {!dying && !armed && !reduced && isRunning && (
         <path
           d={edgePath}
           fill="none"
           stroke={flowStroke}
-          strokeWidth={isRunning ? 2.4 : 1.6}
+          strokeWidth={2.4}
           strokeLinecap="round"
-          className={isRunning ? 'edge-flow edge-flow-running' : 'edge-flow'}
-          style={{ pointerEvents: 'none', opacity: isRunning ? 0.9 : 0.4 }}
+          className="edge-flow edge-flow-running"
+          style={{ pointerEvents: 'none', opacity: 0.9 }}
         />
       )}
 
-      {/* wide transparent hit area — click to arm */}
+      {/* wide transparent hit area — click to arm, double click to reroute */}
       <path
         d={edgePath}
         fill="none"
         stroke="transparent"
         strokeWidth={20}
         onClick={arm}
+        onDoubleClick={handleDoubleClick}
         style={{ cursor: 'pointer', pointerEvents: dying ? 'none' : 'stroke' }}
       />
 

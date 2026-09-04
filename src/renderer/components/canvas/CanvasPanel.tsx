@@ -39,6 +39,7 @@ import {
   FileUp,
   Plus,
   Maximize,
+  Maximize2,
   MoreHorizontal,
   ChevronDown,
   Pin,
@@ -47,6 +48,14 @@ import {
   ZoomIn,
   ZoomOut,
   Focus,
+  Search,
+  ChevronUp,
+  X,
+  Palette,
+  Sparkles,
+  FolderKanban,
+  Layers,
+  Clock,
 } from 'lucide-react';
 import * as canvasStore from '../../state/canvasStore';
 import * as chatStore from '../../state/chatStore';
@@ -54,12 +63,18 @@ import { useCanvasStore } from '../../state/useCanvasStore';
 import { cn } from '../../lib/cn';
 import { layoutGraph, wouldCycle } from '../../../shared/canvasGraph';
 import type { CanvasGroupParams, CanvasNodeType } from '../../../shared/canvas';
+import { extractSubgraph, formatSubgraphForPrompt } from '../../../shared/canvasSubgraph';
 import ImageNode, { type CanvasNodeData } from './ImageNode';
 import AgentNode from './AgentNode';
 import VideoNode from './VideoNode';
 import NoteNode from './NoteNode';
 import GroupNode from './GroupNode';
 import AnchorNode from './AnchorNode';
+import RerouteNode from './RerouteNode';
+import FrameExtractorNode from './FrameExtractorNode';
+import SectionNode from './SectionNode';
+import SubgraphNode from './SubgraphNode';
+import ProposalBar from './ProposalBar';
 import AssetShelf from './AssetShelf';
 import AgentActivityStrip from './AgentActivityStrip';
 import StoryboardModal from './StoryboardModal';
@@ -72,6 +87,10 @@ const NODE_TYPES: NodeTypes = {
   note: NoteNode,
   group: GroupNode,
   anchor: AnchorNode,
+  reroute: RerouteNode,
+  frameExtractor: FrameExtractorNode,
+  section: SectionNode,
+  subgraph: SubgraphNode,
 };
 const EDGE_TYPES: EdgeTypes = { cuttable: CuttableEdge, default: CuttableEdge };
 const VIEWPORT_KEY = (sessionId: string) => `reizo:canvas-viewport:${sessionId}`;
@@ -88,10 +107,13 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
   const history = useCanvasStore((s) => s.historyBySession[sessionId]);
   const spot = useCanvasStore((s) => s.spotlightBySession[sessionId]);
   const trail = useCanvasStore((s) => s.trailBySession[sessionId]);
+  const proposals = useCanvasStore((s) => s.proposalsBySession[sessionId] ?? []);
   const rf = useReactFlow();
 
   const [menu, setMenu] = useState<Menu | null>(null);
-  const [openTool, setOpenTool] = useState<'create' | 'more' | null>(null);
+  const [openTool, setOpenTool] = useState<
+    'create' | 'more' | 'askAgent' | 'batchRatio' | 'batchDuration' | null
+  >(null);
   // Runway-style canvas interaction mode: pan-on-drag vs marquee box-select.
   const [mode, setMode] = useState<'select' | 'marquee'>('select');
   const [toast, setToast] = useState<string | null>(null);
@@ -203,16 +225,17 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         height: node.h,
         // Containers render beneath their members and never intercept clicks
         // meant for the nodes inside them.
-        zIndex: node.type === 'group' ? 0 : 1,
+        zIndex: node.type === 'section' ? -1 : node.type === 'group' ? 0 : 1,
         draggable: lockedMembers.has(node.id) ? false : undefined,
         data: {
           sessionId,
           node,
           highlighted: highlightIds.includes(node.id),
           agentMark: agentMarkedIds.has(node.id),
+          isProposal: proposals.includes(node.id),
         },
       })),
-    [storeNodes, sessionId, highlightIds, lockedMembers, agentMarkedIds],
+    [storeNodes, sessionId, highlightIds, lockedMembers, agentMarkedIds, proposals],
   );
 
   const runningTargets = useMemo(
@@ -232,12 +255,20 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     [sessionId],
   );
 
+  const handleRerouteEdge = useCallback(
+    (edgeId: string, screenPos: { x: number; y: number }) => {
+      const flowPos = rf.screenToFlowPosition(screenPos);
+      void canvasStore.insertRerouteNode(sessionId, edgeId, flowPos);
+    },
+    [rf, sessionId],
+  );
+
   const edges: Edge[] = useMemo(
     () =>
       storeEdges.map((edge) => {
-        const isRunning = runningTargets.has(edge.targetId);
         const sourceNode = nodeMap.get(edge.sourceId);
         const targetNode = nodeMap.get(edge.targetId);
+        const isRunning = runningTargets.has(edge.targetId) || sourceNode?.runState === 'running';
         return {
           id: edge.id,
           type: 'cuttable',
@@ -251,10 +282,11 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
             targetType: targetNode?.type,
             isRunning,
             onCutEdge: handleCutEdge,
+            onRerouteEdge: handleRerouteEdge,
           },
         };
       }),
-    [storeEdges, runningTargets, nodeMap, handleCutEdge],
+    [storeEdges, runningTargets, nodeMap, handleCutEdge, handleRerouteEdge],
   );
 
   const onNodesChange = useCallback(
@@ -307,6 +339,143 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     () => storeNodes.filter((n) => selectedNodeIds.includes(n.id)),
     [storeNodes, selectedNodeIds],
   );
+
+  const isMoodboard = useCanvasStore((s) => s.moodboardBySession[sessionId] ?? false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchMatchIdx, setSearchMatchIdx] = useState(0);
+
+  const matchedNodes = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    const q = searchQuery.toLowerCase();
+    return storeNodes.filter((n) => {
+      const title = (n.title || '').toLowerCase();
+      const p = n.params as Record<string, unknown> | undefined;
+      const prompt = String(p?.prompt || p?.instruction || p?.content || p?.description || '').toLowerCase();
+      return title.includes(q) || prompt.includes(q);
+    });
+  }, [searchQuery, storeNodes]);
+
+  const focusNodeAt = useCallback(
+    (node: (typeof storeNodes)[number]) => {
+      if (node.type === 'section') {
+        rf.fitBounds({ x: node.x, y: node.y, width: node.w, height: node.h }, { duration: 400, padding: 0.15 });
+      } else {
+        rf.setCenter(node.x + node.w / 2, node.y + node.h / 2, {
+          zoom: Math.max(rf.getZoom(), 0.7),
+          duration: 300,
+        });
+      }
+      setHighlightIds([node.id]);
+      setTimeout(() => setHighlightIds((curr) => curr.filter((id) => id !== node.id)), 2200);
+    },
+    [rf],
+  );
+
+  const goToNextMatch = useCallback(() => {
+    if (matchedNodes.length === 0) return;
+    const nextIdx = (searchMatchIdx + 1) % matchedNodes.length;
+    setSearchMatchIdx(nextIdx);
+    focusNodeAt(matchedNodes[nextIdx]);
+  }, [matchedNodes, searchMatchIdx, focusNodeAt]);
+
+  const goToPrevMatch = useCallback(() => {
+    if (matchedNodes.length === 0) return;
+    const prevIdx = (searchMatchIdx - 1 + matchedNodes.length) % matchedNodes.length;
+    setSearchMatchIdx(prevIdx);
+    focusNodeAt(matchedNodes[prevIdx]);
+  }, [matchedNodes, searchMatchIdx, focusNodeAt]);
+
+  // Global Canvas shortcuts: H (Moodboard), I / V / T (Instant downstream creation), Cmd/Ctrl+F (Search)
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const activeTag = (document.activeElement?.tagName || '').toLowerCase();
+      const isInput =
+        activeTag === 'input' ||
+        activeTag === 'textarea' ||
+        (document.activeElement as HTMLElement)?.isContentEditable;
+
+      // Cmd/Ctrl+F -> Toggle Search
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        setSearchOpen((v) => !v);
+        return;
+      }
+
+      if (e.key === 'Escape') {
+        if (searchOpen) {
+          setSearchOpen(false);
+          return;
+        }
+      }
+
+      if (isInput || e.ctrlKey || e.metaKey || e.altKey) return;
+
+      // H -> Moodboard
+      if (e.key.toLowerCase() === 'h') {
+        e.preventDefault();
+        canvasStore.toggleMoodboard(sessionId);
+        flash(canvasStore.isMoodboard(sessionId) ? '已切换至情绪板模式 (按 H 退出)' : '已退出情绪板模式');
+        return;
+      }
+
+      // I / V / T -> Create downstream connected node when 1 node is selected
+      if (['i', 'v', 't'].includes(e.key.toLowerCase()) && selectedNodeIds.length === 1) {
+        const srcNode = storeNodes.find((n) => n.id === selectedNodeIds[0]);
+        if (!srcNode) return;
+        e.preventDefault();
+        const key = e.key.toLowerCase();
+        if (key === 'i') {
+          void canvasStore.addNodeAndConnect(
+            sessionId,
+            {
+              type: 'image',
+              x: srcNode.x + srcNode.w + 60,
+              y: srcNode.y,
+              title: srcNode.title ? `${srcNode.title} · 衍生` : '生图',
+            },
+            srcNode.id,
+            null,
+            'ref_1',
+          );
+        } else if (key === 'v') {
+          if (srcNode.type === 'image') {
+            void canvasStore.animateFromImage(sessionId, srcNode.id);
+          } else {
+            void canvasStore.addNodeAndConnect(
+              sessionId,
+              {
+                type: 'video',
+                x: srcNode.x + srcNode.w + 60,
+                y: srcNode.y,
+                title: srcNode.title ? `${srcNode.title} · 运镜` : '视频生成',
+                params: { prompt: '', duration: '5s', ratio: '16:9' },
+              },
+              srcNode.id,
+              null,
+              'start_frame',
+            );
+          }
+        } else if (key === 't') {
+          void canvasStore.addNodeAndConnect(
+            sessionId,
+            {
+              type: 'note',
+              x: srcNode.x + srcNode.w + 60,
+              y: srcNode.y,
+              title: '分镜便签',
+            },
+            srcNode.id,
+            null,
+            null,
+          );
+        }
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [sessionId, searchOpen, selectedNodeIds, storeNodes, flash]);
 
   const onConnectStart = useCallback(
     (_: MouseEvent | TouchEvent, params: { nodeId: string | null; handleId: string | null; handleType: string | null }) => {
@@ -419,6 +588,31 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       {},
     );
   };
+
+  const askAgentPreset = useCallback(
+    async (preset: 'qa' | 'color' | 'bridge' | 'custom') => {
+      setOpenTool(null);
+      await canvasStore.flushSelection(sessionId);
+      const sub = extractSubgraph(storeNodes, storeEdges, selectedNodeIds);
+      const subXml = formatSubgraphForPrompt(sub);
+
+      let promptIntro = '';
+      if (preset === 'qa') {
+        promptIntro = '请对画布上选中的这组节点画面进行整体质检评估（检查人物连贯性、光影逻辑、构图以及细节缺陷），并给出逐个节点的修改优化建议：';
+      } else if (preset === 'color') {
+        promptIntro = '请对画布选区的这组画面进行色调与氛围统一规划，分析它们在色彩风格、色温与打光上的差异，并输出一套协调统一的色彩方案与修改 Prompt：';
+      } else if (preset === 'bridge') {
+        promptIntro = '请分析选中的这组前后镜头分镜，帮我构思并补写 1~2 个中间过渡/串场镜头（包括景别变化、运镜过渡与完整 Prompt），让故事流更加自然顺畅：';
+      } else {
+        promptIntro = '请根据我选中的这组画布节点与拓扑结构提供分析与建议：';
+      }
+
+      const fullMessage = `${promptIntro}\n\n${subXml}`;
+      void chatStore.sendMessage(sessionId, fullMessage, [], {});
+      flash(`已连带拓扑子图投送给 Agent (${selectedNodeIds.length} 个节点)`);
+    },
+    [sessionId, storeNodes, storeEdges, selectedNodeIds, flash],
+  );
 
   const refToComposer = (nodeId: string) => {
     const node = storeNodes.find((n) => n.id === nodeId);
@@ -593,6 +787,16 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         <AssetShelf sessionId={sessionId} selectedTargetIds={selectedNodeIds} flash={flash} />
         <AgentActivityStrip sessionId={sessionId} />
 
+        {/* Agent Proposal Diff Review Bar */}
+        <Panel position="top-center" className="mt-3 pointer-events-none z-30">
+          <ProposalBar
+            sessionId={sessionId}
+            onFocusProposals={(ids) => {
+              rf.fitView({ nodes: ids.map((id) => ({ id })), padding: 0.35, duration: 250 });
+            }}
+          />
+        </Panel>
+
         {storeNodes.length === 0 ? (
           <Panel position="top-center" className="mt-24 pointer-events-none select-none">
             <div className="flex flex-col items-center justify-center rounded-2xl border border-line bg-paper-raised/95 p-6 text-center shadow-xl backdrop-blur-md pointer-events-auto max-w-sm">
@@ -604,6 +808,24 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
                 可视化编排图片生成、运镜视频与多模态 Agent 质检。支持首尾帧插值与变体派生。
               </p>
               <div className="mt-4 flex w-full flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    void canvasStore.loadStarterFlow(sessionId).then(() => {
+                      flash('已载入「雨夜霓虹街头」影视分镜工作流');
+                      setTimeout(() => rf.fitView({ padding: 0.2, duration: 400 }), 150);
+                    });
+                  }}
+                  className="flex items-center justify-center gap-2 rounded-xl bg-accent px-3 py-2.5 text-xs font-semibold text-accent-ink shadow-md hover:opacity-95 active:scale-98 transition-all"
+                >
+                  <Sparkles size={14} />
+                  一键载入起手影视工作流 (Flow Template)
+                </button>
+                <div className="my-1 flex items-center gap-2">
+                  <div className="h-px flex-1 bg-line" />
+                  <span className="text-[10px] text-ink-muted">或者从空白开始</span>
+                  <div className="h-px flex-1 bg-line" />
+                </div>
                 <button
                   type="button"
                   onClick={() => addNode('image', { x: 80, y: 80 })}
@@ -787,29 +1009,34 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
             <div className="flex items-center gap-2 rounded-2xl border border-line bg-paper-raised/95 px-3.5 py-2 text-xs shadow-2xl backdrop-blur-md">
               <span className="font-semibold text-ink">已选 {selectedNodes.length} 个节点</span>
               <div className="h-3.5 w-px bg-line" />
-              <button
-                type="button"
-                onClick={() => {
-                  const descriptions = selectedNodes
-                    .map((n) => {
-                      const p = (n.params as Record<string, string>) || {};
-                      const desc = p.prompt || p.instruction || n.title || '';
-                      return `${n.type === 'image' ? '图片' : n.type === 'video' ? '视频' : n.type === 'note' ? '便签' : 'Agent'}节点「${n.title || n.id}」${desc ? `（内容：“${desc}”）` : ''}`;
-                    })
-                    .join('\n- ');
-                  void chatStore.sendMessage(
-                    sessionId,
-                    `我对画布上的这几个节点有疑问或想法，请帮我审查与优化：\n- ${descriptions}`,
-                    [],
-                    {},
-                  );
-                  flash(`已投送 ${selectedNodes.length} 个节点至 Agent 对话`);
-                }}
-                className="flex items-center gap-1.5 rounded-xl bg-accent text-accent-ink px-3.5 py-1.5 text-xs font-semibold shadow-xs hover:opacity-90 active:scale-95 transition-all"
-              >
-                <MessagesSquare size={13} className="fill-current" />
-                投送给 Agent 质检 ({selectedNodes.length})
-              </button>
+              <ToolbarDropdown
+                open={openTool === 'askAgent'}
+                onToggle={() => setOpenTool((v) => (v === 'askAgent' ? null : 'askAgent'))}
+                icon={<Bot size={13} className="text-accent" />}
+                label={`问 Agent ▾`}
+                items={[
+                  {
+                    icon: <MessagesSquare size={13} className="text-accent" />,
+                    label: '质检评估 (质量与画面连贯性)',
+                    onClick: () => void askAgentPreset('qa'),
+                  },
+                  {
+                    icon: <Palette size={13} className="text-accent" />,
+                    label: '调色建议 (统一色调与光影细节)',
+                    onClick: () => void askAgentPreset('color'),
+                  },
+                  {
+                    icon: <Film size={13} className="text-accent" />,
+                    label: '串场衔接 (补写中间过渡镜头)',
+                    onClick: () => void askAgentPreset('bridge'),
+                  },
+                  {
+                    icon: <Sparkles size={13} className="text-accent" />,
+                    label: '自由提问当前选区',
+                    onClick: () => void askAgentPreset('custom'),
+                  },
+                ]}
+              />
               {selectedNodes.some((n) => n.type === 'video') ? (
                 <button
                   type="button"
@@ -859,22 +1086,137 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
                 <AlignHorizontalDistributeCenter size={12} className="text-accent" />
                 网格对齐
               </button>
-              {selectedNodes.filter((n) => n.type !== 'group').length >= 2 ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const members = selectedNodes.filter((n) => n.type !== 'group').map((n) => n.id);
-                    void canvasStore.groupNodes(sessionId, members).then((gid) => {
-                      if (gid) flash(`已成组 ${members.length} 个节点`);
-                    });
-                  }}
-                  className="flex items-center gap-1.5 rounded-xl border border-line/70 bg-paper-inset/40 text-ink px-2.5 py-1.5 text-xs font-medium hover:bg-paper-inset/80 active:scale-95 transition-all"
-                  title="用一个容器包住所选节点，可整体拖动 / 锁定 / 仅运行本组"
-                >
-                  <Boxes size={12} className="text-accent" />
-                  成组
-                </button>
+              {selectedNodes.filter((n) => n.type !== 'group' && n.type !== 'section').length >= 2 ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const members = selectedNodes.filter((n) => n.type !== 'group' && n.type !== 'section').map((n) => n.id);
+                      void canvasStore.groupNodes(sessionId, members).then((gid) => {
+                        if (gid) flash(`已成组 ${members.length} 个节点`);
+                      });
+                    }}
+                    className="flex items-center gap-1.5 rounded-xl border border-line/70 bg-paper-inset/40 text-ink px-2.5 py-1.5 text-xs font-medium hover:bg-paper-inset/80 active:scale-95 transition-all"
+                    title="用一个容器包住所选节点，可整体拖动 / 锁定 / 仅运行本组"
+                  >
+                    <Boxes size={12} className="text-accent" />
+                    成组
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const members = selectedNodes.filter((n) => n.type !== 'group' && n.type !== 'section').map((n) => n.id);
+                      void canvasStore.createSection(sessionId, members).then((sid) => {
+                        if (sid) flash(`已为 ${members.length} 个节点创建场景大区`);
+                      });
+                    }}
+                    className="flex items-center gap-1.5 rounded-xl border border-line/70 bg-paper-inset/40 text-ink px-2.5 py-1.5 text-xs font-medium hover:bg-paper-inset/80 active:scale-95 transition-all"
+                    title="创建场景大区框住节点，支持独立标题、剧情描述与整体移动"
+                  >
+                    <FolderKanban size={12} className="text-accent" />
+                    新建分区
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const members = selectedNodes.filter((n) => n.type !== 'group' && n.type !== 'section').map((n) => n.id);
+                      void canvasStore.collapseToSubgraph(sessionId, members).then((sgid) => {
+                        if (sgid) flash(`已将 ${members.length} 个节点折叠为复合子图`);
+                      });
+                    }}
+                    className="flex items-center gap-1.5 rounded-xl border border-line/70 bg-paper-inset/40 text-ink px-2.5 py-1.5 text-xs font-medium hover:bg-paper-inset/80 active:scale-95 transition-all"
+                    title="将所选节点封装为单个外壳节点，暴露虚拟输入输出引脚"
+                  >
+                    <Layers size={12} className="text-accent" />
+                    折叠子图
+                  </button>
+                </>
               ) : null}
+              {selectedNodes.length >= 2 && selectedNodes.every((n) => n.type === 'image') && (
+                <ToolbarDropdown
+                  open={openTool === 'batchRatio'}
+                  onToggle={() => setOpenTool((v) => (v === 'batchRatio' ? null : 'batchRatio'))}
+                  icon={<Maximize2 size={12} className="text-accent" />}
+                  label="批量画幅 ▾"
+                  items={[
+                    {
+                      icon: <Maximize2 size={12} className="text-accent" />,
+                      label: '16:9 横屏 (1536x1024)',
+                      onClick: () => {
+                        void canvasStore.batchUpdateNodeParams(
+                          sessionId,
+                          selectedNodes.map((n) => n.id),
+                          { size: '1536x1024' },
+                        );
+                        flash(`已将 ${selectedNodes.length} 个节点批量切换为 16:9`);
+                        setOpenTool(null);
+                      },
+                    },
+                    {
+                      icon: <Square size={12} className="text-accent" />,
+                      label: '1:1 正方 (1024x1024)',
+                      onClick: () => {
+                        void canvasStore.batchUpdateNodeParams(
+                          sessionId,
+                          selectedNodes.map((n) => n.id),
+                          { size: '1024x1024' },
+                        );
+                        flash(`已将 ${selectedNodes.length} 个节点批量切换为 1:1`);
+                        setOpenTool(null);
+                      },
+                    },
+                    {
+                      icon: <Maximize size={12} className="text-accent" />,
+                      label: '9:16 竖屏 (1024x1536)',
+                      onClick: () => {
+                        void canvasStore.batchUpdateNodeParams(
+                          sessionId,
+                          selectedNodes.map((n) => n.id),
+                          { size: '1024x1536' },
+                        );
+                        flash(`已将 ${selectedNodes.length} 个节点批量切换为 9:16`);
+                        setOpenTool(null);
+                      },
+                    },
+                  ]}
+                />
+              )}
+              {selectedNodes.length >= 2 && selectedNodes.every((n) => n.type === 'video') && (
+                <ToolbarDropdown
+                  open={openTool === 'batchDuration'}
+                  onToggle={() => setOpenTool((v) => (v === 'batchDuration' ? null : 'batchDuration'))}
+                  icon={<Film size={12} className="text-accent" />}
+                  label="批量时长 ▾"
+                  items={[
+                    {
+                      icon: <Clock size={12} className="text-accent" />,
+                      label: '5秒 (快速生成)',
+                      onClick: () => {
+                        void canvasStore.batchUpdateNodeParams(
+                          sessionId,
+                          selectedNodes.map((n) => n.id),
+                          { duration: '5s' },
+                        );
+                        flash(`已将 ${selectedNodes.length} 个视频节点批量切换为 5s`);
+                        setOpenTool(null);
+                      },
+                    },
+                    {
+                      icon: <Film size={12} className="text-accent" />,
+                      label: '10秒 (长镜头运镜)',
+                      onClick: () => {
+                        void canvasStore.batchUpdateNodeParams(
+                          sessionId,
+                          selectedNodes.map((n) => n.id),
+                          { duration: '10s' },
+                        );
+                        flash(`已将 ${selectedNodes.length} 个视频节点批量切换为 10s`);
+                        setOpenTool(null);
+                      },
+                    },
+                  ]}
+                />
+              )}
               <button
                 type="button"
                 onClick={() => {
@@ -891,6 +1233,84 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
             </div>
           </Panel>
         ) : null}
+
+        {isMoodboard && (
+          <Panel position="top-center" className="mt-3 z-40">
+            <div className="flex items-center gap-2 rounded-full border border-line/80 bg-paper-raised/95 px-3 py-1 text-xs shadow-lg backdrop-blur-md">
+              <span className="flex h-2 w-2 rounded-full bg-accent animate-pulse" />
+              <span className="font-medium text-ink">情绪板模式 (Moodboard)</span>
+              <span className="text-[10px] text-ink-muted">按 H 退出</span>
+              <button
+                type="button"
+                onClick={() => canvasStore.setMoodboard(sessionId, false)}
+                className="ml-1 rounded-full p-0.5 hover:bg-paper-inset text-ink-muted hover:text-ink"
+              >
+                <X size={11} />
+              </button>
+            </div>
+          </Panel>
+        )}
+
+        {searchOpen && (
+          <Panel position="top-center" className="mt-3 z-50">
+            <div className="flex items-center gap-1.5 rounded-xl border border-line bg-paper-raised/95 px-2.5 py-1.5 text-xs shadow-2xl backdrop-blur-md">
+              <Search size={13} className="text-ink-muted shrink-0" />
+              <input
+                type="text"
+                autoFocus
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setSearchMatchIdx(0);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (e.shiftKey) goToPrevMatch();
+                    else goToNextMatch();
+                  } else if (e.key === 'Escape') {
+                    setSearchOpen(false);
+                  }
+                }}
+                placeholder="搜索节点名称、提示词…"
+                className="h-6 w-52 bg-transparent text-xs text-ink placeholder:text-ink-muted/60 focus:outline-hidden"
+              />
+              {matchedNodes.length > 0 ? (
+                <span className="text-[10px] text-ink-muted px-1 shrink-0">
+                  {searchMatchIdx + 1} / {matchedNodes.length}
+                </span>
+              ) : searchQuery.trim() ? (
+                <span className="text-[10px] text-danger/80 px-1 shrink-0">无匹配</span>
+              ) : null}
+              <button
+                type="button"
+                onClick={goToPrevMatch}
+                disabled={matchedNodes.length === 0}
+                className="rounded p-1 hover:bg-paper-inset text-ink-muted hover:text-ink disabled:opacity-30"
+                title="上一个 (Shift+Enter)"
+              >
+                <ChevronUp size={12} />
+              </button>
+              <button
+                type="button"
+                onClick={goToNextMatch}
+                disabled={matchedNodes.length === 0}
+                className="rounded p-1 hover:bg-paper-inset text-ink-muted hover:text-ink disabled:opacity-30"
+                title="下一个 (Enter)"
+              >
+                <ChevronDown size={12} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setSearchOpen(false)}
+                className="rounded p-1 hover:bg-paper-inset text-ink-muted hover:text-ink"
+                title="关闭 (Esc)"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          </Panel>
+        )}
 
         {toast ? (
           <Panel position="top-center" className="pointer-events-none mt-3">
@@ -922,6 +1342,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
               <MenuItem icon={<Video size={13} />} label="加视频节点" onClick={() => { addNode('video', { x: menu.flowX, y: menu.flowY }); setMenu(null); }} />
               <MenuItem icon={<Bot size={13} />} label="加 Agent 节点" onClick={() => { addNode('agent', { x: menu.flowX, y: menu.flowY }); setMenu(null); }} />
               <MenuItem icon={<StickyNote size={13} />} label="加灵感便签" onClick={() => { addNode('note', { x: menu.flowX, y: menu.flowY }); setMenu(null); }} />
+              <MenuItem icon={<FolderKanban size={13} />} label="加场景大区 (Section)" onClick={() => { addNode('section', { x: menu.flowX, y: menu.flowY }); setMenu(null); }} />
               <div className="my-1 h-px bg-line" />
               <MenuItem icon={<LayoutGrid size={13} />} label="整理布局" onClick={() => { tidy(); setMenu(null); }} />
               <MenuItem icon={<PlayCircle size={13} />} label="适应视图" onClick={() => { rf.fitView({ padding: 0.2, duration: 200 }); setMenu(null); }} />
@@ -958,6 +1379,26 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
                         dropConnectMenu.sourceNodeId,
                         dropConnectMenu.sourceHandle,
                         'start_frame',
+                      );
+                      setDropConnectMenu(null);
+                    }}
+                  />
+                  <MenuItem
+                    icon={<Film size={13} className="text-accent" />}
+                    label="+ 画面抽帧转换器"
+                    onClick={() => {
+                      void canvasStore.addNodeAndConnect(
+                        sessionId,
+                        {
+                          type: 'frameExtractor',
+                          x: dropConnectMenu.flowX,
+                          y: dropConnectMenu.flowY,
+                          title: '提取画面帧',
+                          params: { mode: 'end' },
+                        },
+                        dropConnectMenu.sourceNodeId,
+                        dropConnectMenu.sourceHandle,
+                        'video_in',
                       );
                       setDropConnectMenu(null);
                     }}
@@ -1005,6 +1446,202 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
                 </>
               );
             }
+            if (src?.type === 'video') {
+              return (
+                <>
+                  <MenuItem
+                    icon={<Film size={13} className="text-accent" />}
+                    label="+ 截取尾帧/首帧 (抽帧器)"
+                    onClick={() => {
+                      void canvasStore.addNodeAndConnect(
+                        sessionId,
+                        {
+                          type: 'frameExtractor',
+                          x: dropConnectMenu.flowX,
+                          y: dropConnectMenu.flowY,
+                          title: '截取尾帧',
+                          params: { mode: 'end' },
+                        },
+                        dropConnectMenu.sourceNodeId,
+                        dropConnectMenu.sourceHandle,
+                        'video_in',
+                      );
+                      setDropConnectMenu(null);
+                    }}
+                  />
+                  <MenuItem
+                    icon={<Video size={13} className="text-accent" />}
+                    label="+ 延伸接续镜头 (Extend)"
+                    onClick={() => {
+                      void canvasStore.addNodeAndConnect(
+                        sessionId,
+                        {
+                          type: 'video',
+                          x: dropConnectMenu.flowX,
+                          y: dropConnectMenu.flowY,
+                          title: '接续分镜',
+                          params: { prompt: '', duration: '5s', ratio: '16:9' },
+                        },
+                        dropConnectMenu.sourceNodeId,
+                        dropConnectMenu.sourceHandle,
+                        'start_frame',
+                      );
+                      setDropConnectMenu(null);
+                    }}
+                  />
+                  <MenuItem
+                    icon={<Bot size={13} className="text-accent" />}
+                    label="+ 运镜画质质检 Agent"
+                    onClick={() => {
+                      void canvasStore.addNodeAndConnect(
+                        sessionId,
+                        {
+                          type: 'agent',
+                          x: dropConnectMenu.flowX,
+                          y: dropConnectMenu.flowY,
+                          title: '运镜画质质检',
+                          params: {
+                            instruction: '请全面质检本段视频的动态走势、画面畸变、角色连贯性与光影一致性。',
+                          },
+                        },
+                        dropConnectMenu.sourceNodeId,
+                        dropConnectMenu.sourceHandle,
+                      );
+                      setDropConnectMenu(null);
+                    }}
+                  />
+                  <MenuItem
+                    icon={<StickyNote size={13} className="text-accent" />}
+                    label="+ 分镜灵感便签"
+                    onClick={() => {
+                      void canvasStore.addNodeAndConnect(
+                        sessionId,
+                        {
+                          type: 'note',
+                          x: dropConnectMenu.flowX,
+                          y: dropConnectMenu.flowY,
+                          title: '分镜批注',
+                          params: { content: '镜头运镜节奏良好，下一镜建议推近景特写。' },
+                        },
+                        dropConnectMenu.sourceNodeId,
+                        dropConnectMenu.sourceHandle,
+                      );
+                      setDropConnectMenu(null);
+                    }}
+                  />
+                </>
+              );
+            }
+            if (src?.type === 'frameExtractor') {
+              return (
+                <>
+                  <MenuItem
+                    icon={<Video size={13} className="text-accent" />}
+                    label="+ 用此帧生成运镜视频"
+                    onClick={() => {
+                      void canvasStore.addNodeAndConnect(
+                        sessionId,
+                        {
+                          type: 'video',
+                          x: dropConnectMenu.flowX,
+                          y: dropConnectMenu.flowY,
+                          title: '下阶段运镜视频',
+                          params: { prompt: '', duration: '5s', ratio: '16:9' },
+                        },
+                        dropConnectMenu.sourceNodeId,
+                        'frame_out',
+                        'start_frame',
+                      );
+                      setDropConnectMenu(null);
+                    }}
+                  />
+                  <MenuItem
+                    icon={<ImageIcon size={13} className="text-accent" />}
+                    label="+ 衍生新概念图 (垫图)"
+                    onClick={() => {
+                      void canvasStore.addNodeAndConnect(
+                        sessionId,
+                        {
+                          type: 'image',
+                          x: dropConnectMenu.flowX,
+                          y: dropConnectMenu.flowY,
+                          title: '参考生图',
+                          params: { prompt: '' },
+                        },
+                        dropConnectMenu.sourceNodeId,
+                        'frame_out',
+                        'ref_1',
+                      );
+                      setDropConnectMenu(null);
+                    }}
+                  />
+                  <MenuItem
+                    icon={<Bot size={13} className="text-accent" />}
+                    label="+ 抽帧质量质检 Agent"
+                    onClick={() => {
+                      void canvasStore.addNodeAndConnect(
+                        sessionId,
+                        {
+                          type: 'agent',
+                          x: dropConnectMenu.flowX,
+                          y: dropConnectMenu.flowY,
+                          title: '抽帧质检',
+                          params: { instruction: '评估当前抽取帧画面的清晰度、构图与可延续性。' },
+                        },
+                        dropConnectMenu.sourceNodeId,
+                        'frame_out',
+                      );
+                      setDropConnectMenu(null);
+                    }}
+                  />
+                </>
+              );
+            }
+            if (src?.type === 'agent') {
+              return (
+                <>
+                  <MenuItem
+                    icon={<ImageIcon size={13} className="text-accent" />}
+                    label="+ 执行 Agent 建议生图"
+                    onClick={() => {
+                      void canvasStore.addNodeAndConnect(
+                        sessionId,
+                        {
+                          type: 'image',
+                          x: dropConnectMenu.flowX,
+                          y: dropConnectMenu.flowY,
+                          title: 'Agent 产出图',
+                          params: { prompt: '' },
+                        },
+                        dropConnectMenu.sourceNodeId,
+                        dropConnectMenu.sourceHandle,
+                      );
+                      setDropConnectMenu(null);
+                    }}
+                  />
+                  <MenuItem
+                    icon={<Video size={13} className="text-accent" />}
+                    label="+ 执行 Agent 建议生视频"
+                    onClick={() => {
+                      void canvasStore.addNodeAndConnect(
+                        sessionId,
+                        {
+                          type: 'video',
+                          x: dropConnectMenu.flowX,
+                          y: dropConnectMenu.flowY,
+                          title: 'Agent 建议视频',
+                          params: { prompt: '', duration: '5s', ratio: '16:9' },
+                        },
+                        dropConnectMenu.sourceNodeId,
+                        dropConnectMenu.sourceHandle,
+                        'start_frame',
+                      );
+                      setDropConnectMenu(null);
+                    }}
+                  />
+                </>
+              );
+            }
             return (
               <MenuItem
                 icon={<Bot size={13} className="text-accent" />}
@@ -1032,11 +1669,11 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
 
       {showShortcuts ? (
         <div
-          className="fixed right-6 top-14 z-[170] w-64 rounded-2xl border border-line bg-paper-raised/95 p-3.5 shadow-2xl backdrop-blur-md text-xs select-none"
+          className="fixed right-6 top-14 z-[170] w-72 rounded-2xl border border-line bg-paper-raised/95 p-3.5 shadow-2xl backdrop-blur-md text-xs select-none"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex items-center justify-between mb-2">
-            <span className="font-semibold text-ink">画布效率快捷键</span>
+            <span className="font-semibold text-ink">画布效率快捷键指南</span>
             <button
               type="button"
               onClick={() => setShowShortcuts(false)}
@@ -1047,8 +1684,24 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           </div>
           <div className="flex flex-col gap-1.5 text-[11px] text-ink">
             <div className="flex justify-between items-center py-0.5 border-b border-line/60">
-              <span className="text-ink-muted">全览平滑居中</span>
-              <kbd className="rounded bg-paper-inset px-1.5 py-0.5 font-mono text-[10px]">F</kbd>
+              <span className="text-ink-muted">全览平滑居中 / 缩放到选中</span>
+              <kbd className="rounded bg-paper-inset px-1.5 py-0.5 font-mono text-[10px]">F / Z</kbd>
+            </div>
+            <div className="flex justify-between items-center py-0.5 border-b border-line/60">
+              <span className="text-ink-muted">纯看图情绪板 (Moodboard)</span>
+              <kbd className="rounded bg-paper-inset px-1.5 py-0.5 font-mono text-[10px]">H</kbd>
+            </div>
+            <div className="flex justify-between items-center py-0.5 border-b border-line/60">
+              <span className="text-ink-muted">建下游节点 (图/视频/便签)</span>
+              <kbd className="rounded bg-paper-inset px-1.5 py-0.5 font-mono text-[10px]">I / V / T</kbd>
+            </div>
+            <div className="flex justify-between items-center py-0.5 border-b border-line/60">
+              <span className="text-ink-muted">全局搜索节点与提示词</span>
+              <kbd className="rounded bg-paper-inset px-1.5 py-0.5 font-mono text-[10px]">Ctrl / ⌘ + F</kbd>
+            </div>
+            <div className="flex justify-between items-center py-0.5 border-b border-line/60">
+              <span className="text-ink-muted">连线插入 Reroute 拐点</span>
+              <span className="text-ink text-[10px]">双击任意连线</span>
             </div>
             <div className="flex justify-between items-center py-0.5 border-b border-line/60">
               <span className="text-ink-muted">运行选中节点</span>
@@ -1071,8 +1724,8 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
               <span className="text-ink text-[10px]">双击空白画布</span>
             </div>
             <div className="flex justify-between items-center py-0.5">
-              <span className="text-ink-muted">流水线延伸</span>
-              <span className="text-ink text-[10px]">连线松在空白处</span>
+              <span className="text-ink-muted">流水线智能延伸</span>
+              <span className="text-ink text-[10px]">引脚拖至空白松开</span>
             </div>
           </div>
         </div>

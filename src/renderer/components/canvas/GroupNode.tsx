@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, memo } from 'react';
 import { NodeResizer, type NodeProps, type ResizeParams, useReactFlow } from '@xyflow/react';
 import { Lock, Unlock, Play, Maximize2, Trash2, Unlink } from 'lucide-react';
 import type { CanvasGroupParams } from '../../../shared/canvas';
@@ -14,7 +14,7 @@ const GROUP_COLORS = [
   '#8b5cf6', // Violet
 ];
 
-export default function GroupNode({ id, data, selected }: NodeProps) {
+function GroupNode({ id, data, selected }: NodeProps) {
   const { sessionId, node } = data as CanvasNodeData;
   const params = (node.params as CanvasGroupParams) || { memberIds: [] };
   const memberIds = params.memberIds || [];
@@ -200,3 +200,5 @@ export default function GroupNode({ id, data, selected }: NodeProps) {
     </div>
   );
 }
+
+export default memo(GroupNode);

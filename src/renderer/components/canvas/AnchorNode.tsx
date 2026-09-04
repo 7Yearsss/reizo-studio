@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, memo } from 'react';
 import { Position, type NodeProps } from '@xyflow/react';
 import { Pin } from 'lucide-react';
 import {
@@ -36,7 +36,7 @@ function useAssetUrl(rel: string | undefined): string | null {
  * strength. Non-runnable — consumed by the image executor, which orders the
  * attached anchors first and prepends a semantic prompt prefix.
  */
-export default function AnchorNode({ data, selected }: NodeProps) {
+function AnchorNode({ data, selected }: NodeProps) {
   const { sessionId, node, highlighted, agentMark } = data as CanvasNodeData;
   const params = (node.params as CanvasAnchorParams) ?? { role: 'character', strength: 'mid' };
   const role = params.role ?? 'character';
@@ -122,3 +122,5 @@ export default function AnchorNode({ data, selected }: NodeProps) {
     </div>
   );
 }
+
+export default memo(AnchorNode);

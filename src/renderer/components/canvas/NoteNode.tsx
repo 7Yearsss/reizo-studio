@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, memo } from 'react';
 import { Handle, NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
 import { Bot, Copy, StickyNote, Trash2 } from 'lucide-react';
 import type { CanvasNoteParams } from '../../../shared/canvas';
@@ -16,7 +16,7 @@ const NOTE_COLORS: Array<{ id: NonNullable<CanvasNoteParams['color']>; bg: strin
   { id: 'violet', bg: 'bg-[#ede9fe]/85 dark:bg-[#4c1d95]/20', border: 'border-[#ddd6fe] dark:border-[#5b21b6]/60', dot: 'bg-violet-400' },
 ];
 
-export default function NoteNode({ data, selected }: NodeProps & { data: CanvasNodeData }) {
+function NoteNode({ data, selected }: NodeProps & { data: CanvasNodeData }) {
   const { sessionId, node, highlighted, agentMark } = data;
   const params = (node.params as CanvasNoteParams) || { content: '' };
   const [content, setContent] = useState(params.content || '');
@@ -162,3 +162,5 @@ export default function NoteNode({ data, selected }: NodeProps & { data: CanvasN
     </div>
   );
 }
+
+export default memo(NoteNode);
