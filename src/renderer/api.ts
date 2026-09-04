@@ -69,7 +69,13 @@ async function readEnvelopeStream(res: Response, onEvent: StreamEventHandler): P
 let originPromise: Promise<string> | null = null;
 
 function apiOrigin(): Promise<string> {
-  if (!originPromise) originPromise = window.reizo.getApiOrigin();
+  if (!originPromise) {
+    if (typeof window !== 'undefined' && window.reizo?.getApiOrigin) {
+      originPromise = window.reizo.getApiOrigin();
+    } else {
+      originPromise = Promise.resolve('http://127.0.0.1:47100');
+    }
+  }
   return originPromise;
 }
 

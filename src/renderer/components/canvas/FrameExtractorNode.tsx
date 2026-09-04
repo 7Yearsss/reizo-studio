@@ -51,8 +51,8 @@ function FrameExtractorNode({ id, data, selected }: NodeProps) {
   const assetUrl = useAssetUrl(assetRel);
 
   // Find incoming video edge
-  const allNodes = useCanvasStore((s) => s.nodesBySession[sessionId]) ?? [];
-  const allEdges = useCanvasStore((s) => s.edgesBySession[sessionId]) ?? [];
+  const allNodes = useCanvasStore((s) => s.nodesBySession[sessionId] ?? canvasStore.EMPTY_NODES);
+  const allEdges = useCanvasStore((s) => s.edgesBySession[sessionId] ?? canvasStore.EMPTY_EDGES);
   const inEdge = allEdges.find((e) => e.targetId === id);
   const upNode = inEdge ? allNodes.find((n) => n.id === inEdge.sourceId) : undefined;
   const hasUpstreamAsset = Boolean(upNode?.output?.assets?.[0]);

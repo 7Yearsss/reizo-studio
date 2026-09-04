@@ -60,8 +60,8 @@ function VideoNode({ id, data, selected }: NodeProps) {
   const expanded = selected || hovered;
   const showVideo = (expanded || isPlaying) && !isLowLOD;
 
-  const allNodes = useCanvasStore((s) => s.nodesBySession[sessionId]) ?? [];
-  const allEdges = useCanvasStore((s) => s.edgesBySession[sessionId]) ?? [];
+  const allNodes = useCanvasStore((s) => s.nodesBySession[sessionId] ?? canvasStore.EMPTY_NODES);
+  const allEdges = useCanvasStore((s) => s.edgesBySession[sessionId] ?? canvasStore.EMPTY_EDGES);
   const candidates = useMemo(
     () => allNodes.filter((n) => n.id !== node.id && (n.output?.assets?.length ?? 0) > 0),
     [allNodes, node.id],

@@ -79,6 +79,7 @@ import AssetShelf from './AssetShelf';
 import AgentActivityStrip from './AgentActivityStrip';
 import StoryboardModal from './StoryboardModal';
 import CuttableEdge from './edges/CuttableEdge';
+import ErrorBoundary from '../ErrorBoundary';
 
 const NODE_TYPES: NodeTypes = {
   image: ImageNode,
@@ -100,14 +101,14 @@ type Menu =
   | { kind: 'pane'; x: number; y: number; flowX: number; flowY: number };
 
 function CanvasInner({ sessionId }: { sessionId: string }) {
-  const storeNodes = useCanvasStore((s) => s.nodesBySession[sessionId]) ?? [];
-  const storeEdges = useCanvasStore((s) => s.edgesBySession[sessionId]) ?? [];
-  const loaded = useCanvasStore((s) => s.loadedBySession[sessionId]) ?? false;
+  const storeNodes = useCanvasStore((s) => s.nodesBySession[sessionId] ?? canvasStore.EMPTY_NODES);
+  const storeEdges = useCanvasStore((s) => s.edgesBySession[sessionId] ?? canvasStore.EMPTY_EDGES);
+  const loaded = useCanvasStore((s) => s.loadedBySession[sessionId] ?? false);
   const graphRun = useCanvasStore((s) => s.graphRunBySession[sessionId]);
   const history = useCanvasStore((s) => s.historyBySession[sessionId]);
   const spot = useCanvasStore((s) => s.spotlightBySession[sessionId]);
-  const trail = useCanvasStore((s) => s.trailBySession[sessionId]);
-  const proposals = useCanvasStore((s) => s.proposalsBySession[sessionId] ?? []);
+  const trail = useCanvasStore((s) => s.trailBySession[sessionId] ?? canvasStore.EMPTY_TRAIL);
+  const proposals = useCanvasStore((s) => s.proposalsBySession[sessionId] ?? canvasStore.EMPTY_PROPOSALS);
   const rf = useReactFlow();
 
   const [menu, setMenu] = useState<Menu | null>(null);
@@ -1866,9 +1867,11 @@ function ToolbarDropdown({
 export default function CanvasPanel({ sessionId }: { sessionId: string }) {
   return (
     <div className="h-full w-full">
-      <ReactFlowProvider>
-        <CanvasInner sessionId={sessionId} />
-      </ReactFlowProvider>
+      <ErrorBoundary>
+        <ReactFlowProvider>
+          <CanvasInner sessionId={sessionId} />
+        </ReactFlowProvider>
+      </ErrorBoundary>
     </div>
   );
 }

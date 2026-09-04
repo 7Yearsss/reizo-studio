@@ -9,7 +9,7 @@ export interface ProposalBarProps {
 }
 
 export default function ProposalBar({ sessionId, onFocusProposals }: ProposalBarProps) {
-  const proposalIds = useCanvasStore((s) => s.proposalsBySession[sessionId] ?? []);
+  const proposalIds = useCanvasStore((s) => s.proposalsBySession[sessionId] ?? canvasStore.EMPTY_PROPOSALS);
   const count = proposalIds.length;
   const [focusIdx, setFocusIdx] = useState(0);
 

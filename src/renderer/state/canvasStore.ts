@@ -40,6 +40,11 @@ export interface CanvasState {
   proposalsBySession: Record<string, string[]>;
 }
 
+export const EMPTY_NODES: CanvasNode[] = [];
+export const EMPTY_EDGES: CanvasEdge[] = [];
+export const EMPTY_PROPOSALS: string[] = [];
+export const EMPTY_TRAIL: AgentTrailEntry[] = [];
+
 const TRAIL_CAP = 30;
 
 let state: CanvasState = {

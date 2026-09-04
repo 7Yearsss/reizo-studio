@@ -8,7 +8,9 @@ export default function CustomTitleBar() {
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
-    void window.reizo.windowIsMaximized().then(setMaximized);
+    void window.reizo?.windowIsMaximized?.().then((val) => {
+      if (typeof val === 'boolean') setMaximized(val);
+    });
   }, []);
 
   return (
@@ -23,21 +25,24 @@ export default function CustomTitleBar() {
         <div className="titlebar-no-drag ml-auto flex">
           <button
             className="flex w-11 items-center justify-center text-ink-muted hover:bg-paper-inset hover:text-ink"
-            onClick={() => void window.reizo.windowMinimize()}
+            onClick={() => void window.reizo?.windowMinimize?.()}
             aria-label="Minimize"
           >
             <Minus size={14} />
           </button>
           <button
             className="flex w-11 items-center justify-center text-ink-muted hover:bg-paper-inset hover:text-ink"
-            onClick={async () => setMaximized(await window.reizo.windowToggleMaximize())}
+            onClick={async () => {
+              const next = await window.reizo?.windowToggleMaximize?.();
+              if (typeof next === 'boolean') setMaximized(next);
+            }}
             aria-label={maximized ? 'Restore' : 'Maximize'}
           >
             {maximized ? <Copy size={12} /> : <Square size={12} />}
           </button>
           <button
             className="flex w-11 items-center justify-center text-ink-muted hover:bg-danger hover:text-white"
-            onClick={() => void window.reizo.windowClose()}
+            onClick={() => void window.reizo?.windowClose?.()}
             aria-label="Close"
           >
             <X size={14} />
