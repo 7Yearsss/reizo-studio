@@ -538,7 +538,15 @@ export async function stopCanvasGraph(canvasId: string): Promise<void> {
 
 export async function importCanvasImage(
   canvasId: string,
-  input: { name: string; dataBase64: string; x?: number; y?: number },
+  input: {
+    name: string;
+    dataBase64: string;
+    x?: number;
+    y?: number;
+    /** 'anchor' drops a reference pin instead of an image node. */
+    type?: CanvasNodeType;
+    params?: CanvasNodeParams;
+  },
 ): Promise<CanvasNode> {
   const res = await api(`/api/canvas/${canvasId}/import`, {
     method: 'POST',

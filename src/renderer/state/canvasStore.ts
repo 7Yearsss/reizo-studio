@@ -1,6 +1,8 @@
 import * as api from '../api';
 import type { CanvasNode, CanvasEdge, CanvasNodeParams, CanvasNodeType, CanvasSnapshot, CanvasGroupParams } from '../../shared/canvas';
 import { gridArrange } from '../../shared/arrangeNodes';
+import { variantGrid } from '../../shared/variantLayout';
+import type { AgentTrailEntry } from '../../shared/agentTrail';
 import { grabVideoFrameBlob, type FramePick } from '../lib/videoFrame';
 import { notifyJobDone, primeNotifications } from '../lib/notify';
 import type { CanvasEvent } from '../../shared/canvasStream';
@@ -17,10 +19,14 @@ export interface CanvasState {
   edgesBySession: Record<string, CanvasEdge[]>;
   loadedBySession: Record<string, boolean>;
   graphRunBySession: Record<string, GraphRun | undefined>;
-  /** Node the agent just touched — the canvas pans to it briefly. */
-  focusBySession: Record<string, { id: string; at: number } | undefined>;
+  /** Node(s) the agent just touched — the canvas pans / fits to them briefly. */
+  spotlightBySession: Record<string, { ids: string[]; at: number } | undefined>;
+  /** Recent agent canvas writes (newest last), derived from chat tool events. */
+  trailBySession: Record<string, AgentTrailEntry[]>;
   historyBySession: Record<string, { canUndo: boolean; canRedo: boolean }>;
 }
+
+const TRAIL_CAP = 30;
 
 let state: CanvasState = {
   canvasIdBySession: {},
@@ -28,7 +34,8 @@ let state: CanvasState = {
   edgesBySession: {},
   loadedBySession: {},
   graphRunBySession: {},
-  focusBySession: {},
+  spotlightBySession: {},
+  trailBySession: {},
   historyBySession: {},
 };
 
@@ -233,9 +240,35 @@ export function nodeById(sessionId: string, nodeId: string): CanvasNode | undefi
   return (state.nodesBySession[sessionId] ?? []).find((n) => n.id === nodeId);
 }
 
+/** Pan (single) or fit (multi) the canvas to these nodes with a brief pulse. */
+export function spotlight(sessionId: string, ids: string[]): void {
+  const present = ids.filter((id) => nodeById(sessionId, id));
+  if (present.length === 0) return;
+  setState({
+    spotlightBySession: { ...state.spotlightBySession, [sessionId]: { ids: present, at: Date.now() } },
+  });
+}
+
+/** Back-compat thin wrapper — existing callers pass one id. */
 export function focusNode(sessionId: string, nodeId: string): void {
-  if (!nodeById(sessionId, nodeId)) return;
-  setState({ focusBySession: { ...state.focusBySession, [sessionId]: { id: nodeId, at: Date.now() } } });
+  spotlight(sessionId, [nodeId]);
+}
+
+/**
+ * Record one agent canvas write in the activity trail (deduped by tool-call id,
+ * newest last, capped). Reads (`trailEntryFromTool` returns null for those)
+ * never reach here. Does NOT touch the undo stack — that's `recordAgentBatch`.
+ */
+export function pushTrail(sessionId: string, entry: AgentTrailEntry): void {
+  const list = state.trailBySession[sessionId] ?? [];
+  const next = list.filter((e) => e.id !== entry.id);
+  next.push(entry);
+  setState({
+    trailBySession: {
+      ...state.trailBySession,
+      [sessionId]: next.slice(-TRAIL_CAP),
+    },
+  });
 }
 
 // --- internal mutations (no history) ---
@@ -370,7 +403,7 @@ export async function forkNode(sessionId: string, nodeId: string): Promise<strin
   const edges = state.edgesBySession[sessionId] ?? [];
   const incoming = edges.filter((e) => e.targetId === nodeId);
   for (const edge of incoming) {
-    await _addEdge(sessionId, edge.sourceId, newId);
+    await _addEdge(sessionId, edge.sourceId, newId, edge.sourceHandle, edge.targetHandle);
   }
 
   record(sessionId, {
@@ -379,13 +412,212 @@ export async function forkNode(sessionId: string, nodeId: string): Promise<strin
       const recreated = await _addNode(sessionId, spec);
       if (recreated) {
         for (const edge of incoming) {
-          await _addEdge(sessionId, edge.sourceId, recreated);
+          await _addEdge(sessionId, edge.sourceId, recreated, edge.sourceHandle, edge.targetHandle);
         }
       }
     },
   });
 
   return newId;
+}
+
+/** Human label a fork/variant title is built from. */
+function forkBaseTitle(node: CanvasNode): string {
+  if (node.title) return node.title;
+  if (node.type === 'image') return '图片';
+  if (node.type === 'video') return '视频';
+  if (node.type === 'agent') return 'Agent';
+  return node.type;
+}
+
+/**
+ * Fork `count` sibling variants of a node — same params, same incoming edges
+ * (handles preserved) — laid out as a grid to the right that dodges every
+ * existing node. The whole batch is one history entry.
+ */
+export async function forkVariations(
+  sessionId: string,
+  nodeId: string,
+  count = 4,
+): Promise<string[]> {
+  const source = nodeById(sessionId, nodeId);
+  if (!source) return [];
+
+  const nodes = state.nodesBySession[sessionId] ?? [];
+  const edges = state.edgesBySession[sessionId] ?? [];
+  const incoming = edges.filter((e) => e.targetId === nodeId);
+  const positions = variantGrid(
+    { x: source.x, y: source.y, w: source.w, h: source.h },
+    count,
+    nodes.map((n) => ({ x: n.x, y: n.y, w: n.w, h: n.h })),
+  );
+  const base = forkBaseTitle(source);
+  const specs = positions.map((pos, i) => ({
+    type: source.type,
+    x: pos.x,
+    y: pos.y,
+    w: source.w,
+    h: source.h,
+    title: `${base} (变体 ${i + 1})`,
+    params: { ...(source.params as Record<string, unknown>) },
+  }));
+
+  const create = async (): Promise<string[]> => {
+    const made: string[] = [];
+    for (const spec of specs) {
+      const id = await _addNode(sessionId, spec);
+      if (!id) continue;
+      made.push(id);
+      for (const edge of incoming) {
+        await _addEdge(sessionId, edge.sourceId, id, edge.sourceHandle, edge.targetHandle);
+      }
+    }
+    return made;
+  };
+
+  let ids = await create();
+  if (ids.length === 0) return [];
+  record(sessionId, {
+    undo: async () => {
+      for (const id of ids) await _deleteNode(sessionId, id);
+    },
+    redo: async () => {
+      ids = await create();
+    },
+  });
+  return ids;
+}
+
+/**
+ * Fork one variant of each selected node as a single history entry — the
+ * multi-select toolbar's "batch fork" (was N separate undo steps).
+ */
+export async function forkSelected(sessionId: string, nodeIds: string[]): Promise<string[]> {
+  const plans = nodeIds
+    .map((id) => {
+      const source = nodeById(sessionId, id);
+      if (!source) return null;
+      const edges = state.edgesBySession[sessionId] ?? [];
+      return {
+        incoming: edges.filter((e) => e.targetId === id),
+        spec: {
+          type: source.type,
+          x: source.x + source.w + 32,
+          y: source.y,
+          w: source.w,
+          h: source.h,
+          title: `${forkBaseTitle(source)} (变体)`,
+          params: { ...(source.params as Record<string, unknown>) },
+        },
+      };
+    })
+    .filter((p): p is NonNullable<typeof p> => p !== null);
+  if (plans.length === 0) return [];
+
+  const create = async (): Promise<string[]> => {
+    const made: string[] = [];
+    for (const plan of plans) {
+      const id = await _addNode(sessionId, plan.spec);
+      if (!id) continue;
+      made.push(id);
+      for (const edge of plan.incoming) {
+        await _addEdge(sessionId, edge.sourceId, id, edge.sourceHandle, edge.targetHandle);
+      }
+    }
+    return made;
+  };
+
+  let ids = await create();
+  if (ids.length === 0) return [];
+  record(sessionId, {
+    undo: async () => {
+      for (const id of ids) await _deleteNode(sessionId, id);
+    },
+    redo: async () => {
+      ids = await create();
+    },
+  });
+  return ids;
+}
+
+const agentBatchRecorded = new Set<string>();
+
+/**
+ * P0-2 — put one agent structural tool-call into the renderer undo stack so
+ * `Ctrl+Z` undoes the whole batch (13 storyboard nodes = one undo).
+ *
+ * The tool result and the `node_added` / `edge_added` channel events are two
+ * separate streams, so the batch's nodes may not be in `state` yet. We check;
+ * if some are missing we retry once after a beat and record only what arrived
+ * — never block, never poll.
+ *
+ * `redo` rebuilds via `_addNode` / `_addEdge` (fresh ids, closure refreshed —
+ * same pattern as `forkVariations`). The agent-trail entry then points at stale
+ * ids; the activity strip greys that row rather than erroring.
+ */
+export function recordAgentBatch(sessionId: string, entry: AgentTrailEntry): void {
+  if (agentBatchRecorded.has(entry.id)) return;
+
+  const attempt = (retriesLeft: number): void => {
+    const present = entry.nodeIds.filter((id) => nodeById(sessionId, id));
+    if (present.length < entry.nodeIds.length && retriesLeft > 0) {
+      setTimeout(() => attempt(retriesLeft - 1), 120);
+      return;
+    }
+    if (present.length === 0) return;
+    agentBatchRecorded.add(entry.id);
+
+    const idSet = new Set(present);
+    const nodeSpecs = present
+      .map((id) => nodeById(sessionId, id))
+      .filter((n): n is CanvasNode => Boolean(n))
+      .map((n) => ({
+        type: n.type,
+        x: n.x,
+        y: n.y,
+        w: n.w,
+        h: n.h,
+        title: n.title,
+        params: n.params as CanvasNodeParams,
+      }));
+    // Any edge that touches the batch — inner edges and edges to outside nodes.
+    const edgeSpecs = (state.edgesBySession[sessionId] ?? [])
+      .filter((e) => idSet.has(e.sourceId) || idSet.has(e.targetId))
+      .map((e) => ({
+        sourceId: e.sourceId,
+        targetId: e.targetId,
+        sourceHandle: e.sourceHandle,
+        targetHandle: e.targetHandle,
+      }));
+
+    let liveIds = [...present];
+
+    record(sessionId, {
+      undo: async () => {
+        for (const id of liveIds) await _deleteNode(sessionId, id);
+      },
+      redo: async () => {
+        const oldToNew = new Map<string, string>();
+        const remade: string[] = [];
+        for (let i = 0; i < nodeSpecs.length; i += 1) {
+          const newId = await _addNode(sessionId, nodeSpecs[i]);
+          if (!newId) continue;
+          oldToNew.set(present[i], newId);
+          remade.push(newId);
+        }
+        for (const e of edgeSpecs) {
+          const s = oldToNew.get(e.sourceId) ?? e.sourceId;
+          const t = oldToNew.get(e.targetId) ?? e.targetId;
+          if (nodeById(sessionId, s) && nodeById(sessionId, t)) {
+            await _addEdge(sessionId, s, t, e.sourceHandle, e.targetHandle).catch((): null => null);
+          }
+        }
+        liveIds = remade;
+      },
+    });
+  };
+
+  attempt(1);
 }
 
 export async function addDownstreamAgent(
@@ -414,6 +646,29 @@ export async function addDownstreamAgent(
     },
   });
   return agentId;
+}
+
+/**
+ * "Animate" an image node: drop a video node to its right, pre-wired to the
+ * image node's `start_frame` handle. Same structure the drop-a-wire menu
+ * produces, as one undo entry.
+ */
+export async function animateFromImage(sessionId: string, imageNodeId: string): Promise<string | null> {
+  const src = nodeById(sessionId, imageNodeId);
+  if (!src || src.type !== 'image') return null;
+  return addNodeAndConnect(
+    sessionId,
+    {
+      type: 'video',
+      x: src.x + src.w + 56,
+      y: src.y,
+      title: src.title ? `${src.title} · 运镜` : '视频生成',
+      params: { prompt: '', duration: '5s', ratio: '16:9', cameraMotion: 'none' },
+    },
+    imageNodeId,
+    null,
+    'start_frame',
+  );
 }
 
 export async function removeNode(sessionId: string, nodeId: string): Promise<void> {
@@ -852,6 +1107,82 @@ export async function importImage(sessionId: string, file: File, at: { x: number
     undo: () => _deleteNode(sessionId, node.id),
     redo: () => Promise.resolve(), // imported bytes are gone from the drop event
   });
+}
+
+/** Drop an image onto the canvas as a reference `anchor` pin (character by default). */
+export async function addAnchorFromFile(
+  sessionId: string,
+  file: File,
+  at: { x: number; y: number },
+): Promise<string | null> {
+  const id = canvasId(sessionId);
+  if (!id) return null;
+  const buffer = await file.arrayBuffer();
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+  const node = await api.importCanvasImage(id, {
+    name: file.name || 'anchor.png',
+    dataBase64: btoa(binary),
+    x: at.x,
+    y: at.y,
+    type: 'anchor',
+    params: { role: 'character', strength: 'mid' },
+  });
+  applyEvent(sessionId, { type: 'node_added', node });
+  record(sessionId, {
+    undo: () => _deleteNode(sessionId, node.id),
+    redo: () => Promise.resolve(),
+  });
+  return node.id;
+}
+
+/**
+ * Wire a reference anchor into every image/video node in `targetIds` (skipping
+ * ones already connected), as one history entry. Returns how many edges landed.
+ */
+export async function attachAnchor(
+  sessionId: string,
+  anchorId: string,
+  targetIds: string[],
+): Promise<number> {
+  const nodes = state.nodesBySession[sessionId] ?? [];
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const edges = state.edgesBySession[sessionId] ?? [];
+  const REF_SLOT_MAX = 3;
+  const refSlotCount = (tid: string): number =>
+    (state.edgesBySession[sessionId] ?? []).filter(
+      (e) => e.targetId === tid && (e.targetHandle ?? '').startsWith('ref_'),
+    ).length;
+  const targets = targetIds.filter((tid) => {
+    const t = byId.get(tid);
+    if (!t || (t.type !== 'image' && t.type !== 'video')) return false;
+    if (edges.some((e) => e.sourceId === anchorId && e.targetId === tid)) return false;
+    return refSlotCount(tid) < REF_SLOT_MAX;
+  });
+  if (targets.length === 0) return 0;
+
+  const connect = async (): Promise<string[]> => {
+    const made: string[] = [];
+    for (const tid of targets) {
+      const slot = Math.min(REF_SLOT_MAX, refSlotCount(tid) + 1);
+      const eid = await _addEdge(sessionId, anchorId, tid, null, `ref_${slot}`);
+      if (eid) made.push(eid);
+    }
+    return made;
+  };
+
+  let edgeIds = await connect();
+  if (edgeIds.length === 0) return 0;
+  record(sessionId, {
+    undo: async () => {
+      for (const eid of edgeIds) await _deleteEdge(sessionId, eid);
+    },
+    redo: async () => {
+      edgeIds = await connect();
+    },
+  });
+  return edgeIds.length;
 }
 
 /**

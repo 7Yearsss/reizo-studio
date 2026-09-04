@@ -6,6 +6,7 @@ import * as canvasStore from '../../state/canvasStore';
 import * as chatStore from '../../state/chatStore';
 import { cn } from '../../lib/cn';
 import { NodeTitle, type CanvasNodeData } from './ImageNode';
+import AgentMark from './AgentMark';
 
 const NOTE_COLORS: Array<{ id: NonNullable<CanvasNoteParams['color']>; bg: string; border: string; dot: string }> = [
   { id: 'amber', bg: 'bg-[#fef9c3]/85 dark:bg-[#713f12]/20', border: 'border-[#fde047] dark:border-[#854d0e]/60', dot: 'bg-amber-400' },
@@ -16,7 +17,7 @@ const NOTE_COLORS: Array<{ id: NonNullable<CanvasNoteParams['color']>; bg: strin
 ];
 
 export default function NoteNode({ data, selected }: NodeProps & { data: CanvasNodeData }) {
-  const { sessionId, node, highlighted } = data;
+  const { sessionId, node, highlighted, agentMark } = data;
   const params = (node.params as CanvasNoteParams) || { content: '' };
   const [content, setContent] = useState(params.content || '');
   const color = params.color || 'amber';
@@ -59,6 +60,7 @@ export default function NoteNode({ data, selected }: NodeProps & { data: CanvasN
       )}
       style={{ width: node.w, height: node.h }}
     >
+      <AgentMark show={agentMark} />
       <NodeResizer
         minWidth={220}
         minHeight={160}

@@ -62,6 +62,8 @@ export function parseMentionTokens(text: string): MentionToken[] {
 export function resolveMentions(
   prompt: string,
   candidates: MentionCandidate[],
+  /** First `<<<image N>>>` number; pass > 1 when reference anchors are numbered ahead. */
+  startIndex = 1,
 ): ResolveMentionsResult {
   if (!prompt || !prompt.includes('@') || candidates.length === 0) {
     return { resolvedPrompt: prompt, orderedAssetRefs: [] };
@@ -134,7 +136,7 @@ export function resolveMentions(
   const orderedAssetRefs: string[] = [];
   let resolvedPrompt = '';
   let lastEnd = 0;
-  let imageNum = 1;
+  let imageNum = startIndex;
 
   for (const span of spans) {
     resolvedPrompt += prompt.slice(lastEnd, span.start);

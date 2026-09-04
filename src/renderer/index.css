@@ -377,6 +377,30 @@ pre,
   border-color: var(--accent);
 }
 
+/* Edge "energy flow" — dashes drift from source toward target. */
+@keyframes edge-flow {
+  to { stroke-dashoffset: -24; }
+}
+.edge-flow {
+  stroke-dasharray: 3 9;
+  animation: edge-flow 1.4s linear infinite;
+}
+.edge-flow-running {
+  stroke-dasharray: 4 6;
+  animation-duration: 0.55s;
+}
+
+/* `✦` mark on a node the agent just wrote — pops in, holds, fades over 8s. */
+@keyframes agent-mark-fade {
+  0% { opacity: 0; transform: scale(0.5); }
+  8% { opacity: 1; transform: scale(1); }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: scale(0.9); }
+}
+.agent-mark {
+  animation: agent-mark-fade 8s var(--ease-out) forwards;
+}
+
 /* Canvas toolbar buttons (React Flow Panel). */
 .canvas-tool {
   display: inline-flex;
@@ -395,6 +419,11 @@ pre,
 }
 .canvas-tool:disabled {
   opacity: 0.4;
+}
+
+/* Shared node floating action bar — fades on hover/selection. */
+.node-action-bar {
+  transition: opacity var(--duration-fast) var(--ease-out);
 }
 
 /* Global press feedback — respond on pointer-down, Apple-style. The
@@ -424,6 +453,17 @@ button,
   }
   .canvas-tool {
     transition: none;
+  }
+  .node-action-bar {
+    transition: none;
+  }
+  .edge-flow {
+    animation: none;
+    opacity: 0 !important;
+  }
+  .agent-mark {
+    animation: none;
+    opacity: 1;
   }
   .home-hero-canvas {
     transition: none;

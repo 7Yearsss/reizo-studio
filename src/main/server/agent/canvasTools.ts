@@ -1,6 +1,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { CANVAS_IMAGE_SIZES, defaultNodeBox } from '../../../shared/canvas';
+import { cameraFromPreset } from '../../../shared/cameraMotion';
 import { serializeMention } from '../../../shared/resolveMentions';
 import type { SettingsStore } from '../storage/settingsStore';
 import type { CanvasStore } from '../storage/canvasStore';
@@ -24,6 +25,9 @@ function nodeBrief(node: CanvasNode) {
     size: typeof params.size === 'string' ? params.size : undefined,
     // group containers: what they hold, so the agent can run / reason about one act
     memberIds: Array.isArray(params.memberIds) ? (params.memberIds as string[]) : undefined,
+    // reference anchors: what the pin locks and how strictly
+    role: typeof params.role === 'string' ? params.role : undefined,
+    strength: typeof params.strength === 'string' ? params.strength : undefined,
     assets: node.output?.assets ?? [],
     error: node.output?.error,
   };
@@ -46,12 +50,14 @@ export function createCanvasTools(options: {
   return {
     add_node: tool({
       description:
-        'Add a node to this session\'s canvas. type "image" generates an image from `prompt`; type "agent" is a research/critique sub-task described by `instruction`; type "video" generates video from `prompt`; type "note" is a screenplay/script sticky note. In an image/video `prompt` you may embed inline references to other canvas nodes as `@[label](canvas:<nodeId>)` — at run time each becomes an ordered reference image (`<<<image 1>>>`, ...) drawn from that node\'s latest output, so you can say e.g. "把 @[主角定妆](canvas:abc123) 放进 @[雨夜街道](canvas:def456)". Returns the new node id. The canvas panel opens automatically.',
+        'Add a node to this session\'s canvas. type "image" generates an image from `prompt`; type "agent" is a research/critique sub-task described by `instruction`; type "video" generates video from `prompt`; type "note" is a screenplay/script sticky note; type "anchor" is a reference pin (the user drops an image onto it) whose `role`/`strength` lock a character or style across shots. In an image/video `prompt` you may embed inline references to other canvas nodes as `@[label](canvas:<nodeId>)` — at run time each becomes an ordered reference image (`<<<image 1>>>`, ...) drawn from that node\'s latest output, so you can say e.g. "把 @[主角定妆](canvas:abc123) 放进 @[雨夜街道](canvas:def456)". Returns the new node id. The canvas panel opens automatically.',
       inputSchema: z.object({
-        type: z.enum(['image', 'agent', 'video', 'note']),
+        type: z.enum(['image', 'agent', 'video', 'note', 'anchor']),
         prompt: z.string().optional().describe('Prompt (type "image", "video", or "note").'),
         size: z.enum(CANVAS_IMAGE_SIZES as [string, ...string[]]).optional(),
         instruction: z.string().optional().describe('Task description (type "agent").'),
+        role: z.enum(['character', 'style', 'content']).optional().describe('type "anchor": what the pin locks.'),
+        strength: z.enum(['low', 'mid', 'high']).optional().describe('type "anchor": how strictly to hold it.'),
         title: z.string().optional(),
         x: z.number().optional(),
         y: z.number().optional(),
@@ -66,7 +72,9 @@ export function createCanvasTools(options: {
               ? { prompt: input.prompt ?? '', duration: '5s', ratio: '16:9', cameraMotion: 'none' }
               : input.type === 'note'
                 ? { content: input.instruction ?? input.prompt ?? '', color: 'amber' }
-                : { instruction: input.instruction ?? '' };
+                : input.type === 'anchor'
+                  ? { role: input.role ?? 'character', strength: input.strength ?? 'mid' }
+                  : { instruction: input.instruction ?? '' };
         const { rev, node } = canvasStore.addNode(canvas.id, {
           type: input.type,
           x: typeof input.x === 'number' ? input.x : 40,
@@ -180,6 +188,7 @@ export function createCanvasTools(options: {
               duration: sc.duration,
               ratio: input.ratio,
               cameraMotion: sc.camera,
+              camera: cameraFromPreset(sc.camera),
               model: 'kling-1.5',
             },
           });
@@ -335,15 +344,26 @@ export function createCanvasTools(options: {
     }),
 
     update_node: tool({
-      description: 'Change a canvas node\'s params. For an image node pass `prompt` and/or `size`; for an agent node pass `instruction`. Also renames via `title`. An image/video `prompt` may embed `@[label](canvas:<nodeId>)` references to other nodes — each resolves to an ordered reference image from that node\'s output at run time. Does not re-run the node.',
+      description: 'Change a canvas node\'s params. For an image node pass `prompt` and/or `size`; for an agent node pass `instruction`; for a video node pass `prompt` and/or `camera` (structured camera motion, each axis −10..10). Also renames via `title`. An image/video `prompt` may embed `@[label](canvas:<nodeId>)` references to other nodes — each resolves to an ordered reference image from that node\'s output at run time. Does not re-run the node.',
       inputSchema: z.object({
         id: z.string(),
         prompt: z.string().optional(),
         size: z.enum(CANVAS_IMAGE_SIZES as [string, ...string[]]).optional(),
         instruction: z.string().optional(),
         title: z.string().optional(),
+        camera: z
+          .object({
+            horizontal: z.number().min(-10).max(10).optional(),
+            vertical: z.number().min(-10).max(10).optional(),
+            pan: z.number().min(-10).max(10).optional(),
+            tilt: z.number().min(-10).max(10).optional(),
+            roll: z.number().min(-10).max(10).optional(),
+            zoom: z.number().min(-10).max(10).optional(),
+          })
+          .optional()
+          .describe('Video node only. Camera motion by axis; negative = left/down/out/ccw, positive = right/up/in/cw.'),
       }),
-      execute: async ({ id, prompt, size, instruction, title }) => {
+      execute: async ({ id, prompt, size, instruction, title, camera }) => {
         const canvas = canvasStore.ensureCanvas(sessionId);
         const node = canvasStore.getNode(canvas.id, id);
         if (!node) return { error: `No canvas node "${id}"` };
@@ -351,6 +371,7 @@ export function createCanvasTools(options: {
         if (prompt !== undefined) params.prompt = prompt;
         if (size !== undefined) params.size = size;
         if (instruction !== undefined) params.instruction = instruction;
+        if (camera !== undefined) params.camera = camera;
         const res = canvasStore.updateNode(canvas.id, id, {
           params,
           ...(title !== undefined ? { title } : {}),
@@ -375,6 +396,47 @@ export function createCanvasTools(options: {
         channel.broadcast(res.rev, { type: 'edge_added', edge: res.edge });
         broadcastDownstreamDirty(canvasStore, canvas.id, source, res.rev);
         return { edgeId: res.edge.id };
+      },
+    }),
+
+    attach_reference: tool({
+      description:
+        'Wire a reference `anchor` node into one or more image/video nodes so its character/style is held across them. Skips targets already attached. Returns how many edges landed.',
+      inputSchema: z.object({
+        anchorId: z.string(),
+        targetIds: z.array(z.string()).min(1),
+      }),
+      execute: async ({ anchorId, targetIds }) => {
+        const canvas = canvasStore.ensureCanvas(sessionId);
+        const anchor = canvasStore.getNode(canvas.id, anchorId);
+        if (!anchor || anchor.type !== 'anchor') return { error: `No anchor node "${anchorId}"` };
+        const channel = getCanvasChannel(canvas.id);
+        const existing = new Set(
+          (canvasStore.getSnapshot(canvas.id)?.edges ?? [])
+            .filter((e) => e.sourceId === anchorId)
+            .map((e) => e.targetId),
+        );
+        const refSlotCount = (tid: string): number =>
+          (canvasStore.getSnapshot(canvas.id)?.edges ?? []).filter(
+            (e) => e.targetId === tid && (e.targetHandle ?? '').startsWith('ref_'),
+          ).length;
+        let attached = 0;
+        for (const targetId of targetIds) {
+          const target = canvasStore.getNode(canvas.id, targetId);
+          if (!target || (target.type !== 'image' && target.type !== 'video') || existing.has(targetId)) continue;
+          const slot = refSlotCount(targetId) + 1;
+          if (slot > 3) continue;
+          const res = canvasStore.addEdge(canvas.id, {
+            sourceId: anchorId,
+            targetId,
+            targetHandle: `ref_${slot}`,
+          });
+          if (res.error || !res.edge || res.rev === undefined) continue;
+          channel.broadcast(res.rev, { type: 'edge_added', edge: res.edge });
+          broadcastDownstreamDirty(canvasStore, canvas.id, targetId, res.rev);
+          attached += 1;
+        }
+        return { attached };
       },
     }),
 

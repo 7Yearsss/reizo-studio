@@ -16,6 +16,9 @@ export const falDriver: VideoDriver = {
     if (!apiKey) throw new Error('FAL.ai API key is missing');
 
     const modelEndpoint = options.baseUrl || 'https://queue.fal.run/fal-ai/kling-video/v1/standard/text-to-video';
+    // FAL's kling endpoint has no structured `camera_control` channel — camera
+    // motion reaches it as the natural-language suffix the executor already
+    // appended to `params.prompt` (see `cameraToPrompt`).
     const body: Record<string, unknown> = {
       prompt: params.prompt,
       duration: params.duration === '10s' ? '10' : '5',

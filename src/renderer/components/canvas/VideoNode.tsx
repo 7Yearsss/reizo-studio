@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Handle, NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
+import { NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
 import { Download, FolderPlus, Loader2, Play, GitBranchPlus, Bot, Video, Camera } from 'lucide-react';
 import type { CanvasVideoParams } from '../../../shared/canvas';
-import { CANVAS_VIDEO_CAMERAS, CANVAS_VIDEO_MODELS } from '../../../shared/canvas';
+import { CANVAS_VIDEO_MODELS } from '../../../shared/canvas';
+import { cameraFromPreset } from '../../../shared/cameraMotion';
 import { canvasAssetUrl } from '../../api';
 import * as canvasStore from '../../state/canvasStore';
 import * as chatStore from '../../state/chatStore';
@@ -10,6 +11,10 @@ import { useCanvasStore } from '../../state/useCanvasStore';
 import { cn } from '../../lib/cn';
 import { NodeTitle, type CanvasNodeData } from './ImageNode';
 import MentionTextArea from './MentionTextArea';
+import CameraDial from './CameraDial';
+import NodeActionBar, { useHoverIntent, type NodeAction } from './NodeActionBar';
+import NodeHandle from './NodeHandle';
+import AgentMark from './AgentMark';
 import MissingInputWarning from './MissingInputWarning';
 import { nodeReadinessIssues } from '../../../shared/canvasReadiness';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
@@ -31,7 +36,7 @@ function useAssetUrl(rel: string | undefined): string | null {
 }
 
 export default function VideoNode({ id, data, selected }: NodeProps) {
-  const { sessionId, node, highlighted } = data as CanvasNodeData;
+  const { sessionId, node, highlighted, agentMark } = data as CanvasNodeData;
   const params = (node.params as CanvasVideoParams) || { prompt: '' };
   const [prompt, setPrompt] = useState(params.prompt ?? '');
   const [assetIdx, setAssetIdx] = useState(0);
@@ -45,6 +50,8 @@ export default function VideoNode({ id, data, selected }: NodeProps) {
   const videoElRef = useRef<HTMLVideoElement>(null);
   const [framePick, setFramePick] = useState<'start' | 'end' | 'current' | null>(null);
   const [frameError, setFrameError] = useState<string | null>(null);
+  const { hovered, hoverProps } = useHoverIntent();
+  const expanded = selected || hovered;
 
   const allNodes = useCanvasStore((s) => s.nodesBySession[sessionId]) ?? [];
   const allEdges = useCanvasStore((s) => s.edgesBySession[sessionId]) ?? [];
@@ -97,6 +104,7 @@ export default function VideoNode({ id, data, selected }: NodeProps) {
 
   return (
     <div
+      {...hoverProps}
       className={cn(
         'relative flex h-full w-full flex-col rounded-xl border bg-paper-raised p-3 text-xs shadow-sm transition-shadow',
         selected ? 'border-accent ring-1 ring-accent/20' : 'border-line',
@@ -104,56 +112,53 @@ export default function VideoNode({ id, data, selected }: NodeProps) {
         highlighted && 'canvas-node-highlight',
       )}
     >
-      {selected ? (
-        <div className="nodrag absolute -top-8 left-0 z-20 flex items-center gap-1 rounded-lg border border-line bg-paper-raised px-1 py-0.5 shadow-md">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              void canvasStore.forkNode(sessionId, node.id);
-            }}
-            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-ink hover:bg-paper-inset"
-            title="克隆此视频节点为独立变体分支 (保持上游首尾帧连接)"
-          >
-            <GitBranchPlus size={11} className="text-accent" />
-            变体分支
-          </button>
-          <div className="h-3 w-px bg-line" />
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
+      <AgentMark show={agentMark} />
+      <NodeActionBar
+        visible={selected || hovered}
+        actions={[
+          {
+            id: 'variations',
+            icon: <GitBranchPlus size={11} className="text-accent" />,
+            label: '变体 ×4',
+            title: '在右侧并排派生 4 个继承参数与首尾帧连线的变体',
+            onClick: () => void canvasStore.forkVariations(sessionId, node.id),
+          },
+          ...((assets.length > 0
+            ? [
+                {
+                  id: 'carryFrame',
+                  icon: <Camera size={11} className="text-accent" />,
+                  label: '抽尾帧续拍',
+                  title: '把尾帧抽成图片节点，用作下一镜的起始帧',
+                  onClick: () => extractFrame('end'),
+                },
+              ]
+            : []) as NodeAction[]),
+          {
+            id: 'qa',
+            icon: <Bot size={11} className="text-accent" />,
+            label: '质检 Agent',
+            title: '在右侧添加连接的视频质检 Agent 节点',
+            onClick: () =>
               void canvasStore.addDownstreamAgent(
                 sessionId,
                 node.id,
                 '请评估该生成的视频分镜，从动作连贯性、光影、画面质感给出点评，并提供优化后的视频 Prompt。',
-              );
-            }}
-            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-ink hover:bg-paper-inset"
-            title="在右侧添加连接的视频质检 Agent 节点"
-          >
-            <Bot size={11} className="text-accent" />
-            + 质检 Agent
-          </button>
-          {assets.length > 0 ? (
-            <>
-              <div className="h-3 w-px bg-line" />
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void canvasStore.saveAsset(sessionId, node.id, assetIdx);
-                }}
-                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-ink hover:bg-paper-inset"
-                title="将当前视频存入作品库"
-              >
-                <FolderPlus size={11} className="text-accent" />
-                存为产物
-              </button>
-            </>
-          ) : null}
-        </div>
-      ) : null}
+              ),
+          },
+          ...((assets.length > 0
+            ? [
+                {
+                  id: 'save',
+                  icon: <FolderPlus size={11} className="text-accent" />,
+                  label: '存为产物',
+                  title: '将当前视频存入作品库',
+                  onClick: () => void canvasStore.saveAsset(sessionId, node.id, assetIdx),
+                },
+              ]
+            : []) as NodeAction[]),
+        ]}
+      />
 
       <NodeResizer
         minWidth={280}
@@ -171,41 +176,34 @@ export default function VideoNode({ id, data, selected }: NodeProps) {
         }}
       />
 
-      <Handle
+      <NodeHandle
+        type="target"
+        id="reference"
+        position={Position.Left}
+        kind="reference"
+        label="参考"
+        expanded={expanded}
+        top="38%"
+      />
+      <NodeHandle
         type="target"
         id="start_frame"
         position={Position.Left}
-        style={{ top: '65%' }}
-        className="!h-2.5 !w-2.5 !border-line !bg-accent"
-        title="连接图片作为首帧 (Start Frame)"
+        kind="startFrame"
+        label="首帧"
+        expanded={expanded}
+        top="65%"
       />
-      <span
-        style={{ top: '65%' }}
-        className="pointer-events-none absolute -left-8 -translate-y-1/2 text-[9px] font-medium text-ink-muted/80 select-none text-right w-6"
-      >
-        首帧
-      </span>
-
-      <Handle
+      <NodeHandle
         type="target"
         id="end_frame"
         position={Position.Left}
-        style={{ top: '85%' }}
-        className="!h-2.5 !w-2.5 !border-line !bg-accent/80"
-        title="连接图片作为尾帧 (End Frame)"
+        kind="endFrame"
+        label="尾帧"
+        expanded={expanded}
+        top="85%"
       />
-      <span
-        style={{ top: '85%' }}
-        className="pointer-events-none absolute -left-8 -translate-y-1/2 text-[9px] font-medium text-ink-muted/80 select-none text-right w-6"
-      >
-        尾帧
-      </span>
-      <Handle
-        type="source"
-        position={Position.Right}
-        className="!h-2.5 !w-2.5 !border-line !bg-accent"
-        title="输出：视频产物输出"
-      />
+      <NodeHandle type="source" position={Position.Right} kind="video" label="视频" expanded={expanded} />
 
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1 min-w-0">
@@ -289,33 +287,13 @@ export default function VideoNode({ id, data, selected }: NodeProps) {
             </SelectContent>
           </Select>
 
-          {/* Camera Motion Selector */}
-          <Select
-            value={params.cameraMotion || 'none'}
-            onValueChange={(val) =>
-              void canvasStore.updateNodeParams(sessionId, node.id, {
-                ...params,
-                cameraMotion: val as CanvasVideoParams['cameraMotion'],
-              })
+          {/* Visual camera-motion controller (direction + intensity per axis) */}
+          <CameraDial
+            value={params.camera ?? cameraFromPreset(params.cameraMotion)}
+            onChange={(camera) =>
+              void canvasStore.updateNodeParams(sessionId, node.id, { ...params, camera })
             }
-          >
-            <SelectTrigger
-              size="sm"
-              className="nodrag h-7 max-w-[110px] rounded-lg border-line/70 bg-paper-inset/40 px-2 py-1 text-[11px] text-ink hover:border-accent hover:bg-paper-inset/70 transition-colors"
-            >
-              <div className="flex items-center gap-1 truncate">
-                <span className="text-ink-muted text-[10px]">🎥</span>
-                <SelectValue />
-              </div>
-            </SelectTrigger>
-            <SelectContent className="min-w-[130px] rounded-xl border border-line bg-paper-raised/95 shadow-xl backdrop-blur-xl p-1 text-xs">
-              {CANVAS_VIDEO_CAMERAS.map((c) => (
-                <SelectItem key={c.id} value={c.id} className="text-xs py-1.5 cursor-pointer rounded-lg hover:bg-paper-inset">
-                  {c.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          />
 
           {/* Ratio Segmented Pills (16:9, 9:16, 1:1) */}
           <div className="flex items-center rounded-lg border border-line/60 bg-paper-inset/50 p-0.5">

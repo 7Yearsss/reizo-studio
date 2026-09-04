@@ -3,7 +3,6 @@ import {
   ReactFlow,
   ReactFlowProvider,
   Background,
-  Controls,
   MiniMap,
   Panel,
   useReactFlow,
@@ -38,6 +37,16 @@ import {
   AlignHorizontalDistributeCenter,
   FileDown,
   FileUp,
+  Plus,
+  Maximize,
+  MoreHorizontal,
+  ChevronDown,
+  Pin,
+  MousePointer2,
+  BoxSelect,
+  ZoomIn,
+  ZoomOut,
+  Focus,
 } from 'lucide-react';
 import * as canvasStore from '../../state/canvasStore';
 import * as chatStore from '../../state/chatStore';
@@ -50,6 +59,9 @@ import AgentNode from './AgentNode';
 import VideoNode from './VideoNode';
 import NoteNode from './NoteNode';
 import GroupNode from './GroupNode';
+import AnchorNode from './AnchorNode';
+import AssetShelf from './AssetShelf';
+import AgentActivityStrip from './AgentActivityStrip';
 import StoryboardModal from './StoryboardModal';
 import CuttableEdge from './edges/CuttableEdge';
 
@@ -59,6 +71,7 @@ const NODE_TYPES: NodeTypes = {
   video: VideoNode,
   note: NoteNode,
   group: GroupNode,
+  anchor: AnchorNode,
 };
 const EDGE_TYPES: EdgeTypes = { cuttable: CuttableEdge, default: CuttableEdge };
 const VIEWPORT_KEY = (sessionId: string) => `reizo:canvas-viewport:${sessionId}`;
@@ -73,13 +86,17 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
   const loaded = useCanvasStore((s) => s.loadedBySession[sessionId]) ?? false;
   const graphRun = useCanvasStore((s) => s.graphRunBySession[sessionId]);
   const history = useCanvasStore((s) => s.historyBySession[sessionId]);
-  const focus = useCanvasStore((s) => s.focusBySession[sessionId]);
+  const spot = useCanvasStore((s) => s.spotlightBySession[sessionId]);
+  const trail = useCanvasStore((s) => s.trailBySession[sessionId]);
   const rf = useReactFlow();
 
   const [menu, setMenu] = useState<Menu | null>(null);
+  const [openTool, setOpenTool] = useState<'create' | 'more' | null>(null);
+  // Runway-style canvas interaction mode: pan-on-drag vs marquee box-select.
+  const [mode, setMode] = useState<'select' | 'marquee'>('select');
   const [toast, setToast] = useState<string | null>(null);
   const [confirmAll, setConfirmAll] = useState(false);
-  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const [highlightIds, setHighlightIds] = useState<string[]>([]);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showStoryboard, setShowStoryboard] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -98,16 +115,32 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     return () => canvasStore.closeCanvas(sessionId);
   }, [sessionId]);
 
-  // The agent touched a node -> pan to it and pulse a highlight.
+  // The agent touched node(s) -> pan (one) or fit (many) and pulse a highlight.
   useEffect(() => {
-    if (!focus) return;
-    const node = storeNodes.find((n) => n.id === focus.id);
-    if (!node) return;
-    rf.setCenter(node.x + node.w / 2, node.y + node.h / 2, { zoom: rf.getZoom(), duration: 300 });
-    setHighlightId(focus.id);
-    const t = setTimeout(() => setHighlightId(null), 1800);
+    if (!spot || spot.ids.length === 0) return;
+    const present = spot.ids.filter((id) => storeNodes.some((n) => n.id === id));
+    if (present.length === 0) return;
+    const reduced =
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const one = present.length === 1 ? storeNodes.find((n) => n.id === present[0]) : null;
+    if (one) {
+      rf.setCenter(one.x + one.w / 2, one.y + one.h / 2, {
+        zoom: rf.getZoom(),
+        duration: reduced ? 0 : 300,
+      });
+    } else {
+      rf.fitView({
+        nodes: present.map((id) => ({ id })),
+        padding: 0.25,
+        maxZoom: 1,
+        duration: reduced ? 0 : 400,
+      });
+    }
+    setHighlightIds(present);
+    const t = setTimeout(() => setHighlightIds([]), 1800);
     return () => clearTimeout(t);
-  }, [focus?.id, focus?.at, storeNodes, rf]);
+  }, [spot?.at, storeNodes, rf]);
 
   const restoredRef = useRef(false);
   const restoreViewport = () => {
@@ -140,6 +173,26 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     return out;
   }, [storeNodes]);
 
+  // Nodes the agent wrote in the last 8s get a `✦` mark. Re-tick while any is fresh.
+  const [markTick, setMarkTick] = useState(0);
+  const agentMarkedIds = useMemo(() => {
+    // markTick in deps: forces recompute on the 1s tick so stale marks drop off.
+    void markTick;
+    const cutoff = Date.now() - 8000;
+    const out = new Set<string>();
+    for (const entry of trail ?? []) {
+      if (entry.at >= cutoff && entry.status !== 'error') {
+        for (const id of entry.nodeIds) out.add(id);
+      }
+    }
+    return out;
+  }, [trail, markTick]);
+  useEffect(() => {
+    if (agentMarkedIds.size === 0) return;
+    const t = setTimeout(() => setMarkTick((n) => n + 1), 1000);
+    return () => clearTimeout(t);
+  }, [agentMarkedIds, markTick]);
+
   const nodes: Node<CanvasNodeData>[] = useMemo(
     () =>
       storeNodes.map((node) => ({
@@ -152,9 +205,14 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         // meant for the nodes inside them.
         zIndex: node.type === 'group' ? 0 : 1,
         draggable: lockedMembers.has(node.id) ? false : undefined,
-        data: { sessionId, node, highlighted: node.id === highlightId },
+        data: {
+          sessionId,
+          node,
+          highlighted: highlightIds.includes(node.id),
+          agentMark: agentMarkedIds.has(node.id),
+        },
       })),
-    [storeNodes, sessionId, highlightId, lockedMembers],
+    [storeNodes, sessionId, highlightIds, lockedMembers, agentMarkedIds],
   );
 
   const runningTargets = useMemo(
@@ -344,6 +402,11 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     setTimeout(() => rf.fitView({ padding: 0.2, duration: 250 }), 60);
   };
 
+  const zoomToSelection = useCallback(() => {
+    if (selectedNodeIds.length === 0) return;
+    rf.fitView({ nodes: selectedNodeIds.map((id) => ({ id })), padding: 0.3, duration: 250, maxZoom: 1.4 });
+  }, [rf, selectedNodeIds]);
+
   const askAgent = (nodeId: string) => {
     const node = storeNodes.find((n) => n.id === nodeId);
     if (!node) return;
@@ -415,6 +478,16 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           e.preventDefault();
           rf.fitView({ padding: 0.2, duration: 250 });
           flash('全景居中 (F)');
+        } else if (k === 'v') {
+          e.preventDefault();
+          setMode('select');
+        } else if (k === 'm') {
+          e.preventDefault();
+          setMode('marquee');
+          flash('框选模式：空白拖拽多选 (M)');
+        } else if (k === 'z') {
+          e.preventDefault();
+          zoomToSelection();
         } else if (k === 'r') {
           if (selectedNodeIds.length === 1) {
             e.preventDefault();
@@ -424,7 +497,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         }
       }
     },
-    [sessionId, storeNodes, selectedNodeIds, rf, flash],
+    [sessionId, storeNodes, selectedNodeIds, rf, flash, zoomToSelection],
   );
 
   return (
@@ -437,6 +510,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       onClick={() => {
         if (menu) setMenu(null);
         if (dropConnectMenu) setDropConnectMenu(null);
+        if (openTool) setOpenTool(null);
       }}
     >
       <ReactFlow
@@ -510,11 +584,14 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         proOptions={{ hideAttribution: true }}
         deleteKeyCode={['Backspace', 'Delete']}
         panActivationKeyCode="Space"
+        panOnDrag={mode === 'marquee' ? [1] : true}
+        selectionOnDrag={mode === 'marquee'}
         className="bg-paper"
       >
         <Background gap={16} color="var(--line)" />
-        <Controls showInteractive={false} />
         <MiniMap pannable zoomable className="!bg-paper-inset" />
+        <AssetShelf sessionId={sessionId} selectedTargetIds={selectedNodeIds} flash={flash} />
+        <AgentActivityStrip sessionId={sessionId} />
 
         {storeNodes.length === 0 ? (
           <Panel position="top-center" className="mt-24 pointer-events-none select-none">
@@ -569,60 +646,81 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           </Panel>
         ) : null}
 
-        <Panel position="top-left" className="flex flex-wrap gap-1.5">
-          <button type="button" onClick={() => addNode('image')} className="canvas-tool">
-            <ImageIcon size={13} />
-            图片
-          </button>
-          <button type="button" onClick={() => addNode('video')} className="canvas-tool">
-            <Video size={13} />
-            视频
-          </button>
-          <button type="button" onClick={() => addNode('agent')} className="canvas-tool">
-            <Bot size={13} />
-            Agent
-          </button>
-          <button type="button" onClick={() => addNode('note')} className="canvas-tool">
-            <StickyNote size={13} />
-            便签
-          </button>
-          {storeNodes.some((n) => n.type === 'video') ? (
-            <button
-              type="button"
-              onClick={() => setShowStoryboard(true)}
-              className="canvas-tool font-semibold text-accent hover:border-accent/60"
-              title="连续播放所有分镜短片"
-            >
-              <Film size={13} />
-              串联审片
-            </button>
-          ) : null}
-          <button type="button" onClick={tidy} disabled={storeNodes.length === 0} className="canvas-tool">
-            <LayoutGrid size={13} />
-            整理
-          </button>
+        {/* Left rail — create / organise / run (Runway RW-2). */}
+        <Panel position="top-left" className="flex flex-col items-center gap-1">
+          <ToolbarDropdown
+            open={openTool === 'create'}
+            onToggle={() => setOpenTool((v) => (v === 'create' ? null : 'create'))}
+            icon={<Plus size={14} />}
+            primary
+            compact
+            items={[
+              { icon: <ImageIcon size={13} />, label: '图片生成', onClick: () => addNode('image') },
+              { icon: <Video size={13} />, label: '运镜视频', onClick: () => addNode('video') },
+              { icon: <Bot size={13} />, label: 'Agent 任务', onClick: () => addNode('agent') },
+              { icon: <StickyNote size={13} />, label: '灵感便签', onClick: () => addNode('note') },
+              { icon: <Pin size={13} />, label: '参考图钉', onClick: () => addNode('anchor') },
+            ]}
+          />
           <button
             type="button"
-            onClick={() => {
-              void canvasStore
-                .exportWorkflow(sessionId)
-                .then(() => flash('已导出工程 .reizo.zip'))
-                .catch((err: unknown) => flash(err instanceof Error ? err.message : '导出失败'));
-            }}
+            onClick={tidy}
             disabled={storeNodes.length === 0}
             className="canvas-tool !px-1.5"
-            title="导出为便携工程包（含所有产物），可跨设备迁移或分享模板"
+            title="按依赖分层自动整理布局"
           >
-            <FileDown size={13} />
+            <LayoutGrid size={13} />
           </button>
-          <button
-            type="button"
-            onClick={() => workflowFileRef.current?.click()}
-            className="canvas-tool !px-1.5"
-            title="导入 .reizo.zip 工程包（节点会以新 id 合并进当前画布）"
-          >
-            <FileUp size={13} />
-          </button>
+
+          <span className="my-0.5 h-px w-5 bg-line" aria-hidden />
+
+          {graphRun?.running ? (
+            <button
+              type="button"
+              onClick={() => void canvasStore.stopGraph(sessionId)}
+              className="canvas-tool !px-1.5 !border-danger/30 !bg-danger/10 !text-danger"
+              title={`停止 · ${graphRun.done}/${graphRun.total}`}
+            >
+              <Square size={12} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={runAll}
+              disabled={!hasRunnable}
+              className={cn(
+                'canvas-tool !px-1.5',
+                confirmAll ? '!border-accent !bg-accent !text-accent-ink' : '!bg-ink !text-paper-raised',
+              )}
+              title={confirmAll ? (hasImage ? '再点一次确认运行整图（付费）' : '再点一次确认运行整图') : '运行整图'}
+            >
+              <PlayCircle size={13} />
+            </button>
+          )}
+          <ToolbarDropdown
+            open={openTool === 'more'}
+            onToggle={() => setOpenTool((v) => (v === 'more' ? null : 'more'))}
+            icon={<MoreHorizontal size={13} />}
+            compact
+            items={[
+              ...(storeNodes.some((n) => n.type === 'video')
+                ? [{ icon: <Film size={13} />, label: '串联审片', onClick: () => setShowStoryboard(true) }]
+                : []),
+              {
+                icon: <FileDown size={13} />,
+                label: '导出工程 .zip',
+                disabled: storeNodes.length === 0,
+                onClick: () => {
+                  void canvasStore
+                    .exportWorkflow(sessionId)
+                    .then(() => flash('已导出工程 .reizo.zip'))
+                    .catch((err: unknown) => flash(err instanceof Error ? err.message : '导出失败'));
+                },
+              },
+              { icon: <FileUp size={13} />, label: '导入工程 .zip', onClick: () => workflowFileRef.current?.click() },
+              { icon: <HelpCircle size={13} />, label: '快捷键速查', onClick: () => setShowShortcuts((s) => !s) },
+            ]}
+          />
           <input
             ref={workflowFileRef}
             type="file"
@@ -646,56 +744,46 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
                 .catch((err: unknown) => flash(err instanceof Error ? err.message : '导入失败'));
             }}
           />
-          <button
-            type="button"
-            onClick={() => void canvasStore.undo(sessionId)}
-            disabled={!history?.canUndo}
-            className="canvas-tool !px-1.5"
-            title="撤销 (Ctrl+Z)"
-          >
-            <Undo2 size={13} />
-          </button>
-          <button
-            type="button"
-            onClick={() => void canvasStore.redo(sessionId)}
-            disabled={!history?.canRedo}
-            className="canvas-tool !px-1.5"
-            title="重做 (Ctrl+Shift+Z)"
-          >
-            <Redo2 size={13} />
-          </button>
-          {graphRun?.running ? (
-            <button
-              type="button"
-              onClick={() => void canvasStore.stopGraph(sessionId)}
-              className="canvas-tool !border-danger/30 !bg-danger/10 !text-danger"
+        </Panel>
+
+        {/* Bottom nav bar — pan/marquee + zoom + history (Runway RW-1). */}
+        <Panel position="bottom-center" className="pb-3">
+          <div className="flex items-center gap-0.5 rounded-xl border border-line bg-paper-raised/95 px-1 py-1 shadow-xl backdrop-blur-md">
+            <NavButton active={mode === 'select'} onClick={() => setMode('select')} title="选择 / 平移 (V)">
+              <MousePointer2 size={14} />
+            </NavButton>
+            <NavButton active={mode === 'marquee'} onClick={() => setMode('marquee')} title="框选：空白拖拽多选 (M)">
+              <BoxSelect size={14} />
+            </NavButton>
+            <span className="mx-0.5 h-4 w-px bg-line" aria-hidden />
+            <NavButton onClick={() => rf.zoomOut({ duration: 150 })} title="缩小">
+              <ZoomOut size={14} />
+            </NavButton>
+            <NavButton onClick={() => rf.zoomIn({ duration: 150 })} title="放大">
+              <ZoomIn size={14} />
+            </NavButton>
+            <NavButton onClick={() => rf.fitView({ padding: 0.2, duration: 250 })} title="适应全景 (F)">
+              <Maximize size={14} />
+            </NavButton>
+            <NavButton
+              onClick={zoomToSelection}
+              disabled={selectedNodeIds.length === 0}
+              title="缩放到选中 (Z)"
             >
-              <Square size={12} />
-              停止 · {graphRun.done}/{graphRun.total}
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={runAll}
-              disabled={!hasRunnable}
-              className={cn('canvas-tool', confirmAll ? '!border-accent !bg-accent !text-accent-ink' : '!bg-ink !text-paper-raised')}
-            >
-              <PlayCircle size={13} />
-              {confirmAll ? (hasImage ? '确认运行整图（付费）' : '确认运行整图') : '运行整图'}
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => setShowShortcuts((s) => !s)}
-            className={cn('canvas-tool !px-1.5', showShortcuts && '!bg-paper-inset !text-ink')}
-            title="快捷键速查表"
-          >
-            <HelpCircle size={13} />
-          </button>
+              <Focus size={14} />
+            </NavButton>
+            <span className="mx-0.5 h-4 w-px bg-line" aria-hidden />
+            <NavButton onClick={() => void canvasStore.undo(sessionId)} disabled={!history?.canUndo} title="撤销 (Ctrl+Z)">
+              <Undo2 size={14} />
+            </NavButton>
+            <NavButton onClick={() => void canvasStore.redo(sessionId)} disabled={!history?.canRedo} title="重做 (Ctrl+Shift+Z)">
+              <Redo2 size={14} />
+            </NavButton>
+          </div>
         </Panel>
 
         {selectedNodes.length > 0 ? (
-          <Panel position="bottom-center" className="pointer-events-auto pb-4">
+          <Panel position="bottom-center" className="pointer-events-auto pb-16">
             <div className="flex items-center gap-2 rounded-2xl border border-line bg-paper-raised/95 px-3.5 py-2 text-xs shadow-2xl backdrop-blur-md">
               <span className="font-semibold text-ink">已选 {selectedNodes.length} 个节点</span>
               <div className="h-3.5 w-px bg-line" />
@@ -749,9 +837,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
               <button
                 type="button"
                 onClick={() => {
-                  for (const n of selectedNodes) {
-                    void canvasStore.forkNode(sessionId, n.id);
-                  }
+                  void canvasStore.forkSelected(sessionId, selectedNodeIds);
                   flash(`已派生 ${selectedNodes.length} 个变体分支`);
                 }}
                 className="flex items-center gap-1.5 rounded-xl border border-line/70 bg-paper-inset/40 text-ink px-2.5 py-1.5 text-xs font-medium hover:bg-paper-inset/80 active:scale-95 transition-all"
@@ -807,7 +893,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         ) : null}
 
         {toast ? (
-          <Panel position="bottom-center" className="pointer-events-none pb-4">
+          <Panel position="top-center" className="pointer-events-none mt-3">
             <div className="rounded-lg bg-ink px-3 py-1.5 text-xs text-paper-raised shadow-lg">{toast}</div>
           </Panel>
         ) : null}
@@ -1025,6 +1111,102 @@ function MenuItem({
       {icon}
       {label}
     </button>
+  );
+}
+
+/** A single icon button in the bottom nav bar. */
+function NavButton({
+  children,
+  onClick,
+  title,
+  active,
+  disabled,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  title: string;
+  active?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      aria-pressed={active}
+      className={cn(
+        'flex h-7 w-7 items-center justify-center rounded-lg text-ink-muted transition-colors hover:bg-paper-inset hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent',
+        active && '!bg-paper-inset !text-ink',
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+type ToolbarItem = { icon: React.ReactNode; label: string; onClick: () => void; disabled?: boolean };
+
+/**
+ * A toolbar button that opens a small dropdown of {@link ToolbarItem}s below it.
+ * `primary` renders it as the filled accent action (the `＋节点` create button);
+ * `compact` drops the text label (the `⋯更多` overflow button). Closing is
+ * handled by the pane-level click handler in `CanvasInner` (`openTool` reset).
+ */
+function ToolbarDropdown({
+  open,
+  onToggle,
+  icon,
+  label,
+  items,
+  primary,
+  compact,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  icon: React.ReactNode;
+  label?: string;
+  items: ToolbarItem[];
+  primary?: boolean;
+  compact?: boolean;
+}) {
+  return (
+    <div className="relative" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        onClick={onToggle}
+        className={cn(
+          'canvas-tool',
+          compact && '!px-1.5',
+          primary && '!bg-ink !text-paper-raised',
+          open && !primary && '!bg-paper-inset !text-ink',
+        )}
+        aria-expanded={open}
+      >
+        {icon}
+        {label && !compact ? label : null}
+        {!compact ? <ChevronDown size={11} className={cn('transition-transform', open && 'rotate-180')} /> : null}
+      </button>
+      {open ? (
+        <div className="absolute left-0 top-full z-50 mt-1 min-w-40 overflow-hidden rounded-lg border border-line bg-paper-raised py-1 text-xs shadow-xl">
+          {items.map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              disabled={item.disabled}
+              onClick={() => {
+                onToggle();
+                item.onClick();
+              }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-ink hover:bg-paper-inset disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              {item.icon}
+              {item.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

@@ -15,6 +15,7 @@ import * as settingsStore from './settingsStore';
 import * as tabStore from './tabStore';
 import * as uiStore from './uiStore';
 import * as canvasStore from './canvasStore';
+import { trailEntryFromTool, UNDOABLE_TRAIL_VERBS } from '../../shared/agentTrail';
 import * as artifactStore from './artifactStore';
 import { appendTerminalLine } from './terminalStore';
 
@@ -611,21 +612,20 @@ function makeEventFolder(
         finishThinkingActivity(acc);
         const part = upsertToolPart(acc, event);
         upsertToolActivity(acc, part);
-        // The agent touched the canvas — surface it and pan to the node.
-        if (['add_node', 'run_node', 'update_node'].includes(event.name)) {
-          if (event.name === 'add_node') uiStore.setCanvasOpen(true);
-          const nodeId =
-            typeof event.args.id === 'string'
-              ? event.args.id
-              : ((): string | null => {
-                  try {
-                    const parsed = JSON.parse(event.result ?? '') as { id?: string };
-                    return typeof parsed.id === 'string' ? parsed.id : null;
-                  } catch {
-                    return null;
-                  }
-                })();
-          if (nodeId) canvasStore.focusNode(sessionId, nodeId);
+        // The agent touched the canvas — record a trail entry, spotlight the
+        // affected nodes, and (P0-2) batch structural writes into the undo stack.
+        {
+          const trail = trailEntryFromTool(event);
+          if (trail) {
+            if (event.name === 'add_node' || event.name === 'create_storyboard_pipeline') {
+              uiStore.setCanvasOpen(true);
+            }
+            canvasStore.pushTrail(sessionId, trail);
+            if (trail.nodeIds.length > 0) canvasStore.spotlight(sessionId, trail.nodeIds);
+            if (trail.status === 'done' && UNDOABLE_TRAIL_VERBS.has(trail.verb)) {
+              canvasStore.recordAgentBatch(sessionId, trail);
+            }
+          }
         }
         setState({
           ...progressPatch(sessionId),
