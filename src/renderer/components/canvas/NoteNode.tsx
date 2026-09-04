@@ -1,4 +1,4 @@
-import { useEffect, useState, memo } from 'react';
+import { useEffect, useState, memo, useRef } from 'react';
 import { Handle, NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
 import { Bot, Copy, StickyNote, Trash2 } from 'lucide-react';
 import type { CanvasNoteParams } from '../../../shared/canvas';
@@ -17,10 +17,11 @@ const NOTE_COLORS: Array<{ id: NonNullable<CanvasNoteParams['color']>; bg: strin
 ];
 
 function NoteNode({ data, selected }: NodeProps & { data: CanvasNodeData }) {
-  const { sessionId, node, highlighted, agentMark } = data;
+  const { sessionId, node, highlighted, agentMark, isProposal } = data;
   const params = (node.params as CanvasNoteParams) || { content: '' };
   const [content, setContent] = useState(params.content || '');
   const color = params.color || 'amber';
+  const resizeStart = useRef<{ w: number; h: number } | null>(null);
 
   useEffect(() => {
     setContent(params.content || '');
@@ -37,7 +38,9 @@ function NoteNode({ data, selected }: NodeProps & { data: CanvasNodeData }) {
   const currentColorConfig = NOTE_COLORS.find((c) => c.id === color) || NOTE_COLORS[0];
 
   const onResizeEnd = (_: unknown, p: ResizeParams) => {
-    canvasStore.commitResize(sessionId, node.id, { w: node.w, h: node.h }, { w: p.width, h: p.height });
+    const from = resizeStart.current;
+    resizeStart.current = null;
+    if (from) canvasStore.commitResize(sessionId, node.id, from, { w: p.width, h: p.height });
   };
 
   const askAgentToExpand = () => {
@@ -57,6 +60,7 @@ function NoteNode({ data, selected }: NodeProps & { data: CanvasNodeData }) {
         currentColorConfig.border,
         selected ? 'ring-2 ring-accent ring-offset-2 ring-offset-paper' : '',
         highlighted ? 'scale-[1.02] ring-2 ring-accent' : '',
+        isProposal && 'border-dashed !border-2 !border-accent shadow-[0_0_15px_rgba(99,102,241,0.35)] animate-pulse-subtle',
       )}
       style={{ width: node.w, height: node.h }}
     >
@@ -67,6 +71,9 @@ function NoteNode({ data, selected }: NodeProps & { data: CanvasNodeData }) {
         isVisible={selected}
         lineClassName="!border-accent/70"
         handleClassName="!size-2 !bg-accent !border-paper-raised !rounded-full"
+        onResizeStart={(_, p: ResizeParams) => {
+          resizeStart.current = { w: p.width, h: p.height };
+        }}
         onResizeEnd={onResizeEnd}
       />
 

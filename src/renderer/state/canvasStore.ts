@@ -898,7 +898,7 @@ export async function loadStarterFlow(sessionId: string): Promise<void> {
   const imageId = await _addNode(sessionId, {
     type: 'image',
     x: 100,
-    y: 150,
+    y: 130,
     w: 320,
     h: 380,
     title: '雨夜概念图 (首帧)',
@@ -908,19 +908,9 @@ export async function loadStarterFlow(sessionId: string): Promise<void> {
     },
   });
 
-  const frameExtractorId = await _addNode(sessionId, {
-    type: 'frameExtractor',
-    x: 460,
-    y: 220,
-    w: 200,
-    h: 160,
-    title: '提取首尾帧',
-    params: { mode: 'end' },
-  });
-
   const videoId = await _addNode(sessionId, {
     type: 'video',
-    x: 700,
+    x: 480,
     y: 130,
     w: 340,
     h: 420,
@@ -933,18 +923,28 @@ export async function loadStarterFlow(sessionId: string): Promise<void> {
     },
   });
 
-  if (imageId && frameExtractorId) {
-    await _addEdge(sessionId, imageId, frameExtractorId, null, 'video_in');
+  const frameExtractorId = await _addNode(sessionId, {
+    type: 'frameExtractor',
+    x: 880,
+    y: 220,
+    w: 200,
+    h: 160,
+    title: '提取首尾帧',
+    params: { mode: 'end' },
+  });
+
+  if (imageId && videoId) {
+    await _addEdge(sessionId, imageId, videoId, null, 'start_frame');
   }
-  if (frameExtractorId && videoId) {
-    await _addEdge(sessionId, frameExtractorId, videoId, 'frame_out', 'start_frame');
+  if (videoId && frameExtractorId) {
+    await _addEdge(sessionId, videoId, frameExtractorId, null, 'video_in');
   }
-  if (sectionId && imageId && frameExtractorId && videoId) {
+  if (sectionId && imageId && videoId && frameExtractorId) {
     await _setNode(sessionId, sectionId, {
       params: {
         color: 'blue',
         description: '电影质感：雨夜街道，霓虹倒影，电影镜头跟踪漫步',
-        memberIds: [imageId, frameExtractorId, videoId],
+        memberIds: [imageId, videoId, frameExtractorId],
       },
     });
   }
@@ -987,14 +987,15 @@ export async function connectNodes(
     });
 
     if (extractorId) {
-      const edge1Id = await _addEdge(sessionId, sourceId, extractorId, sourceHandle, 'video_in');
-      const edge2Id = await _addEdge(sessionId, extractorId, targetId, 'frame_out', actualTargetHandle);
+      let currentExtractorId = extractorId;
+      let currentEdge1Id = await _addEdge(sessionId, sourceId, extractorId, sourceHandle, 'video_in');
+      let currentEdge2Id = await _addEdge(sessionId, extractorId, targetId, 'frame_out', actualTargetHandle);
 
       record(sessionId, {
         undo: async () => {
-          if (edge2Id) await _deleteEdge(sessionId, edge2Id);
-          if (edge1Id) await _deleteEdge(sessionId, edge1Id);
-          await _deleteNode(sessionId, extractorId);
+          if (currentEdge2Id) await _deleteEdge(sessionId, currentEdge2Id);
+          if (currentEdge1Id) await _deleteEdge(sessionId, currentEdge1Id);
+          await _deleteNode(sessionId, currentExtractorId);
         },
         redo: async () => {
           const recreated = await _addNode(sessionId, {
@@ -1005,8 +1006,14 @@ export async function connectNodes(
             params: { mode: preferredMode },
           });
           if (recreated) {
-            await _addEdge(sessionId, sourceId, recreated, sourceHandle, 'video_in').catch((): null => null);
-            await _addEdge(sessionId, recreated, targetId, 'frame_out', actualTargetHandle).catch((): null => null);
+            currentExtractorId = recreated;
+            currentEdge1Id =
+              (await _addEdge(sessionId, sourceId, recreated, sourceHandle, 'video_in').catch((): null => null)) ??
+              undefined;
+            currentEdge2Id =
+              (await _addEdge(sessionId, recreated, targetId, 'frame_out', actualTargetHandle).catch(
+                (): null => null,
+              )) ?? undefined;
           }
         },
       });
@@ -1358,25 +1365,29 @@ export async function collapseToSubgraph(
     },
   };
 
-  const subgraphId = await _addNode(sessionId, subgraphSpec);
-  if (!subgraphId) return null;
+  let currentSubgraphId = await _addNode(sessionId, subgraphSpec);
+  if (!currentSubgraphId) return null;
 
   for (const inEdge of inboundEdges) {
-    await _addEdge(sessionId, inEdge.sourceId, subgraphId, inEdge.sourceHandle, 'input');
+    await _addEdge(sessionId, inEdge.sourceId, currentSubgraphId, inEdge.sourceHandle, 'input');
   }
   for (const outEdge of outboundEdges) {
-    await _addEdge(sessionId, subgraphId, outEdge.targetId, 'output', outEdge.targetHandle);
+    await _addEdge(sessionId, currentSubgraphId, outEdge.targetId, 'output', outEdge.targetHandle);
   }
 
   for (const n of targetNodes) {
     await _deleteNode(sessionId, n.id);
   }
 
+  let currentInnerNodeIds: string[] = [];
+
   record(sessionId, {
     undo: async () => {
-      await _deleteNode(sessionId, subgraphId);
+      if (currentSubgraphId) await _deleteNode(sessionId, currentSubgraphId);
+      const idMap = new Map<string, string>();
+      currentInnerNodeIds = [];
       for (const n of innerSnapshot.nodes) {
-        await _addNode(sessionId, {
+        const newId = await _addNode(sessionId, {
           type: n.type,
           x: n.x,
           y: n.y,
@@ -1385,42 +1396,74 @@ export async function collapseToSubgraph(
           title: n.title,
           params: n.params,
         });
+        if (newId) {
+          idMap.set(n.id, newId);
+          currentInnerNodeIds.push(newId);
+        }
       }
       for (const e of innerSnapshot.edges) {
-        await _addEdge(sessionId, e.sourceId, e.targetId, e.sourceHandle, e.targetHandle);
+        const src = idMap.get(e.sourceId) || e.sourceId;
+        const tgt = idMap.get(e.targetId) || e.targetId;
+        await _addEdge(sessionId, src, tgt, e.sourceHandle, e.targetHandle);
       }
       for (const inEdge of inboundEdges) {
-        await _addEdge(sessionId, inEdge.sourceId, inEdge.targetId, inEdge.sourceHandle, inEdge.targetHandle);
+        const tgt = idMap.get(inEdge.targetId) || inEdge.targetId;
+        await _addEdge(sessionId, inEdge.sourceId, tgt, inEdge.sourceHandle, inEdge.targetHandle);
       }
       for (const outEdge of outboundEdges) {
-        await _addEdge(sessionId, outEdge.sourceId, outEdge.targetId, outEdge.sourceHandle, outEdge.targetHandle);
+        const src = idMap.get(outEdge.sourceId) || outEdge.sourceId;
+        await _addEdge(sessionId, src, outEdge.targetId, outEdge.sourceHandle, outEdge.targetHandle);
       }
     },
     redo: async () => {
-      await collapseToSubgraph(sessionId, memberIds, title);
+      for (const id of currentInnerNodeIds) {
+        await _deleteNode(sessionId, id);
+      }
+      const newSubgraphId = await _addNode(sessionId, subgraphSpec);
+      if (newSubgraphId) {
+        currentSubgraphId = newSubgraphId;
+        for (const inEdge of inboundEdges) {
+          await _addEdge(sessionId, inEdge.sourceId, newSubgraphId, inEdge.sourceHandle, 'input');
+        }
+        for (const outEdge of outboundEdges) {
+          await _addEdge(sessionId, newSubgraphId, outEdge.targetId, 'output', outEdge.targetHandle);
+        }
+      }
     },
   });
 
-  return subgraphId;
+  return currentSubgraphId;
 }
 
-export async function unpackSubgraph(sessionId: string, subgraphId: string): Promise<void> {
+export async function unpackSubgraph(sessionId: string, subgraphId: string): Promise<string[]> {
   const subgraph = nodeById(sessionId, subgraphId);
-  if (!subgraph || subgraph.type !== 'subgraph') return;
+  if (!subgraph || subgraph.type !== 'subgraph') return [];
   const params = subgraph.params as CanvasSubgraphParams;
   const snapshot = params?.innerSnapshot;
   if (!snapshot || !snapshot.nodes || snapshot.nodes.length === 0) {
     await _deleteNode(sessionId, subgraphId);
-    return;
+    return [];
   }
 
   const allEdges = state.edgesBySession[sessionId] ?? [];
   const inboundToSubgraph = allEdges.filter((e) => e.targetId === subgraphId);
   const outboundFromSubgraph = allEdges.filter((e) => e.sourceId === subgraphId);
 
+  const subgraphSpec = {
+    type: subgraph.type,
+    x: subgraph.x,
+    y: subgraph.y,
+    w: subgraph.w,
+    h: subgraph.h,
+    title: subgraph.title,
+    params: subgraph.params,
+  };
+
   await _deleteNode(sessionId, subgraphId);
 
   const idMap = new Map<string, string>();
+  let unpackedNodeIds: string[] = [];
+
   for (const n of snapshot.nodes) {
     const newId = await _addNode(sessionId, {
       type: n.type,
@@ -1431,7 +1474,10 @@ export async function unpackSubgraph(sessionId: string, subgraphId: string): Pro
       title: n.title,
       params: n.params,
     });
-    if (newId) idMap.set(n.id, newId);
+    if (newId) {
+      idMap.set(n.id, newId);
+      unpackedNodeIds.push(newId);
+    }
   }
 
   for (const e of snapshot.edges) {
@@ -1446,29 +1492,95 @@ export async function unpackSubgraph(sessionId: string, subgraphId: string): Pro
       await _addEdge(sessionId, inEdge.sourceId, firstTarget, inEdge.sourceHandle, 'input');
     }
   }
-  const lastSource = idMap.get(snapshot.nodes[snapshot.nodes.length - 1]?.id) || snapshot.nodes[snapshot.nodes.length - 1]?.id;
+  const lastSource =
+    idMap.get(snapshot.nodes[snapshot.nodes.length - 1]?.id) ||
+    snapshot.nodes[snapshot.nodes.length - 1]?.id;
   if (lastSource) {
     for (const outEdge of outboundFromSubgraph) {
       await _addEdge(sessionId, lastSource, outEdge.targetId, 'output', outEdge.targetHandle);
     }
   }
+
+  let currentSubgraphId: string | null = null;
+
+  record(sessionId, {
+    undo: async () => {
+      for (const id of unpackedNodeIds) {
+        await _deleteNode(sessionId, id);
+      }
+      currentSubgraphId = await _addNode(sessionId, subgraphSpec);
+      if (currentSubgraphId) {
+        for (const inEdge of inboundToSubgraph) {
+          await _addEdge(sessionId, inEdge.sourceId, currentSubgraphId, inEdge.sourceHandle, inEdge.targetHandle);
+        }
+        for (const outEdge of outboundFromSubgraph) {
+          await _addEdge(sessionId, currentSubgraphId, outEdge.targetId, outEdge.sourceHandle, outEdge.targetHandle);
+        }
+      }
+    },
+    redo: async () => {
+      if (currentSubgraphId) {
+        await _deleteNode(sessionId, currentSubgraphId);
+      }
+      const redoIdMap = new Map<string, string>();
+      unpackedNodeIds = [];
+      for (const n of snapshot.nodes) {
+        const newId = await _addNode(sessionId, {
+          type: n.type,
+          x: n.x,
+          y: n.y,
+          w: n.w,
+          h: n.h,
+          title: n.title,
+          params: n.params,
+        });
+        if (newId) {
+          redoIdMap.set(n.id, newId);
+          unpackedNodeIds.push(newId);
+        }
+      }
+      for (const e of snapshot.edges) {
+        const src = redoIdMap.get(e.sourceId) || e.sourceId;
+        const tgt = redoIdMap.get(e.targetId) || e.targetId;
+        await _addEdge(sessionId, src, tgt, e.sourceHandle, e.targetHandle);
+      }
+      const redoFirstTarget = redoIdMap.get(snapshot.nodes[0]?.id) || snapshot.nodes[0]?.id;
+      if (redoFirstTarget) {
+        for (const inEdge of inboundToSubgraph) {
+          await _addEdge(sessionId, inEdge.sourceId, redoFirstTarget, inEdge.sourceHandle, 'input');
+        }
+      }
+      const redoLastSource =
+        redoIdMap.get(snapshot.nodes[snapshot.nodes.length - 1]?.id) ||
+        snapshot.nodes[snapshot.nodes.length - 1]?.id;
+      if (redoLastSource) {
+        for (const outEdge of outboundFromSubgraph) {
+          await _addEdge(sessionId, redoLastSource, outEdge.targetId, 'output', outEdge.targetHandle);
+        }
+      }
+    },
+  });
+
+  return unpackedNodeIds;
 }
 
 export async function runSubgraph(sessionId: string, subgraphId: string): Promise<void> {
   const subgraph = nodeById(sessionId, subgraphId);
   if (!subgraph || subgraph.type !== 'subgraph') return;
-  const nodes = state.nodesBySession[sessionId] ?? [];
-  setNodes(
-    sessionId,
-    nodes.map((n) => (n.id === subgraphId ? { ...n, runState: 'running' } : n)),
-  );
-  setTimeout(() => {
-    const currNodes = state.nodesBySession[sessionId] ?? [];
-    setNodes(
-      sessionId,
-      currNodes.map((n) => (n.id === subgraphId ? { ...n, runState: 'done' } : n)),
-    );
-  }, 1200);
+  const params = subgraph.params as CanvasSubgraphParams;
+  const snapshot = params?.innerSnapshot;
+
+  if (snapshot?.nodes && snapshot.nodes.length > 0) {
+    const unpackedIds = await unpackSubgraph(sessionId, subgraphId);
+    if (unpackedIds.length > 0) {
+      await runGraph(sessionId, undefined, unpackedIds);
+    }
+    return;
+  }
+
+  if (params?.innerNodeIds && params.innerNodeIds.length > 0) {
+    await runGraph(sessionId, undefined, params.innerNodeIds);
+  }
 }
 
 /**
@@ -1889,6 +2001,12 @@ export function setProposals(sessionId: string, nodeIds: string[]): void {
   });
 }
 
+export function addProposals(sessionId: string, nodeIds: string[]): void {
+  const existing = state.proposalsBySession[sessionId] ?? [];
+  const merged = Array.from(new Set([...existing, ...nodeIds]));
+  setProposals(sessionId, merged);
+}
+
 export function isProposal(sessionId: string, nodeId: string): boolean {
   return state.proposalsBySession[sessionId]?.includes(nodeId) ?? false;
 }
@@ -1897,21 +2015,18 @@ export async function acceptProposals(sessionId: string): Promise<void> {
   const currentProposals = state.proposalsBySession[sessionId] ?? [];
   if (currentProposals.length === 0) return;
 
-  setState({
-    proposalsBySession: {
-      ...state.proposalsBySession,
-      [sessionId]: [],
-    },
-  });
+  setProposals(sessionId, []);
 
-  // Record undo: rejecting the accepted proposals removes them
+  // Safe undo: restoring proposals puts them back in proposal review state, never deletes data
   record(sessionId, {
-    undo: async () => {
-      for (const id of currentProposals) {
-        await _deleteNode(sessionId, id);
-      }
+    undo: () => {
+      setProposals(sessionId, currentProposals);
+      return Promise.resolve();
     },
-    redo: () => Promise.resolve(),
+    redo: () => {
+      setProposals(sessionId, []);
+      return Promise.resolve();
+    },
   });
 }
 
@@ -1919,15 +2034,58 @@ export async function rejectProposals(sessionId: string): Promise<void> {
   const currentProposals = state.proposalsBySession[sessionId] ?? [];
   if (currentProposals.length === 0) return;
 
-  setState({
-    proposalsBySession: {
-      ...state.proposalsBySession,
-      [sessionId]: [],
+  const allNodes = state.nodesBySession[sessionId] ?? [];
+  const allEdges = state.edgesBySession[sessionId] ?? [];
+
+  const nodesToDelete = allNodes.filter((n) => currentProposals.includes(n.id));
+  const edgesToDelete = allEdges.filter(
+    (e) => currentProposals.includes(e.sourceId) || currentProposals.includes(e.targetId),
+  );
+
+  setProposals(sessionId, []);
+
+  for (const e of edgesToDelete) {
+    await _deleteEdge(sessionId, e.id);
+  }
+  for (const n of nodesToDelete) {
+    await _deleteNode(sessionId, n.id);
+  }
+
+  let liveDeletedIds = currentProposals;
+
+  record(sessionId, {
+    undo: async () => {
+      const idMap = new Map<string, string>();
+      const restoredIds: string[] = [];
+      for (const n of nodesToDelete) {
+        const newId = await _addNode(sessionId, {
+          type: n.type,
+          x: n.x,
+          y: n.y,
+          w: n.w,
+          h: n.h,
+          title: n.title,
+          params: n.params,
+        });
+        if (newId) {
+          idMap.set(n.id, newId);
+          restoredIds.push(newId);
+        }
+      }
+      for (const e of edgesToDelete) {
+        const src = idMap.get(e.sourceId) || e.sourceId;
+        const tgt = idMap.get(e.targetId) || e.targetId;
+        await _addEdge(sessionId, src, tgt, e.sourceHandle, e.targetHandle);
+      }
+      liveDeletedIds = restoredIds;
+      setProposals(sessionId, restoredIds);
+    },
+    redo: async () => {
+      setProposals(sessionId, []);
+      for (const id of liveDeletedIds) {
+        await _deleteNode(sessionId, id);
+      }
     },
   });
-
-  for (const id of currentProposals) {
-    await _deleteNode(sessionId, id);
-  }
 }
 

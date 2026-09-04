@@ -293,7 +293,8 @@ export async function runChatTurn(options: {
   const model = createOpenAiModel({ apiKey, modelId, baseUrl });
 
   let lastSeenNodeCount = -1;
-  const initialSnap = canvasStore ? canvasStore.getSnapshotBySession(sessionId) : null;
+  const initialCanvas = canvasStore ? canvasStore.findCanvasBySession(sessionId) : null;
+  const initialSnap = initialCanvas && canvasStore ? canvasStore.getSnapshot(initialCanvas.id) : null;
   if (initialSnap) lastSeenNodeCount = initialSnap.nodes.length;
 
   const buildStream = (messages: ModelMessage[], signal: AbortSignal) =>
@@ -309,7 +310,8 @@ export async function runChatTurn(options: {
       prepareStep: ({ messages: stepMessages }) => {
         const compacted = compactModelMessages(stepMessages as ModelMessage[]);
         if (canvasStore && lastSeenNodeCount >= 0) {
-          const snap = canvasStore.getSnapshotBySession(sessionId);
+          const canvas = canvasStore.findCanvasBySession(sessionId);
+          const snap = canvas ? canvasStore.getSnapshot(canvas.id) : null;
           if (snap && snap.nodes.length !== lastSeenNodeCount) {
             const diff = snap.nodes.length - lastSeenNodeCount;
             lastSeenNodeCount = snap.nodes.length;

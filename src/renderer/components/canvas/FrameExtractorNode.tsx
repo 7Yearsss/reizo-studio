@@ -33,7 +33,7 @@ function useAssetUrl(rel: string | undefined): string | null {
 }
 
 function FrameExtractorNode({ id, data, selected }: NodeProps) {
-  const { sessionId, node } = data as CanvasNodeData;
+  const { sessionId, node, isProposal } = data as CanvasNodeData;
   const isLowLOD = useStore((s) => s.transform[2] < 0.35);
   const isMoodboard = useCanvasStore((s) => s.moodboardBySession[sessionId] ?? false);
   const hideControls = isLowLOD || isMoodboard;
@@ -87,6 +87,7 @@ function FrameExtractorNode({ id, data, selected }: NodeProps) {
         'relative flex h-full w-full flex-col rounded-xl border bg-paper-raised p-2.5 text-xs shadow-sm transition-shadow',
         selected ? 'border-accent ring-1 ring-accent/20' : 'border-line',
         extracting && 'canvas-node-running',
+        isProposal && 'border-dashed !border-2 !border-accent shadow-[0_0_15px_rgba(99,102,241,0.35)] animate-pulse-subtle',
       )}
     >
       {/* Target handle receives video from upstream */}

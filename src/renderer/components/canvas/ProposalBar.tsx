@@ -17,9 +17,14 @@ export default function ProposalBar({ sessionId, onFocusProposals }: ProposalBar
     if (count === 0) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger if typing in an input or textarea
-      const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
-      if (tag === 'input' || tag === 'textarea') return;
+      // Don't trigger if typing in an input, textarea, or contenteditable element
+      const target = e.target as HTMLElement | null;
+      if (
+        target?.isContentEditable ||
+        Boolean(target?.closest('input, textarea, [contenteditable="true"]'))
+      ) {
+        return;
+      }
 
       if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
@@ -27,19 +32,12 @@ export default function ProposalBar({ sessionId, onFocusProposals }: ProposalBar
       } else if (e.key === 'Escape') {
         e.preventDefault();
         void canvasStore.rejectProposals(sessionId);
-      } else if (e.key === ' ' && !e.ctrlKey) {
-        e.preventDefault();
-        if (proposalIds.length > 0) {
-          const nextIdx = (focusIdx + 1) % proposalIds.length;
-          setFocusIdx(nextIdx);
-          onFocusProposals([proposalIds[nextIdx]]);
-        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [sessionId, count, proposalIds, focusIdx, onFocusProposals]);
+  }, [sessionId, count]);
 
   if (count === 0) return null;
 
@@ -63,10 +61,10 @@ export default function ProposalBar({ sessionId, onFocusProposals }: ProposalBar
             }
           }}
           className="flex items-center gap-1 rounded-xl border border-line/70 bg-paper-inset/40 px-2.5 py-1 text-xs font-medium text-ink hover:bg-paper-inset/80 active:scale-95 transition-all"
-          title="空格键依次聚焦查看提案节点"
+          title="依次聚焦查看提案节点"
         >
           <Eye size={12} className="text-accent" />
-          空间走查 (Space)
+          空间走查
         </button>
 
         <button

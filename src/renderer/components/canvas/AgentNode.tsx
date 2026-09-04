@@ -12,7 +12,7 @@ import MissingInputWarning from './MissingInputWarning';
 import { nodeReadinessIssues } from '../../../shared/canvasReadiness';
 
 function AgentNode({ id, data, selected }: NodeProps) {
-  const { sessionId, node, highlighted, agentMark } = data as CanvasNodeData;
+  const { sessionId, node, highlighted, agentMark, isProposal } = data as CanvasNodeData;
   const params = node.params as CanvasAgentParams;
   const [instruction, setInstruction] = useState(params.instruction ?? '');
   const [copied, setCopied] = useState(false);
@@ -53,6 +53,7 @@ function AgentNode({ id, data, selected }: NodeProps) {
         selected ? 'border-accent ring-1 ring-accent/20' : 'border-line',
         running && 'canvas-node-running',
         highlighted && 'canvas-node-highlight',
+        isProposal && 'border-dashed !border-2 !border-accent shadow-[0_0_15px_rgba(99,102,241,0.35)] animate-pulse-subtle',
       )}
     >
       <AgentMark show={agentMark} />

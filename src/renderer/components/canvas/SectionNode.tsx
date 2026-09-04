@@ -1,4 +1,4 @@
-import { useCallback, useState, memo, useMemo } from 'react';
+import { useCallback, useState, memo, useMemo, useRef } from 'react';
 import { NodeResizer, type NodeProps, type ResizeParams, useReactFlow } from '@xyflow/react';
 import { Maximize2, Trash2, Play, Palette, FolderKanban } from 'lucide-react';
 import type { CanvasSectionParams } from '../../../shared/canvas';
@@ -25,6 +25,7 @@ function SectionNode({ id, data, selected }: NodeProps) {
   const [colorPickerOpen, setColorPickerOpen] = useState(false);
   const [editingDesc, setEditingDesc] = useState(false);
   const [descDraft, setDescDraft] = useState(params.description || '');
+  const resizeStart = useRef<{ w: number; h: number } | null>(null);
 
   const rf = useReactFlow();
 
@@ -98,13 +99,20 @@ function SectionNode({ id, data, selected }: NodeProps) {
         isVisible={selected}
         lineClassName="!border-line/60"
         handleClassName="!h-2.5 !w-2.5 !rounded-md !border-line !bg-paper"
+        onResizeStart={(_, p: ResizeParams) => {
+          resizeStart.current = { w: p.width, h: p.height };
+        }}
         onResizeEnd={(_, p: ResizeParams) => {
-          canvasStore.commitResize(
-            sessionId,
-            id,
-            { w: node.w, h: node.h },
-            { w: p.width, h: p.height },
-          );
+          const from = resizeStart.current;
+          resizeStart.current = null;
+          if (from) {
+            canvasStore.commitResize(
+              sessionId,
+              id,
+              from,
+              { w: p.width, h: p.height },
+            );
+          }
         }}
       />
 
