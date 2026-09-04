@@ -9,7 +9,6 @@ import {
   GitBranch,
   Terminal,
 } from 'lucide-react';
-import { motion } from 'motion/react';
 import { cn } from '../../lib/cn';
 import * as uiStore from '../../state/uiStore';
 import { useUiStore } from '../../state/useUiStore';
@@ -61,6 +60,9 @@ export default function RightPanel({
     (e.target as HTMLElement).releasePointerCapture(e.pointerId);
   };
 
+  const meta = PANEL_METAS[activeTab];
+  const Icon = meta?.icon;
+
   return (
     <aside
       className="relative flex h-full shrink-0 flex-col border-l border-line bg-sidebar"
@@ -77,41 +79,15 @@ export default function RightPanel({
           <span className="h-8 w-1 rounded-full bg-line opacity-0 transition-opacity group-hover:opacity-100" />
         </div>
       )}
-      <div className="flex h-10 items-center justify-between border-b border-line/60 px-2.5">
-        <div className="flex items-center gap-0.5">
-          {(Object.keys(PANEL_METAS) as uiStore.RightPanelTab[]).map((tabKey) => {
-            const item = PANEL_METAS[tabKey];
-            const ItemIcon = item.icon;
-            const active = activeTab === tabKey;
-            return (
-              <Tooltip key={tabKey} content={item.label} side="bottom">
-                <button
-                  type="button"
-                  onClick={() => uiStore.setRightPanelTab(tabKey)}
-                  className={cn(
-                    'relative flex h-7 items-center gap-1.5 rounded-lg px-2 text-xs transition-colors duration-150',
-                    active ? 'font-medium text-ink' : 'text-ink-muted hover:bg-paper-inset/70 hover:text-ink',
-                  )}
-                >
-                  {active && (
-                    <motion.span
-                      layoutId="right-panel-tab-active"
-                      className="absolute inset-0 rounded-lg bg-paper-raised shadow-xs"
-                      transition={{ type: 'spring', stiffness: 450, damping: 35 }}
-                    />
-                  )}
-                  <ItemIcon
-                    size={13}
-                    className={cn(
-                      'relative z-10',
-                      active ? (tabKey === 'canvas' ? 'text-accent' : 'text-ink') : 'opacity-70',
-                    )}
-                  />
-                  {active && <span className="relative z-10 text-[11px]">{item.label}</span>}
-                </button>
-              </Tooltip>
-            );
-          })}
+      <div className="flex h-10 items-center justify-between border-b border-line/60 px-3">
+        <div className="flex items-center gap-2">
+          {Icon && (
+            <Icon
+              size={14}
+              className={cn(activeTab === 'canvas' ? 'text-accent' : 'text-ink-muted')}
+            />
+          )}
+          <span className="text-xs font-semibold text-ink">{meta?.label}</span>
         </div>
         <div className="flex items-center gap-0.5">
           <Tooltip content={maximized ? '还原宽度' : '最大化面板'} side="bottom">
