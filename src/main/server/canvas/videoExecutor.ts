@@ -28,16 +28,17 @@ export async function runVideoNode(options: {
   }
   const params = node.params;
 
-  // Extract upstream images for start / end frame interpolation (handle-aware)
+  // Extract upstream images for start / end frame interpolation and reference conditioning
   const snap = canvasStore.getSnapshot(canvasId);
   const incomingEdges = snap ? snap.edges.filter((e) => e.targetId === node.id) : [];
 
   let startImageBytes: Uint8Array | undefined;
   let endImageBytes: Uint8Array | undefined;
+  const referenceImages: Array<{ bytes: Uint8Array; role?: string }> = [];
 
   for (const edge of incomingEdges) {
     const up = canvasStore.getNode(canvasId, edge.sourceId);
-    if (!up || up.type !== 'image') continue;
+    if (!up) continue;
     const rel = up.output?.assets?.[0];
     if (!rel) continue;
     try {
@@ -47,9 +48,12 @@ export async function runVideoNode(options: {
         endImageBytes = bytes;
       } else if (edge.targetHandle === 'start_frame') {
         startImageBytes = bytes;
-      } else if (!startImageBytes) {
+      } else if (edge.targetHandle === 'reference' || up.type === 'anchor') {
+        const role = (up.params as { role?: string })?.role;
+        referenceImages.push({ bytes, role });
+      } else if (!startImageBytes && (up.type === 'image' || up.type === 'frameExtractor')) {
         startImageBytes = bytes;
-      } else if (!endImageBytes) {
+      } else if (!endImageBytes && (up.type === 'image' || up.type === 'frameExtractor')) {
         endImageBytes = bytes;
       }
     } catch {
@@ -57,10 +61,15 @@ export async function runVideoNode(options: {
     }
   }
 
+  // If no explicit start_frame was given, but reference image(s) exist, route the reference image
+  // as startImageBytes for drivers that require a base image
+  if (!startImageBytes && referenceImages.length > 0) {
+    startImageBytes = referenceImages[0].bytes;
+  }
+
   let promptText = params.prompt;
 
-  // Reference anchors on a video node only shape the prompt text — the driver's
-  // image slots are reserved for start/end frames (documented degrade).
+  // Reference anchors shape both prompt text and model multimodal reference slots
   const anchorNodes = incomingEdges
     .map((e) => canvasStore.getNode(canvasId, e.sourceId))
     .filter((u): u is NonNullable<typeof u> => !!u && u.type === 'anchor');
@@ -107,6 +116,7 @@ export async function runVideoNode(options: {
     camera,
     startImageBytes,
     endImageBytes,
+    referenceImages: referenceImages.length > 0 ? referenceImages : undefined,
   };
 
   const driverId = params.provider || providerId || 'mock';

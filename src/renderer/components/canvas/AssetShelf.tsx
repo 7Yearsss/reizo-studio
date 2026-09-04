@@ -44,7 +44,7 @@ export default function AssetShelf({
   selectedTargetIds: string[];
   flash: (msg: string) => void;
 }) {
-  const nodes = useCanvasStore((s) => s.nodesBySession[sessionId]) ?? [];
+  const nodes = useCanvasStore((s) => s.nodesBySession[sessionId] ?? canvasStore.EMPTY_NODES);
   const anchors = useMemo(() => nodes.filter((n) => n.type === 'anchor'), [nodes]);
   const fileRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);

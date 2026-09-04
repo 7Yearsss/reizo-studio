@@ -16,8 +16,8 @@ const RECENT_MS = 45_000;
  * tool-event trail — no new channel.
  */
 export default function AgentActivityStrip({ sessionId }: { sessionId: string }) {
-  const trail = useCanvasStore((s) => s.trailBySession[sessionId]) ?? [];
-  const nodes = useCanvasStore((s) => s.nodesBySession[sessionId]) ?? [];
+  const trail = useCanvasStore((s) => s.trailBySession[sessionId] ?? canvasStore.EMPTY_TRAIL);
+  const nodes = useCanvasStore((s) => s.nodesBySession[sessionId] ?? canvasStore.EMPTY_NODES);
   const [expanded, setExpanded] = useState(false);
   const [, tick] = useState(0);
 

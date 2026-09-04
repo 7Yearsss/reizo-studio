@@ -26,7 +26,7 @@ export function createMainWindow(): BrowserWindow {
     height: 840,
     minWidth: 900,
     minHeight: 600,
-    show: true,
+    show: false,
     frame: isMac,
     titleBarStyle: isMac ? 'hiddenInset' : undefined,
     trafficLightPosition: isMac ? { x: 16, y: 12 } : undefined,
@@ -50,23 +50,46 @@ export function createMainWindow(): BrowserWindow {
     console.error('[render-process-gone]', details);
   });
 
+  // Allow F12 or Ctrl/Cmd+Shift+I to toggle DevTools in any environment
+  mainWindow.webContents.on('before-input-event', (_event, input) => {
+    if (input.type === 'keyDown') {
+      const isF12 = input.key === 'F12';
+      const isDevToolsCombo = (input.control || input.meta) && input.shift && input.key.toLowerCase() === 'i';
+      if (isF12 || isDevToolsCombo) {
+        if (mainWindow?.webContents.isDevToolsOpened()) {
+          mainWindow.webContents.closeDevTools();
+        } else {
+          mainWindow?.webContents.openDevTools({ mode: 'detach' });
+        }
+      }
+    }
+  });
+
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
   } else {
     mainWindow.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`));
   }
 
-  mainWindow.once('ready-to-show', () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    mainWindow.show();
-    mainWindow.focus();
-    // Windows frameless windows can composite a solid background until DWM
-    // gets a size change. Nudge by 1px so the first paint actually appears.
-    if (process.platform === 'win32') {
+  // Windows frameless windows can composite a solid background until DWM
+  // gets a size change. Nudge by 1px on both initial show and every page reload.
+  const triggerWindowsRepaintNudge = () => {
+    if (process.platform === 'win32' && mainWindow && !mainWindow.isDestroyed()) {
       const [width, height] = mainWindow.getSize();
       mainWindow.setSize(width, height + 1);
       mainWindow.setSize(width, height);
     }
+  };
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    triggerWindowsRepaintNudge();
+  });
+
+  mainWindow.once('ready-to-show', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.show();
+    mainWindow.focus();
+    triggerWindowsRepaintNudge();
   });
 
   // Guarantee window visibility even if ready-to-show is delayed by hardware acceleration
@@ -74,6 +97,7 @@ export function createMainWindow(): BrowserWindow {
     if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
       mainWindow.show();
       mainWindow.focus();
+      triggerWindowsRepaintNudge();
     }
   }, 1000);
 

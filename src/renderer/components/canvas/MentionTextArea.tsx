@@ -14,6 +14,8 @@ interface MentionTextAreaProps {
   placeholder?: string;
   className?: string;
   minRows?: number;
+  /** Fired when user picks a node to mention — use to auto-wire canvas edge. */
+  onMentionSelect?: (node: CanvasNode) => void;
 }
 
 const CHIP_ATTR = 'data-mention-id';
@@ -32,6 +34,7 @@ export default function MentionTextArea({
   placeholder,
   className,
   minRows = 2,
+  onMentionSelect,
 }: MentionTextAreaProps) {
   const ref = useRef<HTMLDivElement>(null);
   const composing = useRef(false);
@@ -190,8 +193,9 @@ export default function MentionTextArea({
       savedRange.current = null;
       el.focus();
       emit();
+      onMentionSelect?.(node);
     },
-    [emit],
+    [emit, onMentionSelect],
   );
 
   const onKeyDown = useCallback(

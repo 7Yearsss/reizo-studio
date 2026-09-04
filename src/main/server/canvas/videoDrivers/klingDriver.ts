@@ -39,9 +39,17 @@ export const klingDriver: VideoDriver = {
 
     if (params.startImageBytes) {
       body.image = Buffer.from(params.startImageBytes).toString('base64');
+    } else if (params.referenceImages && params.referenceImages.length > 0) {
+      body.image = Buffer.from(params.referenceImages[0].bytes).toString('base64');
     }
     if (params.endImageBytes) {
       body.image_tail = Buffer.from(params.endImageBytes).toString('base64');
+    }
+    if (params.referenceImages && params.referenceImages.length > 0) {
+      body.elements = params.referenceImages.map((ref) => ({
+        image: Buffer.from(ref.bytes).toString('base64'),
+        role: ref.role || 'character',
+      }));
     }
 
     const res = await fetch(endpoint, {

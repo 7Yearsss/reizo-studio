@@ -16,7 +16,18 @@ import { setCanvasSelection } from '../canvas/selection';
 import { exportWorkflowZip } from '../canvas/exportWorkflow';
 import { importWorkflowZip } from '../canvas/importWorkflow';
 
-const NODE_TYPES = new Set<CanvasNodeType>(['image', 'agent', 'video', 'note', 'group', 'anchor']);
+const NODE_TYPES = new Set<CanvasNodeType>([
+  'image',
+  'agent',
+  'video',
+  'note',
+  'group',
+  'anchor',
+  'reroute',
+  'frameExtractor',
+  'section',
+  'subgraph',
+]);
 const IMPORT_MAX_BYTES = 12 * 1024 * 1024;
 const WORKFLOW_MAX_BYTES = 256 * 1024 * 1024;
 
@@ -283,6 +294,39 @@ export function createCanvasRouter(
       });
     }
     return c.json({ node: withAsset?.node ?? node }, 201);
+  });
+
+  /** Attach an asset (e.g. extracted video frame) directly to a node's output. */
+  router.post('/:canvasId/nodes/:id/asset', async (c) => {
+    const canvasId = c.req.param('canvasId');
+    const id = c.req.param('id');
+    const node = canvasStore.getNode(canvasId, id);
+    if (!node) return c.json({ error: 'Node not found' }, 404);
+    const body = await c.req.json().catch((): null => null);
+    if (!body || typeof body.dataBase64 !== 'string') {
+      return c.json({ error: 'dataBase64 is required' }, 400);
+    }
+    const bytes = Buffer.from(body.dataBase64, 'base64');
+    const ext = (typeof body.name === 'string' ? body.name.split('.').pop() || 'png' : 'png')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '') || 'png';
+    const dir = canvasAssetsDir(dataRoot, canvasId);
+    await mkdir(dir, { recursive: true });
+    const file = `${id}-frame-${nanoid(6)}.${ext}`;
+    await writeFile(path.join(dir, file), bytes);
+    const withAsset = canvasStore.updateNode(canvasId, id, {
+      runState: 'done',
+      output: { assets: [`${canvasId}/${file}`] },
+    });
+    if (withAsset) {
+      getCanvasChannel(canvasId).broadcast(withAsset.rev, {
+        type: 'node_output',
+        id,
+        output: withAsset.node.output ?? { assets: [`${canvasId}/${file}`] },
+        runState: 'done',
+      });
+    }
+    return c.json({ node: withAsset?.node ?? node }, 200);
   });
 
   /** Download the whole canvas as a portable `.reizo.zip` (workflow.json + assets). */

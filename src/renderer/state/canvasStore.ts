@@ -1,5 +1,15 @@
 import * as api from '../api';
-import type { CanvasNode, CanvasEdge, CanvasNodeParams, CanvasNodeType, CanvasSnapshot, CanvasGroupParams } from '../../shared/canvas';
+import type {
+  CanvasNode,
+  CanvasEdge,
+  CanvasNodeParams,
+  CanvasNodeType,
+  CanvasSnapshot,
+  CanvasGroupParams,
+  CanvasFrameExtractorParams,
+  CanvasSectionParams,
+  CanvasSubgraphParams,
+} from '../../shared/canvas';
 import { gridArrange } from '../../shared/arrangeNodes';
 import { variantGrid } from '../../shared/variantLayout';
 import type { AgentTrailEntry } from '../../shared/agentTrail';
@@ -24,7 +34,16 @@ export interface CanvasState {
   /** Recent agent canvas writes (newest last), derived from chat tool events. */
   trailBySession: Record<string, AgentTrailEntry[]>;
   historyBySession: Record<string, { canUndo: boolean; canRedo: boolean }>;
+  /** When true, canvas nodes hide form widgets and show pure media. */
+  moodboardBySession: Record<string, boolean>;
+  /** Node(s) currently in Agent proposal diff state (rendered with glowing dashed border). */
+  proposalsBySession: Record<string, string[]>;
 }
+
+export const EMPTY_NODES: CanvasNode[] = [];
+export const EMPTY_EDGES: CanvasEdge[] = [];
+export const EMPTY_PROPOSALS: string[] = [];
+export const EMPTY_TRAIL: AgentTrailEntry[] = [];
 
 const TRAIL_CAP = 30;
 
@@ -37,6 +56,8 @@ let state: CanvasState = {
   spotlightBySession: {},
   trailBySession: {},
   historyBySession: {},
+  moodboardBySession: {},
+  proposalsBySession: {},
 };
 
 const listeners = new Set<() => void>();
@@ -63,6 +84,10 @@ export function subscribe(listener: () => void): () => void {
 
 export function getSnapshot(): CanvasState {
   return state;
+}
+
+export function edgesForSession(sessionId: string): CanvasEdge[] {
+  return state.edgesBySession[sessionId] ?? [];
 }
 
 function stacksFor(sessionId: string) {
@@ -742,13 +767,43 @@ export function groupOf(sessionId: string, nodeId: string): CanvasNode | undefin
   );
 }
 
-/** Member ids of a group node (empty for anything else). */
+/** Member ids of any container node (group or section). */
+export function containerMemberIds(sessionId: string, containerId: string): string[] {
+  const container = nodeById(sessionId, containerId);
+  if (!container) return [];
+  if (container.type === 'group') {
+    return ((container.params as CanvasGroupParams).memberIds ?? []).filter((id) =>
+      nodeById(sessionId, id),
+    );
+  }
+  if (container.type === 'section') {
+    const params = container.params as CanvasSectionParams;
+    // Explicit memberIds takes strict precedence when defined (preventing accidental boundary suction)
+    if (params && Array.isArray(params.memberIds)) {
+      return params.memberIds.filter((id) => nodeById(sessionId, id));
+    }
+
+    // Physical containment fallback (only for legacy sections where memberIds is completely absent):
+    const all = state.nodesBySession[sessionId] ?? [];
+    return all
+      .filter(
+        (n) =>
+          n.id !== containerId &&
+          n.type !== 'section' &&
+          n.type !== 'group' &&
+          n.x >= container.x - 20 &&
+          n.y >= container.y - 20 &&
+          n.x + n.w <= container.x + container.w + 20 &&
+          n.y + n.h <= container.y + container.h + 20,
+      )
+      .map((n) => n.id);
+  }
+  return [];
+}
+
+/** Member ids of a group or section node (delegates to containerMemberIds). */
 export function groupMemberIds(sessionId: string, groupId: string): string[] {
-  const group = nodeById(sessionId, groupId);
-  if (!group || group.type !== 'group') return [];
-  return ((group.params as CanvasGroupParams).memberIds ?? []).filter((id) =>
-    nodeById(sessionId, id),
-  );
+  return containerMemberIds(sessionId, groupId);
 }
 
 /** Ids of every node that sits inside a *locked* group — these must not move. */
@@ -801,6 +856,102 @@ export async function renameNode(sessionId: string, nodeId: string, title: strin
   });
 }
 
+export async function batchUpdateNodeParams(
+  sessionId: string,
+  nodeIds: string[],
+  patch: Record<string, unknown>,
+): Promise<void> {
+  const befores = new Map<string, CanvasNodeParams | undefined>();
+  for (const id of nodeIds) {
+    befores.set(id, nodeById(sessionId, id)?.params);
+    const curr = (nodeById(sessionId, id)?.params ?? {}) as Record<string, unknown>;
+    await _setNode(sessionId, id, { params: { ...curr, ...patch } });
+  }
+  record(sessionId, {
+    undo: async () => {
+      for (const id of nodeIds) {
+        const before = befores.get(id);
+        if (before !== undefined) await _setNode(sessionId, id, { params: before });
+      }
+    },
+    redo: async () => {
+      for (const id of nodeIds) {
+        const curr = (nodeById(sessionId, id)?.params ?? {}) as Record<string, unknown>;
+        await _setNode(sessionId, id, { params: { ...curr, ...patch } });
+      }
+    },
+  });
+}
+
+export async function loadStarterFlow(sessionId: string): Promise<void> {
+  const sectionId = await _addNode(sessionId, {
+    type: 'section',
+    x: 60,
+    y: 60,
+    w: 1100,
+    h: 520,
+    title: '场景一：雨夜霓虹街头',
+    params: {
+      color: 'blue',
+      description: '电影质感：雨夜街道，霓虹倒影，电影镜头跟踪漫步',
+    },
+  });
+
+  const imageId = await _addNode(sessionId, {
+    type: 'image',
+    x: 100,
+    y: 130,
+    w: 320,
+    h: 380,
+    title: '雨夜概念图 (首帧)',
+    params: {
+      prompt: 'Cinematic film still, cyberpunk wet street at night, neon reflections in rain puddles, 35mm photograph, moody lighting, 8k',
+      size: '1536x1024',
+    },
+  });
+
+  const videoId = await _addNode(sessionId, {
+    type: 'video',
+    x: 480,
+    y: 130,
+    w: 340,
+    h: 420,
+    title: '漫步运镜视频',
+    params: {
+      prompt: 'Slow forward camera tracking shot following character walking in rainy night street, cinematic motion',
+      duration: '5s',
+      ratio: '16:9',
+      cameraMotion: 'zoom_in',
+    },
+  });
+
+  const frameExtractorId = await _addNode(sessionId, {
+    type: 'frameExtractor',
+    x: 880,
+    y: 220,
+    w: 200,
+    h: 160,
+    title: '提取首尾帧',
+    params: { mode: 'end' },
+  });
+
+  if (imageId && videoId) {
+    await _addEdge(sessionId, imageId, videoId, null, 'start_frame');
+  }
+  if (videoId && frameExtractorId) {
+    await _addEdge(sessionId, videoId, frameExtractorId, null, 'video_in');
+  }
+  if (sectionId && imageId && videoId && frameExtractorId) {
+    await _setNode(sessionId, sectionId, {
+      params: {
+        color: 'blue',
+        description: '电影质感：雨夜街道，霓虹倒影，电影镜头跟踪漫步',
+        memberIds: [imageId, videoId, frameExtractorId],
+      },
+    });
+  }
+}
+
 /** Throws with a readable message when the server rejects the connection. */
 export async function connectNodes(
   sessionId: string,
@@ -810,8 +961,94 @@ export async function connectNodes(
   targetHandle?: string | null,
 ): Promise<void> {
   if (sourceId === targetId) return;
+
+  const sourceNode = nodeById(sessionId, sourceId);
+  const targetNode = nodeById(sessionId, targetId);
+
+  // Self-healing: if connecting a video node output to an image frame slot (start_frame / end_frame)
+  // or connecting video -> video without handles:
+  const isVideoToFrameSlot =
+    sourceNode?.type === 'video' &&
+    (targetHandle === 'start_frame' ||
+      targetHandle === 'end_frame' ||
+      targetHandle === 'reference' ||
+      (targetNode?.type === 'video' && !targetHandle));
+
+  if (isVideoToFrameSlot && targetNode) {
+    const preferredMode = targetHandle === 'end_frame' ? 'start' : 'end';
+    const midX = Math.round((sourceNode.x + sourceNode.w + targetNode.x) / 2 - 100);
+    const midY = Math.round((sourceNode.y + targetNode.y) / 2);
+    const actualTargetHandle = targetHandle || 'start_frame';
+
+    const extractorId = await _addNode(sessionId, {
+      type: 'frameExtractor',
+      x: midX,
+      y: midY,
+      title: preferredMode === 'end' ? '抽尾帧' : '抽首帧',
+      params: { mode: preferredMode },
+    });
+
+    if (extractorId) {
+      let currentExtractorId = extractorId;
+      let currentEdge1Id = await _addEdge(sessionId, sourceId, extractorId, sourceHandle, 'video_in');
+      let currentEdge2Id = await _addEdge(sessionId, extractorId, targetId, 'frame_out', actualTargetHandle);
+
+      record(sessionId, {
+        undo: async () => {
+          if (currentEdge2Id) await _deleteEdge(sessionId, currentEdge2Id);
+          if (currentEdge1Id) await _deleteEdge(sessionId, currentEdge1Id);
+          await _deleteNode(sessionId, currentExtractorId);
+        },
+        redo: async () => {
+          const recreated = await _addNode(sessionId, {
+            type: 'frameExtractor',
+            x: midX,
+            y: midY,
+            title: preferredMode === 'end' ? '抽尾帧' : '抽首帧',
+            params: { mode: preferredMode },
+          });
+          if (recreated) {
+            currentExtractorId = recreated;
+            currentEdge1Id =
+              (await _addEdge(sessionId, sourceId, recreated, sourceHandle, 'video_in').catch((): null => null)) ??
+              undefined;
+            currentEdge2Id =
+              (await _addEdge(sessionId, recreated, targetId, 'frame_out', actualTargetHandle).catch(
+                (): null => null,
+              )) ?? undefined;
+          }
+        },
+      });
+
+      // If upstream video already has asset, trigger extraction automatically!
+      if (sourceNode.output?.assets?.[0]) {
+        void extractFrameForNode(sessionId, extractorId).catch((): void => undefined);
+      }
+      return;
+    }
+  }
+
   const edgeId = await _addEdge(sessionId, sourceId, targetId, sourceHandle, targetHandle);
   if (!edgeId) return;
+
+  // Mention sync: if connecting into an image/video prompt node via reference/image,
+  // ensure the prompt includes the mention token so graph and prompt remain in sync!
+  if (
+    targetNode &&
+    (targetNode.type === 'image' || targetNode.type === 'video') &&
+    (targetHandle === 'reference' || targetHandle === 'image' || !targetHandle) &&
+    sourceNode &&
+    (sourceNode.type === 'image' || sourceNode.type === 'anchor' || sourceNode.type === 'video')
+  ) {
+    const p = (targetNode.params as { prompt?: string }) ?? {};
+    const currPrompt = p.prompt ?? '';
+    const mentionToken = `@[${sourceNode.title || '节点'}](canvas:${sourceNode.id})`;
+    if (!currPrompt.includes(sourceNode.id)) {
+      const nextPrompt = currPrompt.trim() ? `${currPrompt} ${mentionToken}` : mentionToken;
+      void updateNodeParams(sessionId, targetId, { ...p, prompt: nextPrompt });
+    }
+  }
+
   record(sessionId, {
     undo: () => _deleteEdge(sessionId, edgeId),
     redo: async () => {
@@ -851,13 +1088,97 @@ export async function removeEdge(sessionId: string, edgeId: string): Promise<voi
   await _deleteEdge(sessionId, edgeId);
   record(sessionId, {
     undo: async () => {
-      await _addEdge(sessionId, edge.sourceId, edge.targetId).catch((): null => null);
+      await _addEdge(sessionId, edge.sourceId, edge.targetId, edge.sourceHandle, edge.targetHandle).catch((): null => null);
     },
     redo: async () => {
       const again = (state.edgesBySession[sessionId] ?? []).find(
         (e) => e.sourceId === edge.sourceId && e.targetId === edge.targetId,
       );
       if (again) await _deleteEdge(sessionId, again.id);
+    },
+  });
+}
+
+/**
+ * Split an existing edge by inserting a compact Reroute knot at `at`.
+ * The original edge (A -> B) is replaced with (A -> Reroute) and (Reroute -> B).
+ * Supported with full undo/redo.
+ */
+export async function insertRerouteNode(
+  sessionId: string,
+  edgeId: string,
+  at: { x: number; y: number },
+): Promise<string | null> {
+  const edge = (state.edgesBySession[sessionId] ?? []).find((e) => e.id === edgeId);
+  if (!edge) return null;
+
+  const originalSourceId = edge.sourceId;
+  const originalTargetId = edge.targetId;
+  const originalSourceHandle = edge.sourceHandle;
+  const originalTargetHandle = edge.targetHandle;
+
+  let rerouteId = await _addNode(sessionId, {
+    type: 'reroute',
+    x: Math.round(at.x - 10),
+    y: Math.round(at.y - 10),
+    w: 20,
+    h: 20,
+    title: '',
+  });
+  if (!rerouteId) return null;
+
+  await _deleteEdge(sessionId, edgeId);
+  let edge1Id = await _addEdge(sessionId, originalSourceId, rerouteId, originalSourceHandle, null);
+  let edge2Id = await _addEdge(sessionId, rerouteId, originalTargetId, null, originalTargetHandle);
+
+  record(sessionId, {
+    undo: async () => {
+      if (edge1Id) await _deleteEdge(sessionId, edge1Id).catch((): void => undefined);
+      if (edge2Id) await _deleteEdge(sessionId, edge2Id).catch((): void => undefined);
+      if (rerouteId) await _deleteNode(sessionId, rerouteId).catch((): void => undefined);
+      await _addEdge(sessionId, originalSourceId, originalTargetId, originalSourceHandle, originalTargetHandle).catch((): null => null);
+    },
+    redo: async () => {
+      rerouteId = await _addNode(sessionId, {
+        type: 'reroute',
+        x: Math.round(at.x - 10),
+        y: Math.round(at.y - 10),
+        w: 20,
+        h: 20,
+        title: '',
+      });
+      if (!rerouteId) return;
+      const oldEdge = (state.edgesBySession[sessionId] ?? []).find(
+        (e) => e.sourceId === originalSourceId && e.targetId === originalTargetId,
+      );
+      if (oldEdge) await _deleteEdge(sessionId, oldEdge.id).catch((): void => undefined);
+      edge1Id = await _addEdge(sessionId, originalSourceId, rerouteId, originalSourceHandle, null);
+      edge2Id = await _addEdge(sessionId, rerouteId, originalTargetId, null, originalTargetHandle);
+    },
+  });
+
+  return rerouteId;
+}
+
+export function isMoodboard(sessionId: string): boolean {
+  return state.moodboardBySession[sessionId] ?? false;
+}
+
+export function toggleMoodboard(sessionId: string): void {
+  const current = isMoodboard(sessionId);
+  setState({
+    moodboardBySession: {
+      ...state.moodboardBySession,
+      [sessionId]: !current,
+    },
+  });
+}
+
+export function setMoodboard(sessionId: string, active: boolean): void {
+  setState({
+    moodboardBySession: {
+      ...state.moodboardBySession,
+      [sessionId]: active,
     },
   });
 }
@@ -950,6 +1271,337 @@ export async function ungroupNodes(sessionId: string, groupId: string): Promise<
     },
     redo: () => _deleteNode(sessionId, recreatedId),
   });
+}
+
+const SECTION_PADDING = 36;
+const SECTION_HEADER = 60;
+
+function sectionBox(members: CanvasNode[]): { x: number; y: number; w: number; h: number } {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const n of members) {
+    minX = Math.min(minX, n.x);
+    minY = Math.min(minY, n.y);
+    maxX = Math.max(maxX, n.x + n.w);
+    maxY = Math.max(maxY, n.y + n.h);
+  }
+  return {
+    x: Math.round(minX - SECTION_PADDING),
+    y: Math.round(minY - SECTION_HEADER),
+    w: Math.round(maxX - minX + SECTION_PADDING * 2),
+    h: Math.round(maxY - minY + SECTION_HEADER + SECTION_PADDING),
+  };
+}
+
+export async function createSection(
+  sessionId: string,
+  memberIds: string[],
+  initialTitle?: string,
+): Promise<string | null> {
+  const nodes = (state.nodesBySession[sessionId] ?? []).filter(
+    (n) => memberIds.includes(n.id) && n.type !== 'section',
+  );
+  if (nodes.length === 0) return null;
+
+  const count = (state.nodesBySession[sessionId] ?? []).filter((n) => n.type === 'section').length + 1;
+  const spec = {
+    type: 'section' as const,
+    ...sectionBox(nodes),
+    title: initialTitle || `场景分区 ${count}`,
+    params: {
+      color: 'blue' as const,
+      memberIds: nodes.map((n) => n.id),
+      description: '',
+    },
+  };
+
+  let currentId = await _addNode(sessionId, spec);
+  if (!currentId) return null;
+
+  record(sessionId, {
+    undo: () => (currentId ? _deleteNode(sessionId, currentId) : Promise.resolve()),
+    redo: async () => {
+      currentId = await _addNode(sessionId, spec);
+    },
+  });
+
+  return currentId;
+}
+
+export async function runSection(sessionId: string, sectionId: string): Promise<void> {
+  const memberIds = containerMemberIds(sessionId, sectionId);
+  for (const id of memberIds) {
+    const node = nodeById(sessionId, id);
+    if (node && (node.type === 'image' || node.type === 'video' || node.type === 'agent')) {
+      void runNode(sessionId, node.id);
+    }
+  }
+}
+
+export async function collapseToSubgraph(
+  sessionId: string,
+  memberIds: string[],
+  title?: string,
+): Promise<string | null> {
+  const allNodes = state.nodesBySession[sessionId] ?? [];
+  const allEdges = state.edgesBySession[sessionId] ?? [];
+
+  const targetNodes = allNodes.filter((n) => memberIds.includes(n.id) && n.type !== 'subgraph');
+  if (targetNodes.length < 2) return null;
+
+  const targetIdSet = new Set(targetNodes.map((n) => n.id));
+  const innerEdges = allEdges.filter(
+    (e) => targetIdSet.has(e.sourceId) && targetIdSet.has(e.targetId),
+  );
+  const inboundEdges = allEdges.filter(
+    (e) => !targetIdSet.has(e.sourceId) && targetIdSet.has(e.targetId),
+  );
+  const outboundEdges = allEdges.filter(
+    (e) => targetIdSet.has(e.sourceId) && !targetIdSet.has(e.targetId),
+  );
+
+  const avgX = Math.round(targetNodes.reduce((sum, n) => sum + n.x, 0) / targetNodes.length);
+  const avgY = Math.round(targetNodes.reduce((sum, n) => sum + n.y, 0) / targetNodes.length);
+
+  const innerSnapshot = {
+    nodes: targetNodes,
+    edges: innerEdges,
+  };
+
+  const subgraphCount = allNodes.filter((n) => n.type === 'subgraph').length + 1;
+  const subgraphSpec = {
+    type: 'subgraph' as const,
+    x: avgX,
+    y: avgY,
+    w: 280,
+    h: 190,
+    title: title || `复合子图 ${subgraphCount}`,
+    params: {
+      collapsed: true,
+      innerNodeIds: targetNodes.map((n) => n.id),
+      innerSnapshot,
+      description: `包含 ${targetNodes.length} 个节点的模块`,
+    },
+  };
+
+  let currentSubgraphId = await _addNode(sessionId, subgraphSpec);
+  if (!currentSubgraphId) return null;
+
+  for (const inEdge of inboundEdges) {
+    await _addEdge(sessionId, inEdge.sourceId, currentSubgraphId, inEdge.sourceHandle, 'input');
+  }
+  for (const outEdge of outboundEdges) {
+    await _addEdge(sessionId, currentSubgraphId, outEdge.targetId, 'output', outEdge.targetHandle);
+  }
+
+  for (const n of targetNodes) {
+    await _deleteNode(sessionId, n.id);
+  }
+
+  let currentInnerNodeIds: string[] = [];
+
+  record(sessionId, {
+    undo: async () => {
+      if (currentSubgraphId) await _deleteNode(sessionId, currentSubgraphId);
+      const idMap = new Map<string, string>();
+      currentInnerNodeIds = [];
+      for (const n of innerSnapshot.nodes) {
+        const newId = await _addNode(sessionId, {
+          type: n.type,
+          x: n.x,
+          y: n.y,
+          w: n.w,
+          h: n.h,
+          title: n.title,
+          params: n.params,
+        });
+        if (newId) {
+          idMap.set(n.id, newId);
+          currentInnerNodeIds.push(newId);
+        }
+      }
+      for (const e of innerSnapshot.edges) {
+        const src = idMap.get(e.sourceId) || e.sourceId;
+        const tgt = idMap.get(e.targetId) || e.targetId;
+        await _addEdge(sessionId, src, tgt, e.sourceHandle, e.targetHandle);
+      }
+      for (const inEdge of inboundEdges) {
+        const tgt = idMap.get(inEdge.targetId) || inEdge.targetId;
+        await _addEdge(sessionId, inEdge.sourceId, tgt, inEdge.sourceHandle, inEdge.targetHandle);
+      }
+      for (const outEdge of outboundEdges) {
+        const src = idMap.get(outEdge.sourceId) || outEdge.sourceId;
+        await _addEdge(sessionId, src, outEdge.targetId, outEdge.sourceHandle, outEdge.targetHandle);
+      }
+    },
+    redo: async () => {
+      for (const id of currentInnerNodeIds) {
+        await _deleteNode(sessionId, id);
+      }
+      const newSubgraphId = await _addNode(sessionId, subgraphSpec);
+      if (newSubgraphId) {
+        currentSubgraphId = newSubgraphId;
+        for (const inEdge of inboundEdges) {
+          await _addEdge(sessionId, inEdge.sourceId, newSubgraphId, inEdge.sourceHandle, 'input');
+        }
+        for (const outEdge of outboundEdges) {
+          await _addEdge(sessionId, newSubgraphId, outEdge.targetId, 'output', outEdge.targetHandle);
+        }
+      }
+    },
+  });
+
+  return currentSubgraphId;
+}
+
+export async function unpackSubgraph(sessionId: string, subgraphId: string): Promise<string[]> {
+  const subgraph = nodeById(sessionId, subgraphId);
+  if (!subgraph || subgraph.type !== 'subgraph') return [];
+  const params = subgraph.params as CanvasSubgraphParams;
+  const snapshot = params?.innerSnapshot;
+  if (!snapshot || !snapshot.nodes || snapshot.nodes.length === 0) {
+    await _deleteNode(sessionId, subgraphId);
+    return [];
+  }
+
+  const allEdges = state.edgesBySession[sessionId] ?? [];
+  const inboundToSubgraph = allEdges.filter((e) => e.targetId === subgraphId);
+  const outboundFromSubgraph = allEdges.filter((e) => e.sourceId === subgraphId);
+
+  const subgraphSpec = {
+    type: subgraph.type,
+    x: subgraph.x,
+    y: subgraph.y,
+    w: subgraph.w,
+    h: subgraph.h,
+    title: subgraph.title,
+    params: subgraph.params,
+  };
+
+  await _deleteNode(sessionId, subgraphId);
+
+  const idMap = new Map<string, string>();
+  let unpackedNodeIds: string[] = [];
+
+  for (const n of snapshot.nodes) {
+    const newId = await _addNode(sessionId, {
+      type: n.type,
+      x: n.x,
+      y: n.y,
+      w: n.w,
+      h: n.h,
+      title: n.title,
+      params: n.params,
+    });
+    if (newId) {
+      idMap.set(n.id, newId);
+      unpackedNodeIds.push(newId);
+    }
+  }
+
+  for (const e of snapshot.edges) {
+    const src = idMap.get(e.sourceId) || e.sourceId;
+    const tgt = idMap.get(e.targetId) || e.targetId;
+    await _addEdge(sessionId, src, tgt, e.sourceHandle, e.targetHandle);
+  }
+
+  const firstTarget = idMap.get(snapshot.nodes[0]?.id) || snapshot.nodes[0]?.id;
+  if (firstTarget) {
+    for (const inEdge of inboundToSubgraph) {
+      await _addEdge(sessionId, inEdge.sourceId, firstTarget, inEdge.sourceHandle, 'input');
+    }
+  }
+  const lastSource =
+    idMap.get(snapshot.nodes[snapshot.nodes.length - 1]?.id) ||
+    snapshot.nodes[snapshot.nodes.length - 1]?.id;
+  if (lastSource) {
+    for (const outEdge of outboundFromSubgraph) {
+      await _addEdge(sessionId, lastSource, outEdge.targetId, 'output', outEdge.targetHandle);
+    }
+  }
+
+  let currentSubgraphId: string | null = null;
+
+  record(sessionId, {
+    undo: async () => {
+      for (const id of unpackedNodeIds) {
+        await _deleteNode(sessionId, id);
+      }
+      currentSubgraphId = await _addNode(sessionId, subgraphSpec);
+      if (currentSubgraphId) {
+        for (const inEdge of inboundToSubgraph) {
+          await _addEdge(sessionId, inEdge.sourceId, currentSubgraphId, inEdge.sourceHandle, inEdge.targetHandle);
+        }
+        for (const outEdge of outboundFromSubgraph) {
+          await _addEdge(sessionId, currentSubgraphId, outEdge.targetId, outEdge.sourceHandle, outEdge.targetHandle);
+        }
+      }
+    },
+    redo: async () => {
+      if (currentSubgraphId) {
+        await _deleteNode(sessionId, currentSubgraphId);
+      }
+      const redoIdMap = new Map<string, string>();
+      unpackedNodeIds = [];
+      for (const n of snapshot.nodes) {
+        const newId = await _addNode(sessionId, {
+          type: n.type,
+          x: n.x,
+          y: n.y,
+          w: n.w,
+          h: n.h,
+          title: n.title,
+          params: n.params,
+        });
+        if (newId) {
+          redoIdMap.set(n.id, newId);
+          unpackedNodeIds.push(newId);
+        }
+      }
+      for (const e of snapshot.edges) {
+        const src = redoIdMap.get(e.sourceId) || e.sourceId;
+        const tgt = redoIdMap.get(e.targetId) || e.targetId;
+        await _addEdge(sessionId, src, tgt, e.sourceHandle, e.targetHandle);
+      }
+      const redoFirstTarget = redoIdMap.get(snapshot.nodes[0]?.id) || snapshot.nodes[0]?.id;
+      if (redoFirstTarget) {
+        for (const inEdge of inboundToSubgraph) {
+          await _addEdge(sessionId, inEdge.sourceId, redoFirstTarget, inEdge.sourceHandle, 'input');
+        }
+      }
+      const redoLastSource =
+        redoIdMap.get(snapshot.nodes[snapshot.nodes.length - 1]?.id) ||
+        snapshot.nodes[snapshot.nodes.length - 1]?.id;
+      if (redoLastSource) {
+        for (const outEdge of outboundFromSubgraph) {
+          await _addEdge(sessionId, redoLastSource, outEdge.targetId, 'output', outEdge.targetHandle);
+        }
+      }
+    },
+  });
+
+  return unpackedNodeIds;
+}
+
+export async function runSubgraph(sessionId: string, subgraphId: string): Promise<void> {
+  const subgraph = nodeById(sessionId, subgraphId);
+  if (!subgraph || subgraph.type !== 'subgraph') return;
+  const params = subgraph.params as CanvasSubgraphParams;
+  const snapshot = params?.innerSnapshot;
+
+  if (snapshot?.nodes && snapshot.nodes.length > 0) {
+    const unpackedIds = await unpackSubgraph(sessionId, subgraphId);
+    if (unpackedIds.length > 0) {
+      await runGraph(sessionId, undefined, unpackedIds);
+    }
+    return;
+  }
+
+  if (params?.innerNodeIds && params.innerNodeIds.length > 0) {
+    await runGraph(sessionId, undefined, params.innerNodeIds);
+  }
 }
 
 /**
@@ -1240,6 +1892,41 @@ export async function extractVideoFrame(
   return node.id;
 }
 
+export async function extractFrameForNode(sessionId: string, frameExtractorNodeId: string): Promise<void> {
+  const id = canvasId(sessionId);
+  if (!id) return;
+  const targetNode = nodeById(sessionId, frameExtractorNodeId);
+  if (!targetNode || targetNode.type !== 'frameExtractor') return;
+
+  const edges = edgesForSession(sessionId);
+  const inEdge = edges.find((e) => e.targetId === frameExtractorNodeId);
+  if (!inEdge) throw new Error('未连接上游视频源');
+
+  const sourceNode = nodeById(sessionId, inEdge.sourceId);
+  if (!sourceNode || sourceNode.type !== 'video') throw new Error('上游节点不是视频节点');
+
+  const assets = sourceNode.output?.assets ?? [];
+  const rel = assets[0];
+  if (!rel) throw new Error('上游视频尚未生成产物');
+
+  const params = (targetNode.params as CanvasFrameExtractorParams) || { mode: 'end' };
+  const mode = params.mode === 'start' ? 'start' : 'end';
+  const customTime = params.timestampSec ?? 0;
+
+  const httpUrl = await api.canvasAssetUrl(rel);
+  const blob = await grabVideoFrameBlob(httpUrl, mode, customTime);
+  const buffer = await blob.arrayBuffer();
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+
+  const updatedNode = await api.setCanvasNodeAsset(id, frameExtractorNodeId, {
+    name: `frame-${mode}.png`,
+    dataBase64: btoa(binary),
+  });
+  applyEvent(sessionId, { type: 'node_updated', node: updatedNode });
+}
+
 export async function saveAsset(sessionId: string, nodeId: string, assetIndex = 0): Promise<void> {
   const id = canvasId(sessionId);
   if (id) await api.saveCanvasAsset(id, nodeId, assetIndex);
@@ -1291,16 +1978,135 @@ export async function importWorkflow(
   return { warnings: res.warnings ?? [], count: createdIds.length };
 }
 
+const pendingSelection = new Map<string, string[]>();
+
 export function setSelection(sessionId: string, ids: string[]): void {
   const id = canvasId(sessionId);
   if (!id) return;
+  pendingSelection.set(sessionId, ids);
   const prev = selectionTimers.get(sessionId);
   if (prev) clearTimeout(prev);
   selectionTimers.set(
     sessionId,
     setTimeout(() => {
       selectionTimers.delete(sessionId);
+      pendingSelection.delete(sessionId);
       void api.setCanvasSelection(id, ids).catch((): void => undefined);
     }, 300),
   );
 }
+
+/** Immediately synchronizes pending selection to the backend, preventing debounce race conditions. */
+export async function flushSelection(sessionId: string): Promise<void> {
+  const prev = selectionTimers.get(sessionId);
+  if (prev) {
+    clearTimeout(prev);
+    selectionTimers.delete(sessionId);
+  }
+  const pending = pendingSelection.get(sessionId);
+  const id = canvasId(sessionId);
+  if (id && pending) {
+    pendingSelection.delete(sessionId);
+    await api.setCanvasSelection(id, pending).catch((): void => undefined);
+  }
+}
+
+// --- Agent Proposal Diff State (P1-1) ---
+
+export function setProposals(sessionId: string, nodeIds: string[]): void {
+  setState({
+    proposalsBySession: {
+      ...state.proposalsBySession,
+      [sessionId]: nodeIds,
+    },
+  });
+}
+
+export function addProposals(sessionId: string, nodeIds: string[]): void {
+  const existing = state.proposalsBySession[sessionId] ?? [];
+  const merged = Array.from(new Set([...existing, ...nodeIds]));
+  setProposals(sessionId, merged);
+}
+
+export function isProposal(sessionId: string, nodeId: string): boolean {
+  return state.proposalsBySession[sessionId]?.includes(nodeId) ?? false;
+}
+
+export async function acceptProposals(sessionId: string): Promise<void> {
+  const currentProposals = state.proposalsBySession[sessionId] ?? [];
+  if (currentProposals.length === 0) return;
+
+  setProposals(sessionId, []);
+
+  // Safe undo: restoring proposals puts them back in proposal review state, never deletes data
+  record(sessionId, {
+    undo: () => {
+      setProposals(sessionId, currentProposals);
+      return Promise.resolve();
+    },
+    redo: () => {
+      setProposals(sessionId, []);
+      return Promise.resolve();
+    },
+  });
+}
+
+export async function rejectProposals(sessionId: string): Promise<void> {
+  const currentProposals = state.proposalsBySession[sessionId] ?? [];
+  if (currentProposals.length === 0) return;
+
+  const allNodes = state.nodesBySession[sessionId] ?? [];
+  const allEdges = state.edgesBySession[sessionId] ?? [];
+
+  const nodesToDelete = allNodes.filter((n) => currentProposals.includes(n.id));
+  const edgesToDelete = allEdges.filter(
+    (e) => currentProposals.includes(e.sourceId) || currentProposals.includes(e.targetId),
+  );
+
+  setProposals(sessionId, []);
+
+  for (const e of edgesToDelete) {
+    await _deleteEdge(sessionId, e.id);
+  }
+  for (const n of nodesToDelete) {
+    await _deleteNode(sessionId, n.id);
+  }
+
+  let liveDeletedIds = currentProposals;
+
+  record(sessionId, {
+    undo: async () => {
+      const idMap = new Map<string, string>();
+      const restoredIds: string[] = [];
+      for (const n of nodesToDelete) {
+        const newId = await _addNode(sessionId, {
+          type: n.type,
+          x: n.x,
+          y: n.y,
+          w: n.w,
+          h: n.h,
+          title: n.title,
+          params: n.params,
+        });
+        if (newId) {
+          idMap.set(n.id, newId);
+          restoredIds.push(newId);
+        }
+      }
+      for (const e of edgesToDelete) {
+        const src = idMap.get(e.sourceId) || e.sourceId;
+        const tgt = idMap.get(e.targetId) || e.targetId;
+        await _addEdge(sessionId, src, tgt, e.sourceHandle, e.targetHandle);
+      }
+      liveDeletedIds = restoredIds;
+      setProposals(sessionId, restoredIds);
+    },
+    redo: async () => {
+      setProposals(sessionId, []);
+      for (const id of liveDeletedIds) {
+        await _deleteNode(sessionId, id);
+      }
+    },
+  });
+}
+

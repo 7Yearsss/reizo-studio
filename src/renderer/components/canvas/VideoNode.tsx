@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
+import { useEffect, useMemo, useRef, useState, memo } from 'react';
+import { NodeResizer, Position, type NodeProps, type ResizeParams, useStore } from '@xyflow/react';
 import { Download, FolderPlus, Loader2, Play, GitBranchPlus, Bot, Video, Camera } from 'lucide-react';
 import type { CanvasVideoParams } from '../../../shared/canvas';
-import { CANVAS_VIDEO_MODELS } from '../../../shared/canvas';
+import { CANVAS_VIDEO_MODELS, getVideoModelCapabilities } from '../../../shared/canvas';
+import { estimateNodeCost } from '../../../shared/canvasPricing';
 import { cameraFromPreset } from '../../../shared/cameraMotion';
 import { canvasAssetUrl } from '../../api';
 import * as canvasStore from '../../state/canvasStore';
@@ -35,9 +36,14 @@ function useAssetUrl(rel: string | undefined): string | null {
   return url;
 }
 
-export default function VideoNode({ id, data, selected }: NodeProps) {
-  const { sessionId, node, highlighted, agentMark } = data as CanvasNodeData;
+function VideoNode({ id, data, selected }: NodeProps) {
+  const { sessionId, node, highlighted, agentMark, isProposal } = data as CanvasNodeData;
+  const isLowLOD = useStore((s) => s.transform[2] < 0.35);
+  const isMoodboard = useCanvasStore((s) => s.moodboardBySession[sessionId] ?? false);
+  const hideControls = isLowLOD || isMoodboard;
+
   const params = (node.params as CanvasVideoParams) || { prompt: '' };
+  const caps = getVideoModelCapabilities(params.model);
   const [prompt, setPrompt] = useState(params.prompt ?? '');
   const [assetIdx, setAssetIdx] = useState(0);
   const resizeStart = useRef<{ w: number; h: number } | null>(null);
@@ -50,11 +56,13 @@ export default function VideoNode({ id, data, selected }: NodeProps) {
   const videoElRef = useRef<HTMLVideoElement>(null);
   const [framePick, setFramePick] = useState<'start' | 'end' | 'current' | null>(null);
   const [frameError, setFrameError] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
   const { hovered, hoverProps } = useHoverIntent();
   const expanded = selected || hovered;
+  const showVideo = (expanded || isPlaying) && !isLowLOD;
 
-  const allNodes = useCanvasStore((s) => s.nodesBySession[sessionId]) ?? [];
-  const allEdges = useCanvasStore((s) => s.edgesBySession[sessionId]) ?? [];
+  const allNodes = useCanvasStore((s) => s.nodesBySession[sessionId] ?? canvasStore.EMPTY_NODES);
+  const allEdges = useCanvasStore((s) => s.edgesBySession[sessionId] ?? canvasStore.EMPTY_EDGES);
   const candidates = useMemo(
     () => allNodes.filter((n) => n.id !== node.id && (n.output?.assets?.length ?? 0) > 0),
     [allNodes, node.id],
@@ -110,6 +118,7 @@ export default function VideoNode({ id, data, selected }: NodeProps) {
         selected ? 'border-accent ring-1 ring-accent/20' : 'border-line',
         running && 'canvas-node-running',
         highlighted && 'canvas-node-highlight',
+        isProposal && 'border-dashed !border-2 !border-accent shadow-[0_0_15px_rgba(99,102,241,0.35)] animate-pulse-subtle',
       )}
     >
       <AgentMark show={agentMark} />
@@ -182,6 +191,8 @@ export default function VideoNode({ id, data, selected }: NodeProps) {
         position={Position.Left}
         kind="reference"
         label="参考"
+        disabled={!caps.reference}
+        disabledReason="当前模型不支持角色参考"
         expanded={expanded}
         top="38%"
       />
@@ -191,6 +202,8 @@ export default function VideoNode({ id, data, selected }: NodeProps) {
         position={Position.Left}
         kind="startFrame"
         label="首帧"
+        disabled={!caps.startFrame}
+        disabledReason="当前模型不支持首帧输入"
         expanded={expanded}
         top="65%"
       />
@@ -200,6 +213,8 @@ export default function VideoNode({ id, data, selected }: NodeProps) {
         position={Position.Left}
         kind="endFrame"
         label="尾帧"
+        disabled={!caps.endFrame}
+        disabledReason="当前模型不支持尾帧插值"
         expanded={expanded}
         top="85%"
       />
@@ -240,198 +255,277 @@ export default function VideoNode({ id, data, selected }: NodeProps) {
         </div>
       </div>
 
-      <div className="mt-1">
-        <MentionTextArea
-          value={prompt}
-          onChange={setPrompt}
-          onCommit={commitPrompt}
-          candidates={candidates}
-          placeholder="描述画面动态与运镜（输入 @ 可引用画布节点）…"
-        />
-      </div>
+      {!hideControls ? (
+        <>
+          <div className="mt-1">
+            <MentionTextArea
+              value={prompt}
+              onChange={setPrompt}
+              onCommit={commitPrompt}
+              candidates={candidates}
+              placeholder="描述画面动态与运镜（输入 @ 可引用画布节点）…"
+              onMentionSelect={(refNode) => {
+                void canvasStore.connectNodes(sessionId, refNode.id, node.id, 'reference');
+              }}
+            />
+          </div>
 
-      <div className="mt-2.5 flex flex-wrap items-center justify-between gap-1.5">
-        <div className="flex flex-wrap items-center gap-1.5">
-          {/* Video Model Selector */}
-          <Select
-            value={params.model || 'kling-1.5'}
-            onValueChange={(val) =>
-              void canvasStore.updateNodeParams(sessionId, node.id, {
-                ...params,
-                model: val,
-              })
-            }
-          >
-            <SelectTrigger
-              size="sm"
-              className="nodrag h-7 max-w-[140px] rounded-lg border-line/70 bg-paper-inset/40 px-2 py-1 text-[11px] font-medium text-ink hover:border-accent hover:bg-paper-inset/70 transition-colors"
-            >
-              <div className="flex items-center gap-1 truncate">
-                <span className="text-accent text-[10px]">🎬</span>
-                <SelectValue placeholder="视频模型" />
-              </div>
-            </SelectTrigger>
-            <SelectContent className="min-w-[170px] rounded-xl border border-line bg-paper-raised/95 shadow-xl backdrop-blur-xl p-1 text-xs">
-              {CANVAS_VIDEO_MODELS.map((m) => (
-                <SelectItem key={m.id} value={m.id} className="text-xs py-1.5 cursor-pointer rounded-lg hover:bg-paper-inset">
-                  <div className="flex items-center justify-between w-full gap-2">
-                    <span>{m.name}</span>
-                    {'badge' in m ? (
-                      <span className="rounded bg-accent/15 px-1 py-0.5 text-[9px] text-accent font-semibold">
-                        {m.badge}
-                      </span>
-                    ) : null}
+          <div className="mt-2.5 flex flex-wrap items-center justify-between gap-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {/* Video Model Selector */}
+              <Select
+                value={params.model || 'kling-1.5'}
+                onValueChange={(val) =>
+                  void canvasStore.updateNodeParams(sessionId, node.id, {
+                    ...params,
+                    model: val,
+                  })
+                }
+              >
+                <SelectTrigger
+                  size="sm"
+                  className="nodrag h-7 max-w-[140px] rounded-lg border-line/70 bg-paper-inset/40 px-2 py-1 text-[11px] font-medium text-ink hover:border-accent hover:bg-paper-inset/70 transition-colors"
+                >
+                  <div className="flex items-center gap-1 truncate">
+                    <span className="text-accent text-[10px]">🎬</span>
+                    <SelectValue placeholder="视频模型" />
                   </div>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+                </SelectTrigger>
+                <SelectContent className="min-w-[170px] rounded-xl border border-line bg-paper-raised/95 shadow-xl backdrop-blur-xl p-1 text-xs">
+                  {CANVAS_VIDEO_MODELS.map((m) => (
+                    <SelectItem key={m.id} value={m.id} className="text-xs py-1.5 cursor-pointer rounded-lg hover:bg-paper-inset">
+                      <div className="flex items-center justify-between w-full gap-2">
+                        <span>{m.name}</span>
+                        {'badge' in m ? (
+                          <span className="rounded bg-accent/15 px-1 py-0.5 text-[9px] text-accent font-semibold">
+                            {m.badge}
+                          </span>
+                        ) : null}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
 
-          {/* Visual camera-motion controller (direction + intensity per axis) */}
-          <CameraDial
-            value={params.camera ?? cameraFromPreset(params.cameraMotion)}
-            onChange={(camera) =>
-              void canvasStore.updateNodeParams(sessionId, node.id, { ...params, camera })
-            }
-          />
+              {/* Capability status badge row */}
+              <div className="flex items-center gap-1 select-none">
+                <span
+                  title={caps.startFrame ? '支持首帧垫图 (Image-to-Video)' : '当前模型不支持首帧垫图'}
+                  className={cn(
+                    'rounded px-1 py-0.5 text-[9px] font-mono border transition-colors',
+                    caps.startFrame
+                      ? 'border-emerald-500/30 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10'
+                      : 'border-line text-ink-muted/50 opacity-60',
+                  )}
+                >
+                  首帧 {caps.startFrame ? '✓' : '✗'}
+                </span>
+                <span
+                  title={caps.endFrame ? '支持尾帧插值 (Start & End Frame)' : '当前模型不支持尾帧插值'}
+                  className={cn(
+                    'rounded px-1 py-0.5 text-[9px] font-mono border transition-colors',
+                    caps.endFrame
+                      ? 'border-emerald-500/30 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10'
+                      : 'border-line text-ink-muted/50 opacity-60',
+                  )}
+                >
+                  尾帧 {caps.endFrame ? '✓' : '✗'}
+                </span>
+                <span
+                  title={caps.camera ? '支持精细多轴运镜控制' : '当前模型不支持运镜控制'}
+                  className={cn(
+                    'rounded px-1 py-0.5 text-[9px] font-mono border transition-colors',
+                    caps.camera
+                      ? 'border-emerald-500/30 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10'
+                      : 'border-line text-ink-muted/50 opacity-60',
+                  )}
+                >
+                  运镜 {caps.camera ? '✓' : '✗'}
+                </span>
+              </div>
 
-          {/* Ratio Segmented Pills (16:9, 9:16, 1:1) */}
-          <div className="flex items-center rounded-lg border border-line/60 bg-paper-inset/50 p-0.5">
-            {['16:9', '9:16', '1:1'].map((r) => (
-              <button
-                key={r}
-                type="button"
-                onClick={() =>
-                  void canvasStore.updateNodeParams(sessionId, node.id, {
-                    ...params,
-                    ratio: r as CanvasVideoParams['ratio'],
-                  })
+              {/* Visual camera-motion controller (direction + intensity per axis) */}
+              <CameraDial
+                value={params.camera ?? cameraFromPreset(params.cameraMotion)}
+                onChange={(camera) =>
+                  void canvasStore.updateNodeParams(sessionId, node.id, { ...params, camera })
                 }
-                className={cn(
-                  'nodrag rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-all',
-                  (params.ratio || '16:9') === r
-                    ? 'bg-paper-raised text-ink border border-line/60 shadow-xs font-semibold dark:bg-white/15 dark:text-white dark:border-white/20'
-                    : 'text-ink-muted hover:text-ink',
-                )}
-                title={`画幅比例: ${r}`}
-              >
-                {r}
-              </button>
-            ))}
+              />
+
+              {/* Ratio Segmented Pills (16:9, 9:16, 1:1) */}
+              <div className="flex items-center rounded-lg border border-line/60 bg-paper-inset/50 p-0.5">
+                {['16:9', '9:16', '1:1'].map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() =>
+                      void canvasStore.updateNodeParams(sessionId, node.id, {
+                        ...params,
+                        ratio: r as CanvasVideoParams['ratio'],
+                      })
+                    }
+                    className={cn(
+                      'nodrag rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-all',
+                      (params.ratio || '16:9') === r
+                        ? 'bg-paper-raised text-ink border border-line/60 shadow-xs font-semibold dark:bg-white/15 dark:text-white dark:border-white/20'
+                        : 'text-ink-muted hover:text-ink',
+                    )}
+                    title={`画幅比例: ${r}`}
+                  >
+                    {r}
+                  </button>
+                ))}
+              </div>
+
+              {/* Duration Segmented Pills (5s, 10s) */}
+              <div className="flex items-center rounded-lg border border-line/60 bg-paper-inset/50 p-0.5">
+                {(['5s', '10s'] as const).map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() =>
+                      void canvasStore.updateNodeParams(sessionId, node.id, {
+                        ...params,
+                        duration: d as CanvasVideoParams['duration'],
+                      })
+                    }
+                    className={cn(
+                      'nodrag rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-all',
+                      (params.duration || '5s') === d
+                        ? 'bg-paper-raised text-ink border border-line/60 shadow-xs font-semibold dark:bg-white/15 dark:text-white dark:border-white/20'
+                        : 'text-ink-muted hover:text-ink',
+                    )}
+                    title={`视频时长: ${d}`}
+                  >
+                    {d}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={run}
+              disabled={running || !prompt.trim()}
+              title={`生成视频 (单次预计消耗约 ${estimateNodeCost(node)} 算力点)`}
+              className="nodrag ml-auto inline-flex items-center gap-1.5 rounded-lg bg-accent text-accent-ink px-3 py-1 text-[11px] font-medium shadow-xs hover:opacity-90 active:scale-95 transition-all disabled:opacity-40"
+            >
+              {running ? <Loader2 size={12} className="animate-spin" /> : <Play size={11} className="fill-current" />}
+              生成视频
+              <span className="text-[9px] opacity-75 font-normal ml-0.5">(~{estimateNodeCost(node)}点)</span>
+            </button>
           </div>
 
-          {/* Duration Segmented Pills (5s, 10s) */}
-          <div className="flex items-center rounded-lg border border-line/60 bg-paper-inset/50 p-0.5">
-            {['5s', '10s'].map((d) => (
+          {running ? (
+            <div className="mt-2 w-full overflow-hidden rounded-full bg-paper-inset">
+              <div
+                className="h-1.5 rounded-full bg-accent transition-all duration-300"
+                style={{ width: `${Math.max(5, progress)}%` }}
+              />
+            </div>
+          ) : null}
+
+          {node.output?.error ? (
+            <div className="mt-2 flex flex-col gap-1 rounded-lg bg-danger/10 p-2 text-[11px] text-danger">
+              <p className="line-clamp-2">{node.output.error}</p>
               <button
-                key={d}
-                type="button"
-                onClick={() =>
-                  void canvasStore.updateNodeParams(sessionId, node.id, {
-                    ...params,
-                    duration: d as CanvasVideoParams['duration'],
-                  })
-                }
-                className={cn(
-                  'nodrag rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-all',
-                  (params.duration || '5s') === d
-                    ? 'bg-paper-raised text-ink border border-line/60 shadow-xs font-semibold dark:bg-white/15 dark:text-white dark:border-white/20'
-                    : 'text-ink-muted hover:text-ink',
-                )}
-                title={`视频时长: ${d}`}
-              >
-                {d}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={run}
-          disabled={running || !prompt.trim()}
-          className="nodrag ml-auto inline-flex items-center gap-1.5 rounded-lg bg-accent text-accent-ink px-3 py-1 text-[11px] font-medium shadow-xs hover:opacity-90 active:scale-95 transition-all disabled:opacity-40"
-        >
-          {running ? <Loader2 size={12} className="animate-spin" /> : <Play size={11} className="fill-current" />}
-          生成视频
-        </button>
-      </div>
-
-      {running ? (
-        <div className="mt-2 w-full overflow-hidden rounded-full bg-paper-inset">
-          <div
-            className="h-1.5 rounded-full bg-accent transition-all duration-300"
-            style={{ width: `${Math.max(5, progress)}%` }}
-          />
-        </div>
-      ) : null}
-
-      {node.output?.error ? (
-        <div className="mt-2 flex flex-col gap-1 rounded-lg bg-danger/10 p-2 text-[11px] text-danger">
-          <p className="line-clamp-2">{node.output.error}</p>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              void chatStore.sendMessage(
-                sessionId,
-                `画布上的视频节点「${node.title || node.id}」生成报错：\n“${node.output?.error}”\n当前 Prompt 为：“${prompt}”。\n请分析报错原因（如违禁词/运镜参数冲突/模型超时），并帮我生成修改后的视频 Prompt 与参数建议。`,
-                [],
-                {},
-              );
-            }}
-            className="nodrag inline-flex items-center gap-1 self-start rounded bg-danger/20 px-1.5 py-0.5 text-[10px] font-medium text-danger hover:bg-danger/30 transition-colors"
-          >
-            <Bot size={11} />
-            让 Agent 协助修复提示词
-          </button>
-        </div>
-      ) : null}
-
-      {assetUrl ? (
-        <div className="group relative mt-2 min-h-0 flex-1 overflow-hidden rounded-lg border border-line bg-black/5 flex items-center justify-center">
-          <video
-            ref={videoElRef}
-            src={assetUrl}
-            controls
-            playsInline
-            loop
-            preload="metadata"
-            className="nodrag h-full w-full object-contain"
-          />
-          <div className="nodrag absolute left-1.5 top-1.5 flex flex-col items-start gap-1 opacity-0 transition-opacity group-hover:opacity-100 z-10">
-            {(['start', 'end', 'current'] as const).map((pick) => (
-              <button
-                key={pick}
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  extractFrame(pick);
+                  void chatStore.sendMessage(
+                    sessionId,
+                    `画布上的视频节点「${node.title || node.id}」生成报错：\n“${node.output?.error}”\n当前 Prompt 为：“${prompt}”。\n请分析报错原因（如违禁词/运镜参数冲突/模型超时），并帮我生成修改后的视频 Prompt 与参数建议。`,
+                    [],
+                    {},
+                  );
                 }}
-                disabled={framePick !== null}
-                className="inline-flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-1 text-[10px] font-medium text-white hover:bg-black/80 disabled:opacity-50"
-                title={
-                  pick === 'start'
-                    ? '抽取首帧为图片节点，用作下一镜的起始帧'
-                    : pick === 'end'
-                      ? '抽取尾帧为图片节点，用作下一镜的起始帧'
-                      : '抽取当前播放帧为图片节点'
-                }
+                className="nodrag inline-flex items-center gap-1 self-start rounded bg-danger/20 px-1.5 py-0.5 text-[10px] font-medium text-danger hover:bg-danger/30 transition-colors"
               >
-                {framePick === pick ? (
-                  <Loader2 size={11} className="animate-spin" />
-                ) : (
-                  <Camera size={11} />
-                )}
-                {pick === 'start' ? '抽首帧' : pick === 'end' ? '抽尾帧' : '抽当前帧'}
+                <Bot size={11} />
+                让 Agent 协助修复提示词
               </button>
-            ))}
+            </div>
+          ) : null}
+        </>
+      ) : (
+        !assetUrl && (
+          <div className="flex-1 flex items-center justify-center p-3 text-center text-[11px] text-ink-muted select-none">
+            {prompt ? <p className="line-clamp-3 italic opacity-80">{prompt}</p> : <span>等待生成视频</span>}
           </div>
+        )
+      )}
+
+      {assetUrl ? (
+        <div className="group relative mt-2 min-h-0 flex-1 overflow-hidden rounded-lg border border-line bg-black/5 flex items-center justify-center">
+          {showVideo ? (
+            <video
+              ref={videoElRef}
+              src={assetUrl}
+              controls
+              playsInline
+              loop
+              autoPlay={isPlaying}
+              preload="metadata"
+              className="nodrag h-full w-full object-contain"
+            />
+          ) : (
+            <div
+              className="group/poster relative h-full w-full flex items-center justify-center cursor-pointer bg-black/30 overflow-hidden"
+              onClick={() => setIsPlaying(true)}
+              title="点击播放视频"
+            >
+              <video
+                src={`${assetUrl}#t=0.001`}
+                preload="metadata"
+                muted
+                playsInline
+                className="nodrag pointer-events-none h-full w-full object-contain opacity-90"
+              />
+              <div className="absolute inset-0 flex items-center justify-center bg-black/15 group-hover/poster:bg-black/30 transition-colors">
+                <div className="rounded-full bg-black/70 p-2 text-white shadow-lg backdrop-blur-xs transition-transform group-hover/poster:scale-110">
+                  <Play size={16} className="fill-current translate-x-0.5" />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showVideo && (
+            <div className="nodrag absolute left-1.5 top-1.5 flex flex-col items-start gap-1 opacity-0 transition-opacity group-hover:opacity-100 z-10">
+              {(['start', 'end', 'current'] as const).map((pick) => (
+                <button
+                  key={pick}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    extractFrame(pick);
+                  }}
+                  disabled={framePick !== null}
+                  className="inline-flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-1 text-[10px] font-medium text-white hover:bg-black/80 disabled:opacity-50"
+                  title={
+                    pick === 'start'
+                      ? '抽取首帧为图片节点，用作下一镜的起始帧'
+                      : pick === 'end'
+                        ? '抽取尾帧为图片节点，用作下一镜的起始帧'
+                        : '抽取当前播放帧为图片节点'
+                  }
+                >
+                  {framePick === pick ? (
+                    <Loader2 size={11} className="animate-spin" />
+                  ) : (
+                    <Camera size={11} />
+                  )}
+                  {pick === 'start' ? '抽首帧' : pick === 'end' ? '抽尾帧' : '抽当前帧'}
+                </button>
+              ))}
+            </div>
+          )}
+
           {frameError ? (
             <div className="absolute inset-x-2 bottom-9 rounded bg-danger/90 px-2 py-1 text-[10px] text-white shadow">
               {frameError}
             </div>
           ) : null}
+
           {assets.length > 1 ? (
             <div className="absolute inset-x-0 bottom-7 flex items-center justify-center gap-1 bg-black/40 py-0.5 backdrop-blur-[2px]">
               {assets.map((_, i) => (
@@ -455,30 +549,35 @@ export default function VideoNode({ id, data, selected }: NodeProps) {
               ))}
             </div>
           ) : null}
-          <div className="absolute right-1.5 top-1.5 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 z-10">
-            <a
-              href={assetUrl}
-              download
-              onClick={(e) => e.stopPropagation()}
-              className="nodrag rounded-md bg-black/60 p-1 text-white hover:bg-black/80"
-              title="下载视频"
-            >
-              <Download size={12} />
-            </a>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                void canvasStore.saveAsset(sessionId, node.id, assetIdx);
-              }}
-              className="nodrag rounded-md bg-black/60 p-1 text-white hover:bg-black/80"
-              title="存到作品库"
-            >
-              <FolderPlus size={12} />
-            </button>
-          </div>
+
+          {showVideo && (
+            <div className="absolute right-1.5 top-1.5 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 z-10">
+              <a
+                href={assetUrl}
+                download
+                onClick={(e) => e.stopPropagation()}
+                className="nodrag rounded-md bg-black/60 p-1 text-white hover:bg-black/80"
+                title="下载视频"
+              >
+                <Download size={12} />
+              </a>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void canvasStore.saveAsset(sessionId, node.id, assetIdx);
+                }}
+                className="nodrag rounded-md bg-black/60 p-1 text-white hover:bg-black/80"
+                title="存到作品库"
+              >
+                <FolderPlus size={12} />
+              </button>
+            </div>
+          )}
         </div>
       ) : null}
     </div>
   );
 }
+
+export default memo(VideoNode);

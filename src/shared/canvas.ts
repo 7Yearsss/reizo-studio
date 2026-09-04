@@ -9,7 +9,17 @@ import type { CameraControl } from './cameraMotion';
 
 export type { CameraControl } from './cameraMotion';
 
-export type CanvasNodeType = 'image' | 'agent' | 'video' | 'note' | 'group' | 'anchor';
+export type CanvasNodeType =
+  | 'image'
+  | 'agent'
+  | 'video'
+  | 'note'
+  | 'group'
+  | 'anchor'
+  | 'reroute'
+  | 'frameExtractor'
+  | 'section'
+  | 'subgraph';
 
 export type NodeRunState = 'idle' | 'running' | 'done' | 'error';
 
@@ -73,6 +83,27 @@ export const ANCHOR_STRENGTHS: Array<{ id: AnchorStrength; label: string }> = [
   { id: 'high', label: '强' },
 ];
 
+export interface CanvasFrameExtractorParams {
+  mode?: 'start' | 'end' | 'custom';
+  timestampSec?: number;
+}
+
+export interface CanvasSectionParams {
+  color?: 'slate' | 'amber' | 'blue' | 'emerald' | 'violet' | 'rose';
+  description?: string;
+  memberIds?: string[];
+}
+
+export interface CanvasSubgraphParams {
+  collapsed?: boolean;
+  innerNodeIds?: string[];
+  description?: string;
+  innerSnapshot?: {
+    nodes: CanvasNode[];
+    edges: CanvasEdge[];
+  };
+}
+
 export type CanvasNodeParams =
   | CanvasImageParams
   | CanvasAgentParams
@@ -80,6 +111,9 @@ export type CanvasNodeParams =
   | CanvasNoteParams
   | CanvasGroupParams
   | CanvasAnchorParams
+  | CanvasFrameExtractorParams
+  | CanvasSectionParams
+  | CanvasSubgraphParams
   | Record<string, unknown>;
 
 export interface CanvasNode {
@@ -154,12 +188,48 @@ export const CANVAS_IMAGE_MODELS = [
   { id: 'dall-e-3', name: 'DALL-E 3 (奇幻插画)' },
 ] as const;
 
-export const CANVAS_VIDEO_MODELS = [
-  { id: 'kling-1.5', name: '可灵 Kling 1.5 (运镜流畅)', badge: '默认' },
-  { id: 'kling-2.0', name: '可灵 Kling 2.0 HD (电影感)' },
-  { id: 'wan-2.1', name: 'WAN 2.1 (大幅动态)' },
-  { id: 'luma-ray', name: 'Luma Ray (大范围推拉)' },
+export interface VideoModelCapabilities {
+  startFrame: boolean;
+  endFrame: boolean;
+  camera: boolean;
+  reference: boolean;
+}
+
+export interface CanvasVideoModelDef {
+  id: string;
+  name: string;
+  badge?: string;
+  capabilities: VideoModelCapabilities;
+}
+
+export const CANVAS_VIDEO_MODELS: readonly CanvasVideoModelDef[] = [
+  {
+    id: 'kling-1.5',
+    name: '可灵 Kling 1.5 (运镜流畅)',
+    badge: '默认',
+    capabilities: { startFrame: true, endFrame: true, camera: true, reference: false },
+  },
+  {
+    id: 'kling-2.0',
+    name: '可灵 Kling 2.0 HD (电影感)',
+    capabilities: { startFrame: true, endFrame: true, camera: true, reference: true },
+  },
+  {
+    id: 'wan-2.1',
+    name: 'WAN 2.1 (大幅动态)',
+    capabilities: { startFrame: true, endFrame: false, camera: false, reference: false },
+  },
+  {
+    id: 'luma-ray',
+    name: 'Luma Ray (大范围推拉)',
+    capabilities: { startFrame: true, endFrame: true, camera: true, reference: false },
+  },
 ] as const;
+
+export function getVideoModelCapabilities(modelId?: string): VideoModelCapabilities {
+  const model = CANVAS_VIDEO_MODELS.find((m) => m.id === modelId);
+  return model?.capabilities ?? { startFrame: true, endFrame: true, camera: true, reference: false };
+}
 
 /** Default node box for a freshly created node of each type. */
 export function defaultNodeBox(type: CanvasNodeType): { w: number; h: number } {
@@ -168,5 +238,10 @@ export function defaultNodeBox(type: CanvasNodeType): { w: number; h: number } {
   if (type === 'note') return { w: 280, h: 220 };
   if (type === 'group') return { w: 480, h: 360 };
   if (type === 'anchor') return { w: 200, h: 250 };
+  if (type === 'reroute') return { w: 24, h: 24 };
+  if (type === 'frameExtractor') return { w: 200, h: 160 };
+  if (type === 'section') return { w: 560, h: 420 };
+  if (type === 'subgraph') return { w: 260, h: 180 };
   return { w: 320, h: 220 };
 }
+

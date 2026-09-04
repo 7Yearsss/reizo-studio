@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, memo } from 'react';
 import { NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
 import { Check, Copy, GitBranchPlus, Loader2, Play } from 'lucide-react';
 import type { CanvasAgentParams } from '../../../shared/canvas';
@@ -11,8 +11,8 @@ import AgentMark from './AgentMark';
 import MissingInputWarning from './MissingInputWarning';
 import { nodeReadinessIssues } from '../../../shared/canvasReadiness';
 
-export default function AgentNode({ id, data, selected }: NodeProps) {
-  const { sessionId, node, highlighted, agentMark } = data as CanvasNodeData;
+function AgentNode({ id, data, selected }: NodeProps) {
+  const { sessionId, node, highlighted, agentMark, isProposal } = data as CanvasNodeData;
   const params = node.params as CanvasAgentParams;
   const [instruction, setInstruction] = useState(params.instruction ?? '');
   const [copied, setCopied] = useState(false);
@@ -53,6 +53,7 @@ export default function AgentNode({ id, data, selected }: NodeProps) {
         selected ? 'border-accent ring-1 ring-accent/20' : 'border-line',
         running && 'canvas-node-running',
         highlighted && 'canvas-node-highlight',
+        isProposal && 'border-dashed !border-2 !border-accent shadow-[0_0_15px_rgba(99,102,241,0.35)] animate-pulse-subtle',
       )}
     >
       <AgentMark show={agentMark} />
@@ -164,3 +165,5 @@ export default function AgentNode({ id, data, selected }: NodeProps) {
     </div>
   );
 }
+
+export default memo(AgentNode);

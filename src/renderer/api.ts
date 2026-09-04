@@ -69,7 +69,13 @@ async function readEnvelopeStream(res: Response, onEvent: StreamEventHandler): P
 let originPromise: Promise<string> | null = null;
 
 function apiOrigin(): Promise<string> {
-  if (!originPromise) originPromise = window.reizo.getApiOrigin();
+  if (!originPromise) {
+    if (typeof window !== 'undefined' && window.reizo?.getApiOrigin) {
+      originPromise = window.reizo.getApiOrigin();
+    } else {
+      originPromise = Promise.resolve('http://127.0.0.1:47100');
+    }
+  }
   return originPromise;
 }
 
@@ -507,6 +513,20 @@ export async function addCanvasEdge(
 
 export async function deleteCanvasEdge(canvasId: string, id: string): Promise<void> {
   await api(`/api/canvas/${canvasId}/edges/${id}`, { method: 'DELETE' });
+}
+
+export async function setCanvasNodeAsset(
+  canvasId: string,
+  id: string,
+  input: { name?: string; dataBase64: string },
+): Promise<CanvasNode> {
+  const res = await api(`/api/canvas/${canvasId}/nodes/${id}/asset`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const { node } = await res.json();
+  return node;
 }
 
 export async function runCanvasNode(

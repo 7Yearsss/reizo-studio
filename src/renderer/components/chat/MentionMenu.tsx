@@ -4,6 +4,7 @@ import * as api from '../../api';
 import type { DirEntry } from '../../../shared/workspace';
 import type { CanvasNode } from '../../../shared/canvas';
 import { useCanvasStore } from '../../state/useCanvasStore';
+import * as canvasStore from '../../state/canvasStore';
 
 export function extractMentionQuery(text: string): string | null {
   const match = text.match(/@([^\s@]*)$/);
@@ -22,7 +23,7 @@ export default function MentionMenu({
   onPickNode?: (node: CanvasNode) => void;
 }) {
   const [entries, setEntries] = useState<DirEntry[]>([]);
-  const storeNodes = useCanvasStore((s) => (sessionId ? s.nodesBySession[sessionId] : undefined)) ?? [];
+  const storeNodes = useCanvasStore((s) => (sessionId ? s.nodesBySession[sessionId] : undefined) ?? canvasStore.EMPTY_NODES);
 
   const matchedNodes = sessionId
     ? storeNodes
