@@ -119,6 +119,14 @@ export function microCompactToolResult(name: string, result: string, maxChars?: 
         }
       }
     }
+
+    if (name === 'generate_image') {
+      const parsed = JSON.parse(result);
+      if (parsed && typeof parsed === 'object') {
+        const { dataUrl: _omitted, ...rest } = parsed as { dataUrl?: string };
+        return JSON.stringify(rest);
+      }
+    }
   } catch {
     // Non-JSON or parsing error - fall through to clipToolOutput
   }

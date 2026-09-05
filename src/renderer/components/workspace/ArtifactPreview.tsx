@@ -8,6 +8,8 @@ import { downloadBase64, toHtmlDocument } from '../../lib/artifactExport';
 import { pickRenderer } from './renderers';
 import ArtifactVersionRail from './ArtifactVersionRail';
 import HandoffMenu from './HandoffMenu';
+import { parseSheetContent } from '../../../shared/sheetContent';
+import { downloadSheetAsXlsx } from '../../../shared/sheetXlsx';
 
 export default function ArtifactPreview({
   artifact,
@@ -57,6 +59,13 @@ export default function ArtifactPreview({
   }
 
   async function download() {
+    if (artifact.kind === 'sheet') {
+      const parsed = parseSheetContent(text);
+      if (parsed) {
+        void downloadSheetAsXlsx(parsed, artifact.name);
+        return;
+      }
+    }
     if (rawUrl) {
       const a = document.createElement('a');
       a.href = rawUrl;

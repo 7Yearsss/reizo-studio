@@ -1974,6 +1974,20 @@ export async function saveAsset(sessionId: string, nodeId: string, assetIndex = 
   if (id) await api.saveCanvasAsset(id, nodeId, assetIndex);
 }
 
+export async function uploadAssetToNode(sessionId: string, nodeId: string, file: File): Promise<void> {
+  const id = canvasId(sessionId);
+  if (!id) return;
+  const buffer = await file.arrayBuffer();
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+  const updatedNode = await api.setCanvasNodeAsset(id, nodeId, {
+    name: file.name,
+    dataBase64: btoa(binary),
+  });
+  applyEvent(sessionId, { type: 'node_updated', node: updatedNode });
+}
+
 /** Download the current canvas as a portable `.reizo.zip`. */
 export async function exportWorkflow(sessionId: string): Promise<void> {
   const id = canvasId(sessionId);

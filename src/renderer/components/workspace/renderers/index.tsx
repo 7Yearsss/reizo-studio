@@ -2,6 +2,8 @@ import type { Artifact } from '../../../../shared/artifact';
 import type { ArtifactRendererDef, ArtifactRenderProps } from './types';
 import MarkdownRenderer from './MarkdownRenderer';
 import PreviewFrame from './PreviewFrame';
+import DiagramRenderer from './DiagramRenderer';
+import SheetRenderer from './SheetRenderer';
 
 const HtmlRenderer: React.FC<ArtifactRenderProps> = ({ artifact, text }) => (
   // `sandbox=""` blocks scripts entirely, which is the safe default for a
@@ -79,6 +81,8 @@ const REGISTRY: ArtifactRendererDef[] = [
   { id: 'image', canRender: (a) => a.renderer === 'image' || a.kind === 'image', supportsStreaming: false, Component: ImageRenderer },
   { id: 'video', canRender: (a) => a.renderer === 'video' || a.kind === 'video', supportsStreaming: false, Component: VideoRenderer },
   { id: 'audio', canRender: (a) => a.renderer === 'audio' || a.kind === 'audio', supportsStreaming: false, Component: AudioRenderer },
+  { id: 'diagram', canRender: (a) => a.renderer === 'diagram' || a.kind === 'diagram' || a.renderer === 'sketch' || a.kind === 'sketch', supportsStreaming: false, Component: DiagramRenderer },
+  { id: 'sheet', canRender: (a) => a.renderer === 'sheet' || a.kind === 'sheet', supportsStreaming: false, Component: SheetRenderer },
   { id: 'svg', canRender: (a) => a.renderer === 'svg' || a.kind === 'svg', supportsStreaming: true, Component: SvgRenderer },
   { id: 'html', canRender: (a) => a.renderer === 'html' || a.kind === 'html', supportsStreaming: true, Component: HtmlRenderer },
   { id: 'markdown', canRender: (a) => a.renderer === 'markdown' || a.kind === 'markdown' || a.kind === 'text', supportsStreaming: true, Component: MarkdownRenderer },

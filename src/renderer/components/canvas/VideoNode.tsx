@@ -180,7 +180,7 @@ function VideoNode({ id, data, selected }: NodeProps) {
         kind="prompt"
         label="提示词"
         expanded={expanded}
-        top="18%"
+        top="16%"
       />
       <NodeHandle
         type="target"
@@ -191,7 +191,7 @@ function VideoNode({ id, data, selected }: NodeProps) {
         disabled={!caps.startFrame}
         disabledReason="当前模型不支持首帧输入"
         expanded={expanded}
-        top="42%"
+        top="36%"
       />
       <NodeHandle
         type="target"
@@ -202,7 +202,7 @@ function VideoNode({ id, data, selected }: NodeProps) {
         disabled={!caps.endFrame}
         disabledReason="当前模型不支持尾帧插值"
         expanded={expanded}
-        top="66%"
+        top="56%"
       />
       <NodeHandle
         type="target"
@@ -213,7 +213,16 @@ function VideoNode({ id, data, selected }: NodeProps) {
         disabled={!caps.reference}
         disabledReason="当前模型不支持角色参考"
         expanded={expanded}
-        top="86%"
+        top="74%"
+      />
+      <NodeHandle
+        type="target"
+        id="audio_in"
+        position={Position.Left}
+        kind="audio"
+        label="音频配乐"
+        expanded={expanded}
+        top="90%"
       />
       <NodeHandle
         type="source"

@@ -125,6 +125,26 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
     void canvasStore.updateNodeParams(sessionId, node.id, { ...params, prompt });
   };
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const handleUpload = async (file: File) => {
+    if (!file.type.startsWith('image/')) return;
+    try {
+      await canvasStore.uploadAssetToNode(sessionId, node.id, file);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) void handleUpload(file);
+  };
+
   const run = () => {
     if (running) return;
     if (!prompt.trim() && !hasUpstreamPrompt) return;
@@ -233,19 +253,17 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
           >
             {node.runState === 'idle' ? '未运行' : running ? '生成中' : node.runState === 'done' ? '就绪' : '失败'}
           </span>
-          {hasImage && (
-            <button
-              type="button"
-              onClick={() => setShowConfig((v) => !v)}
-              className={cn(
-                'nodrag rounded p-1 text-ink-muted hover:bg-paper-inset hover:text-ink transition-colors',
-                showConfig && 'bg-accent/15 text-accent',
-              )}
-              title={showConfig ? '收起配置 (纯画面模式)' : '展开提示词与参数配置'}
-            >
-              <SlidersHorizontal size={11} />
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => setShowConfig((v) => !v)}
+            className={cn(
+              'nodrag rounded p-1 text-ink-muted hover:bg-paper-inset hover:text-ink transition-colors',
+              showConfig && 'bg-accent/15 text-accent',
+            )}
+            title={showConfig ? '收起配置 (纯画面模式)' : '展开提示词与参数配置'}
+          >
+            <SlidersHorizontal size={11} />
+          </button>
         </div>
       </div>
 
@@ -377,8 +395,71 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
         </div>
       ) : null}
 
-      {/* Config / Prompt Input Area (when standalone, or explicitly opened) */}
-      {(!hasImage && !hasUpstreamPrompt) || showConfig ? (
+      {/* Clean Cover Placeholder / Dropzone (when standalone and no image yet) */}
+      {!hasImage && !hasUpstreamPrompt && !showConfig ? (
+        <div
+          onClick={() => fileInputRef.current?.click()}
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setIsDragging(true);
+          }}
+          onDragLeave={() => setIsDragging(false)}
+          onDrop={handleDrop}
+          className={cn(
+            'group/placeholder nodrag relative flex min-h-0 flex-1 flex-col items-center justify-center rounded-lg border border-dashed p-4 text-center cursor-pointer transition-all',
+            isDragging
+              ? 'border-accent bg-accent/10 scale-[0.99]'
+              : 'border-line hover:border-accent/60 bg-black/20 hover:bg-black/30',
+          )}
+          title="点击上传图片或拖入文件，也可点击右上角滑块展开提示词配置"
+        >
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void handleUpload(f);
+              e.target.value = '';
+            }}
+          />
+          <div className="rounded-full bg-paper-inset/70 p-3 mb-2 text-ink-muted group-hover/placeholder:text-accent group-hover/placeholder:bg-accent/15 group-hover/placeholder:scale-110 transition-all shadow-xs">
+            <ImageIcon size={22} />
+          </div>
+          <span className="text-xs font-medium text-ink">点击或拖入图片封面</span>
+          <p className="mt-1 text-[10px] text-ink-muted/80">支持 PNG, JPG, WebP 画面</p>
+          <div className="mt-3 flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowConfig(true);
+              }}
+              className="nodrag rounded-md bg-paper-raised border border-line px-2 py-1 text-[10px] text-ink-muted hover:text-ink hover:border-accent transition-colors"
+            >
+              配置提示词 ⚙️
+            </button>
+            {prompt.trim() ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  run();
+                }}
+                disabled={running}
+                className="nodrag rounded-md bg-accent px-2.5 py-1 text-[10px] font-medium text-accent-ink shadow-xs hover:opacity-90"
+              >
+                生成
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Config / Prompt Input Area (when explicitly opened via Sliders) */}
+      {showConfig ? (
         <div className="flex flex-col flex-1 min-h-0">
           <div className="mt-1">
             <MentionTextArea

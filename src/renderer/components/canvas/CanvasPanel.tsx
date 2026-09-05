@@ -60,6 +60,8 @@ import {
   Clock,
   Mouse,
   Laptop,
+  Type,
+  Volume2,
 } from 'lucide-react';
 import * as canvasStore from '../../state/canvasStore';
 import * as chatStore from '../../state/chatStore';
@@ -73,6 +75,7 @@ import { nodeReadinessIssues } from '../../../shared/canvasReadiness';
 import ImageNode, { type CanvasNodeData } from './ImageNode';
 import AgentNode from './AgentNode';
 import VideoNode from './VideoNode';
+import AudioNode from './AudioNode';
 import NoteNode from './NoteNode';
 import GroupNode from './GroupNode';
 import AnchorNode from './AnchorNode';
@@ -93,6 +96,7 @@ const NODE_TYPES: NodeTypes = {
   image: ImageNode,
   agent: AgentNode,
   video: VideoNode,
+  audio: AudioNode,
   note: NoteNode,
   group: GroupNode,
   anchor: AnchorNode,
@@ -107,6 +111,7 @@ const VIEWPORT_KEY = (sessionId: string) => `reizo:canvas-viewport:${sessionId}`
 const MINIMAP_NODE_COLOR = (n: { type?: string }) => {
   if (n.type === 'image') return 'var(--accent, #c26d3a)';
   if (n.type === 'video') return '#0ea5e9';
+  if (n.type === 'audio') return '#f59e0b';
   if (n.type === 'agent') return '#8b5cf6';
   if (n.type === 'note') return '#eab308';
   if (n.type === 'section' || n.type === 'group') return 'transparent';
@@ -1046,35 +1051,43 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
                   <ImageIcon size={14} />
                   创建图片生成卡片
                 </button>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
                     onClick={() => addNode('video', { x: 80, y: 80 })}
-                    className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-line bg-paper px-2.5 py-1.5 text-xs text-ink hover:bg-paper-inset transition-colors"
+                    className="flex flex-1 min-w-[100px] items-center justify-center gap-1.5 rounded-lg border border-line bg-paper px-2.5 py-1.5 text-xs text-ink hover:bg-paper-inset transition-colors"
                   >
                     <Video size={13} className="text-accent" />
-                    创建视频卡片
+                    运镜视频
                   </button>
                   <button
                     type="button"
-                    onClick={() => addNode('agent', { x: 80, y: 80 })}
-                    className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-line bg-paper px-2.5 py-1.5 text-xs text-ink hover:bg-paper-inset transition-colors"
+                    onClick={() => addNode('audio', { x: 80, y: 80 })}
+                    className="flex flex-1 min-w-[100px] items-center justify-center gap-1.5 rounded-lg border border-line bg-paper px-2.5 py-1.5 text-xs text-ink hover:bg-paper-inset transition-colors"
                   >
-                    <Bot size={13} className="text-accent" />
-                    创建 Agent 卡片
+                    <Volume2 size={13} className="text-accent" />
+                    音频播放
                   </button>
                   <button
                     type="button"
                     onClick={() => addNode('note', { x: 80, y: 80 })}
-                    className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-line bg-paper px-2.5 py-1.5 text-xs text-ink hover:bg-paper-inset transition-colors"
+                    className="flex flex-1 min-w-[100px] items-center justify-center gap-1.5 rounded-lg border border-line bg-paper px-2.5 py-1.5 text-xs text-ink hover:bg-paper-inset transition-colors"
                   >
-                    <StickyNote size={13} className="text-accent" />
-                    创建便签
+                    <Type size={13} className="text-accent" />
+                    文本节点
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => addNode('agent', { x: 80, y: 80 })}
+                    className="flex flex-1 min-w-[100px] items-center justify-center gap-1.5 rounded-lg border border-line bg-paper px-2.5 py-1.5 text-xs text-ink hover:bg-paper-inset transition-colors"
+                  >
+                    <Bot size={13} className="text-accent" />
+                    Agent 卡片
                   </button>
                 </div>
               </div>
               <span className="mt-3 text-[10px] text-ink-muted/70">
-                双击空白处或右键打开菜单，也可直接拖入电脑里的图片文件
+                双击空白处或右键打开菜单，也可直接拖入电脑里的图片或音频文件
               </span>
             </div>
           </Panel>
@@ -1091,8 +1104,9 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
             items={[
               { icon: <ImageIcon size={13} />, label: '图片生成', onClick: () => addNode('image') },
               { icon: <Video size={13} />, label: '运镜视频', onClick: () => addNode('video') },
+              { icon: <Volume2 size={13} />, label: '音频播放', onClick: () => addNode('audio') },
+              { icon: <Type size={13} />, label: '文本节点', onClick: () => addNode('note') },
               { icon: <Bot size={13} />, label: 'Agent 任务', onClick: () => addNode('agent') },
-              { icon: <StickyNote size={13} />, label: '灵感便签', onClick: () => addNode('note') },
               { icon: <Pin size={13} />, label: '参考图钉', onClick: () => addNode('anchor') },
             ]}
           />
@@ -1567,8 +1581,9 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
             <>
               <MenuItem icon={<ImageIcon size={13} />} label="加图片节点" onClick={() => { addNode('image', { x: menu.flowX, y: menu.flowY }); setMenu(null); }} />
               <MenuItem icon={<Video size={13} />} label="加视频节点" onClick={() => { addNode('video', { x: menu.flowX, y: menu.flowY }); setMenu(null); }} />
+              <MenuItem icon={<Volume2 size={13} />} label="加音频节点" onClick={() => { addNode('audio', { x: menu.flowX, y: menu.flowY }); setMenu(null); }} />
+              <MenuItem icon={<Type size={13} />} label="加文本节点" onClick={() => { addNode('note', { x: menu.flowX, y: menu.flowY }); setMenu(null); }} />
               <MenuItem icon={<Bot size={13} />} label="加 Agent 节点" onClick={() => { addNode('agent', { x: menu.flowX, y: menu.flowY }); setMenu(null); }} />
-              <MenuItem icon={<StickyNote size={13} />} label="加灵感便签" onClick={() => { addNode('note', { x: menu.flowX, y: menu.flowY }); setMenu(null); }} />
               <MenuItem icon={<FolderKanban size={13} />} label="加场景大区 (Section)" onClick={() => { addNode('section', { x: menu.flowX, y: menu.flowY }); setMenu(null); }} />
               <div className="my-1 h-px bg-line" />
               <MenuItem icon={<LayoutGrid size={13} />} label="整理布局" onClick={() => { tidy(); setMenu(null); }} />
@@ -1596,9 +1611,30 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
                     <span>接入上游输入源</span>
                     <span className="text-[9px] font-normal text-ink-muted truncate max-w-[90px]">➔ {nodeTitle}</span>
                   </div>
+                  {dropConnectMenu.handleId === 'audio_in' ? (
+                    <MenuItem
+                      icon={<Volume2 size={13} className="text-[#f59e0b]" />}
+                      label="加音频节点 / 配乐"
+                      onClick={() => {
+                        void canvasStore.addNodeAndConnectToTarget(
+                          sessionId,
+                          {
+                            type: 'audio',
+                            x: dropConnectMenu.flowX - 80,
+                            y: dropConnectMenu.flowY,
+                            title: '配乐音频',
+                          },
+                          dropConnectMenu.nodeId,
+                          dropConnectMenu.handleId,
+                          'audio_out',
+                        );
+                        setDropConnectMenu(null);
+                      }}
+                    />
+                  ) : null}
                   <MenuItem
-                    icon={<StickyNote size={13} className="text-[#4ade80]" />}
-                    label="加灵感便签 / 提示词"
+                    icon={<Type size={13} className="text-[#4ade80]" />}
+                    label="加文本节点 / 提示词"
                     onClick={() => {
                       void canvasStore.addNodeAndConnectToTarget(
                         sessionId,

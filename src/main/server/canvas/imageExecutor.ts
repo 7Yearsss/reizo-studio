@@ -156,8 +156,9 @@ export async function runImageNode(options: {
       fail(`No API key configured for ${preset?.name ?? providerId}. Add one in Settings.`);
       return;
     }
-    const modelId = params.model || 'gpt-image-1';
     const baseUrl = stored.baseUrl || preset.baseUrl;
+    const isOfficial = !baseUrl || baseUrl.includes('api.openai.com');
+    const modelId = params.model || (isOfficial ? 'dall-e-3' : 'gpt-image-2');
 
     const provider = createOpenAiProvider({ apiKey: stored.apiKey, baseUrl });
     let images: Uint8Array[] = [];
