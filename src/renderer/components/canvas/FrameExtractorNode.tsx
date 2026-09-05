@@ -1,42 +1,18 @@
-import React, { memo, useEffect, useState } from 'react';
+import React, { memo, useState } from 'react';
 import { Position, type NodeProps, useStore } from '@xyflow/react';
 import { Film, Scissors, Loader2, RefreshCw } from 'lucide-react';
 import type { CanvasFrameExtractorParams } from '../../../shared/canvas';
-import { canvasAssetUrl } from '../../api';
 import * as canvasStore from '../../state/canvasStore';
-import { useCanvasStore } from '../../state/useCanvasStore';
 import NodeHandle from './NodeHandle';
 import { NodeTitle, type CanvasNodeData } from './ImageNode';
+import { useAssetUrl } from './useAssetUrl';
 import { useHoverIntent } from './NodeActionBar';
 import { cn } from '../../lib/cn';
 
-function useAssetUrl(rel: string | undefined): string | null {
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
-    if (!rel) {
-      setUrl(null);
-      return;
-    }
-    let active = true;
-    canvasAssetUrl(rel)
-      .then((u) => {
-        if (active) setUrl(u);
-      })
-      .catch(() => {
-        if (active) setUrl(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, [rel]);
-  return url;
-}
-
 function FrameExtractorNode({ id, data, selected }: NodeProps) {
-  const { sessionId, node, isProposal } = data as CanvasNodeData;
+  const { sessionId, node, isProposal, hasUpstreamAsset = false } = data as CanvasNodeData;
   const isLowLOD = useStore((s) => s.transform[2] < 0.35);
-  const isMoodboard = useCanvasStore((s) => s.moodboardBySession[sessionId] ?? false);
-  const hideControls = isLowLOD || isMoodboard;
+  const hideControls = isLowLOD;
 
   const { hovered, hoverProps } = useHoverIntent();
   const expanded = selected || hovered;
@@ -49,13 +25,6 @@ function FrameExtractorNode({ id, data, selected }: NodeProps) {
 
   const assetRel = node?.output?.assets?.[0];
   const assetUrl = useAssetUrl(assetRel);
-
-  // Find incoming video edge
-  const allNodes = useCanvasStore((s) => s.nodesBySession[sessionId] ?? canvasStore.EMPTY_NODES);
-  const allEdges = useCanvasStore((s) => s.edgesBySession[sessionId] ?? canvasStore.EMPTY_EDGES);
-  const inEdge = allEdges.find((e) => e.targetId === id);
-  const upNode = inEdge ? allNodes.find((n) => n.id === inEdge.sourceId) : undefined;
-  const hasUpstreamAsset = Boolean(upNode?.output?.assets?.[0]);
 
   if (!node) return null;
 
@@ -198,4 +167,18 @@ function FrameExtractorNode({ id, data, selected }: NodeProps) {
   );
 }
 
-export default memo(FrameExtractorNode);
+export default memo(FrameExtractorNode, (prev, next) => {
+  const prevData = prev.data as CanvasNodeData;
+  const nextData = next.data as CanvasNodeData;
+  return (
+    prev.selected === next.selected &&
+    prev.width === next.width &&
+    prev.height === next.height &&
+    prevData.sessionId === nextData.sessionId &&
+    prevData.highlighted === nextData.highlighted &&
+    prevData.agentMark === nextData.agentMark &&
+    prevData.isProposal === nextData.isProposal &&
+    prevData.hasUpstreamAsset === nextData.hasUpstreamAsset &&
+    prevData.node === nextData.node
+  );
+});

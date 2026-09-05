@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, memo } from 'react';
 import { Panel } from '@xyflow/react';
 import { Sparkles, ChevronDown } from 'lucide-react';
 import type { AgentTrailEntry } from '../../../shared/agentTrail';
@@ -15,7 +15,7 @@ const RECENT_MS = 45_000;
  * spotlight the nodes that call touched. Purely derived from the chat
  * tool-event trail — no new channel.
  */
-export default function AgentActivityStrip({ sessionId }: { sessionId: string }) {
+function AgentActivityStrip({ sessionId }: { sessionId: string }) {
   const trail = useCanvasStore((s) => s.trailBySession[sessionId] ?? canvasStore.EMPTY_TRAIL);
   const nodes = useCanvasStore((s) => s.nodesBySession[sessionId] ?? canvasStore.EMPTY_NODES);
   const [expanded, setExpanded] = useState(false);
@@ -88,3 +88,5 @@ export default function AgentActivityStrip({ sessionId }: { sessionId: string })
     </Panel>
   );
 }
+
+export default memo(AgentActivityStrip);

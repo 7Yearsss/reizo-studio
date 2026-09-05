@@ -10,7 +10,7 @@ function RerouteNode({ selected }: NodeProps) {
   return (
     <div
       className={cn(
-        'group relative flex h-4 w-4 items-center justify-center rounded-full border border-line bg-paper-raised shadow-xs transition-all duration-150',
+        'group relative flex h-4 w-4 items-center justify-center rounded-full border border-line bg-paper-raised shadow-xs transition-[transform,border-color,background-color] duration-150',
         selected
           ? 'scale-125 border-accent bg-accent/20 ring-2 ring-accent/40'
           : 'hover:scale-125 hover:border-accent hover:bg-paper-inset',
@@ -32,4 +32,6 @@ function RerouteNode({ selected }: NodeProps) {
   );
 }
 
-export default memo(RerouteNode);
+export default memo(RerouteNode, (prev, next) => {
+  return prev.selected === next.selected;
+});

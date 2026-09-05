@@ -23,10 +23,31 @@ export async function runVideoNode(options: {
 }): Promise<void> {
   const { canvasStore, settingsStore, dataRoot, canvasId, node, providerId } = options;
 
-  if (!isVideoParams(node.params) || !node.params.prompt.trim()) {
-    throw new Error('Video node has no prompt');
+  const params = (node.params || {}) as CanvasVideoParams;
+  let promptText = (typeof params.prompt === 'string' ? params.prompt : '').trim();
+
+  if (!promptText) {
+    const upstream = canvasStore.upstreamNodes(canvasId, node.id);
+    for (const u of upstream) {
+      if (u.type === 'note') {
+        const np = u.params as { content?: string } | undefined;
+        if (np?.content?.trim()) {
+          promptText = np.content.trim();
+          break;
+        }
+      } else if (u.type === 'agent') {
+        const ap = u.output as { text?: string } | undefined;
+        if (ap?.text?.trim()) {
+          promptText = ap.text.trim();
+          break;
+        }
+      }
+    }
   }
-  const params = node.params;
+
+  if (!promptText) {
+    throw new Error('Video node has no prompt (缺少提示词，请在卡片中填写或连入上游便签/Agent)');
+  }
 
   // Extract upstream images for start / end frame interpolation and reference conditioning
   const snap = canvasStore.getSnapshot(canvasId);
@@ -66,8 +87,6 @@ export async function runVideoNode(options: {
   if (!startImageBytes && referenceImages.length > 0) {
     startImageBytes = referenceImages[0].bytes;
   }
-
-  let promptText = params.prompt;
 
   // Reference anchors shape both prompt text and model multimodal reference slots
   const anchorNodes = incomingEdges

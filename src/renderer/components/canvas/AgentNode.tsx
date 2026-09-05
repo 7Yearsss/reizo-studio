@@ -166,4 +166,15 @@ function AgentNode({ id, data, selected }: NodeProps) {
   );
 }
 
-export default memo(AgentNode);
+export default memo(AgentNode, (prev, next) => {
+  const prevData = prev.data as CanvasNodeData;
+  const nextData = next.data as CanvasNodeData;
+  return (
+    prev.selected === next.selected &&
+    prevData.sessionId === nextData.sessionId &&
+    prevData.highlighted === nextData.highlighted &&
+    prevData.agentMark === nextData.agentMark &&
+    prevData.isProposal === nextData.isProposal &&
+    prevData.node === nextData.node
+  );
+});

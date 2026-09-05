@@ -84,7 +84,7 @@ function SectionNode({ id, data, selected }: NodeProps) {
 
   return (
     <div
-      className="group relative flex h-full w-full flex-col rounded-3xl border-2 transition-all duration-200"
+      className="group relative flex h-full w-full flex-col rounded-3xl border-2 transition-[border-color,box-shadow] duration-150"
       style={{
         borderColor: selected ? theme.hex : theme.border,
         background: theme.bg,
@@ -272,4 +272,17 @@ function SectionNode({ id, data, selected }: NodeProps) {
   );
 }
 
-export default memo(SectionNode);
+export default memo(SectionNode, (prev, next) => {
+  const prevData = prev.data as CanvasNodeData;
+  const nextData = next.data as CanvasNodeData;
+  return (
+    prev.selected === next.selected &&
+    prev.width === next.width &&
+    prev.height === next.height &&
+    prevData.sessionId === nextData.sessionId &&
+    prevData.highlighted === nextData.highlighted &&
+    prevData.agentMark === nextData.agentMark &&
+    prevData.isProposal === nextData.isProposal &&
+    prevData.node === nextData.node
+  );
+});

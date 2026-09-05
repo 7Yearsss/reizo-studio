@@ -86,7 +86,7 @@ function SubgraphNode({ id, data, selected }: NodeProps) {
     <div
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      className={`group relative flex h-full w-full flex-col rounded-2xl border bg-paper shadow-md transition-all duration-200 ${
+      className={`group relative flex h-full w-full flex-col rounded-2xl border bg-paper shadow-md transition-[border-color,box-shadow] duration-150 ${
         selected ? 'border-accent shadow-lg shadow-accent/10 ring-2 ring-accent/20' : 'border-line hover:border-line-focus'
       } ${isProposal ? 'border-dashed border-cyan-400 ring-2 ring-cyan-400/40 animate-pulse' : ''}`}
     >
@@ -244,4 +244,15 @@ function SubgraphNode({ id, data, selected }: NodeProps) {
   );
 }
 
-export default memo(SubgraphNode);
+export default memo(SubgraphNode, (prev, next) => {
+  const prevData = prev.data as CanvasNodeData;
+  const nextData = next.data as CanvasNodeData;
+  return (
+    prev.selected === next.selected &&
+    prevData.sessionId === nextData.sessionId &&
+    prevData.highlighted === nextData.highlighted &&
+    prevData.agentMark === nextData.agentMark &&
+    prevData.isProposal === nextData.isProposal &&
+    prevData.node === nextData.node
+  );
+});

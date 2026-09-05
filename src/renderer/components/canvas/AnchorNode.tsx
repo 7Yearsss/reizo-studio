@@ -1,4 +1,4 @@
-import { useEffect, useState, memo } from 'react';
+import { memo } from 'react';
 import { Position, type NodeProps } from '@xyflow/react';
 import { Pin } from 'lucide-react';
 import {
@@ -7,29 +7,13 @@ import {
   type CanvasAnchorParams,
 } from '../../../shared/canvas';
 import { EDGE_COLORS } from './edges/edgeStyles';
-import { canvasAssetUrl } from '../../api';
 import * as canvasStore from '../../state/canvasStore';
 import { cn } from '../../lib/cn';
 import { NodeTitle, type CanvasNodeData } from './ImageNode';
 import NodeHandle from './NodeHandle';
 import AgentMark from './AgentMark';
+import { useAssetUrl } from './useAssetUrl';
 import { useHoverIntent } from './NodeActionBar';
-
-function useAssetUrl(rel: string | undefined): string | null {
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
-    if (!rel) {
-      setUrl(null);
-      return;
-    }
-    let ok = true;
-    void canvasAssetUrl(rel).then((u) => ok && setUrl(u));
-    return () => {
-      ok = false;
-    };
-  }, [rel]);
-  return url;
-}
 
 /**
  * A reference pin: one image + a role (character / style / content) + a
@@ -123,4 +107,15 @@ function AnchorNode({ data, selected }: NodeProps) {
   );
 }
 
-export default memo(AnchorNode);
+export default memo(AnchorNode, (prev, next) => {
+  const prevData = prev.data as CanvasNodeData;
+  const nextData = next.data as CanvasNodeData;
+  return (
+    prev.selected === next.selected &&
+    prevData.sessionId === nextData.sessionId &&
+    prevData.highlighted === nextData.highlighted &&
+    prevData.agentMark === nextData.agentMark &&
+    prevData.isProposal === nextData.isProposal &&
+    prevData.node === nextData.node
+  );
+});

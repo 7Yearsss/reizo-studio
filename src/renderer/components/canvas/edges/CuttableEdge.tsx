@@ -25,7 +25,7 @@ const prefersReducedMotion = (): boolean =>
  * dashed and shows scissors), click the scissors to cut. Hover never shows the
  * scissors, so a stray mouse-over can't delete a wire.
  */
-export default function CuttableEdge({
+function CuttableEdge({
   id,
   sourceX,
   sourceY,
@@ -61,23 +61,15 @@ export default function CuttableEdge({
     targetPosition,
   });
 
+  // Disarm when another edge arms (only listen when this edge is currently armed).
   useEffect(() => {
-    if (!pathRef.current) return;
-    try {
-      setPathLength(pathRef.current.getTotalLength());
-    } catch {
-      /* detached — ignore */
-    }
-  }, [edgePath]);
-
-  // Disarm when another edge arms.
-  useEffect(() => {
+    if (!armed) return;
     const onOther = (e: Event) => {
       if ((e as CustomEvent<string>).detail !== id) setArmed(false);
     };
     window.addEventListener(ARMED_EVENT, onOther);
     return () => window.removeEventListener(ARMED_EVENT, onOther);
-  }, [id]);
+  }, [armed, id]);
 
   // While armed: Esc or an outside click disarms.
   useEffect(() => {
@@ -120,6 +112,13 @@ export default function CuttableEdge({
       onCutEdge?.(id);
       return;
     }
+    if (pathRef.current) {
+      try {
+        setPathLength(pathRef.current.getTotalLength());
+      } catch {
+        /* detached — ignore */
+      }
+    }
     setDying(true);
     setTimeout(() => onCutEdge?.(id), 360);
   }, [dying, id, onCutEdge]);
@@ -137,11 +136,9 @@ export default function CuttableEdge({
         </defs>
       )}
 
-      {/* measure path */}
-      <path ref={pathRef} d={edgePath} fill="none" stroke="transparent" />
-
-      {/* base line */}
+      {/* base line (also measures path for cut animation) */}
       <path
+        ref={pathRef}
         d={edgePath}
         fill="none"
         stroke={baseStroke}
@@ -211,3 +208,5 @@ export default function CuttableEdge({
     </>
   );
 }
+
+export default React.memo(CuttableEdge);

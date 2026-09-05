@@ -121,11 +121,32 @@ export async function runImageNode(options: {
   };
 
   try {
-    if (!isImageParams(node.params) || !node.params.prompt.trim()) {
-      fail('Image node has no prompt');
+    const upstream = canvasStore.upstreamNodes(canvasId, node.id);
+    const params = (node.params || {}) as CanvasImageParams;
+    let rawPrompt = (typeof params.prompt === 'string' ? params.prompt : '').trim();
+
+    if (!rawPrompt) {
+      for (const u of upstream) {
+        if (u.type === 'note') {
+          const np = u.params as { content?: string } | undefined;
+          if (np?.content?.trim()) {
+            rawPrompt = np.content.trim();
+            break;
+          }
+        } else if (u.type === 'agent') {
+          const ap = u.output as { text?: string } | undefined;
+          if (ap?.text?.trim()) {
+            rawPrompt = ap.text.trim();
+            break;
+          }
+        }
+      }
+    }
+
+    if (!rawPrompt) {
+      fail('生图节点缺少提示词，请在卡片中填写或连入上游便签/Agent');
       return;
     }
-    const params = node.params;
 
     const settings = await settingsStore.get();
     const providerId = options.providerId || 'openai';
@@ -139,8 +160,6 @@ export async function runImageNode(options: {
     const baseUrl = stored.baseUrl || preset.baseUrl;
 
     const provider = createOpenAiProvider({ apiKey: stored.apiKey, baseUrl });
-    const upstream = canvasStore.upstreamNodes(canvasId, node.id);
-    let rawPrompt = params.prompt;
     let images: Uint8Array[] = [];
 
     const readRefBytes = async (rel: string): Promise<void> => {

@@ -47,11 +47,16 @@ export default function NodeHandle({
         type={type}
         id={id}
         position={position}
-        style={{ top, ...(expanded ? { background: activeColor, borderColor: activeColor } : undefined) }}
+        style={{
+          top,
+          borderColor: activeColor,
+          background: expanded ? activeColor : 'var(--paper-raised, #18181b)',
+          boxShadow: expanded ? `0 0 8px ${activeColor}66` : undefined,
+        }}
         className={cn(
-          'transition-all',
-          disabled && 'opacity-40 !cursor-not-allowed',
-          expanded ? '!h-2.5 !w-2.5 !border' : '!h-2 !w-2 !border-line !bg-paper',
+          'transition-all duration-150 !cursor-crosshair after:absolute after:-inset-3 after:content-[""] after:pointer-events-auto',
+          disabled && 'opacity-40 !cursor-not-allowed after:pointer-events-none',
+          expanded ? '!h-3.5 !w-3.5 !border-2' : '!h-3 !w-3 !border-2 hover:!scale-125',
         )}
       />
       {expanded ? (
