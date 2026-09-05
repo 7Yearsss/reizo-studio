@@ -9,6 +9,7 @@ import type {
   CanvasFrameExtractorParams,
   CanvasSectionParams,
   CanvasSubgraphParams,
+  CanvasNodeOutput,
 } from '../../shared/canvas';
 import { gridArrange } from '../../shared/arrangeNodes';
 import { variantGrid } from '../../shared/variantLayout';
@@ -206,6 +207,13 @@ function applyEvent(sessionId: string, event: CanvasEvent): void {
       });
       break;
     }
+    case 'proposal_created':
+      addProposals(sessionId, event.nodeIds);
+      break;
+    case 'proposal_accepted':
+    case 'proposal_rejected':
+      setProposals(sessionId, []);
+      break;
     case 'heartbeat':
       break;
   }
@@ -345,7 +353,7 @@ async function _setSize(sessionId: string, nodeId: string, w: number, h: number)
 async function _setNode(
   sessionId: string,
   nodeId: string,
-  patch: { params?: CanvasNodeParams; title?: string },
+  patch: { params?: CanvasNodeParams; title?: string; output?: CanvasNodeOutput },
 ): Promise<void> {
   const nodes = state.nodesBySession[sessionId] ?? [];
   setNodes(sessionId, nodes.map((n) => (n.id === nodeId ? { ...n, ...patch } : n)));
@@ -867,6 +875,39 @@ export async function renameNode(sessionId: string, nodeId: string, title: strin
     undo: () => _setNode(sessionId, nodeId, { title: before }),
     redo: () => _setNode(sessionId, nodeId, { title }),
   });
+}
+
+export async function updateNodeOutput(
+  sessionId: string,
+  nodeId: string,
+  output: CanvasNodeOutput,
+): Promise<void> {
+  await _setNode(sessionId, nodeId, { output });
+}
+
+export async function removeNodeAsset(
+  sessionId: string,
+  nodeId: string,
+  assetIndex: number,
+): Promise<void> {
+  const node = nodeById(sessionId, nodeId);
+  if (!node || !node.output?.assets) return;
+  const nextAssets = node.output.assets.filter((_, i) => i !== assetIndex);
+  const nextResultSet = node.output.resultSet?.filter((_, i) => i !== assetIndex);
+  const currentActive = node.output.activeAssetIndex ?? 0;
+  let nextActiveIndex = currentActive;
+  if (assetIndex < currentActive) {
+    nextActiveIndex = currentActive - 1;
+  } else if (nextActiveIndex >= nextAssets.length) {
+    nextActiveIndex = Math.max(0, nextAssets.length - 1);
+  }
+  const nextOutput: CanvasNodeOutput = {
+    ...node.output,
+    assets: nextAssets,
+    resultSet: nextResultSet,
+    activeAssetIndex: nextActiveIndex,
+  };
+  await _setNode(sessionId, nodeId, { output: nextOutput });
 }
 
 export async function batchUpdateNodeParams(

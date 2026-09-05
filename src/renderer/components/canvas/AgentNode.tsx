@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState, memo } from 'react';
 import { NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
-import { Check, Copy, GitBranchPlus, Loader2, Play } from 'lucide-react';
+import { Bot, Loader2, Play } from 'lucide-react';
 import type { CanvasAgentParams } from '../../../shared/canvas';
 import * as canvasStore from '../../state/canvasStore';
 import { cn } from '../../lib/cn';
-import { NodeTitle, type CanvasNodeData } from './ImageNode';
-import NodeActionBar, { useHoverIntent, type NodeAction } from './NodeActionBar';
+import FloatingNodeHeader from './FloatingNodeHeader';
+import { type CanvasNodeData } from './ImageNode';
+import { useHoverIntent } from './NodeActionBar';
 import NodeHandle from './NodeHandle';
 import AgentMark from './AgentMark';
 import MissingInputWarning from './MissingInputWarning';
@@ -15,7 +16,6 @@ function AgentNode({ id, data, selected }: NodeProps) {
   const { sessionId, node, highlighted, agentMark, isProposal } = data as CanvasNodeData;
   const params = node.params as CanvasAgentParams;
   const [instruction, setInstruction] = useState(params.instruction ?? '');
-  const [copied, setCopied] = useState(false);
   const resizeStart = useRef<{ w: number; h: number } | null>(null);
   const { hovered, hoverProps } = useHoverIntent();
   const expanded = selected || hovered;
@@ -26,13 +26,6 @@ function AgentNode({ id, data, selected }: NodeProps) {
   useEffect(() => {
     setInstruction((params.instruction as string) ?? '');
   }, [params.instruction]);
-
-  const copyAnswer = () => {
-    if (!answer) return;
-    void navigator.clipboard.writeText(answer);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
 
   const run = () => {
     if (running || !instruction.trim()) return;
@@ -57,33 +50,7 @@ function AgentNode({ id, data, selected }: NodeProps) {
       )}
     >
       <AgentMark show={agentMark} />
-      <NodeActionBar
-        visible={selected || hovered}
-        actions={[
-          {
-            id: 'variations',
-            icon: <GitBranchPlus size={11} className="text-accent" />,
-            label: '变体分支',
-            title: '克隆此任务为独立变体分支（保持上游连接）',
-            onClick: () => void canvasStore.forkNode(sessionId, node.id),
-          },
-          ...((answer
-            ? [
-                {
-                  id: 'copy',
-                  icon: copied ? (
-                    <Check size={11} className="text-success" />
-                  ) : (
-                    <Copy size={11} className="text-accent" />
-                  ),
-                  label: copied ? '已复制' : '复制结果',
-                  title: '复制此节点的输出文本',
-                  onClick: copyAnswer,
-                },
-              ]
-            : []) as NodeAction[]),
-        ]}
-      />
+
       <NodeResizer
         minWidth={240}
         minHeight={160}
@@ -102,31 +69,43 @@ function AgentNode({ id, data, selected }: NodeProps) {
       <NodeHandle type="target" position={Position.Left} kind="image" label="上游输入" expanded={expanded} />
       <NodeHandle type="source" position={Position.Right} kind="prompt" label="文本" expanded={expanded} />
 
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <NodeTitle sessionId={sessionId} nodeId={node.id} title={node.title} fallback="Agent 任务" />
-        <div className="flex shrink-0 items-center gap-1">
-          {!running && readiness.length > 0 ? <MissingInputWarning messages={readiness} /> : null}
-          {node.dirty && !running ? (
-            <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">
-              待更新
-            </span>
-          ) : null}
-          <span
-            className={cn(
-              'rounded-full px-1.5 py-0.5 text-[10px]',
-              node.runState === 'error'
-                ? 'bg-danger/10 text-danger'
-                : node.runState === 'done'
-                  ? 'bg-success/10 text-success'
-                  : running
-                    ? 'bg-accent/10 text-accent'
-                    : 'bg-paper-inset text-ink-muted',
-            )}
-          >
-            {node.runState === 'idle' ? '未运行' : running ? '思考中' : node.runState === 'done' ? '完成' : '失败'}
-          </span>
-        </div>
-      </div>
+      {/* Floating anti-zoom header outside the card boundary (TapNow design) */}
+      <FloatingNodeHeader
+        sessionId={sessionId}
+        nodeId={node.id}
+        title={node.title}
+        fallback="Agent 任务"
+        icon={<Bot size={13} className="text-sky-400 shrink-0" />}
+        selected={selected}
+        hovered={hovered}
+        running={running}
+        status={
+          <>
+            {!running && readiness.length > 0 ? <MissingInputWarning messages={readiness} /> : null}
+            {node.dirty && !running ? (
+              <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">
+                待更新
+              </span>
+            ) : null}
+            {node.runState !== 'idle' ? (
+              <span
+                className={cn(
+                  'rounded-full px-1.5 py-0.5 text-[10px]',
+                  node.runState === 'error'
+                    ? 'bg-danger/10 text-danger'
+                    : node.runState === 'done'
+                      ? 'bg-success/10 text-success'
+                      : running
+                        ? 'bg-accent/10 text-accent'
+                        : 'bg-paper-inset text-ink-muted',
+                )}
+              >
+                {running ? '思考中' : node.runState === 'done' ? '完成' : '失败'}
+              </span>
+            ) : null}
+          </>
+        }
+      />
 
       <textarea
         value={instruction}
@@ -157,7 +136,10 @@ function AgentNode({ id, data, selected }: NodeProps) {
       ) : null}
 
       {answer ? (
-        <div className="nodrag mt-2 min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap rounded-lg border border-line bg-paper px-2 py-1.5 text-[11px] leading-relaxed text-ink">
+        <div
+          onWheel={(e) => e.stopPropagation()}
+          className="nodrag nopan nowheel overscroll-contain mt-2 min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap rounded-lg border border-line bg-paper px-2 py-1.5 text-[11px] leading-relaxed text-ink"
+        >
           {answer}
           {running ? <span className="ml-0.5 inline-block h-3 w-1 animate-pulse bg-accent align-middle" /> : null}
         </div>

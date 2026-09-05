@@ -6,14 +6,17 @@ import type { CanvasEdge, CanvasNode, NodeRunState, CanvasNodeOutput } from './c
  * and with no terminal `done` — the stream is long-lived.
  */
 export type CanvasEvent =
-  | { type: 'node_added'; node: CanvasNode }
-  | { type: 'node_updated'; node: CanvasNode }
-  | { type: 'node_deleted'; id: string }
-  | { type: 'edge_added'; edge: CanvasEdge }
-  | { type: 'edge_deleted'; id: string }
-  | { type: 'run_state'; id: string; runState: NodeRunState }
-  | { type: 'node_output'; id: string; output: CanvasNodeOutput; runState: NodeRunState }
-  | { type: 'graph_run'; running: boolean; done: number; total: number }
+  | { type: 'node_added'; node: CanvasNode; operationId?: string }
+  | { type: 'node_updated'; node: CanvasNode; operationId?: string }
+  | { type: 'node_deleted'; id: string; operationId?: string }
+  | { type: 'edge_added'; edge: CanvasEdge; operationId?: string }
+  | { type: 'edge_deleted'; id: string; operationId?: string }
+  | { type: 'run_state'; id: string; runState: NodeRunState; operationId?: string }
+  | { type: 'node_output'; id: string; output: CanvasNodeOutput; runState: NodeRunState; operationId?: string }
+  | { type: 'graph_run'; running: boolean; done: number; total: number; operationId?: string }
+  | { type: 'proposal_created'; nodeIds: string[]; operationId?: string }
+  | { type: 'proposal_accepted'; operationId?: string }
+  | { type: 'proposal_rejected'; operationId?: string }
   | { type: 'heartbeat' };
 
 export interface CanvasEnvelope {

@@ -7,7 +7,7 @@ import type { Schedule, Thought } from '../shared/schedule';
 import { SCHEDULE_PRESETS } from '../shared/schedule';
 import { parseStreamLine, type ChatStreamEvent } from '../shared/stream';
 import { isLiveEnvelope } from '../shared/liveRevision';
-import type { CanvasSnapshot, CanvasEdge, CanvasNode, CanvasNodeParams, CanvasNodeType } from '../shared/canvas';
+import type { CanvasSnapshot, CanvasEdge, CanvasNode, CanvasNodeParams, CanvasNodeType, CanvasNodeOutput } from '../shared/canvas';
 import { isCanvasEnvelope, type CanvasEvent } from '../shared/canvasStream';
 
 export interface StreamMeta {
@@ -516,7 +516,7 @@ export async function addCanvasNode(
 export async function patchCanvasNode(
   canvasId: string,
   id: string,
-  patch: { x?: number; y?: number; w?: number; h?: number; title?: string; params?: CanvasNodeParams },
+  patch: { x?: number; y?: number; w?: number; h?: number; title?: string; params?: CanvasNodeParams; output?: CanvasNodeOutput },
 ): Promise<CanvasNode> {
   const res = await api(`/api/canvas/${canvasId}/nodes/${id}`, {
     method: 'PATCH',

@@ -113,6 +113,7 @@ export function createCanvasRouter(
     if (typeof body.title === 'string') patch.title = body.title;
     const paramsChanged = body.params && typeof body.params === 'object';
     if (paramsChanged) patch.params = body.params;
+    if (body.output && typeof body.output === 'object') patch.output = body.output;
     const result = canvasStore.updateNode(canvasId, id, patch);
     if (!result) return c.json({ error: 'Node not found' }, 404);
     const channel = getCanvasChannel(canvasId);
@@ -145,6 +146,9 @@ export function createCanvasRouter(
     });
     if (result.error === 'cycle') {
       return c.json({ error: 'That connection would create a cycle' }, 409);
+    }
+    if (result.error === 'incompatible') {
+      return c.json({ error: 'Port incompatible between source and target' }, 400);
     }
     if (result.error || !result.edge || result.rev === undefined) {
       return c.json({ error: 'source or target node not found' }, 404);

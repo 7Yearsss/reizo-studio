@@ -2,6 +2,7 @@ export interface MentionCandidate {
   id: string;
   label: string;
   assets: string[];
+  text?: string;
 }
 
 export interface ResolveMentionsResult {
@@ -145,6 +146,8 @@ export function resolveMentions(
       resolvedPrompt += `<<<image ${imageNum}>>>`;
       orderedAssetRefs.push(asset);
       imageNum++;
+    } else if (span.candidate?.text) {
+      resolvedPrompt += span.candidate.text;
     } else {
       resolvedPrompt += span.fallbackText;
     }

@@ -1,20 +1,20 @@
 import { useEffect, useMemo, useRef, useState, memo } from 'react';
 import { NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
-import { Download, FolderPlus, Loader2, Play, GitBranchPlus, Bot, Video, SlidersHorizontal, Sparkles, ImageIcon, RotateCw } from 'lucide-react';
+import { Download, FolderPlus, Loader2, Play, Sparkles, ImageIcon, RotateCw, X, FileUp, Maximize2, Bot } from 'lucide-react';
 import type { CanvasImageParams, CanvasNode } from '../../../shared/canvas';
-import { CANVAS_IMAGE_MODELS } from '../../../shared/canvas';
 import { estimateNodeCost } from '../../../shared/canvasPricing';
+import { serializeMention } from '../../../shared/resolveMentions';
 import * as canvasStore from '../../state/canvasStore';
 import * as chatStore from '../../state/chatStore';
+import { useCanvasStore } from '../../state/useCanvasStore';
 import { cn } from '../../lib/cn';
 import Lightbox from './Lightbox';
-import MentionTextArea from './MentionTextArea';
-import NodeActionBar, { useHoverIntent, type NodeAction } from './NodeActionBar';
-import NodeHandle, { ProgressiveRefHandles } from './NodeHandle';
+import { useHoverIntent } from './NodeActionBar';
+import MagneticHandle from './MagneticHandle';
+import NodeFloatingPanel from './NodeFloatingPanel';
 import AgentMark from './AgentMark';
 import MissingInputWarning from './MissingInputWarning';
 import { useAssetUrl } from './useAssetUrl';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 
 export interface CanvasNodeData extends Record<string, unknown> {
   sessionId: string;
@@ -31,52 +31,67 @@ export interface CanvasNodeData extends Record<string, unknown> {
   refCount?: number;
 }
 
-export function NodeTitle({
-  sessionId,
-  nodeId,
-  title,
-  fallback,
+import FloatingNodeHeader, { NodeTitle } from './FloatingNodeHeader';
+export { NodeTitle, FloatingNodeHeader };
+
+function VariantThumbnail({
+  asset,
+  index,
+  total,
+  isSelected,
+  onSelect,
+  onRemove,
 }: {
-  sessionId: string;
-  nodeId: string;
-  title: string;
-  fallback: string;
+  asset: string;
+  index: number;
+  total: number;
+  isSelected: boolean;
+  onSelect: () => void;
+  onRemove: () => void;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(title);
-  useEffect(() => setDraft(title), [title]);
-  if (editing) {
-    return (
-      <input
-        autoFocus
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => {
-          setEditing(false);
-          void canvasStore.renameNode(sessionId, nodeId, draft.trim());
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-          if (e.key === 'Escape') {
-            setDraft(title);
-            setEditing(false);
-          }
-        }}
-        className="nodrag min-w-0 flex-1 rounded bg-paper-inset px-1 text-xs font-medium text-ink outline-none"
-      />
-    );
-  }
+  const url = useAssetUrl(asset);
   return (
-    <span
-      className="truncate font-medium text-ink-muted"
-      title="双击重命名"
-      onDoubleClick={() => {
-        setDraft(title);
-        setEditing(true);
-      }}
-    >
-      {title || fallback}
-    </span>
+    <div className="group/thumb relative flex items-center shrink-0">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onSelect();
+        }}
+        className={cn(
+          'nodrag relative flex items-center justify-center rounded overflow-hidden border transition-all',
+          isSelected
+            ? 'border-accent ring-2 ring-accent/70 scale-105 shadow-md z-10'
+            : 'border-white/30 opacity-75 hover:opacity-100 hover:border-white/70',
+        )}
+        style={{ width: 28, height: 28 }}
+        title={`变体 ${index + 1} / ${total} (点击切换)`}
+      >
+        {url ? (
+          <img src={url} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-black/60 text-[9px] text-white font-medium">
+            {index + 1}
+          </div>
+        )}
+        <span className="absolute bottom-0 right-0 rounded-tl bg-black/85 px-1 text-[8px] font-bold text-white leading-tight">
+          {index + 1}
+        </span>
+      </button>
+      {total > 1 ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove();
+          }}
+          className="nodrag absolute -top-1 -right-1 hidden h-3.5 w-3.5 items-center justify-center rounded-full bg-danger text-white shadow-xs group-hover/thumb:flex hover:scale-110 transition-transform z-20"
+          title="删除该变体"
+        >
+          <X size={8} />
+        </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -96,7 +111,10 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
   const [prompt, setPrompt] = useState(params.prompt ?? '');
   const [showConfig, setShowConfig] = useState(false);
   const [zoom, setZoom] = useState<string | null>(null);
-  const [assetIdx, setAssetIdx] = useState(0);
+  const [assetIdx, setAssetIdx] = useState(node.output?.activeAssetIndex ?? 0);
+  const [variationsCount, setVariationsCount] = useState<1 | 2 | 4>(
+    params.count === 4 ? 4 : params.count === 2 ? 2 : 1,
+  );
   const resizeStart = useRef<{ w: number; h: number } | null>(null);
   const { hovered, hoverProps } = useHoverIntent();
   const size = params.size ?? '1024x1024';
@@ -106,18 +124,53 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
   const assetUrl = useAssetUrl(current);
   const hasImage = Boolean(assetUrl);
 
+  const edges = useCanvasStore((s) => s.edgesBySession[sessionId] ?? canvasStore.EMPTY_EDGES);
+  const allNodes = useCanvasStore((s) => s.nodesBySession[sessionId] ?? canvasStore.EMPTY_NODES);
+
+  const upstreamSources = useMemo(() => {
+    const inEdges = edges.filter((e) => e.targetId === node.id);
+    return inEdges.map((e) => {
+      const srcNode = allNodes.find((n) => n.id === e.sourceId);
+      return {
+        edgeId: e.id,
+        sourceNodeId: e.sourceId,
+        sourceType: srcNode?.type || 'node',
+        sourceTitle: srcNode?.title || (srcNode?.type === 'note' ? '提示词' : srcNode?.type === 'image' ? '图片' : '节点'),
+        handleId: e.targetHandle,
+      };
+    });
+  }, [edges, allNodes, node.id]);
+
   const expanded = selected || hovered;
   const candidates = useMemo(() => {
     if (!expanded) return [];
     const snapshot = canvasStore.getSnapshot().nodesBySession[sessionId] ?? [];
-    return snapshot.filter((n) => n.id !== node.id && (n.output?.assets?.length ?? 0) > 0);
+    return snapshot.filter((n) => n.id !== node.id && n.type !== 'anchor');
   }, [expanded, sessionId, node.id]);
+
+  const autoSeededRef = useRef(false);
+  useEffect(() => {
+    if (!autoSeededRef.current && !params.prompt && upstreamSources.length > 0) {
+      const firstNote = upstreamSources.find((s) => s.sourceType === 'note');
+      if (firstNote) {
+        autoSeededRef.current = true;
+        const initial = `${serializeMention(firstNote.sourceTitle, firstNote.sourceNodeId)} `;
+        setPrompt(initial);
+        void canvasStore.updateNodeParams(sessionId, node.id, { ...params, prompt: initial });
+      }
+    }
+  }, [upstreamSources, params.prompt, sessionId, node.id, params]);
 
   useEffect(() => {
     setPrompt((params.prompt as string) ?? '');
   }, [params.prompt]);
   useEffect(() => {
-    if (assetIdx >= assets.length) setAssetIdx(0);
+    if (typeof node.output?.activeAssetIndex === 'number') {
+      setAssetIdx(node.output.activeAssetIndex);
+    }
+  }, [node.output?.activeAssetIndex]);
+  useEffect(() => {
+    if (assets.length > 0 && assetIdx >= assets.length) setAssetIdx(0);
   }, [assets.length, assetIdx]);
 
   const commitPrompt = () => {
@@ -148,13 +201,10 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
   const run = () => {
     if (running) return;
     if (!prompt.trim() && !hasUpstreamPrompt) return;
-    if (prompt !== params.prompt) {
-      void canvasStore
-        .updateNodeParams(sessionId, node.id, { ...params, prompt })
-        .then(() => canvasStore.runNode(sessionId, node.id));
-    } else {
-      void canvasStore.runNode(sessionId, node.id);
-    }
+    const updatedParams = { ...params, prompt, count: variationsCount };
+    void canvasStore
+      .updateNodeParams(sessionId, node.id, updatedParams)
+      .then(() => canvasStore.runNode(sessionId, node.id));
   };
 
   return (
@@ -169,43 +219,6 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
       )}
     >
       <AgentMark show={agentMark} />
-      <NodeActionBar
-        visible={selected || hovered}
-        actions={[
-          {
-            id: 'variations',
-            icon: <GitBranchPlus size={11} className="text-accent" />,
-            label: '变体 ×4',
-            title: '在右侧并排派生 4 个继承参数与上游连线的变体',
-            onClick: () => void canvasStore.forkVariations(sessionId, node.id),
-          },
-          {
-            id: 'animate',
-            icon: <Video size={11} className="text-accent" />,
-            label: '转视频',
-            title: '在右侧生成以此图为首帧的运镜视频节点',
-            onClick: () => void canvasStore.animateFromImage(sessionId, node.id),
-          },
-          {
-            id: 'qa',
-            icon: <Bot size={11} className="text-accent" />,
-            label: '质检 Agent',
-            title: '在右侧添加连接的画面质检 Agent 节点',
-            onClick: () => void canvasStore.addDownstreamAgent(sessionId, node.id),
-          },
-          ...((assets.length > 0
-            ? [
-                {
-                  id: 'save',
-                  icon: <FolderPlus size={11} className="text-accent" />,
-                  label: '存为产物',
-                  title: '将当前选中的画面存入作品库',
-                  onClick: () => void canvasStore.saveAsset(sessionId, node.id, assetIdx),
-                },
-              ]
-            : []) as NodeAction[]),
-        ]}
-      />
       <NodeResizer
         minWidth={240}
         minHeight={180}
@@ -221,51 +234,75 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
           if (from) canvasStore.commitResize(sessionId, id, from, { w: p.width, h: p.height });
         }}
       />
-      <NodeHandle type="target" position={Position.Left} id="prompt" kind="prompt" label="提示词" expanded={expanded} top="18%" />
-      <NodeHandle type="target" position={Position.Left} id="image_in" kind="image" label="图生图" expanded={expanded} top="38%" />
-      <ProgressiveRefHandles connectedCount={refCount} expanded={expanded} topStart={0.55} gap={0.16} />
-      <NodeHandle type="source" position={Position.Right} id="image_out" kind="image" label="图像输出" expanded={expanded} top="50%" />
+      {/* TapNow magnetic handles with elastic follow and click-to-create */}
+      <MagneticHandle
+        type="target"
+        position={Position.Left}
+        id="prompt"
+        nodeId={node.id}
+        kind="prompt"
+        label="添加上下文"
+        top="50%"
+      />
+      <MagneticHandle
+        type="source"
+        position={Position.Right}
+        id="image_out"
+        nodeId={node.id}
+        kind="image"
+        label="引用该节点生成"
+        top="50%"
+      />
 
-      {/* Header */}
-      <div className="mb-1.5 flex items-center justify-between gap-1.5">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <ImageIcon size={13} className="text-accent shrink-0" />
-          <NodeTitle sessionId={sessionId} nodeId={node.id} title={node.title} fallback="生图" />
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          {!running && readiness.length > 0 ? <MissingInputWarning messages={readiness} /> : null}
-          {node.dirty && !running ? (
-            <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[9px] text-amber-600 dark:text-amber-400">
-              待更新
+      {/* Floating anti-zoom header outside the card boundary (TapNow design) */}
+      <FloatingNodeHeader
+        sessionId={sessionId}
+        nodeId={node.id}
+        title={node.title}
+        fallback="生图"
+        icon={<ImageIcon size={13} className="text-indigo-400 shrink-0" />}
+        selected={selected}
+        hovered={hovered}
+        running={running}
+        badge={
+          assets.length > 1 ? (
+            <span
+              className="rounded-full bg-indigo-500/15 border border-indigo-500/25 px-1.5 py-0.5 text-[9px] font-medium text-indigo-400 select-none"
+              title={`共 ${assets.length} 个生成变体结果，当前展示第 ${assetIdx + 1} 项`}
+            >
+              变体 {assetIdx + 1}/{assets.length}
             </span>
-          ) : null}
-          <span
-            className={cn(
-              'rounded-full px-1.5 py-0.5 text-[9px]',
-              node.runState === 'error'
-                ? 'bg-danger/10 text-danger'
-                : node.runState === 'done'
-                  ? 'bg-success/10 text-success'
-                  : running
-                    ? 'bg-accent/10 text-accent'
-                    : 'bg-paper-inset text-ink-muted',
-            )}
-          >
-            {node.runState === 'idle' ? '未运行' : running ? '生成中' : node.runState === 'done' ? '就绪' : '失败'}
-          </span>
-          <button
-            type="button"
-            onClick={() => setShowConfig((v) => !v)}
-            className={cn(
-              'nodrag rounded p-1 text-ink-muted hover:bg-paper-inset hover:text-ink transition-colors',
-              showConfig && 'bg-accent/15 text-accent',
-            )}
-            title={showConfig ? '收起配置 (纯画面模式)' : '展开提示词与参数配置'}
-          >
-            <SlidersHorizontal size={11} />
-          </button>
-        </div>
-      </div>
+          ) : null
+        }
+        status={
+          <>
+            {!running && readiness.some((m) => m.includes('已删除') || m.includes('尚未生成')) ? (
+              <MissingInputWarning messages={readiness} />
+            ) : null}
+            {node.dirty && !running ? (
+              <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[9px] text-amber-600 dark:text-amber-400">
+                待更新
+              </span>
+            ) : null}
+            {node.runState !== 'idle' ? (
+              <span
+                className={cn(
+                  'rounded-full px-1.5 py-0.5 text-[9px]',
+                  node.runState === 'error'
+                    ? 'bg-danger/10 text-danger'
+                    : node.runState === 'done'
+                      ? 'bg-success/10 text-success'
+                      : running
+                        ? 'bg-accent/10 text-accent'
+                        : 'bg-paper-inset text-ink-muted',
+                )}
+              >
+                {running ? '生成中' : node.runState === 'done' ? '就绪' : '失败'}
+              </span>
+            ) : null}
+          </>
+        }
+      />
 
       {/* Error state */}
       {node.output?.error ? (
@@ -290,96 +327,134 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
         </div>
       ) : null}
 
-      {/* Hero Image view (when media exists and config is closed) */}
-      {hasImage && !showConfig ? (
-        <div className="group/image relative min-h-0 flex-1 overflow-hidden rounded-lg border border-line bg-black/40">
-          <img
-            src={assetUrl!}
-            alt=""
-            loading="lazy"
-            decoding="async"
-            onClick={() => setZoom(assetUrl)}
-            className="nodrag h-full w-full cursor-zoom-in object-contain"
-          />
-
-          {/* Version Switcher if multiple assets */}
+      {/* Hero Image view (when media exists) */}
+      {hasImage ? (
+        <div className="relative min-h-0 flex-1 flex flex-col">
+          {/* Stacked card deck layers when multiple variants exist (TapNow 4x result set visual) */}
           {assets.length > 1 ? (
-            <div className="absolute inset-x-0 bottom-1 flex items-center justify-center gap-1 bg-black/50 py-0.5 backdrop-blur-[2px]">
-              {assets.map((_, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setAssetIdx(i);
-                  }}
-                  className={cn(
-                    'nodrag rounded px-1.5 py-0.5 text-[9px] font-medium transition-colors',
-                    i === assetIdx ? 'bg-accent text-accent-ink font-semibold shadow-sm' : 'bg-black/60 text-white/80 hover:bg-black/80',
-                  )}
-                  title={`版本 v${assets.length - i}`}
-                >
-                  v{assets.length - i}
-                </button>
-              ))}
-            </div>
+            <>
+              {assets.length > 2 ? (
+                <div
+                  className="pointer-events-none absolute inset-0 -top-1.5 -right-1.5 rounded-lg border border-line/40 bg-black/25 shadow-xs"
+                  style={{ zIndex: 0 }}
+                />
+              ) : null}
+              <div
+                className="pointer-events-none absolute inset-0 -top-1 -right-1 rounded-lg border border-line/60 bg-black/35 shadow-xs"
+                style={{ zIndex: 1 }}
+              />
+            </>
           ) : null}
 
-          {/* Hover Bottom Bar with Prompt Peek & Quick Rerun */}
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between p-1.5 bg-gradient-to-t from-black/80 via-black/40 to-transparent opacity-0 transition-opacity group-hover/image:opacity-100">
-            <span
-              className="truncate max-w-[70%] rounded bg-black/60 px-1.5 py-0.5 text-[9px] text-white/90 select-none backdrop-blur-xs"
-              title={prompt || (hasUpstreamPrompt ? '上游节点提示词驱动' : '')}
-            >
-              {prompt ? `“${prompt}”` : hasUpstreamPrompt ? '✦ 上游提示词驱动' : '无提示词'}
-            </span>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                run();
-              }}
-              disabled={running}
-              className="pointer-events-auto nodrag flex items-center gap-1 rounded-md bg-accent px-2 py-0.5 text-[9px] font-medium text-accent-ink shadow-md hover:opacity-90 active:scale-95"
-              title="重新生成"
-            >
-              {running ? <Loader2 size={10} className="animate-spin" /> : <RotateCw size={9} />}
-              重跑
-            </button>
-          </div>
+          <div className="group/image relative z-10 min-h-0 flex-1 overflow-hidden rounded-lg border border-line bg-black/40 select-none">
+            <img
+              src={assetUrl!}
+              alt=""
+              loading="lazy"
+              decoding="async"
+              draggable={false}
+              onDoubleClick={() => setZoom(assetUrl)}
+              className="h-full w-full object-contain pointer-events-auto"
+              title="双击全屏放大，拖拽移动节点"
+            />
 
-          {/* Hover Top Right Action Buttons */}
-          <div className="absolute right-1.5 top-1.5 flex items-center gap-1 opacity-0 transition-opacity group-hover/image:opacity-100">
-            <a
-              href={assetUrl!}
-              download
-              onClick={(e) => e.stopPropagation()}
-              className="nodrag rounded-md bg-black/60 p-1 text-white hover:bg-black/80 transition-colors"
-              title="下载图片"
+            {/* Version / Multi-result set Thumbnail Switcher */}
+            {assets.length > 1 ? (
+              <div className="absolute inset-x-0 bottom-1 flex items-center justify-center gap-1.5 bg-black/60 px-2 py-1 backdrop-blur-[3px] z-20 overflow-x-auto no-scrollbar">
+                {assets.map((asset, i) => (
+                  <VariantThumbnail
+                    key={asset || i}
+                    asset={asset}
+                    index={i}
+                    total={assets.length}
+                    isSelected={i === assetIdx}
+                    onSelect={() => {
+                      setAssetIdx(i);
+                      void canvasStore.updateNodeOutput(sessionId, node.id, {
+                        ...node.output,
+                        activeAssetIndex: i,
+                      });
+                    }}
+                    onRemove={() => {
+                      void canvasStore.removeNodeAsset(sessionId, node.id, i);
+                    }}
+                  />
+                ))}
+              </div>
+            ) : null}
+
+            {/* Hover Bottom Bar with Prompt Peek & Quick Rerun (only when no bottom thumbnails or positioned slightly higher) */}
+            <div
+              className={cn(
+                'pointer-events-none absolute inset-x-0 flex items-center justify-between p-1.5 bg-gradient-to-t from-black/80 via-black/40 to-transparent opacity-0 transition-opacity group-hover/image:opacity-100 z-10',
+                assets.length > 1 ? 'bottom-10' : 'bottom-0',
+              )}
             >
-              <Download size={11} />
-            </a>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                void canvasStore.saveAsset(sessionId, node.id, assetIdx);
-              }}
-              className="nodrag rounded-md bg-black/60 p-1 text-white hover:bg-black/80 transition-colors"
-              title="存入作品库"
-            >
-              <FolderPlus size={11} />
-            </button>
+              <span
+                className="truncate max-w-[70%] rounded bg-black/60 px-1.5 py-0.5 text-[9px] text-white/90 select-none backdrop-blur-xs"
+                title={prompt || (hasUpstreamPrompt ? '上游节点提示词驱动' : '')}
+              >
+                {prompt ? `“${prompt}”` : hasUpstreamPrompt ? '✦ 上游提示词驱动' : '无提示词'}
+              </span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  run();
+                }}
+                disabled={running}
+                className="pointer-events-auto nodrag flex items-center gap-1 rounded-md bg-accent px-2 py-0.5 text-[9px] font-medium text-accent-ink shadow-md hover:opacity-90 active:scale-95"
+                title="重新生成"
+              >
+                {running ? <Loader2 size={10} className="animate-spin" /> : <RotateCw size={9} />}
+                重跑
+              </button>
+            </div>
+
+            {/* Hover Top Right Action Buttons */}
+            <div className="absolute right-1.5 top-1.5 flex items-center gap-1 opacity-0 transition-opacity group-hover/image:opacity-100 z-20">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setZoom(assetUrl);
+                }}
+                className="nodrag rounded-md bg-black/60 p-1 text-white hover:bg-black/80 transition-colors"
+                title="全屏放大查看 (双击图片也可放大)"
+              >
+                <Maximize2 size={11} />
+              </button>
+              <a
+                href={assetUrl!}
+                download
+                onClick={(e) => e.stopPropagation()}
+                className="nodrag rounded-md bg-black/60 p-1 text-white hover:bg-black/80 transition-colors"
+                title="下载图片"
+              >
+                <Download size={11} />
+              </a>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void canvasStore.saveAsset(sessionId, node.id, assetIdx);
+                }}
+                className="nodrag rounded-md bg-black/60 p-1 text-white hover:bg-black/80 transition-colors"
+                title="存入作品库"
+              >
+                <FolderPlus size={11} />
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
 
       {/* Upstream Connected Ready State (when no image yet and upstream prompt exists) */}
-      {!hasImage && hasUpstreamPrompt && !showConfig ? (
-        <div className="mt-1 flex min-h-0 flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-accent/40 bg-accent/5 p-4 text-center">
-          <Sparkles size={20} className="text-accent mb-1.5 animate-pulse-subtle" />
-          <span className="text-xs font-semibold text-ink">已接入上游提示词</span>
-          <p className="mt-1 text-[10px] text-ink-muted leading-relaxed">
+      {!hasImage && hasUpstreamPrompt ? (
+        <div className="mt-1 flex min-h-0 flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-accent/40 bg-accent/5 p-4 text-center select-none">
+          <Sparkles size={20} className="text-accent mb-1.5 animate-pulse-subtle pointer-events-none" />
+          <span className="text-xs font-semibold text-ink pointer-events-none">已接入上游提示词</span>
+          <p className="mt-1 text-[10px] text-ink-muted leading-relaxed pointer-events-none">
             由上游便签或 Agent 节点提供画面描述
           </p>
           <button
@@ -396,9 +471,8 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
       ) : null}
 
       {/* Clean Cover Placeholder / Dropzone (when standalone and no image yet) */}
-      {!hasImage && !hasUpstreamPrompt && !showConfig ? (
+      {!hasImage && !hasUpstreamPrompt ? (
         <div
-          onClick={() => fileInputRef.current?.click()}
           onDragOver={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -407,12 +481,12 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
           onDragLeave={() => setIsDragging(false)}
           onDrop={handleDrop}
           className={cn(
-            'group/placeholder nodrag relative flex min-h-0 flex-1 flex-col items-center justify-center rounded-lg border border-dashed p-4 text-center cursor-pointer transition-all',
+            'group/placeholder relative flex min-h-0 flex-1 flex-col items-center justify-center rounded-lg border border-dashed p-4 text-center transition-all select-none',
             isDragging
               ? 'border-accent bg-accent/10 scale-[0.99]'
               : 'border-line hover:border-accent/60 bg-black/20 hover:bg-black/30',
           )}
-          title="点击上传图片或拖入文件，也可点击右上角滑块展开提示词配置"
+          title="点击卡片配置参数，支持拖入图片"
         >
           <input
             ref={fileInputRef}
@@ -425,145 +499,51 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
               e.target.value = '';
             }}
           />
-          <div className="rounded-full bg-paper-inset/70 p-3 mb-2 text-ink-muted group-hover/placeholder:text-accent group-hover/placeholder:bg-accent/15 group-hover/placeholder:scale-110 transition-all shadow-xs">
+          <div className="rounded-full bg-paper-inset/70 p-3 mb-2 text-ink-muted group-hover/placeholder:text-accent group-hover/placeholder:bg-accent/15 group-hover/placeholder:scale-110 transition-all shadow-xs pointer-events-none">
             <ImageIcon size={22} />
           </div>
-          <span className="text-xs font-medium text-ink">点击或拖入图片封面</span>
-          <p className="mt-1 text-[10px] text-ink-muted/80">支持 PNG, JPG, WebP 画面</p>
-          <div className="mt-3 flex items-center gap-1.5">
+          <span className="text-xs font-medium text-ink-muted group-hover/placeholder:text-ink pointer-events-none transition-colors">待生成图片卡片</span>
+          <div className="mt-2 flex items-center gap-1.5">
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                setShowConfig(true);
+                fileInputRef.current?.click();
               }}
-              className="nodrag rounded-md bg-paper-raised border border-line px-2 py-1 text-[10px] text-ink-muted hover:text-ink hover:border-accent transition-colors"
+              className="nodrag rounded-md bg-paper-raised border border-line px-2 py-0.5 text-[9px] text-ink-muted hover:text-ink hover:border-accent transition-colors flex items-center gap-1"
+              title="上传本地图片作为当前节点画面"
             >
-              配置提示词 ⚙️
+              <FileUp size={10} />
+              上传图片
             </button>
-            {prompt.trim() ? (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  run();
-                }}
-                disabled={running}
-                className="nodrag rounded-md bg-accent px-2.5 py-1 text-[10px] font-medium text-accent-ink shadow-xs hover:opacity-90"
-              >
-                生成
-              </button>
-            ) : null}
           </div>
         </div>
       ) : null}
 
-      {/* Config / Prompt Input Area (when explicitly opened via Sliders) */}
-      {showConfig ? (
-        <div className="flex flex-col flex-1 min-h-0">
-          <div className="mt-1">
-            <MentionTextArea
-              value={prompt}
-              onChange={setPrompt}
-              onCommit={commitPrompt}
-              candidates={candidates}
-              placeholder="描述画面视觉风格、主体与光影细节（或拉出左侧提示词端口连接便签）…"
-              onMentionSelect={(refNode) => {
-                void canvasStore.connectNodes(sessionId, refNode.id, node.id, 'reference');
-              }}
-            />
-          </div>
-
-          <div className="mt-2 flex items-center justify-between gap-1.5 flex-wrap">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <Select
-                value={params.model || 'flux-schnell'}
-                onValueChange={(val) =>
-                  void canvasStore.updateNodeParams(sessionId, node.id, {
-                    ...params,
-                    model: val,
-                  })
-                }
-              >
-                <SelectTrigger
-                  size="sm"
-                  className="nodrag h-7 max-w-[130px] rounded-lg border-line/70 bg-paper-inset/40 px-2 py-1 text-[10px] font-medium text-ink hover:border-accent hover:bg-paper-inset/70 transition-colors"
-                >
-                  <div className="flex items-center gap-1 truncate">
-                    <span className="text-accent text-[10px]">⚡</span>
-                    <SelectValue placeholder="模型选择" />
-                  </div>
-                </SelectTrigger>
-                <SelectContent className="min-w-[160px] rounded-xl border border-line bg-paper-raised/95 shadow-xl backdrop-blur-xl p-1 text-xs">
-                  {CANVAS_IMAGE_MODELS.map((m) => (
-                    <SelectItem key={m.id} value={m.id} className="text-xs py-1.5 cursor-pointer rounded-lg hover:bg-paper-inset">
-                      <div className="flex items-center justify-between w-full gap-2">
-                        <span>{m.name}</span>
-                        {'badge' in m ? (
-                          <span className="rounded bg-accent/15 px-1 py-0.5 text-[9px] text-accent font-semibold">
-                            {m.badge}
-                          </span>
-                        ) : null}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              {/* Segmented Pill Group for Size */}
-              <div className="flex items-center rounded-lg border border-line/60 bg-paper-inset/50 p-0.5">
-                {[
-                  { id: '1024x1024', label: '1:1' },
-                  { id: '1536x1024', label: '16:9' },
-                  { id: '1024x1536', label: '9:16' },
-                ].map((opt) => (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() =>
-                      void canvasStore.updateNodeParams(sessionId, node.id, {
-                        ...params,
-                        size: opt.id as CanvasImageParams['size'],
-                      })
-                    }
-                    className={cn(
-                      'nodrag rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-all',
-                      size === opt.id
-                        ? 'bg-paper-raised text-ink border border-line/60 shadow-xs font-semibold dark:bg-white/15 dark:text-white dark:border-white/20'
-                        : 'text-ink-muted hover:text-ink',
-                    )}
-                    title={`画幅比例: ${opt.label}`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex items-center gap-1 ml-auto">
-              <button
-                type="button"
-                onClick={() => void canvasStore.runGraph(sessionId, node.id)}
-                disabled={running}
-                className="nodrag rounded-lg border border-line/70 px-2 py-1 text-[10px] text-ink-muted hover:bg-paper-inset hover:text-ink transition-colors disabled:opacity-40"
-                title="从这里往下重新运行整条流水线"
-              >
-                向下跑
-              </button>
-              <button
-                type="button"
-                onClick={run}
-                disabled={running || (!prompt.trim() && !hasUpstreamPrompt)}
-                title={`生成图片 (单次预计消耗约 ${estimateNodeCost(node)} 算力点)`}
-                className="nodrag inline-flex items-center gap-1 rounded-lg bg-accent text-accent-ink px-3 py-1 text-[10px] font-medium shadow-xs hover:opacity-90 active:scale-95 transition-all disabled:opacity-40"
-              >
-                {running ? <Loader2 size={11} className="animate-spin" /> : <Play size={10} className="fill-current" />}
-                生成
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      {/* TapNow floating generation panel with inverse-scale compensation */}
+      <NodeFloatingPanel
+        sessionId={sessionId}
+        node={node}
+        visible={Boolean(selected || showConfig)}
+        prompt={prompt}
+        onPromptChange={setPrompt}
+        onPromptCommit={commitPrompt}
+        candidates={candidates}
+        upstreamSources={upstreamSources}
+        running={running}
+        onRun={run}
+        size={size}
+        onSizeChange={(s) => {
+          void canvasStore.updateNodeParams(sessionId, node.id, { ...params, size: s });
+        }}
+        model={params.model || 'flux-schnell'}
+        onModelChange={(m) => {
+          void canvasStore.updateNodeParams(sessionId, node.id, { ...params, model: m });
+        }}
+        variationsCount={variationsCount}
+        onVariationsCountChange={setVariationsCount}
+        estimatedCost={estimateNodeCost(node)}
+      />
 
       {zoom ? <Lightbox src={zoom} onClose={() => setZoom(null)} /> : null}
     </div>

@@ -12,6 +12,7 @@ import type {
 } from '../../../shared/canvas';
 import type { DbHandle } from '../db/client';
 import { descendants, inputHash, wouldCycle } from '../canvas/graph';
+import { isPortCompatible } from '../../../shared/canvasGraph';
 
 interface CanvasRowRaw {
   id: string;
@@ -121,7 +122,7 @@ export interface NodePatch {
 export interface AddEdgeResult {
   edge?: CanvasEdge;
   rev?: number;
-  error?: 'missing' | 'cycle';
+  error?: 'missing' | 'cycle' | 'incompatible';
 }
 
 export interface EdgeInput {
@@ -324,6 +325,10 @@ export function createCanvasStore(handle: DbHandle) {
         const src = readNode(canvasId, input.sourceId);
         const tgt = readNode(canvasId, input.targetId);
         if (!src || !tgt) return { error: 'missing' };
+        const compat = isPortCompatible(src, tgt, input.sourceHandle, input.targetHandle);
+        if (!compat.valid) {
+          return { error: 'incompatible' };
+        }
         const existing = readEdges(canvasId);
         if (
           existing.some((e) => e.sourceId === input.sourceId && e.targetId === input.targetId) ||

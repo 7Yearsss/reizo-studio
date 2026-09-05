@@ -87,6 +87,63 @@ export function wouldCycle(edges: CanvasEdge[], source: string, target: string):
 }
 
 /**
+ * Type Guard Matrix checking if an edge between source and target node is semantically valid.
+ */
+export function isPortCompatible(
+  sourceNode: CanvasNode,
+  targetNode: CanvasNode,
+  sourceHandle?: string | null,
+  targetHandle?: string | null,
+): { valid: boolean; reason?: string } {
+  // Disallow connecting group or section directly as data endpoints
+  if (sourceNode.type === 'group' || sourceNode.type === 'section') {
+    return { valid: false, reason: '组/大区容器不支持直接作为连线端点' };
+  }
+  if (targetNode.type === 'group' || targetNode.type === 'section') {
+    return { valid: false, reason: '组/大区容器不支持直接作为连线端点' };
+  }
+
+  // Handle-specific legacy checks: audio_in requires audio source
+  if (targetHandle === 'audio_in' && sourceNode.type !== 'audio') {
+    return { valid: false, reason: '音轨输入仅支持音频节点' };
+  }
+
+  // Audio source: can connect to video or audio nodes
+  if (sourceNode.type === 'audio') {
+    if (targetNode.type !== 'video' && targetNode.type !== 'audio') {
+      return { valid: false, reason: '音频节点只能连接到视频节点或音频节点' };
+    }
+    return { valid: true };
+  }
+
+  // TapNow unified context intake: when connecting to video/image target context handle
+  if (targetNode.type === 'video') {
+    // Video context handle accepts note (prompt), image (start frame/ref), video (prev shot), agent
+    if (sourceNode.type === 'note' || sourceNode.type === 'image' || sourceNode.type === 'video' || sourceNode.type === 'agent') {
+      return { valid: true };
+    }
+  }
+
+  if (targetNode.type === 'image') {
+    // Image context handle accepts note (prompt), image (reference), video, agent
+    return { valid: true };
+  }
+
+  if (targetNode.type === 'note') {
+    return { valid: true };
+  }
+
+  if (targetNode.type === 'audio') {
+    if (sourceNode.type !== 'note' && sourceNode.type !== 'agent') {
+      return { valid: false, reason: '音频节点仅接收文本便签或 Agent 生成的台词文本' };
+    }
+    return { valid: true };
+  }
+
+  return { valid: true };
+}
+
+/**
  * Simple layered layout: column = longest path from a root, row = order
  * within the column. Enough to "tidy" a small hand-built graph.
  */

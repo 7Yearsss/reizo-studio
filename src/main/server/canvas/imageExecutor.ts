@@ -206,11 +206,20 @@ export async function runImageNode(options: {
       // the agent can both reference a node that is not wired in as an edge).
       const candidates = (canvasStore.getSnapshot(canvasId)?.nodes ?? [])
         .filter((u) => u.id !== node.id && u.type !== 'anchor')
-        .map((u) => ({
-          id: u.id,
-          label: u.title || '',
-          assets: u.output?.assets ?? [],
-        }));
+        .map((u) => {
+          let text: string | undefined;
+          if (u.type === 'note') {
+            text = (u.params as { content?: string } | undefined)?.content;
+          } else if (u.type === 'agent') {
+            text = (u.output as { text?: string } | undefined)?.text;
+          }
+          return {
+            id: u.id,
+            label: u.title || '',
+            assets: u.output?.assets ?? [],
+            text,
+          };
+        });
       const { resolvedPrompt, orderedAssetRefs } = resolveMentions(rawPrompt, candidates, anchorRefs.length + 1);
       rawPrompt = resolvedPrompt;
       for (const rel of orderedAssetRefs) await readRefBytes(rel);
@@ -223,37 +232,65 @@ export async function runImageNode(options: {
     images = images.slice(0, MAX_REFERENCE_IMAGES);
     const prompt = images.length > 0 ? { text: rawPrompt, images } : rawPrompt;
 
-    const result = await generateImage({
-      model: provider.image(modelId),
-      prompt,
-      size: params.size ?? '1024x1024',
-    });
+    const variationsCount = Math.min(
+      4,
+      Math.max(1, Number(params.count ?? 1)),
+    );
+
+    const genPromises = Array.from({ length: variationsCount }, () =>
+      generateImage({
+        model: provider.image(modelId),
+        prompt,
+        size: params.size ?? '1024x1024',
+      }),
+    );
+    const results = await Promise.all(genPromises);
 
     const dir = canvasAssetsDir(dataRoot, canvasId);
     await mkdir(dir, { recursive: true });
     const rels: string[] = [];
     let n = 0;
-    for (const image of result.images) {
-      const ext = image.mediaType?.includes('jpeg') ? 'jpg' : 'png';
-      const file = `${node.id}-${Date.now().toString(36)}-${n}.${ext}`;
-      await writeFile(path.join(dir, file), Buffer.from(image.uint8Array));
-      rels.push(`${canvasId}/${file}`);
-      n += 1;
+    for (const res of results) {
+      for (const image of res.images) {
+        const ext = image.mediaType?.includes('jpeg') ? 'jpg' : 'png';
+        const file = `${node.id}-${Date.now().toString(36)}-${n}.${ext}`;
+        await writeFile(path.join(dir, file), Buffer.from(image.uint8Array));
+        rels.push(`${canvasId}/${file}`);
+        n += 1;
+      }
     }
 
     const prevAssets = node.output?.assets ?? [];
     const combinedAssets = [...rels, ...prevAssets.filter((p) => !rels.includes(p))].slice(0, 10);
 
+    const nowIso = new Date().toISOString();
+    const newResultSetItems = rels.map((asset) => ({
+      asset,
+      createdAt: nowIso,
+      prompt: rawPrompt,
+    }));
+    const prevResultSet = node.output?.resultSet ?? [];
+    const combinedResultSet = [
+      ...newResultSetItems,
+      ...prevResultSet.filter((it) => !rels.includes(it.asset)),
+    ].slice(0, 20);
+
+    const outputPayload = {
+      assets: combinedAssets,
+      resultSet: combinedResultSet,
+      activeAssetIndex: 0,
+    };
+
     const done = canvasStore.updateNode(canvasId, node.id, {
       runState: 'done',
-      output: { assets: combinedAssets },
+      output: outputPayload,
       paramsHash: inputHash(node, upstream),
     });
     if (done) {
       channel.broadcast(done.rev, {
         type: 'node_output',
         id: node.id,
-        output: done.node.output ?? { assets: combinedAssets },
+        output: done.node.output ?? outputPayload,
         runState: 'done',
       });
       // Include self: it just ran, so its own `dirty` clears.

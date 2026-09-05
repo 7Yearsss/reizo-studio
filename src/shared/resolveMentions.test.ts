@@ -106,6 +106,14 @@ describe('resolveMentions — canonical @[label](canvas:id) syntax', () => {
     const r = resolveMentions('用 @女主特写 的脸', candidates);
     expect(r.resolvedPrompt).toBe('用 <<<image 1>>> 的脸');
   });
+
+  it('interpolates note candidate text into prompt when candidate has text', () => {
+    const c = [
+      { id: 'note_1', label: '角色设定', assets: [] as string[], text: '银发红瞳的赛博女武神' },
+    ];
+    const r = resolveMentions('生成 @[角色设定](canvas:note_1)，站在雨中', c);
+    expect(r.resolvedPrompt).toBe('生成 银发红瞳的赛博女武神，站在雨中');
+  });
 });
 
 describe('parseMentionTokens / serializeMention', () => {

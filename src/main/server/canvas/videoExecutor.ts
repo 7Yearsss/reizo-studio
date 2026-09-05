@@ -113,11 +113,20 @@ export async function runVideoNode(options: {
     // Resolve @-mentions against the whole canvas by id, not just wired-in nodes.
     const candidates = (canvasStore.getSnapshot(canvasId)?.nodes ?? [])
       .filter((u) => u.id !== node.id && u.type !== 'anchor')
-      .map((u) => ({
-        id: u.id,
-        label: u.title || '',
-        assets: u.output?.assets ?? [],
-      }));
+      .map((u) => {
+        let text: string | undefined;
+        if (u.type === 'note') {
+          text = (u.params as { content?: string } | undefined)?.content;
+        } else if (u.type === 'agent') {
+          text = (u.output as { text?: string } | undefined)?.text;
+        }
+        return {
+          id: u.id,
+          label: u.title || '',
+          assets: u.output?.assets ?? [],
+          text,
+        };
+      });
     const { resolvedPrompt } = resolveMentions(promptText, candidates);
     promptText = resolvedPrompt;
   }

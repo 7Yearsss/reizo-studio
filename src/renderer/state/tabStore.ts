@@ -181,3 +181,8 @@ export function closeSessionTabs(sessionId: string): void {
   const activeGone = !remaining.some((t) => t.id === state.activeTabId);
   select(remaining, activeGone ? remaining[0].id : state.activeTabId);
 }
+
+export function activeSessionId(): string | undefined {
+  const active = state.tabs.find((t) => t.id === state.activeTabId);
+  return active?.kind === 'chat' ? active.sessionId : undefined;
+}

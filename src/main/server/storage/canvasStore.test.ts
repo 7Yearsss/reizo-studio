@@ -65,6 +65,26 @@ describe('CanvasStore', () => {
     expect(canvas.addEdge(c.id, { sourceId: b.id, targetId: a.id }).error).toBe('cycle');
   });
 
+  it('rejects semantically incompatible edges (port guard)', async () => {
+    const { canvas, sessionId } = await freshStores();
+    const c = canvas.ensureCanvas(sessionId);
+    const grp = canvas.addNode(c.id, { type: 'group', x: 0, y: 0, w: 100, h: 100, params: {} }).node;
+    const img = canvas.addNode(c.id, { type: 'image', x: 0, y: 0, w: 100, h: 100, params: {} }).node;
+    const vid = canvas.addNode(c.id, { type: 'video', x: 0, y: 0, w: 100, h: 100, params: {} }).node;
+
+    // Group containers cannot be wired directly
+    expect(canvas.addEdge(c.id, { sourceId: grp.id, targetId: img.id }).error).toBe('incompatible');
+    expect(canvas.addEdge(c.id, { sourceId: img.id, targetId: grp.id }).error).toBe('incompatible');
+
+    // Video to Video without frame slot is incompatible
+    expect(canvas.addEdge(c.id, { sourceId: vid.id, targetId: vid.id }).error).toBe('cycle');
+
+    // Image to Video start_frame is compatible
+    const validEdge = canvas.addEdge(c.id, { sourceId: img.id, targetId: vid.id, targetHandle: 'start_frame' });
+    expect(validEdge.edge).toBeTruthy();
+    expect(validEdge.error).toBeUndefined();
+  });
+
   it('flags a node dirty when its params drift after a run', async () => {
     const { canvas, sessionId } = await freshStores();
     const c = canvas.ensureCanvas(sessionId);
