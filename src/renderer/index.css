@@ -426,6 +426,61 @@ pre,
   transition: opacity var(--duration-fast) var(--ease-out);
 }
 
+/* React Flow GPU layer promotion and smooth panning/dragging */
+.react-flow__viewport {
+  will-change: transform;
+  transform: translateZ(0);
+}
+/* Only the node actually being dragged needs its own GPU layer — panning
+   already moves everything via the single .react-flow__viewport transform.
+   Promoting *every* node permanently forces Chromium to keep a persistent
+   compositor layer per card (image/video textures included), which adds
+   constant compositing overhead instead of removing it. */
+.react-flow__node {
+  contain: layout style;
+}
+.react-flow__node.dragging {
+  will-change: transform;
+}
+.react-flow__pane {
+  cursor: grab;
+}
+.react-flow__pane.dragging {
+  cursor: grabbing;
+}
+
+/* Zoomed-out-overview LOD optimization: silences heavy
+   filters, blurs and shadows permanently once zoomed out far enough to see many cards at
+   once (e.g. 40-50+ node boards) — with that many cards on screen simultaneously,
+   backdrop-blur and drop-shadows cost real per-frame compositing time even
+   when nothing is actively being dragged, and none of that detail is legible
+   at that zoom level anyway. */
+[data-lowzoom='true'] .react-flow__node {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+}
+[data-lowzoom='true'] [class*='backdrop-blur'] {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* While actively dragging or panning, suppress transitions to ensure 0ms immediate response */
+[data-dragging='true'] .react-flow__node,
+[data-dragging='true'] .react-flow__pane,
+[data-dragging='true'] .node-action-bar,
+[data-lowzoom='true'] .react-flow__pane,
+[data-lowzoom='true'] .node-action-bar {
+  transition: none !important;
+}
+
+.react-flow__minimap {
+  contain: strict;
+}
+[data-dragging='true'] .react-flow__minimap {
+  pointer-events: none;
+  opacity: 0.6;
+  transition: opacity 150ms ease;
+}
+
 /* Global press feedback — respond on pointer-down, Apple-style. The
    `:has()` guard keeps a nested button from double-scaling its parent. */
 button,

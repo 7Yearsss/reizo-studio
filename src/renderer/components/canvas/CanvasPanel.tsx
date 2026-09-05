@@ -6,6 +6,8 @@ import {
   MiniMap,
   Panel,
   useReactFlow,
+  useStore,
+  applyNodeChanges,
   type Node,
   type Edge,
   type NodeChange,
@@ -65,8 +67,9 @@ import { useCanvasStore } from '../../state/useCanvasStore';
 import { cn } from '../../lib/cn';
 import { layoutGraph, wouldCycle } from '../../../shared/canvasGraph';
 import { estimateGraphCost } from '../../../shared/canvasPricing';
-import type { CanvasGroupParams, CanvasNodeType } from '../../../shared/canvas';
+import type { CanvasEdge, CanvasGroupParams, CanvasNode, CanvasNodeType } from '../../../shared/canvas';
 import { extractSubgraph, formatSubgraphForPrompt } from '../../../shared/canvasSubgraph';
+import { nodeReadinessIssues } from '../../../shared/canvasReadiness';
 import ImageNode, { type CanvasNodeData } from './ImageNode';
 import AgentNode from './AgentNode';
 import VideoNode from './VideoNode';
@@ -101,9 +104,45 @@ const NODE_TYPES: NodeTypes = {
 const EDGE_TYPES: EdgeTypes = { cuttable: CuttableEdge, default: CuttableEdge };
 const VIEWPORT_KEY = (sessionId: string) => `reizo:canvas-viewport:${sessionId}`;
 
+const MINIMAP_NODE_COLOR = (n: { type?: string }) => {
+  if (n.type === 'image') return 'var(--accent, #c26d3a)';
+  if (n.type === 'video') return '#0ea5e9';
+  if (n.type === 'agent') return '#8b5cf6';
+  if (n.type === 'note') return '#eab308';
+  if (n.type === 'section' || n.type === 'group') return 'transparent';
+  return 'var(--line, #ccc)';
+};
+
 type Menu =
   | { kind: 'node'; x: number; y: number; nodeId: string }
   | { kind: 'pane'; x: number; y: number; flowX: number; flowY: number };
+
+function computeNodeInputMeta(
+  node: CanvasNode,
+  edgesByTarget: Map<string, CanvasEdge[]>,
+  nodesById: Map<string, CanvasNode>,
+) {
+  const incoming = edgesByTarget.get(node.id) || [];
+  const readiness = nodeReadinessIssues(node, incoming, nodesById);
+  const hasUpstreamPrompt = incoming.some(
+    (e) => e.targetHandle === 'prompt' || !e.targetHandle,
+  );
+  const hasUpstreamStartFrame = incoming.some(
+    (e) => e.targetHandle === 'start_frame' || e.targetHandle === 'startFrame',
+  );
+  const refCount = incoming.filter((e) => (e.targetHandle ?? '').startsWith('ref_')).length;
+  const inEdge = incoming[0];
+  const upNode = inEdge ? nodesById.get(inEdge.sourceId) : undefined;
+  const hasUpstreamAsset = Boolean(upNode?.output?.assets?.[0]);
+
+  return {
+    readiness,
+    hasUpstreamPrompt,
+    hasUpstreamStartFrame,
+    refCount,
+    hasUpstreamAsset,
+  };
+}
 
 function CanvasInner({ sessionId }: { sessionId: string }) {
   const storeNodes = useCanvasStore((s) => s.nodesBySession[sessionId] ?? canvasStore.EMPTY_NODES);
@@ -229,16 +268,39 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     return () => clearTimeout(t);
   }, [agentMarkedIds, markTick]);
 
-  const nodes: Node<CanvasNodeData>[] = useMemo(
-    () =>
-      storeNodes.map((node) => ({
+  const isDraggingRef = useRef(false);
+  const isPanningRef = useRef(false);
+  const [isInteracting, setIsInteracting] = useState(false);
+  // Zoomed-out overview (many nodes at once): the same LOD treatment we give
+  // an active drag/pan also applies here permanently, since backdrop-blur and
+  // shadows on dozens of simultaneously-visible cards cost real frame time
+  // regardless of whether the user is currently touching the canvas.
+  // Two thresholds (not one) give it hysteresis — zoom hovering right at a
+  // single cutoff during trackpad-momentum panning would otherwise flip
+  // `data-lowzoom` on/off rapidly, which reads as its own flicker.
+  const isLowZoomRef = useRef(false);
+  const isLowZoom = useStore((s) => {
+    const zoom = s.transform[2];
+    isLowZoomRef.current = isLowZoomRef.current ? zoom < 0.5 : zoom < 0.45;
+    return isLowZoomRef.current;
+  });
+
+  const initialNodes = useMemo(() => {
+    const nodesById = new Map(storeNodes.map((n) => [n.id, n]));
+    const edgesByTarget = new Map<string, CanvasEdge[]>();
+    for (const e of storeEdges) {
+      const list = edgesByTarget.get(e.targetId);
+      if (list) list.push(e);
+      else edgesByTarget.set(e.targetId, [e]);
+    }
+    return storeNodes.map((node) => {
+      const meta = computeNodeInputMeta(node, edgesByTarget, nodesById);
+      return {
         id: node.id,
         type: node.type,
         position: { x: node.x, y: node.y },
         width: node.w,
         height: node.h,
-        // Containers render beneath their members and never intercept clicks
-        // meant for the nodes inside them.
         zIndex: node.type === 'section' ? -1 : node.type === 'group' ? 0 : 1,
         draggable: lockedMembers.has(node.id) ? false : undefined,
         data: {
@@ -247,20 +309,111 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           highlighted: highlightIds.includes(node.id),
           agentMark: agentMarkedIds.has(node.id),
           isProposal: proposals.includes(node.id),
+          ...meta,
         },
-      })),
-    [storeNodes, sessionId, highlightIds, lockedMembers, agentMarkedIds, proposals],
-  );
+      };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const runningTargets = useMemo(
-    () => new Set(storeNodes.filter((n) => n.runState === 'running').map((n) => n.id)),
+  useEffect(() => {
+    if (isDraggingRef.current) return;
+    rf.setNodes((prevNodes) => {
+      const prevMap = new Map<string, Node<CanvasNodeData>>();
+      for (const n of prevNodes) prevMap.set(n.id, n as Node<CanvasNodeData>);
+
+      const nodesById = new Map(storeNodes.map((n) => [n.id, n]));
+      const edgesByTarget = new Map<string, CanvasEdge[]>();
+      for (const e of storeEdges) {
+        const list = edgesByTarget.get(e.targetId);
+        if (list) list.push(e);
+        else edgesByTarget.set(e.targetId, [e]);
+      }
+
+      const nextNodes: Node<CanvasNodeData>[] = [];
+      for (const node of storeNodes) {
+        const prev = prevMap.get(node.id);
+        const isHighlighted = highlightIds.includes(node.id);
+        const isAgentMark = agentMarkedIds.has(node.id);
+        const isProposal = proposals.includes(node.id);
+        const isLocked = lockedMembers.has(node.id);
+        const zIndex = node.type === 'section' ? -1 : node.type === 'group' ? 0 : 1;
+        const draggable = isLocked ? false : undefined;
+
+        const {
+          readiness,
+          hasUpstreamPrompt,
+          hasUpstreamStartFrame,
+          refCount,
+          hasUpstreamAsset,
+        } = computeNodeInputMeta(node, edgesByTarget, nodesById);
+
+        const readinessChanged =
+          !prev?.data.readiness ||
+          prev.data.readiness.length !== readiness.length ||
+          prev.data.readiness.some((msg, idx) => msg !== readiness[idx]);
+
+        if (
+          prev &&
+          prev.type === node.type &&
+          prev.position.x === node.x &&
+          prev.position.y === node.y &&
+          prev.width === node.w &&
+          prev.height === node.h &&
+          prev.zIndex === zIndex &&
+          prev.draggable === draggable &&
+          prev.data.node === node &&
+          prev.data.highlighted === isHighlighted &&
+          prev.data.agentMark === isAgentMark &&
+          prev.data.isProposal === isProposal &&
+          prev.data.hasUpstreamPrompt === hasUpstreamPrompt &&
+          prev.data.hasUpstreamStartFrame === hasUpstreamStartFrame &&
+          prev.data.hasUpstreamAsset === hasUpstreamAsset &&
+          prev.data.refCount === refCount &&
+          !readinessChanged
+        ) {
+          nextNodes.push(prev);
+        } else {
+          nextNodes.push({
+            id: node.id,
+            type: node.type,
+            position: { x: node.x, y: node.y },
+            width: node.w,
+            height: node.h,
+            zIndex,
+            draggable,
+            data: {
+              sessionId,
+              node,
+              highlighted: isHighlighted,
+              agentMark: isAgentMark,
+              isProposal,
+              readiness,
+              hasUpstreamPrompt,
+              hasUpstreamStartFrame,
+              hasUpstreamAsset,
+              refCount,
+            },
+          });
+        }
+      }
+      return nextNodes;
+    });
+  }, [storeNodes, storeEdges, sessionId, highlightIds, lockedMembers, agentMarkedIds, proposals, rf]);
+
+  const nodeMetaKey = useMemo(
+    () => storeNodes.map((n) => `${n.id}:${n.type}:${n.runState}`).join('|'),
     [storeNodes],
   );
-
-  const nodeMap = useMemo(
-    () => new Map(storeNodes.map((n) => [n.id, n])),
-    [storeNodes],
-  );
+  const nodeMetaMap = useMemo(() => {
+    const map = new Map<string, { type: string; isRunning: boolean }>();
+    if (!nodeMetaKey) return map;
+    for (const part of nodeMetaKey.split('|')) {
+      const [id, type, runState] = part.split(':');
+      if (id) map.set(id, { type, isRunning: runState === 'running' });
+    }
+    return map;
+  }, [nodeMetaKey]);
 
   const handleCutEdge = useCallback(
     (edgeId: string) => {
@@ -280,9 +433,9 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
   const edges: Edge[] = useMemo(
     () =>
       storeEdges.map((edge) => {
-        const sourceNode = nodeMap.get(edge.sourceId);
-        const targetNode = nodeMap.get(edge.targetId);
-        const isRunning = runningTargets.has(edge.targetId) || sourceNode?.runState === 'running';
+        const sourceMeta = nodeMetaMap.get(edge.sourceId);
+        const targetMeta = nodeMetaMap.get(edge.targetId);
+        const isRunning = Boolean(targetMeta?.isRunning || sourceMeta?.isRunning);
         return {
           id: edge.id,
           type: 'cuttable',
@@ -292,41 +445,42 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           targetHandle: edge.targetHandle,
           animated: isRunning,
           data: {
-            sourceType: sourceNode?.type,
-            targetType: targetNode?.type,
+            sourceType: sourceMeta?.type,
+            targetType: targetMeta?.type,
             isRunning,
             onCutEdge: handleCutEdge,
             onRerouteEdge: handleRerouteEdge,
           },
         };
       }),
-    [storeEdges, runningTargets, nodeMap, handleCutEdge, handleRerouteEdge],
+    [storeEdges, nodeMetaMap, handleCutEdge, handleRerouteEdge],
   );
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
       for (const change of changes) {
-        if (change.type === 'position' && change.position) {
-          const before = canvasStore.nodeById(sessionId, change.id);
-          canvasStore.moveNodeLive(sessionId, change.id, change.position.x, change.position.y);
-          // Dragging a group container moves everything inside it by the same
-          // delta, so members keep their relative layout.
-          if (before?.type === 'group') {
-            const dx = change.position.x - before.x;
-            const dy = change.position.y - before.y;
+        if (change.type === 'remove') {
+          void canvasStore.removeNode(sessionId, change.id);
+        } else if (change.type === 'position' && change.position) {
+          const before = rf.getNode(change.id);
+          if (before?.type === 'group' && before.position) {
+            const dx = change.position.x - before.position.x;
+            const dy = change.position.y - before.position.y;
             if (dx !== 0 || dy !== 0) {
-              for (const memberId of canvasStore.groupMemberIds(sessionId, change.id)) {
-                const member = canvasStore.nodeById(sessionId, memberId);
-                if (member) canvasStore.moveNodeLive(sessionId, memberId, member.x + dx, member.y + dy);
-              }
+              const memberIds = new Set(canvasStore.groupMemberIds(sessionId, change.id));
+              rf.setNodes((currentNodes) =>
+                currentNodes.map((n) =>
+                  memberIds.has(n.id)
+                    ? { ...n, position: { x: n.position.x + dx, y: n.position.y + dy } }
+                    : n,
+                ),
+              );
             }
           }
-        } else if (change.type === 'remove') {
-          void canvasStore.removeNode(sessionId, change.id);
         }
       }
     },
-    [sessionId],
+    [sessionId, rf],
   );
 
   const onEdgesChange = useCallback(
@@ -339,10 +493,11 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
   );
 
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
-  const connectingNode = useRef<{ nodeId: string; handleId: string | null; handleType: string | null } | null>(null);
+  const connectingNode = useRef<{ nodeId: string; handleId: string | null; handleType: 'source' | 'target' } | null>(null);
   const [dropConnectMenu, setDropConnectMenu] = useState<{
-    sourceNodeId: string;
-    sourceHandle: string | null;
+    nodeId: string;
+    handleId: string | null;
+    handleType: 'source' | 'target';
     flowX: number;
     flowY: number;
     screenX: number;
@@ -497,7 +652,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         connectingNode.current = {
           nodeId: params.nodeId,
           handleId: params.handleId,
-          handleType: params.handleType,
+          handleType: params.handleType === 'target' ? 'target' : 'source',
         };
       }
     },
@@ -518,8 +673,9 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       const flowPos = rf.screenToFlowPosition({ x: clientX, y: clientY });
 
       setDropConnectMenu({
-        sourceNodeId: source.nodeId,
-        sourceHandle: source.handleId,
+        nodeId: source.nodeId,
+        handleId: source.handleId,
+        handleType: source.handleType,
         flowX: Math.round(flowPos.x),
         flowY: Math.round(flowPos.y),
         screenX: clientX,
@@ -729,6 +885,8 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
 
   return (
     <div
+      data-dragging={isInteracting ? 'true' : undefined}
+      data-lowzoom={isLowZoom ? 'true' : undefined}
       className="h-full w-full outline-none"
       tabIndex={0}
       onKeyDown={onKeyDown}
@@ -741,7 +899,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       }}
     >
       <ReactFlow
-        nodes={nodes}
+        defaultNodes={initialNodes}
         edges={edges}
         nodeTypes={NODE_TYPES}
         edgeTypes={EDGE_TYPES}
@@ -753,22 +911,26 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         isValidConnection={isValidConnection}
         onSelectionChange={onSelectionChange}
         onNodeDragStart={(_, __, dragged) => {
+          isDraggingRef.current = true;
+          setIsInteracting(true);
           for (const n of dragged) {
             dragStart.current[n.id] = { x: n.position.x, y: n.position.y };
             // A group drag also moves its members — snapshot them too so the
             // whole gesture can be undone in one step.
             for (const memberId of canvasStore.groupMemberIds(sessionId, n.id)) {
-              const member = canvasStore.nodeById(sessionId, memberId);
-              if (member) dragStart.current[memberId] = { x: member.x, y: member.y };
+              const member = rf.getNode(memberId);
+              if (member) dragStart.current[memberId] = { x: member.position.x, y: member.position.y };
             }
           }
         }}
         onNodeDragStop={(_, __, dragged) => {
+          isDraggingRef.current = false;
+          if (!isPanningRef.current) setIsInteracting(false);
           const moves: { id: string; from: { x: number; y: number }; to: { x: number; y: number } }[] = [];
           const collect = (id: string) => {
             const from = dragStart.current[id];
-            const now = canvasStore.nodeById(sessionId, id);
-            if (from && now) moves.push({ id, from, to: { x: now.x, y: now.y } });
+            const now = rf.getNode(id);
+            if (from && now) moves.push({ id, from, to: { x: now.position.x, y: now.position.y } });
             delete dragStart.current[id];
           };
           for (const n of dragged) {
@@ -778,7 +940,13 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           canvasStore.commitMoveBatch(sessionId, moves);
         }}
         onInit={restoreViewport}
+        onMoveStart={() => {
+          isPanningRef.current = true;
+          setIsInteracting(true);
+        }}
         onMoveEnd={(_, v) => {
+          isPanningRef.current = false;
+          if (!isDraggingRef.current) setIsInteracting(false);
           try {
             localStorage.setItem(VIEWPORT_KEY(sessionId), JSON.stringify(v));
           } catch {
@@ -819,7 +987,15 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         className="bg-paper"
       >
         <Background gap={16} color="var(--line)" />
-        <MiniMap pannable zoomable className="!bg-paper-inset" />
+        <MiniMap
+          pannable
+          zoomable
+          className="!bg-paper-inset"
+          nodeColor={MINIMAP_NODE_COLOR}
+          nodeStrokeColor="transparent"
+          nodeBorderRadius={3}
+          maskColor="rgba(0, 0, 0, 0.2)"
+        />
         <AssetShelf sessionId={sessionId} selectedTargetIds={selectedNodeIds} flash={flash} />
         <AgentActivityStrip sessionId={sessionId} />
 
@@ -1404,77 +1580,132 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
 
       {dropConnectMenu ? (
         <div
-          className="fixed z-[160] min-w-48 overflow-hidden rounded-xl border border-line bg-paper-raised p-1 text-xs shadow-2xl backdrop-blur-md"
+          className="fixed z-[160] min-w-52 overflow-hidden rounded-xl border border-line bg-paper-raised p-1 text-xs shadow-2xl backdrop-blur-md"
           style={{ left: dropConnectMenu.screenX, top: dropConnectMenu.screenY }}
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="px-2 py-1 text-[10px] font-semibold text-ink-muted">从此处快速延伸流水线</div>
           {(() => {
-            const src = storeNodes.find((n) => n.id === dropConnectMenu.sourceNodeId);
-            if (src?.type === 'image') {
+            const anchorNode = storeNodes.find((n) => n.id === dropConnectMenu.nodeId);
+            const isBackward = dropConnectMenu.handleType === 'target';
+            const nodeTitle = anchorNode?.title || (anchorNode?.type === 'image' ? '图片' : anchorNode?.type === 'video' ? '视频' : '节点');
+
+            if (isBackward) {
               return (
                 <>
+                  <div className="flex items-center justify-between px-2 py-1 text-[10px] font-semibold text-accent">
+                    <span>接入上游输入源</span>
+                    <span className="text-[9px] font-normal text-ink-muted truncate max-w-[90px]">➔ {nodeTitle}</span>
+                  </div>
                   <MenuItem
-                    icon={<Video size={13} className="text-accent" />}
-                    label="生成运镜视频"
+                    icon={<StickyNote size={13} className="text-[#4ade80]" />}
+                    label="加灵感便签 / 提示词"
                     onClick={() => {
-                      void canvasStore.addNodeAndConnect(
+                      void canvasStore.addNodeAndConnectToTarget(
                         sessionId,
                         {
-                          type: 'video',
-                          x: dropConnectMenu.flowX,
+                          type: 'note',
+                          x: dropConnectMenu.flowX - 80,
                           y: dropConnectMenu.flowY,
-                          title: '视频生成',
-                          params: { prompt: '', duration: '5s', ratio: '16:9' },
+                          title: '提示词',
                         },
-                        dropConnectMenu.sourceNodeId,
-                        dropConnectMenu.sourceHandle,
-                        'start_frame',
-                      );
-                      setDropConnectMenu(null);
-                    }}
-                  />
-                  <MenuItem
-                    icon={<Film size={13} className="text-accent" />}
-                    label="+ 画面抽帧转换器"
-                    onClick={() => {
-                      void canvasStore.addNodeAndConnect(
-                        sessionId,
-                        {
-                          type: 'frameExtractor',
-                          x: dropConnectMenu.flowX,
-                          y: dropConnectMenu.flowY,
-                          title: '提取画面帧',
-                          params: { mode: 'end' },
-                        },
-                        dropConnectMenu.sourceNodeId,
-                        dropConnectMenu.sourceHandle,
-                        'video_in',
+                        dropConnectMenu.nodeId,
+                        dropConnectMenu.handleId,
+                        'prompt_out',
                       );
                       setDropConnectMenu(null);
                     }}
                   />
                   <MenuItem
                     icon={<Bot size={13} className="text-accent" />}
-                    label="+ 画面质检 Agent"
+                    label="加 Prompt / 质检 Agent"
                     onClick={() => {
-                      void canvasStore.addNodeAndConnect(
+                      void canvasStore.addNodeAndConnectToTarget(
                         sessionId,
                         {
                           type: 'agent',
-                          x: dropConnectMenu.flowX,
+                          x: dropConnectMenu.flowX - 80,
                           y: dropConnectMenu.flowY,
-                          title: '画面质检',
-                          params: {
-                            instruction: '请评估该图片，从画面构图、细节与质感给出点评，并提供优化后的 Prompt 建议。',
-                          },
+                          title: '提示词 Agent',
+                          params: { instruction: '请为画面生成极富细节与质感的生图 Prompt：' },
                         },
-                        dropConnectMenu.sourceNodeId,
-                        dropConnectMenu.sourceHandle,
+                        dropConnectMenu.nodeId,
+                        dropConnectMenu.handleId,
                       );
                       setDropConnectMenu(null);
                     }}
                   />
+                  <MenuItem
+                    icon={<ImageIcon size={13} className="text-[#818cf8]" />}
+                    label="加生图节点 (参考/前序图)"
+                    onClick={() => {
+                      void canvasStore.addNodeAndConnectToTarget(
+                        sessionId,
+                        {
+                          type: 'image',
+                          x: dropConnectMenu.flowX - 80,
+                          y: dropConnectMenu.flowY,
+                          title: '参考图',
+                        },
+                        dropConnectMenu.nodeId,
+                        dropConnectMenu.handleId,
+                      );
+                      setDropConnectMenu(null);
+                    }}
+                  />
+                  <MenuItem
+                    icon={<Video size={13} className="text-[#f43f5e]" />}
+                    label="加视频节点 (前序视频)"
+                    onClick={() => {
+                      void canvasStore.addNodeAndConnectToTarget(
+                        sessionId,
+                        {
+                          type: 'video',
+                          x: dropConnectMenu.flowX - 80,
+                          y: dropConnectMenu.flowY,
+                          title: '前序视频',
+                          params: { prompt: '', duration: '5s', ratio: '16:9' },
+                        },
+                        dropConnectMenu.nodeId,
+                        dropConnectMenu.handleId,
+                      );
+                      setDropConnectMenu(null);
+                    }}
+                  />
+                  <MenuItem
+                    icon={<Film size={13} className="text-accent" />}
+                    label="加画面抽帧器"
+                    onClick={() => {
+                      void canvasStore.addNodeAndConnectToTarget(
+                        sessionId,
+                        {
+                          type: 'frameExtractor',
+                          x: dropConnectMenu.flowX - 80,
+                          y: dropConnectMenu.flowY,
+                          title: '截取帧',
+                          params: { mode: 'end' },
+                        },
+                        dropConnectMenu.nodeId,
+                        dropConnectMenu.handleId,
+                      );
+                      setDropConnectMenu(null);
+                    }}
+                  />
+                </>
+              );
+            }
+
+            const targetPromptHandle = 'prompt';
+            const targetImageHandle = 'ref_1';
+            const targetVideoHandle = 'start_frame';
+
+            return (
+              <>
+                <div className="flex items-center justify-between px-2 py-1 text-[10px] font-semibold text-accent">
+                  <span>从此处延伸流水线</span>
+                  <span className="text-[9px] font-normal text-ink-muted truncate max-w-[90px]">由 {nodeTitle} 派生</span>
+                </div>
+
+                {anchorNode?.type === 'image' && (
                   <MenuItem
                     icon={<GitBranchPlus size={13} className="text-accent" />}
                     label="派生变体分支"
@@ -1485,234 +1716,123 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
                           type: 'image',
                           x: dropConnectMenu.flowX,
                           y: dropConnectMenu.flowY,
-                          title: `${src.title || '图片'} (变体)`,
-                          params: { ...(src.params as Record<string, unknown>) },
+                          title: `${anchorNode.title || '图片'} (变体)`,
+                          params: { ...(anchorNode.params as Record<string, unknown>) },
                         },
-                        dropConnectMenu.sourceNodeId,
-                        dropConnectMenu.sourceHandle,
+                        dropConnectMenu.nodeId,
+                        dropConnectMenu.handleId,
+                        targetImageHandle,
                       );
                       setDropConnectMenu(null);
                     }}
                   />
-                </>
-              );
-            }
-            if (src?.type === 'video') {
-              return (
-                <>
-                  <MenuItem
-                    icon={<Film size={13} className="text-accent" />}
-                    label="+ 截取尾帧/首帧 (抽帧器)"
-                    onClick={() => {
-                      void canvasStore.addNodeAndConnect(
-                        sessionId,
-                        {
-                          type: 'frameExtractor',
-                          x: dropConnectMenu.flowX,
-                          y: dropConnectMenu.flowY,
-                          title: '截取尾帧',
-                          params: { mode: 'end' },
-                        },
-                        dropConnectMenu.sourceNodeId,
-                        dropConnectMenu.sourceHandle,
-                        'video_in',
-                      );
-                      setDropConnectMenu(null);
-                    }}
-                  />
-                  <MenuItem
-                    icon={<Video size={13} className="text-accent" />}
-                    label="+ 延伸接续镜头 (Extend)"
-                    onClick={() => {
-                      void canvasStore.addNodeAndConnect(
-                        sessionId,
-                        {
-                          type: 'video',
-                          x: dropConnectMenu.flowX,
-                          y: dropConnectMenu.flowY,
-                          title: '接续分镜',
-                          params: { prompt: '', duration: '5s', ratio: '16:9' },
-                        },
-                        dropConnectMenu.sourceNodeId,
-                        dropConnectMenu.sourceHandle,
-                        'start_frame',
-                      );
-                      setDropConnectMenu(null);
-                    }}
-                  />
-                  <MenuItem
-                    icon={<Bot size={13} className="text-accent" />}
-                    label="+ 运镜画质质检 Agent"
-                    onClick={() => {
-                      void canvasStore.addNodeAndConnect(
-                        sessionId,
-                        {
-                          type: 'agent',
-                          x: dropConnectMenu.flowX,
-                          y: dropConnectMenu.flowY,
-                          title: '运镜画质质检',
-                          params: {
-                            instruction: '请全面质检本段视频的动态走势、画面畸变、角色连贯性与光影一致性。',
-                          },
-                        },
-                        dropConnectMenu.sourceNodeId,
-                        dropConnectMenu.sourceHandle,
-                      );
-                      setDropConnectMenu(null);
-                    }}
-                  />
-                  <MenuItem
-                    icon={<StickyNote size={13} className="text-accent" />}
-                    label="+ 分镜灵感便签"
-                    onClick={() => {
-                      void canvasStore.addNodeAndConnect(
-                        sessionId,
-                        {
-                          type: 'note',
-                          x: dropConnectMenu.flowX,
-                          y: dropConnectMenu.flowY,
-                          title: '分镜批注',
-                          params: { content: '镜头运镜节奏良好，下一镜建议推近景特写。' },
-                        },
-                        dropConnectMenu.sourceNodeId,
-                        dropConnectMenu.sourceHandle,
-                      );
-                      setDropConnectMenu(null);
-                    }}
-                  />
-                </>
-              );
-            }
-            if (src?.type === 'frameExtractor') {
-              return (
-                <>
-                  <MenuItem
-                    icon={<Video size={13} className="text-accent" />}
-                    label="+ 用此帧生成运镜视频"
-                    onClick={() => {
-                      void canvasStore.addNodeAndConnect(
-                        sessionId,
-                        {
-                          type: 'video',
-                          x: dropConnectMenu.flowX,
-                          y: dropConnectMenu.flowY,
-                          title: '下阶段运镜视频',
-                          params: { prompt: '', duration: '5s', ratio: '16:9' },
-                        },
-                        dropConnectMenu.sourceNodeId,
-                        'frame_out',
-                        'start_frame',
-                      );
-                      setDropConnectMenu(null);
-                    }}
-                  />
-                  <MenuItem
-                    icon={<ImageIcon size={13} className="text-accent" />}
-                    label="+ 衍生新概念图 (垫图)"
-                    onClick={() => {
-                      void canvasStore.addNodeAndConnect(
-                        sessionId,
-                        {
-                          type: 'image',
-                          x: dropConnectMenu.flowX,
-                          y: dropConnectMenu.flowY,
-                          title: '参考生图',
-                          params: { prompt: '' },
-                        },
-                        dropConnectMenu.sourceNodeId,
-                        'frame_out',
-                        'ref_1',
-                      );
-                      setDropConnectMenu(null);
-                    }}
-                  />
-                  <MenuItem
-                    icon={<Bot size={13} className="text-accent" />}
-                    label="+ 抽帧质量质检 Agent"
-                    onClick={() => {
-                      void canvasStore.addNodeAndConnect(
-                        sessionId,
-                        {
-                          type: 'agent',
-                          x: dropConnectMenu.flowX,
-                          y: dropConnectMenu.flowY,
-                          title: '抽帧质检',
-                          params: { instruction: '评估当前抽取帧画面的清晰度、构图与可延续性。' },
-                        },
-                        dropConnectMenu.sourceNodeId,
-                        'frame_out',
-                      );
-                      setDropConnectMenu(null);
-                    }}
-                  />
-                </>
-              );
-            }
-            if (src?.type === 'agent') {
-              return (
-                <>
-                  <MenuItem
-                    icon={<ImageIcon size={13} className="text-accent" />}
-                    label="+ 执行 Agent 建议生图"
-                    onClick={() => {
-                      void canvasStore.addNodeAndConnect(
-                        sessionId,
-                        {
-                          type: 'image',
-                          x: dropConnectMenu.flowX,
-                          y: dropConnectMenu.flowY,
-                          title: 'Agent 产出图',
-                          params: { prompt: '' },
-                        },
-                        dropConnectMenu.sourceNodeId,
-                        dropConnectMenu.sourceHandle,
-                      );
-                      setDropConnectMenu(null);
-                    }}
-                  />
-                  <MenuItem
-                    icon={<Video size={13} className="text-accent" />}
-                    label="+ 执行 Agent 建议生视频"
-                    onClick={() => {
-                      void canvasStore.addNodeAndConnect(
-                        sessionId,
-                        {
-                          type: 'video',
-                          x: dropConnectMenu.flowX,
-                          y: dropConnectMenu.flowY,
-                          title: 'Agent 建议视频',
-                          params: { prompt: '', duration: '5s', ratio: '16:9' },
-                        },
-                        dropConnectMenu.sourceNodeId,
-                        dropConnectMenu.sourceHandle,
-                        'start_frame',
-                      );
-                      setDropConnectMenu(null);
-                    }}
-                  />
-                </>
-              );
-            }
-            return (
-              <MenuItem
-                icon={<Bot size={13} className="text-accent" />}
-                label="+ 质检 Agent"
-                onClick={() => {
-                  void canvasStore.addNodeAndConnect(
-                    sessionId,
-                    {
-                      type: 'agent',
-                      x: dropConnectMenu.flowX,
-                      y: dropConnectMenu.flowY,
-                      title: '质检 Agent',
-                      params: { instruction: '请综合评估此输出，提出优化建议。' },
-                    },
-                    dropConnectMenu.sourceNodeId,
-                    dropConnectMenu.sourceHandle,
-                  );
-                  setDropConnectMenu(null);
-                }}
-              />
+                )}
+
+                <MenuItem
+                  icon={<ImageIcon size={13} className="text-[#818cf8]" />}
+                  label="加生图节点"
+                  onClick={() => {
+                    const tgtHandle =
+                      anchorNode?.type === 'note' || anchorNode?.type === 'agent'
+                        ? targetPromptHandle
+                        : targetImageHandle;
+                    void canvasStore.addNodeAndConnect(
+                      sessionId,
+                      {
+                        type: 'image',
+                        x: dropConnectMenu.flowX,
+                        y: dropConnectMenu.flowY,
+                        title: '生图',
+                      },
+                      dropConnectMenu.nodeId,
+                      dropConnectMenu.handleId,
+                      tgtHandle,
+                    );
+                    setDropConnectMenu(null);
+                  }}
+                />
+                <MenuItem
+                  icon={<Video size={13} className="text-[#f43f5e]" />}
+                  label="加运镜视频"
+                  onClick={() => {
+                    const tgtHandle =
+                      anchorNode?.type === 'note' || anchorNode?.type === 'agent'
+                        ? targetPromptHandle
+                        : targetVideoHandle;
+                    void canvasStore.addNodeAndConnect(
+                      sessionId,
+                      {
+                        type: 'video',
+                        x: dropConnectMenu.flowX,
+                        y: dropConnectMenu.flowY,
+                        title: '视频生成',
+                        params: { prompt: '', duration: '5s', ratio: '16:9' },
+                      },
+                      dropConnectMenu.nodeId,
+                      dropConnectMenu.handleId,
+                      tgtHandle,
+                    );
+                    setDropConnectMenu(null);
+                  }}
+                />
+                <MenuItem
+                  icon={<Bot size={13} className="text-accent" />}
+                  label="加 Agent 质检/分析"
+                  onClick={() => {
+                    void canvasStore.addNodeAndConnect(
+                      sessionId,
+                      {
+                        type: 'agent',
+                        x: dropConnectMenu.flowX,
+                        y: dropConnectMenu.flowY,
+                        title: '画面质检',
+                        params: { instruction: '请评估画面的细节、光影与质感，并给出优化后的 Prompt 建议：' },
+                      },
+                      dropConnectMenu.nodeId,
+                      dropConnectMenu.handleId,
+                    );
+                    setDropConnectMenu(null);
+                  }}
+                />
+                <MenuItem
+                  icon={<StickyNote size={13} className="text-[#4ade80]" />}
+                  label="加灵感便签"
+                  onClick={() => {
+                    void canvasStore.addNodeAndConnect(
+                      sessionId,
+                      {
+                        type: 'note',
+                        x: dropConnectMenu.flowX,
+                        y: dropConnectMenu.flowY,
+                        title: '分镜便签',
+                      },
+                      dropConnectMenu.nodeId,
+                      dropConnectMenu.handleId,
+                    );
+                    setDropConnectMenu(null);
+                  }}
+                />
+                <MenuItem
+                  icon={<Film size={13} className="text-accent" />}
+                  label="加画面抽帧转换器"
+                  onClick={() => {
+                    void canvasStore.addNodeAndConnect(
+                      sessionId,
+                      {
+                        type: 'frameExtractor',
+                        x: dropConnectMenu.flowX,
+                        y: dropConnectMenu.flowY,
+                        title: '画面抽帧',
+                        params: { mode: 'end' },
+                      },
+                      dropConnectMenu.nodeId,
+                      dropConnectMenu.handleId,
+                      'video_in',
+                    );
+                    setDropConnectMenu(null);
+                  }}
+                />
+              </>
             );
           })()}
         </div>
@@ -1929,7 +2049,7 @@ export default function CanvasPanel({ sessionId }: { sessionId: string }) {
     <div className="h-full w-full">
       <ErrorBoundary>
         <ReactFlowProvider>
-          <CanvasInner sessionId={sessionId} />
+          <CanvasInner key={sessionId} sessionId={sessionId} />
         </ReactFlowProvider>
       </ErrorBoundary>
     </div>

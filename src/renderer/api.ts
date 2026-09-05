@@ -67,6 +67,9 @@ async function readEnvelopeStream(res: Response, onEvent: StreamEventHandler): P
 }
 
 let originPromise: Promise<string> | null = null;
+/** Set once `originPromise` resolves — lets callers read the origin synchronously afterwards. */
+let resolvedOrigin: string | null = null;
+const originListeners = new Set<() => void>();
 
 function apiOrigin(): Promise<string> {
   if (!originPromise) {
@@ -75,8 +78,38 @@ function apiOrigin(): Promise<string> {
     } else {
       originPromise = Promise.resolve('http://127.0.0.1:47100');
     }
+    void originPromise.then((o) => {
+      resolvedOrigin = o;
+      for (const listener of originListeners) listener();
+    });
   }
   return originPromise;
+}
+
+/** Kicks off origin resolution if nothing has yet; safe/cheap to call from every render. */
+export function warmApiOrigin(): void {
+  void apiOrigin();
+}
+
+/** Subscribe to the api origin becoming available (fires once, after startup). For `useSyncExternalStore`. */
+export function subscribeApiOrigin(listener: () => void): () => void {
+  originListeners.add(listener);
+  return () => originListeners.delete(listener);
+}
+
+export function getResolvedApiOrigin(): string | null {
+  return resolvedOrigin;
+}
+
+/**
+ * Synchronous counterpart to `canvasAssetUrl`. Returns `null` only in the brief window before
+ * the api origin has resolved (once, at app startup) — after that it never needs to go async again.
+ * Prefer this in components that can be mounted/unmounted repeatedly (e.g. canvas nodes scrolling
+ * in and out of `onlyRenderVisibleElements`), where re-running an async effect on every remount
+ * would otherwise flash the node back to its "no asset yet" state each time.
+ */
+export function canvasAssetUrlSync(relPath: string): string | null {
+  return resolvedOrigin ? `${resolvedOrigin}/api/canvas/assets/${relPath}` : null;
 }
 
 async function api(path: string, init?: RequestInit): Promise<Response> {

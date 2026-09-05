@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, memo } from 'react';
 import { Sparkles, Check, X, Eye } from 'lucide-react';
 import * as canvasStore from '../../state/canvasStore';
 import { useCanvasStore } from '../../state/useCanvasStore';
@@ -8,7 +8,7 @@ export interface ProposalBarProps {
   onFocusProposals: (nodeIds: string[]) => void;
 }
 
-export default function ProposalBar({ sessionId, onFocusProposals }: ProposalBarProps) {
+function ProposalBar({ sessionId, onFocusProposals }: ProposalBarProps) {
   const proposalIds = useCanvasStore((s) => s.proposalsBySession[sessionId] ?? canvasStore.EMPTY_PROPOSALS);
   const count = proposalIds.length;
   const [focusIdx, setFocusIdx] = useState(0);
@@ -90,3 +90,5 @@ export default function ProposalBar({ sessionId, onFocusProposals }: ProposalBar
     </div>
   );
 }
+
+export default memo(ProposalBar);

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, memo } from 'react';
 import { Panel } from '@xyflow/react';
 import { ImagePlus, Link2, Pin } from 'lucide-react';
 import { ANCHOR_ROLES, type CanvasAnchorParams } from '../../../shared/canvas';
@@ -35,7 +35,7 @@ function Thumb({ rel }: { rel: string | undefined }) {
  * the canvas, takes dropped images to create new ones, and batch-attaches an
  * anchor to the current selection.
  */
-export default function AssetShelf({
+function AssetShelf({
   sessionId,
   selectedTargetIds,
   flash,
@@ -184,3 +184,5 @@ export default function AssetShelf({
     </Panel>
   );
 }
+
+export default memo(AssetShelf);

@@ -24,7 +24,13 @@ export function nodeReadinessIssues(
 
   if (node.type === 'image' || node.type === 'video') {
     const prompt = typeof params.prompt === 'string' ? params.prompt.trim() : '';
-    if (!prompt) issues.push('提示词为空');
+    const hasUpstreamPrompt = edges.some((e) => {
+      if (e.targetId !== node.id) return false;
+      if (e.targetHandle === 'prompt') return true;
+      const src = nodesById.get(e.sourceId);
+      return src?.type === 'note' || src?.type === 'agent';
+    });
+    if (!prompt && !hasUpstreamPrompt) issues.push('提示词为空');
     for (const ref of canonicalRefs(prompt)) {
       const target = nodesById.get(ref.id);
       if (!target) issues.push(`引用「${ref.label}」的节点已被删除`);

@@ -1,11 +1,12 @@
 import { useEffect, useState, memo, useRef } from 'react';
-import { Handle, NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
+import { NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
 import { Bot, Copy, StickyNote, Trash2 } from 'lucide-react';
 import type { CanvasNoteParams } from '../../../shared/canvas';
 import * as canvasStore from '../../state/canvasStore';
 import * as chatStore from '../../state/chatStore';
 import { cn } from '../../lib/cn';
 import { NodeTitle, type CanvasNodeData } from './ImageNode';
+import NodeHandle from './NodeHandle';
 import AgentMark from './AgentMark';
 
 const NOTE_COLORS: Array<{ id: NonNullable<CanvasNoteParams['color']>; bg: string; border: string; dot: string }> = [
@@ -55,7 +56,7 @@ function NoteNode({ data, selected }: NodeProps & { data: CanvasNodeData }) {
   return (
     <div
       className={cn(
-        'group relative flex flex-col rounded-2xl border p-3 shadow-xl backdrop-blur-md transition-all duration-200',
+        'group relative flex flex-col rounded-2xl border p-3 shadow-xl backdrop-blur-md transition-[border-color,box-shadow] duration-150',
         currentColorConfig.bg,
         currentColorConfig.border,
         selected ? 'ring-2 ring-accent ring-offset-2 ring-offset-paper' : '',
@@ -159,15 +160,27 @@ function NoteNode({ data, selected }: NodeProps & { data: CanvasNodeData }) {
       </div>
 
       {/* Output Handle */}
-      <Handle
+      <NodeHandle
         type="source"
         position={Position.Right}
         id="prompt_out"
-        className="!size-2.5 !bg-accent !border-2 !border-paper-raised transition-transform hover:!scale-150"
-        title="拖出连线注入下游生图/视频卡片"
+        kind="prompt"
+        label="提示词输出"
+        expanded={Boolean(selected)}
       />
     </div>
   );
 }
 
-export default memo(NoteNode);
+export default memo(NoteNode, (prev, next) => {
+  const prevData = prev.data as CanvasNodeData;
+  const nextData = next.data as CanvasNodeData;
+  return (
+    prev.selected === next.selected &&
+    prevData.sessionId === nextData.sessionId &&
+    prevData.highlighted === nextData.highlighted &&
+    prevData.agentMark === nextData.agentMark &&
+    prevData.isProposal === nextData.isProposal &&
+    prevData.node === nextData.node
+  );
+});

@@ -738,6 +738,19 @@ export function moveNodeLive(sessionId: string, nodeId: string, x: number, y: nu
   setNodes(sessionId, nodes.map((n) => (n.id === nodeId ? { ...n, x, y } : n)));
 }
 
+/** Batch live positions during drag for high-performance atomic update. */
+export function moveNodesBatchLive(sessionId: string, moves: Map<string, { x: number; y: number }>): void {
+  if (moves.size === 0) return;
+  const nodes = state.nodesBySession[sessionId] ?? [];
+  setNodes(
+    sessionId,
+    nodes.map((n) => {
+      const pos = moves.get(n.id);
+      return pos ? { ...n, x: pos.x, y: pos.y } : n;
+    }),
+  );
+}
+
 /**
  * Records ONE history entry for a multi-node drag gesture (e.g. dragging a
  * group container carries its members along). Positions are already live in
@@ -1076,6 +1089,35 @@ export async function addNodeAndConnect(
       const recreated = await _addNode(sessionId, spec);
       if (recreated) {
         await _addEdge(sessionId, sourceId, recreated, sourceHandle, targetHandle).catch((): null => null);
+      }
+    },
+  });
+  return newNodeId;
+}
+
+/**
+ * Creates a new upstream node and connects it TO an existing target node.
+ * Used when dragging backwards from an input handle.
+ */
+export async function addNodeAndConnectToTarget(
+  sessionId: string,
+  spec: { type: CanvasNodeType; x: number; y: number; title?: string; params?: CanvasNodeParams },
+  targetId: string,
+  targetHandle?: string | null,
+  sourceHandle?: string | null,
+): Promise<string | null> {
+  const newNodeId = await _addNode(sessionId, spec);
+  if (!newNodeId) return null;
+  const edgeId = await _addEdge(sessionId, newNodeId, targetId, sourceHandle, targetHandle);
+  record(sessionId, {
+    undo: async () => {
+      if (edgeId) await _deleteEdge(sessionId, edgeId);
+      await _deleteNode(sessionId, newNodeId);
+    },
+    redo: async () => {
+      const recreated = await _addNode(sessionId, spec);
+      if (recreated) {
+        await _addEdge(sessionId, recreated, targetId, sourceHandle, targetHandle).catch((): null => null);
       }
     },
   });

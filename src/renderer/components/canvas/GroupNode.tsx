@@ -84,7 +84,7 @@ function GroupNode({ id, data, selected }: NodeProps) {
 
   return (
     <div
-      className="group relative flex h-full w-full flex-col rounded-2xl border transition-all"
+      className="group relative flex h-full w-full flex-col rounded-2xl border transition-[border-color,box-shadow] duration-150"
       style={{
         borderColor: `${currentColor}66`,
         background: `${currentColor}0a`,
@@ -207,4 +207,17 @@ function GroupNode({ id, data, selected }: NodeProps) {
   );
 }
 
-export default memo(GroupNode);
+export default memo(GroupNode, (prev, next) => {
+  const prevData = prev.data as CanvasNodeData;
+  const nextData = next.data as CanvasNodeData;
+  return (
+    prev.selected === next.selected &&
+    prev.width === next.width &&
+    prev.height === next.height &&
+    prevData.sessionId === nextData.sessionId &&
+    prevData.highlighted === nextData.highlighted &&
+    prevData.agentMark === nextData.agentMark &&
+    prevData.isProposal === nextData.isProposal &&
+    prevData.node === nextData.node
+  );
+});
