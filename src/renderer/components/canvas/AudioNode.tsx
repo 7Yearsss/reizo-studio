@@ -10,7 +10,6 @@ import {
   VolumeX,
   Repeat,
   Upload,
-  SlidersHorizontal,
   Sparkles,
   Loader2,
   Music,
@@ -19,10 +18,11 @@ import type { CanvasAudioParams } from '../../../shared/canvas';
 import * as canvasStore from '../../state/canvasStore';
 import * as chatStore from '../../state/chatStore';
 import { cn } from '../../lib/cn';
+import FloatingNodeHeader from './FloatingNodeHeader';
 import { NodeTitle, type CanvasNodeData } from './ImageNode';
 import MentionTextArea from './MentionTextArea';
-import NodeActionBar, { useHoverIntent, type NodeAction } from './NodeActionBar';
-import NodeHandle from './NodeHandle';
+import { useHoverIntent } from './NodeActionBar';
+import MagneticHandle from './MagneticHandle';
 import AgentMark from './AgentMark';
 import MissingInputWarning from './MissingInputWarning';
 import { useAssetUrl } from './useAssetUrl';
@@ -79,7 +79,7 @@ function AudioNode({ id, data, selected }: NodeProps) {
   const candidates = useMemo(() => {
     if (!expanded) return [];
     const snapshot = canvasStore.getSnapshot().nodesBySession[sessionId] ?? [];
-    return snapshot.filter((n) => n.id !== node.id && (n.output?.assets?.length ?? 0) > 0);
+    return snapshot.filter((n) => n.id !== node.id && n.type !== 'anchor');
   }, [expanded, sessionId, node.id]);
 
   useEffect(() => {
@@ -189,37 +189,6 @@ function AudioNode({ id, data, selected }: NodeProps) {
         />
       ) : null}
 
-      <NodeActionBar
-        visible={selected || hovered}
-        actions={[
-          ...((hasAudio
-            ? [
-                {
-                  id: 'save',
-                  icon: <FolderPlus size={11} className="text-accent" />,
-                  label: '存为产物',
-                  title: '将当前音频存入作品库',
-                  onClick: () => void canvasStore.saveAsset(sessionId, node.id, assetIdx),
-                },
-              ]
-            : []) as NodeAction[]),
-          {
-            id: 'qa',
-            icon: <Sparkles size={11} className="text-accent" />,
-            label: 'AI 优化提示词',
-            title: '让 Agent 协助设计音频音效或配乐 Prompt',
-            onClick: () => {
-              void chatStore.sendMessage(
-                sessionId,
-                `请为画布上的音频节点「${node.title || node.id}」设计一段专业的音效/配乐 Prompt：\n当前提示词为：“${prompt}”。`,
-                [],
-                {},
-              );
-            },
-          },
-        ]}
-      />
-
       <NodeResizer
         minWidth={280}
         minHeight={170}
@@ -236,59 +205,54 @@ function AudioNode({ id, data, selected }: NodeProps) {
         }}
       />
 
-      {/* Ports */}
-      <NodeHandle
+      {/* TapNow magnetic handles with elastic follow and click-to-create */}
+      <MagneticHandle
         type="target"
         position={Position.Left}
         id="prompt"
+        nodeId={node.id}
         kind="prompt"
-        label="提示词 / 旁白"
-        expanded={expanded}
+        label="添加上下文"
         top="50%"
       />
-      <NodeHandle
+      <MagneticHandle
         type="source"
         position={Position.Right}
         id="audio_out"
+        nodeId={node.id}
         kind="audio"
-        label="音频输出"
-        expanded={expanded}
+        label="引用该节点生成"
         top="50%"
       />
 
-      {/* Header */}
-      <div className="mb-1.5 flex items-center justify-between gap-1.5">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <Volume2 size={13} className="text-accent shrink-0" />
-          <NodeTitle sessionId={sessionId} nodeId={node.id} title={node.title} fallback="音频播放器" />
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          {!running && readiness.length > 0 ? <MissingInputWarning messages={readiness} /> : null}
-          <span
-            className={cn(
-              'rounded-full px-1.5 py-0.5 text-[9px]',
-              hasAudio
-                ? isPlaying
-                  ? 'bg-accent/15 text-accent font-medium animate-pulse'
-                  : 'bg-paper-inset text-ink-muted'
-                : 'bg-paper-inset text-ink-muted/70',
-            )}
-          >
-            {hasAudio ? (duration > 0 ? formatTime(duration) : '就绪') : '无音轨'}
-          </span>
-          <button
-            type="button"
-            onClick={() => setShowConfig((v) => !v)}
-            className={cn(
-              'nodrag rounded p-1 text-ink-muted hover:bg-paper-inset hover:text-ink transition-colors',
-              showConfig && 'bg-accent/15 text-accent',
-            )}
-            title={showConfig ? '收起配置 (播放器视图)' : '展开提示词与音频配置'}
-          >
-            <SlidersHorizontal size={11} />
-          </button>
-        </div>
-      </div>
+      {/* Floating anti-zoom header outside the card boundary (TapNow design) */}
+      <FloatingNodeHeader
+        sessionId={sessionId}
+        nodeId={node.id}
+        title={node.title}
+        fallback="音频播放器"
+        icon={<Volume2 size={13} className="text-amber-400 shrink-0" />}
+        selected={selected}
+        hovered={hovered}
+        running={running}
+        status={
+          <>
+            {!running && readiness.length > 0 ? <MissingInputWarning messages={readiness} /> : null}
+            {hasAudio ? (
+              <span
+                className={cn(
+                  'rounded-full px-1.5 py-0.5 text-[9px]',
+                  isPlaying
+                    ? 'bg-accent/15 text-accent font-medium animate-pulse'
+                    : 'bg-paper-inset text-ink-muted',
+                )}
+              >
+                {isPlaying ? '播放中' : duration > 0 ? formatTime(duration) : '就绪'}
+              </span>
+            ) : null}
+          </>
+        }
+      />
 
       {/* ComfyUI / Runway Style Mini Audio Player */}
       {hasAudio && !showConfig ? (
@@ -431,7 +395,6 @@ function AudioNode({ id, data, selected }: NodeProps) {
       {/* Empty State / Dropzone (when no audio yet and config is closed) */}
       {!hasAudio && !showConfig ? (
         <div
-          onClick={() => fileInputRef.current?.click()}
           onDragOver={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -440,12 +403,12 @@ function AudioNode({ id, data, selected }: NodeProps) {
           onDragLeave={() => setIsDraggingFile(false)}
           onDrop={handleDrop}
           className={cn(
-            'group/placeholder nodrag relative flex min-h-0 flex-1 flex-col items-center justify-center rounded-lg border border-dashed p-4 text-center cursor-pointer transition-all select-none',
+            'group/placeholder relative flex min-h-0 flex-1 flex-col items-center justify-center rounded-lg border border-dashed p-4 text-center transition-all select-none',
             isDraggingFile
               ? 'border-accent bg-accent/10 scale-[0.99]'
               : 'border-line hover:border-accent/60 bg-black/20 hover:bg-black/30',
           )}
-          title="点击上传音频文件或直接拖入 MP3, WAV, M4A"
+          title="可拖拽移动节点，支持拖入音频文件或配置提示词"
         >
           <input
             ref={fileInputRef}
@@ -458,21 +421,36 @@ function AudioNode({ id, data, selected }: NodeProps) {
               e.target.value = '';
             }}
           />
-          <div className="rounded-full bg-paper-inset/70 p-3 mb-2 text-ink-muted group-hover/placeholder:text-accent group-hover/placeholder:bg-accent/15 group-hover/placeholder:scale-110 transition-all shadow-xs">
+          <div className="rounded-full bg-paper-inset/70 p-3 mb-2 text-ink-muted group-hover/placeholder:text-accent group-hover/placeholder:bg-accent/15 group-hover/placeholder:scale-110 transition-all shadow-xs pointer-events-none">
             <Volume2 size={22} />
           </div>
-          <span className="text-xs font-medium text-ink">点击或拖入音频文件</span>
-          <p className="mt-1 text-[10px] text-ink-muted/80">支持 MP3, WAV, M4A, OGG 音乐与音效</p>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowConfig(true);
-            }}
-            className="nodrag mt-3 rounded-md bg-paper-raised border border-line px-2.5 py-1 text-[10px] text-ink-muted hover:text-ink hover:border-accent transition-colors"
-          >
-            展开提示词配置 ⚙️
-          </button>
+          <span className="text-xs font-medium text-ink pointer-events-none">待配置音频节点</span>
+          <p className="mt-1 text-[10px] text-ink-muted/80 pointer-events-none">支持 MP3, WAV, M4A, OGG 音乐与音效</p>
+          <div className="mt-3 flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowConfig(true);
+                canvasStore.setSelection(sessionId, [node.id]);
+              }}
+              className="nodrag rounded-md bg-paper-raised border border-line px-2.5 py-1 text-[10px] text-ink-muted hover:text-ink hover:border-accent transition-colors"
+            >
+              配置提示词 ⚙️
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                fileInputRef.current?.click();
+              }}
+              className="nodrag rounded-md bg-paper-raised border border-line px-2.5 py-1 text-[10px] text-ink-muted hover:text-ink hover:border-accent transition-colors flex items-center gap-1"
+              title="上传本地音频文件"
+            >
+              <Upload size={10} />
+              上传音频
+            </button>
+          </div>
         </div>
       ) : null}
 

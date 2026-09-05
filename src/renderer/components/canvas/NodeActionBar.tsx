@@ -1,4 +1,5 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useStore } from '@xyflow/react';
 import { cn } from '../../lib/cn';
 
 /**
@@ -25,15 +26,37 @@ export interface NodeAction {
  * `visible` is driven by `selected || hovered` (see {@link useHoverIntent}).
  * It stays mounted and fades so the hover→bar cursor trip doesn't unmount it
  * mid-move; `pointer-events` are dropped while hidden.
+ *
+ * Applies inverse zoom compensation (`scale(1 / zoom)`) matching FloatingNodeHeader,
+ * stacked cleanly 26px above the floating title header.
  */
-export default function NodeActionBar({ visible, actions }: { visible: boolean; actions: NodeAction[] }) {
+export default function NodeActionBar({
+  visible,
+  actions,
+  className,
+  style,
+}: {
+  visible: boolean;
+  actions: NodeAction[];
+  className?: string;
+  style?: CSSProperties;
+}) {
+  const zoom = useStore((s) => s.transform[2]) || 1;
+  const scale = Math.min(8, Math.max(1, 1 / zoom));
+
   if (actions.length === 0) return null;
   return (
     <div
       className={cn(
-        'node-action-bar nodrag absolute -top-8 left-0 z-20 flex items-center gap-1 rounded-lg border border-line bg-paper-raised/95 px-1 py-0.5 shadow-md backdrop-blur-sm',
+        'node-action-bar nodrag absolute bottom-[calc(100%+6px)] left-0 z-20 flex items-center gap-1 rounded-lg border border-line bg-paper-raised/95 px-1 py-0.5 shadow-md backdrop-blur-sm whitespace-nowrap transition-opacity',
         visible ? 'opacity-100' : 'pointer-events-none opacity-0',
+        className,
       )}
+      style={{
+        transform: `scale(${scale}) translateY(-26px)`,
+        transformOrigin: 'bottom left',
+        ...style,
+      }}
       onClick={(e) => e.stopPropagation()}
     >
       {actions.map((action, i) => (

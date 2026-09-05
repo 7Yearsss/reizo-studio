@@ -71,6 +71,8 @@ export function createCanvasTools(options: {
         title: z.string().optional(),
         x: z.number().optional(),
         y: z.number().optional(),
+        asProposal: z.boolean().optional().describe('When true, marks the node as a Ghost Proposal awaiting user review in ProposalBar.'),
+        operationId: z.string().optional().describe('Idempotent operation ID for tracking and batched undo.'),
       }),
       execute: async (input) => {
         const canvas = canvasStore.ensureCanvas(sessionId);
@@ -94,8 +96,22 @@ export function createCanvasTools(options: {
           title: input.title ?? '',
           params,
         });
-        getCanvasChannel(canvas.id).broadcast(rev, { type: 'node_added', node });
-        return { id: node.id, canvasId: canvas.id, type: node.type };
+        const channel = getCanvasChannel(canvas.id);
+        channel.broadcast(rev, { type: 'node_added', node, operationId: input.operationId });
+        if (input.asProposal) {
+          channel.broadcast(rev, {
+            type: 'proposal_created',
+            nodeIds: [node.id],
+            operationId: input.operationId,
+          });
+        }
+        return {
+          id: node.id,
+          canvasId: canvas.id,
+          type: node.type,
+          asProposal: Boolean(input.asProposal),
+          operationId: input.operationId,
+        };
       },
     }),
 
@@ -129,6 +145,8 @@ export function createCanvasTools(options: {
           .describe(
             'When true, every scene after the first gets an inline @[镜头1关键帧](canvas:<id>) reference appended to its image and video prompts so the character / style stays consistent across shots.',
           ),
+        asProposal: z.boolean().default(false).describe('When true, marks all created nodes as Ghost Proposals awaiting user approval in ProposalBar.'),
+        operationId: z.string().optional().describe('Idempotent operation ID for tracking and batched undo.'),
       }),
       execute: async (input) => {
         const canvas = canvasStore.ensureCanvas(sessionId);
@@ -236,12 +254,23 @@ export function createCanvasTools(options: {
           void runImageNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node: imageNodes[0] });
         }
 
+        if (input.asProposal) {
+          const allCreated = [noteNode.id, ...createdSceneNodeIds];
+          channel.broadcast(rNote, {
+            type: 'proposal_created',
+            nodeIds: allCreated,
+            operationId: input.operationId,
+          });
+        }
+
         return {
           ok: true,
           storyTitle: input.storyTitle,
           totalScenes: input.scenes.length,
           noteId: noteNode.id,
           createdNodeIds: createdSceneNodeIds,
+          asProposal: Boolean(input.asProposal),
+          operationId: input.operationId,
           summary: `已在画布上生成全套分镜编排流水线（包含 1 个剧本大纲卡、${input.scenes.length} 个关键帧图片卡、${input.scenes.length} 个运镜视频卡，并已完成全流水线自动连线）。`,
         };
       },
@@ -372,8 +401,9 @@ export function createCanvasTools(options: {
           })
           .optional()
           .describe('Video node only. Camera motion by axis; negative = left/down/out/ccw, positive = right/up/in/cw.'),
+        operationId: z.string().optional().describe('Idempotent operation ID.'),
       }),
-      execute: async ({ id, prompt, size, instruction, title, camera }) => {
+      execute: async ({ id, prompt, size, instruction, title, camera, operationId }) => {
         const canvas = canvasStore.ensureCanvas(sessionId);
         const node = canvasStore.getNode(canvas.id, id);
         if (!node) return { error: `No canvas node "${id}"` };
@@ -388,24 +418,41 @@ export function createCanvasTools(options: {
         });
         if (!res) return { error: `No canvas node "${id}"` };
         const channel = getCanvasChannel(canvas.id);
-        channel.broadcast(res.rev, { type: 'node_updated', node: res.node });
+        channel.broadcast(res.rev, { type: 'node_updated', node: res.node, operationId });
         broadcastDownstreamDirty(canvasStore, canvas.id, id, res.rev);
-        return { id, params: res.node.params };
+        return { id, params: res.node.params, operationId };
       },
     }),
 
     connect_nodes: tool({
-      description: 'Wire one canvas node\'s output into another node\'s input (source -> target). An image node with an image input does image-to-image.',
-      inputSchema: z.object({ source: z.string(), target: z.string() }),
-      execute: async ({ source, target }) => {
+      description:
+        'Wire one canvas node\'s output into another node\'s input (source -> target). Enforces port compatibility (e.g. image -> video start_frame, text -> prompt).',
+      inputSchema: z.object({
+        source: z.string(),
+        target: z.string(),
+        sourceHandle: z.string().optional().describe('Handle on source node (e.g. "output").'),
+        targetHandle: z.string().optional().describe('Handle on target node (e.g. "prompt", "start_frame", "reference", "ref_1").'),
+        operationId: z.string().optional().describe('Idempotent operation ID.'),
+      }),
+      execute: async ({ source, target, sourceHandle, targetHandle, operationId }) => {
         const canvas = canvasStore.ensureCanvas(sessionId);
-        const res = canvasStore.addEdge(canvas.id, { sourceId: source, targetId: target });
+        const res = canvasStore.addEdge(canvas.id, {
+          sourceId: source,
+          targetId: target,
+          sourceHandle: sourceHandle ?? null,
+          targetHandle: targetHandle ?? null,
+        });
+        if (res.error === 'incompatible') {
+          return {
+            error: `Port incompatible: cannot connect "${source}" (${sourceHandle ?? 'default'}) to "${target}" (${targetHandle ?? 'default'})`,
+          };
+        }
         if (res.error === 'cycle') return { error: 'That connection would create a cycle' };
         if (res.error || !res.edge || res.rev === undefined) return { error: 'source or target node not found' };
         const channel = getCanvasChannel(canvas.id);
-        channel.broadcast(res.rev, { type: 'edge_added', edge: res.edge });
+        channel.broadcast(res.rev, { type: 'edge_added', edge: res.edge, operationId });
         broadcastDownstreamDirty(canvasStore, canvas.id, source, res.rev);
-        return { edgeId: res.edge.id };
+        return { edgeId: res.edge.id, operationId };
       },
     }),
 
@@ -415,8 +462,9 @@ export function createCanvasTools(options: {
       inputSchema: z.object({
         anchorId: z.string(),
         targetIds: z.array(z.string()).min(1),
+        operationId: z.string().optional().describe('Idempotent operation ID.'),
       }),
-      execute: async ({ anchorId, targetIds }) => {
+      execute: async ({ anchorId, targetIds, operationId }) => {
         const canvas = canvasStore.ensureCanvas(sessionId);
         const anchor = canvasStore.getNode(canvas.id, anchorId);
         if (!anchor || anchor.type !== 'anchor') return { error: `No anchor node "${anchorId}"` };
@@ -442,23 +490,26 @@ export function createCanvasTools(options: {
             targetHandle: `ref_${slot}`,
           });
           if (res.error || !res.edge || res.rev === undefined) continue;
-          channel.broadcast(res.rev, { type: 'edge_added', edge: res.edge });
+          channel.broadcast(res.rev, { type: 'edge_added', edge: res.edge, operationId });
           broadcastDownstreamDirty(canvasStore, canvas.id, targetId, res.rev);
           attached += 1;
         }
-        return { attached };
+        return { attached, operationId };
       },
     }),
 
     delete_node: tool({
       description: 'Remove a canvas node and any edges touching it.',
-      inputSchema: z.object({ id: z.string() }),
-      execute: async ({ id }) => {
+      inputSchema: z.object({
+        id: z.string(),
+        operationId: z.string().optional().describe('Idempotent operation ID.'),
+      }),
+      execute: async ({ id, operationId }) => {
         const canvas = canvasStore.ensureCanvas(sessionId);
         const res = canvasStore.deleteNode(canvas.id, id);
         if (!res) return { error: `No canvas node "${id}"` };
-        getCanvasChannel(canvas.id).broadcast(res.rev, { type: 'node_deleted', id });
-        return { ok: true };
+        getCanvasChannel(canvas.id).broadcast(res.rev, { type: 'node_deleted', id, operationId });
+        return { ok: true, operationId };
       },
     }),
   };

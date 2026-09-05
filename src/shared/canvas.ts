@@ -28,6 +28,7 @@ export interface CanvasImageParams {
   prompt: string;
   size: '1024x1024' | '1024x1536' | '1536x1024';
   model?: string;
+  count?: 1 | 2 | 4;
 }
 
 export interface CanvasAgentParams {
@@ -146,6 +147,15 @@ export interface CanvasNode {
    * output has changed since, so its result is out of date.
    */
   dirty?: boolean;
+  /** Proposal correlation ID when node is proposed by agent. */
+  proposalId?: string | null;
+  /** Upstream context references. */
+  sourceRefs?: Array<{
+    nodeId: string;
+    handleId?: string;
+    type?: string;
+    title?: string;
+  }>;
 }
 
 export interface CanvasNodeOutput {
@@ -154,6 +164,14 @@ export interface CanvasNodeOutput {
   text?: string;
   progress?: number;
   error?: string;
+  /** For multi-variation results (1x/2x/4x), tracking item list and active selection. */
+  resultSet?: Array<{
+    asset: string;
+    createdAt?: string;
+    seed?: number;
+    prompt?: string;
+  }>;
+  activeAssetIndex?: number;
 }
 
 export interface CanvasEdge {

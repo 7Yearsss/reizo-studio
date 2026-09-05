@@ -1,23 +1,22 @@
 import { useEffect, useState, memo, useRef } from 'react';
 import { NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
-import { Bot, Check, Copy, GitBranchPlus, Sparkles, Type } from 'lucide-react';
+import { AlignLeft, Bot, Type } from 'lucide-react';
 import type { CanvasNoteParams } from '../../../shared/canvas';
 import * as canvasStore from '../../state/canvasStore';
 import * as chatStore from '../../state/chatStore';
 import { cn } from '../../lib/cn';
-import { NodeTitle, type CanvasNodeData } from './ImageNode';
-import NodeActionBar, { useHoverIntent } from './NodeActionBar';
-import NodeHandle from './NodeHandle';
+import FloatingNodeHeader from './FloatingNodeHeader';
+import type { CanvasNodeData } from './ImageNode';
+import { useHoverIntent } from './NodeActionBar';
+import MagneticHandle from './MagneticHandle';
 import AgentMark from './AgentMark';
 
 function NoteNode({ id, data, selected }: NodeProps) {
   const { sessionId, node, highlighted, agentMark, isProposal } = data as CanvasNodeData;
   const params = (node.params as CanvasNoteParams) || { content: '' };
   const [content, setContent] = useState(params.content || '');
-  const [copied, setCopied] = useState(false);
   const resizeStart = useRef<{ w: number; h: number } | null>(null);
   const { hovered, hoverProps } = useHoverIntent();
-  const expanded = selected || hovered;
 
   useEffect(() => {
     setContent(params.content || '');
@@ -29,14 +28,6 @@ function NoteNode({ id, data, selected }: NodeProps) {
       ...params,
       content,
     });
-  };
-
-  const copyText = (e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    if (!content) return;
-    void navigator.clipboard.writeText(content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
   };
 
   const askAgentToExpand = () => {
@@ -60,33 +51,6 @@ function NoteNode({ id, data, selected }: NodeProps) {
     >
       <AgentMark show={agentMark} />
 
-      <NodeActionBar
-        visible={selected || hovered}
-        actions={[
-          {
-            id: 'expand',
-            icon: <Sparkles size={11} className="text-accent" />,
-            label: 'AI 扩写',
-            title: '让 Agent 细化并丰富这段提示词或剧本大纲',
-            onClick: askAgentToExpand,
-          },
-          {
-            id: 'copy',
-            icon: copied ? <Check size={11} className="text-success" /> : <Copy size={11} className="text-accent" />,
-            label: copied ? '已复制' : '复制文本',
-            title: '复制全部文本到剪贴板',
-            onClick: copyText,
-          },
-          {
-            id: 'fork',
-            icon: <GitBranchPlus size={11} className="text-accent" />,
-            label: '派生变体',
-            title: '在右侧派生一个副本分支',
-            onClick: () => void canvasStore.forkNode(sessionId, node.id),
-          },
-        ]}
-      />
-
       <NodeResizer
         minWidth={240}
         minHeight={160}
@@ -103,45 +67,41 @@ function NoteNode({ id, data, selected }: NodeProps) {
         }}
       />
 
-      <NodeHandle
+      {/* TapNow magnetic handles with elastic follow and click-to-create */}
+      <MagneticHandle
         type="target"
         position={Position.Left}
         id="text_in"
+        nodeId={node.id}
         kind="prompt"
-        label="文本输入"
-        expanded={expanded}
+        label="添加上下文"
         top="50%"
       />
-      <NodeHandle
+      <MagneticHandle
         type="source"
         position={Position.Right}
         id="prompt_out"
+        nodeId={node.id}
         kind="prompt"
-        label="文本输出"
-        expanded={expanded}
+        label="引用该节点生成"
         top="50%"
       />
 
-      {/* Header */}
-      <div className="mb-1.5 flex items-center justify-between gap-1.5">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <Type size={13} className="text-accent shrink-0" />
-          <NodeTitle sessionId={sessionId} nodeId={node.id} title={node.title} fallback="文本 / 提示词" />
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <span className="rounded-full bg-paper-inset px-1.5 py-0.5 text-[9px] text-ink-muted select-none">
+      {/* Floating anti-zoom header outside the card boundary (TapNow design) */}
+      <FloatingNodeHeader
+        sessionId={sessionId}
+        nodeId={node.id}
+        title={node.title}
+        fallback="文本"
+        icon={<Type size={13} className="text-emerald-400 shrink-0" />}
+        selected={selected}
+        hovered={hovered}
+        badge={
+          <span className="rounded-full bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 text-[9px] text-emerald-400/90 select-none">
             {content.length} 字
           </span>
-          <button
-            type="button"
-            onClick={copyText}
-            className="nodrag rounded p-1 text-ink-muted hover:bg-paper-inset hover:text-ink transition-colors"
-            title="复制文本"
-          >
-            {copied ? <Check size={11} className="text-success" /> : <Copy size={11} />}
-          </button>
-        </div>
-      </div>
+        }
+      />
 
       {/* Body textarea - large prominent text area */}
       <div className="relative flex-1 min-h-0 flex flex-col">
