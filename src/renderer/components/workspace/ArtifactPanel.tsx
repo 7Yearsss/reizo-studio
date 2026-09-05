@@ -37,6 +37,7 @@ const KIND_LABELS: Record<ArtifactKind, string> = {
   video: '视频',
   audio: '音频',
   sketch: '手绘',
+  sheet: '表格',
 };
 
 const SOURCE_LABELS: Record<string, string> = {

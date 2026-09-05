@@ -1,28 +1,23 @@
 import { useEffect, useState, memo, useRef } from 'react';
 import { NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
-import { Bot, Copy, StickyNote, Trash2 } from 'lucide-react';
+import { Bot, Check, Copy, GitBranchPlus, Sparkles, Type } from 'lucide-react';
 import type { CanvasNoteParams } from '../../../shared/canvas';
 import * as canvasStore from '../../state/canvasStore';
 import * as chatStore from '../../state/chatStore';
 import { cn } from '../../lib/cn';
 import { NodeTitle, type CanvasNodeData } from './ImageNode';
+import NodeActionBar, { useHoverIntent } from './NodeActionBar';
 import NodeHandle from './NodeHandle';
 import AgentMark from './AgentMark';
 
-const NOTE_COLORS: Array<{ id: NonNullable<CanvasNoteParams['color']>; bg: string; border: string; dot: string }> = [
-  { id: 'amber', bg: 'bg-[#fef9c3]/85 dark:bg-[#713f12]/20', border: 'border-[#fde047] dark:border-[#854d0e]/60', dot: 'bg-amber-400' },
-  { id: 'slate', bg: 'bg-paper-raised/95', border: 'border-line', dot: 'bg-zinc-400' },
-  { id: 'rose', bg: 'bg-[#ffe4e6]/85 dark:bg-[#881337]/20', border: 'border-[#fecdd3] dark:border-[#9f1239]/60', dot: 'bg-rose-400' },
-  { id: 'emerald', bg: 'bg-[#d1fae5]/85 dark:bg-[#064e3b]/20', border: 'border-[#a7f3d0] dark:border-[#065f46]/60', dot: 'bg-emerald-400' },
-  { id: 'violet', bg: 'bg-[#ede9fe]/85 dark:bg-[#4c1d95]/20', border: 'border-[#ddd6fe] dark:border-[#5b21b6]/60', dot: 'bg-violet-400' },
-];
-
-function NoteNode({ data, selected }: NodeProps & { data: CanvasNodeData }) {
-  const { sessionId, node, highlighted, agentMark, isProposal } = data;
+function NoteNode({ id, data, selected }: NodeProps) {
+  const { sessionId, node, highlighted, agentMark, isProposal } = data as CanvasNodeData;
   const params = (node.params as CanvasNoteParams) || { content: '' };
   const [content, setContent] = useState(params.content || '');
-  const color = params.color || 'amber';
+  const [copied, setCopied] = useState(false);
   const resizeStart = useRef<{ w: number; h: number } | null>(null);
+  const { hovered, hoverProps } = useHoverIntent();
+  const expanded = selected || hovered;
 
   useEffect(() => {
     setContent(params.content || '');
@@ -36,18 +31,18 @@ function NoteNode({ data, selected }: NodeProps & { data: CanvasNodeData }) {
     });
   };
 
-  const currentColorConfig = NOTE_COLORS.find((c) => c.id === color) || NOTE_COLORS[0];
-
-  const onResizeEnd = (_: unknown, p: ResizeParams) => {
-    const from = resizeStart.current;
-    resizeStart.current = null;
-    if (from) canvasStore.commitResize(sessionId, node.id, from, { w: p.width, h: p.height });
+  const copyText = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (!content) return;
+    void navigator.clipboard.writeText(content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   const askAgentToExpand = () => {
     void chatStore.sendMessage(
       sessionId,
-      `这是我在画布便签「${node.title || '剧情大纲'}」中写的灵感草稿：\n“${content || '（暂无草稿内容）'}”\n\n请帮我将这段大纲扩写为富有视听感染力的分镜剧本，包含详细的画面视觉要素、色调风格与镜头运动建议。`,
+      `这是我在画布文本节点「${node.title || '剧本/提示词'}」中写的内容：\n“${content || '（暂无草稿内容）'}”\n\n请帮我将这段文本扩写为富于视听细节与画质描述的专业提示词，并保留适合分镜生成的节奏。`,
       [],
       {},
     );
@@ -55,119 +50,122 @@ function NoteNode({ data, selected }: NodeProps & { data: CanvasNodeData }) {
 
   return (
     <div
+      {...hoverProps}
       className={cn(
-        'group relative flex flex-col rounded-2xl border p-3 shadow-xl backdrop-blur-md transition-[border-color,box-shadow] duration-150',
-        currentColorConfig.bg,
-        currentColorConfig.border,
-        selected ? 'ring-2 ring-accent ring-offset-2 ring-offset-paper' : '',
-        highlighted ? 'scale-[1.02] ring-2 ring-accent' : '',
+        'relative flex h-full w-full flex-col rounded-xl border bg-paper-raised p-2.5 text-xs shadow-sm transition-shadow',
+        selected ? 'border-accent ring-1 ring-accent/20' : 'border-line',
+        highlighted && 'canvas-node-highlight',
         isProposal && 'border-dashed !border-2 !border-accent shadow-[0_0_15px_rgba(99,102,241,0.35)] animate-pulse-subtle',
       )}
-      style={{ width: node.w, height: node.h }}
     >
       <AgentMark show={agentMark} />
+
+      <NodeActionBar
+        visible={selected || hovered}
+        actions={[
+          {
+            id: 'expand',
+            icon: <Sparkles size={11} className="text-accent" />,
+            label: 'AI 扩写',
+            title: '让 Agent 细化并丰富这段提示词或剧本大纲',
+            onClick: askAgentToExpand,
+          },
+          {
+            id: 'copy',
+            icon: copied ? <Check size={11} className="text-success" /> : <Copy size={11} className="text-accent" />,
+            label: copied ? '已复制' : '复制文本',
+            title: '复制全部文本到剪贴板',
+            onClick: copyText,
+          },
+          {
+            id: 'fork',
+            icon: <GitBranchPlus size={11} className="text-accent" />,
+            label: '派生变体',
+            title: '在右侧派生一个副本分支',
+            onClick: () => void canvasStore.forkNode(sessionId, node.id),
+          },
+        ]}
+      />
+
       <NodeResizer
-        minWidth={220}
+        minWidth={240}
         minHeight={160}
         isVisible={selected}
-        lineClassName="!border-accent/70"
-        handleClassName="!size-2 !bg-accent !border-paper-raised !rounded-full"
+        lineClassName="!border-accent/40"
+        handleClassName="!h-2 !w-2 !rounded-sm !border-accent !bg-paper"
         onResizeStart={(_, p: ResizeParams) => {
           resizeStart.current = { w: p.width, h: p.height };
         }}
-        onResizeEnd={onResizeEnd}
+        onResizeEnd={(_, p: ResizeParams) => {
+          const from = resizeStart.current;
+          resizeStart.current = null;
+          if (from) canvasStore.commitResize(sessionId, id, from, { w: p.width, h: p.height });
+        }}
       />
 
-      {/* Floating Action Bar */}
-      <div className="absolute -top-9 right-1 hidden items-center gap-1 rounded-xl border border-line bg-paper-raised/95 px-1.5 py-1 shadow-lg backdrop-blur-md group-hover:flex">
-        <button
-          type="button"
-          onClick={askAgentToExpand}
-          className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-ink hover:bg-paper-inset transition-colors"
-          title="让 Agent 扩写剧情与分镜"
-        >
-          <Bot size={11} className="text-accent" />
-          扩写剧本
-        </button>
-        <button
-          type="button"
-          onClick={() => void canvasStore.duplicateNode(sessionId, node.id)}
-          className="rounded p-1 text-ink-muted hover:bg-paper-inset hover:text-ink transition-colors"
-          title="复制便签"
-        >
-          <Copy size={11} />
-        </button>
-        <button
-          type="button"
-          onClick={() => void canvasStore.removeNode(sessionId, node.id)}
-          className="rounded p-1 text-ink-muted hover:bg-danger/10 hover:text-danger transition-colors"
-          title="删除"
-        >
-          <Trash2 size={11} />
-        </button>
-      </div>
-
-      {/* Header */}
-      <div className="flex items-center justify-between gap-2 border-b border-line/40 pb-2">
-        <div className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-ink">
-          <StickyNote size={14} className="text-accent shrink-0" />
-          <NodeTitle sessionId={sessionId} nodeId={node.id} title={node.title} fallback="剧本 / 灵感便签" />
-        </div>
-
-        {/* Color Palette Picker */}
-        <div className="flex items-center gap-1 nodrag">
-          {NOTE_COLORS.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              onClick={() => {
-                void canvasStore.updateNodeParams(sessionId, node.id, {
-                  ...params,
-                  color: c.id,
-                });
-              }}
-              className={cn(
-                'size-3 rounded-full transition-transform',
-                c.dot,
-                color === c.id ? 'scale-125 ring-1 ring-ink/40' : 'opacity-60 hover:opacity-100 hover:scale-110',
-              )}
-              title={`切换色调: ${c.id}`}
-            />
-          ))}
-        </div>
-      </div>
-
-      {/* Body textarea */}
-      <textarea
-        value={content}
-        onChange={(e) => setContent(e.target.value)}
-        onBlur={commitContent}
-        placeholder="记录剧情大纲、分镜脚本、旁白台词或画面灵感…&#10;可拉出右侧端口连入下游生图/视频节点作为母本。"
-        className="nodrag mt-2 min-h-0 flex-1 w-full resize-none bg-transparent text-xs text-ink placeholder:text-ink-muted/60 outline-none leading-relaxed"
+      <NodeHandle
+        type="target"
+        position={Position.Left}
+        id="text_in"
+        kind="prompt"
+        label="文本输入"
+        expanded={expanded}
+        top="50%"
       />
-
-      {/* Footer hint */}
-      <div className="mt-1 flex items-center justify-between text-[10px] text-ink-muted/70 pt-1 border-t border-line/30">
-        <span>延伸输出端点 ➔</span>
-        <button
-          type="button"
-          onClick={askAgentToExpand}
-          className="nodrag flex items-center gap-1 text-accent hover:underline font-medium"
-        >
-          <Bot size={10} />
-          Agent 扩写
-        </button>
-      </div>
-
-      {/* Output Handle */}
       <NodeHandle
         type="source"
         position={Position.Right}
         id="prompt_out"
         kind="prompt"
-        label="提示词输出"
-        expanded={Boolean(selected)}
+        label="文本输出"
+        expanded={expanded}
+        top="50%"
       />
+
+      {/* Header */}
+      <div className="mb-1.5 flex items-center justify-between gap-1.5">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <Type size={13} className="text-accent shrink-0" />
+          <NodeTitle sessionId={sessionId} nodeId={node.id} title={node.title} fallback="文本 / 提示词" />
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <span className="rounded-full bg-paper-inset px-1.5 py-0.5 text-[9px] text-ink-muted select-none">
+            {content.length} 字
+          </span>
+          <button
+            type="button"
+            onClick={copyText}
+            className="nodrag rounded p-1 text-ink-muted hover:bg-paper-inset hover:text-ink transition-colors"
+            title="复制文本"
+          >
+            {copied ? <Check size={11} className="text-success" /> : <Copy size={11} />}
+          </button>
+        </div>
+      </div>
+
+      {/* Body textarea - large prominent text area */}
+      <div className="relative flex-1 min-h-0 flex flex-col">
+        <textarea
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          onBlur={commitContent}
+          placeholder="输入提示词、分镜剧本、旁白台词或灵感文本…&#10;可拉出右侧端口连入下游生图、视频或音频节点。"
+          className="nodrag h-full w-full resize-none rounded-lg border border-line/70 bg-paper-inset/40 p-2.5 text-xs text-ink placeholder:text-ink-muted/50 focus:border-accent focus:bg-paper-inset/70 focus:outline-none leading-relaxed transition-colors selection:bg-accent/20 font-sans"
+        />
+      </div>
+
+      {/* Footer hint */}
+      <div className="mt-1.5 flex items-center justify-between text-[10px] text-ink-muted/70 px-0.5">
+        <span className="truncate max-w-[65%] select-none">拉出右侧端点连入画面/视频 ➔</span>
+        <button
+          type="button"
+          onClick={askAgentToExpand}
+          className="nodrag flex items-center gap-1 text-accent hover:underline font-medium shrink-0"
+        >
+          <Bot size={11} />
+          Agent 扩写
+        </button>
+      </div>
     </div>
   );
 }
@@ -177,6 +175,8 @@ export default memo(NoteNode, (prev, next) => {
   const nextData = next.data as CanvasNodeData;
   return (
     prev.selected === next.selected &&
+    prev.width === next.width &&
+    prev.height === next.height &&
     prevData.sessionId === nextData.sessionId &&
     prevData.highlighted === nextData.highlighted &&
     prevData.agentMark === nextData.agentMark &&

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { FileCode2, FileJson, FileText, Image as ImageIcon, LayoutGrid, RefreshCw } from 'lucide-react';
+import { FileCode2, FileJson, FileSpreadsheet, FileText, Image as ImageIcon, LayoutGrid, RefreshCw } from 'lucide-react';
 import type { Artifact, ArtifactKind } from '../../shared/artifact';
 import * as api from '../api';
 import ArtifactPreview from '../components/workspace/ArtifactPreview';
@@ -20,6 +20,7 @@ const KIND_LABELS: Record<ArtifactKind, string> = {
   video: '视频',
   audio: '音频',
   sketch: '手绘',
+  sheet: '表格',
 };
 
 function KindIcon({ kind }: { kind: ArtifactKind }) {
@@ -27,6 +28,7 @@ function KindIcon({ kind }: { kind: ArtifactKind }) {
   if (kind === 'json') return <FileJson className={className} />;
   if (kind === 'html') return <FileCode2 className={className} />;
   if (kind === 'image') return <ImageIcon className={className} />;
+  if (kind === 'sheet') return <FileSpreadsheet className={className} />;
   return <FileText className={className} />;
 }
 

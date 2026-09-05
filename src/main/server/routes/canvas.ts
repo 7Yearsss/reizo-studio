@@ -20,6 +20,7 @@ const NODE_TYPES = new Set<CanvasNodeType>([
   'image',
   'agent',
   'video',
+  'audio',
   'note',
   'group',
   'anchor',
@@ -59,7 +60,17 @@ export function createCanvasRouter(
     try {
       const bytes = await readCanvasAsset(dataRoot, rel);
       const ext = rel.split('.').pop()?.toLowerCase();
-      const type = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : 'image/png';
+      let type = 'image/png';
+      if (ext === 'jpg' || ext === 'jpeg') type = 'image/jpeg';
+      else if (ext === 'webp') type = 'image/webp';
+      else if (ext === 'gif') type = 'image/gif';
+      else if (ext === 'mp4') type = 'video/mp4';
+      else if (ext === 'webm') type = 'video/webm';
+      else if (ext === 'mp3') type = 'audio/mpeg';
+      else if (ext === 'wav') type = 'audio/wav';
+      else if (ext === 'ogg') type = 'audio/ogg';
+      else if (ext === 'm4a' || ext === 'aac') type = 'audio/mp4';
+      else if (ext === 'flac') type = 'audio/flac';
       return new Response(new Uint8Array(bytes), {
         headers: { 'content-type': type, 'cache-control': 'private, max-age=31536000' },
       });
@@ -259,14 +270,20 @@ export function createCanvasRouter(
       return c.json({ error: `Image must be 1 byte – ${IMPORT_MAX_BYTES} bytes` }, 413);
     }
     const ext = (body.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
-    // Default path drops an image node; `type: 'anchor'` (+ optional `params`)
-    // makes it a reference pin instead. Any other type is rejected.
-    const nodeType: CanvasNodeType = body.type === 'anchor' ? 'anchor' : 'image';
+    const isAudioExt = ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac'].includes(ext);
+    const nodeType: CanvasNodeType =
+      body.type === 'anchor'
+        ? 'anchor'
+        : body.type === 'audio' || isAudioExt
+          ? 'audio'
+          : 'image';
     const box = defaultNodeBox(nodeType);
     const defaultParams =
       nodeType === 'anchor'
         ? { role: 'character', strength: 'mid' }
-        : { prompt: '', size: '1024x1024' };
+        : nodeType === 'audio'
+          ? { prompt: '' }
+          : { prompt: '', size: '1024x1024' };
     const { rev, node } = canvasStore.addNode(canvasId, {
       type: nodeType,
       x: typeof body.x === 'number' ? body.x : 40,

@@ -10,7 +10,8 @@ export type ArtifactKind =
   | 'code'
   | 'video'
   | 'audio'
-  | 'sketch';
+  | 'sketch'
+  | 'sheet';
 
 /** Which preview component renders this artifact. */
 export type ArtifactRenderer =
@@ -23,6 +24,7 @@ export type ArtifactRenderer =
   | 'svg'
   | 'diagram'
   | 'sketch'
+  | 'sheet'
   | 'raw';
 
 export type ArtifactStatus = 'streaming' | 'complete' | 'error';
@@ -97,6 +99,8 @@ const TEXT_KINDS: ReadonlySet<ArtifactKind> = new Set([
   'json',
   'svg',
   'diagram',
+  'sketch',
+  'sheet',
   'code',
 ]);
 
@@ -114,6 +118,9 @@ export function inferArtifactKind(name: string, mimeType?: string): ArtifactKind
   if ((mimeType && mimeType.startsWith('video/')) || /\.(mp4|webm|mov|m4v)$/i.test(lower)) return 'video';
   if ((mimeType && mimeType.startsWith('audio/')) || /\.(mp3|wav|ogg|m4a|flac)$/i.test(lower)) return 'audio';
   if (/\.excalidraw$/i.test(lower)) return 'sketch';
+  if (/\.(xlsx|xls|csv)$/i.test(lower) || mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || mimeType === 'text/csv' || mimeType === 'application/vnd.reizo.sheet+json') {
+    return 'sheet';
+  }
   if (/\.html?$/i.test(lower) || mimeType === 'text/html') return 'html';
   if (/\.md$/i.test(lower) || mimeType === 'text/markdown') return 'markdown';
   if (/\.json$/i.test(lower) || mimeType === 'application/json') return 'json';
@@ -142,7 +149,9 @@ export function inferRenderer(kind: ArtifactKind): ArtifactRenderer {
     case 'diagram':
       return 'diagram';
     case 'sketch':
-      return 'sketch';
+      return 'diagram';
+    case 'sheet':
+      return 'sheet';
     case 'code':
     case 'json':
       return 'code';
@@ -175,6 +184,8 @@ export function mimeForKind(kind: ArtifactKind): string {
       return 'text/plain';
     case 'sketch':
       return 'application/json';
+    case 'sheet':
+      return 'application/vnd.reizo.sheet+json';
     case 'binary':
       return 'application/octet-stream';
     default:

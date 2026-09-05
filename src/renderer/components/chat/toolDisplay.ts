@@ -44,6 +44,9 @@ export function toolLabel(name: string): string {
     case 'update_node': return '修改画布节点';
     case 'connect_nodes': return '连接画布节点';
     case 'delete_node': return '删除画布节点';
+    case 'generate_image': return '生成图片';
+    case 'generate_diagram': return '生成流程图';
+    case 'generate_sheet': return '生成表格';
     default: return name.replace(/[_-]+/g, ' ');
   }
 }

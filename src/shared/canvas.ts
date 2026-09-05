@@ -13,6 +13,7 @@ export type CanvasNodeType =
   | 'image'
   | 'agent'
   | 'video'
+  | 'audio'
   | 'note'
   | 'group'
   | 'anchor'
@@ -47,6 +48,13 @@ export interface CanvasVideoParams {
   camera?: CameraControl;
   provider?: string;
   model?: string;
+}
+
+export interface CanvasAudioParams {
+  prompt?: string;
+  durationSec?: number;
+  model?: string;
+  format?: 'mp3' | 'wav';
 }
 
 export interface CanvasNoteParams {
@@ -108,6 +116,7 @@ export type CanvasNodeParams =
   | CanvasImageParams
   | CanvasAgentParams
   | CanvasVideoParams
+  | CanvasAudioParams
   | CanvasNoteParams
   | CanvasGroupParams
   | CanvasAnchorParams
@@ -235,6 +244,7 @@ export function getVideoModelCapabilities(modelId?: string): VideoModelCapabilit
 export function defaultNodeBox(type: CanvasNodeType): { w: number; h: number } {
   if (type === 'image') return { w: 320, h: 380 };
   if (type === 'video') return { w: 340, h: 420 };
+  if (type === 'audio') return { w: 320, h: 200 };
   if (type === 'note') return { w: 280, h: 220 };
   if (type === 'group') return { w: 480, h: 360 };
   if (type === 'anchor') return { w: 200, h: 250 };

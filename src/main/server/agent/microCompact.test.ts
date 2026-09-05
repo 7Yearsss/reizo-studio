@@ -96,5 +96,21 @@ describe('microCompact', () => {
       expect(result.length).toBeLessThan(8100);
       expect(result).toContain('…[truncated 1000 chars]');
     });
+
+    it('strips dataUrl from generate_image tool result', () => {
+      const toolOutput = JSON.stringify({
+        ok: true,
+        imageUrl: '/api/canvas/assets/chat/img-123.png',
+        dataUrl: 'data:image/png;base64,VERY_LONG_BASE64_STRING_12345',
+        prompt: 'a cute cat',
+        size: '1024x1024',
+      });
+      const result = microCompactToolResult('generate_image', toolOutput);
+      const parsed = JSON.parse(result);
+
+      expect(parsed.dataUrl).toBeUndefined();
+      expect(parsed.imageUrl).toBe('/api/canvas/assets/chat/img-123.png');
+      expect(parsed.prompt).toBe('a cute cat');
+    });
   });
 });
