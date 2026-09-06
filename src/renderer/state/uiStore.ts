@@ -10,6 +10,7 @@ export interface UiState {
   rightPanelWidth: number;
   rightPanelMaximized: boolean;
   sidebarCollapsed: boolean;
+  sidebarWidth: number;
 }
 
 const MODE_KEY = 'reizo:sidebar-mode';
@@ -19,10 +20,20 @@ const CANVAS_KEY = 'reizo:canvas-open';
 const RIGHT_WIDTH_KEY = 'reizo:right-panel-width';
 const RIGHT_TAB_KEY = 'reizo:right-panel-tab';
 const SIDEBAR_COLLAPSED_KEY = 'reizo:sidebar-collapsed';
+const SIDEBAR_WIDTH_KEY = 'reizo:sidebar-width';
+
+export const SIDEBAR_DEFAULT_WIDTH = 248;
+export const SIDEBAR_MIN_WIDTH = 180;
+export const SIDEBAR_MAX_WIDTH = 420;
+export const SIDEBAR_COLLAPSE_THRESHOLD = 110;
 
 export const RIGHT_PANEL_MIN = 320;
-export const RIGHT_PANEL_MAX = 960;
-const RIGHT_PANEL_DEFAULT = 480;
+export const RIGHT_PANEL_DEFAULT = 480;
+
+export function getRightPanelMax(): number {
+  if (typeof window === 'undefined') return 1200;
+  return Math.max(RIGHT_PANEL_MIN, window.innerWidth - 220);
+}
 
 function readMode(): SidebarMode {
   if (typeof localStorage === 'undefined') return 'chat';
@@ -42,7 +53,14 @@ function readRightWidth(): number {
   if (typeof localStorage === 'undefined') return RIGHT_PANEL_DEFAULT;
   const raw = Number(localStorage.getItem(RIGHT_WIDTH_KEY));
   if (!Number.isFinite(raw) || raw <= 0) return RIGHT_PANEL_DEFAULT;
-  return Math.min(RIGHT_PANEL_MAX, Math.max(RIGHT_PANEL_MIN, raw));
+  return Math.max(RIGHT_PANEL_MIN, raw);
+}
+
+function readSidebarWidth(): number {
+  if (typeof localStorage === 'undefined') return SIDEBAR_DEFAULT_WIDTH;
+  const raw = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
+  if (!Number.isFinite(raw) || raw <= 0) return SIDEBAR_DEFAULT_WIDTH;
+  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, raw));
 }
 
 function readRightTab(): RightPanelTab | null {
@@ -72,6 +90,7 @@ let state: UiState = {
   rightPanelWidth: readRightWidth(),
   rightPanelMaximized: false,
   sidebarCollapsed: readSidebarCollapsed(),
+  sidebarWidth: readSidebarWidth(),
 };
 
 const listeners = new Set<() => void>();
@@ -89,6 +108,7 @@ function setState(patch: Partial<UiState>): void {
       else localStorage.removeItem(RIGHT_TAB_KEY);
       localStorage.setItem(RIGHT_WIDTH_KEY, String(state.rightPanelWidth));
       localStorage.setItem(SIDEBAR_COLLAPSED_KEY, state.sidebarCollapsed ? '1' : '0');
+      localStorage.setItem(SIDEBAR_WIDTH_KEY, String(state.sidebarWidth));
     } catch {
       /* ignore */
     }
@@ -153,14 +173,25 @@ export function toggleCanvas(): void {
 }
 
 export function setRightPanelWidth(width: number): void {
+  const max = getRightPanelMax();
   setState({
-    rightPanelWidth: Math.min(RIGHT_PANEL_MAX, Math.max(RIGHT_PANEL_MIN, Math.round(width))),
+    rightPanelWidth: Math.min(max, Math.max(RIGHT_PANEL_MIN, Math.round(width))),
     rightPanelMaximized: false,
   });
 }
 
+export function setRightPanelMaximized(maximized: boolean): void {
+  setState({ rightPanelMaximized: maximized });
+}
+
 export function toggleRightPanelMaximized(): void {
   setState({ rightPanelMaximized: !state.rightPanelMaximized });
+}
+
+export function setSidebarWidth(width: number): void {
+  setState({
+    sidebarWidth: Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width))),
+  });
 }
 
 export function toggleSidebar(): void {

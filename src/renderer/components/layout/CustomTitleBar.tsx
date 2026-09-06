@@ -34,6 +34,7 @@ function isMacPlatform(): boolean {
 export default function CustomTitleBar() {
   const [maximized, setMaximized] = useState(false);
   const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
+  const sidebarWidth = useUiStore((s) => s.sidebarWidth);
   const mode = useUiStore((s) => s.mode);
   const activeTabId = useTabStore((s) => s.activeTabId);
   const { canGoBack, canGoForward } = useNavHistory();
@@ -90,8 +91,9 @@ export default function CustomTitleBar() {
       <div
         className={cn(
           'flex h-full shrink-0 items-center border-r border-line/70 px-3 bg-sidebar transition-[width] duration-[var(--duration-base)] ease-[var(--ease-drawer)] motion-reduce:transition-none',
-          sidebarCollapsed ? 'w-auto' : 'w-[248px]',
+          sidebarCollapsed && 'w-auto',
         )}
+        style={sidebarCollapsed ? undefined : { width: sidebarWidth }}
       >
         <div className="titlebar-no-drag flex items-center gap-1">
           <Tooltip content="Reizo Studio" side="bottom">

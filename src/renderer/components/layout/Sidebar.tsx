@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ChevronRight,
   CirclePlus,
@@ -49,6 +49,13 @@ export default function Sidebar() {
   const mode = useUiStore((s) => s.mode);
   const selectedProjectId = useUiStore((s) => s.selectedProjectId);
   const collapsed = useUiStore((s) => s.sidebarCollapsed);
+  const sidebarWidth = useUiStore((s) => s.sidebarWidth);
+
+  const [isDragging, setIsDragging] = useState(false);
+  const dragging = useRef(false);
+  const startX = useRef(0);
+  const startWidth = useRef(0);
+
   const [query, setQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [fileHits, setFileHits] = useState<DirEntry[]>([]);
@@ -59,8 +66,8 @@ export default function Sidebar() {
   const [chatsOpen, setChatsOpen] = useState(() => localStorage.getItem(CHATS_FOLD_KEY) !== '0');
 
   useEffect(() => {
-    document.documentElement.style.setProperty('--sidebar-width', `${collapsed ? 0 : 248}px`);
-  }, [collapsed]);
+    document.documentElement.style.setProperty('--sidebar-width', `${collapsed ? 0 : sidebarWidth}px`);
+  }, [collapsed, sidebarWidth]);
 
   useEffect(() => {
     if (!loaded) void chatStore.loadSessions();
@@ -138,16 +145,59 @@ export default function Sidebar() {
   const foldRow =
     'flex min-w-0 items-center gap-1 rounded-xl px-3 py-2 text-left text-[13px] text-ink-muted outline-none transition-colors hover:text-ink';
 
+  const onPointerDown = (e: React.PointerEvent) => {
+    e.preventDefault();
+    dragging.current = true;
+    startX.current = e.clientX;
+    startWidth.current = sidebarWidth;
+    setIsDragging(true);
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  };
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!dragging.current) return;
+    const delta = e.clientX - startX.current;
+    const calculatedWidth = startWidth.current + delta;
+
+    if (calculatedWidth < uiStore.SIDEBAR_COLLAPSE_THRESHOLD) {
+      uiStore.setSidebarCollapsed(true);
+      dragging.current = false;
+      setIsDragging(false);
+      try {
+        (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+
+    uiStore.setSidebarWidth(calculatedWidth);
+  };
+
+  const onPointerUp = (e: React.PointerEvent) => {
+    if (!dragging.current) return;
+    dragging.current = false;
+    setIsDragging(false);
+    try {
+      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+  };
+
   return (
     <aside
       className={cn(
-        'relative flex h-full shrink-0 flex-col overflow-hidden bg-sidebar transition-[width] duration-[var(--duration-base)] ease-[var(--ease-drawer)] motion-reduce:transition-none',
+        'relative flex h-full shrink-0 flex-col overflow-hidden bg-sidebar',
+        isDragging
+          ? 'transition-none select-none'
+          : 'transition-[width] duration-[var(--duration-base)] ease-[var(--ease-drawer)] motion-reduce:transition-none',
         collapsed ? 'border-r-0' : 'border-r border-line/70',
       )}
-      style={{ width: collapsed ? 0 : 248 }}
+      style={{ width: collapsed ? 0 : sidebarWidth }}
     >
       <div
-        className="anim-fade flex h-full w-[248px] flex-col px-3 py-2.5"
+        className="anim-fade flex h-full w-full min-w-0 flex-col px-3 py-2.5 overflow-hidden"
         style={collapsed ? { display: 'none' } : undefined}
       >
         <nav className="flex flex-col gap-0.5" aria-label="Studio 导航">
@@ -430,6 +480,23 @@ export default function Sidebar() {
         </div>
       </div>
       </div>
+
+      {!collapsed && (
+        <div
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          className="group absolute -right-1.5 top-0 z-30 flex h-full w-3 cursor-col-resize items-center justify-center select-none"
+          title="拖动调整侧栏宽度（继续向左滑可折叠收起）"
+        >
+          <span
+            className={cn(
+              'h-8 w-1 rounded-full bg-line opacity-0 transition-opacity group-hover:opacity-100',
+              isDragging && 'opacity-100 bg-accent',
+            )}
+          />
+        </div>
+      )}
 
       <ProjectDialog open={projectDialogOpen} onClose={() => setProjectDialogOpen(false)} />
     </aside>
