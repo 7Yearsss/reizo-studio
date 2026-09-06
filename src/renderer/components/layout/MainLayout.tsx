@@ -1,3 +1,4 @@
+import { cn } from '../../lib/cn';
 import CustomTitleBar from './CustomTitleBar';
 import Sidebar from './Sidebar';
 import RightPanel from '../workspace/RightPanel';
@@ -22,15 +23,22 @@ export default function MainLayout() {
   const activeTab = tabs.find((t) => t.id === activeTabId);
   const mode = useUiStore((s) => s.mode);
   const rightPanelTab = useUiStore((s) => s.rightPanelTab);
+  const rightPanelMaximized = useUiStore((s) => s.rightPanelMaximized);
   const isChatView = mode === 'chat' || mode === 'projects';
   const showRight = isChatView && rightPanelTab !== null;
+  const isRightMaximized = showRight && rightPanelMaximized;
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-paper text-ink">
       <CustomTitleBar />
       <div className="flex min-h-0 flex-1">
         <Sidebar />
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <main
+          className={cn(
+            'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden',
+            isRightMaximized && 'hidden',
+          )}
+        >
           <div className={isChatView ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'hidden'}>
             {tabs.map((tab) => {
               const active = tab.id === activeTabId;
