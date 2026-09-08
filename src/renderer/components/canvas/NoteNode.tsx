@@ -10,6 +10,7 @@ import type { CanvasNodeData } from './ImageNode';
 import { useHoverIntent } from './NodeActionBar';
 import MagneticHandle from './MagneticHandle';
 import AgentMark from './AgentMark';
+import NodeCornerResizer from './NodeCornerResizer';
 
 function NoteNode({ id, data, selected }: NodeProps) {
   const { sessionId, node, highlighted, agentMark, isProposal } = data as CanvasNodeData;
@@ -74,6 +75,14 @@ function NoteNode({ id, data, selected }: NodeProps) {
       )}
     >
       <AgentMark show={agentMark} />
+
+      <NodeCornerResizer
+        nodeId={node.id}
+        sessionId={sessionId}
+        hovered={hovered}
+        minWidth={200}
+        minHeight={140}
+      />
 
       {/* TapNow magnetic handles with elastic follow and click-to-create */}
       <MagneticHandle

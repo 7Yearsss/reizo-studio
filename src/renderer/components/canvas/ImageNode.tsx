@@ -13,6 +13,7 @@ import { useHoverIntent } from './NodeActionBar';
 import MagneticHandle from './MagneticHandle';
 import NodeFloatingPanel from './NodeFloatingPanel';
 import AgentMark from './AgentMark';
+import NodeCornerResizer from './NodeCornerResizer';
 import MissingInputWarning from './MissingInputWarning';
 import { useAssetUrl } from './useAssetUrl';
 
@@ -218,6 +219,13 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
       )}
     >
       <AgentMark show={agentMark} />
+      <NodeCornerResizer
+        nodeId={node.id}
+        sessionId={sessionId}
+        hovered={hovered}
+        minWidth={240}
+        minHeight={180}
+      />
       {/* TapNow magnetic handles with elastic follow and click-to-create */}
       <MagneticHandle
         type="target"
