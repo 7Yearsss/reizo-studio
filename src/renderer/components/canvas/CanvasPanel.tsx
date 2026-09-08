@@ -618,6 +618,24 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     flowX: number;
     flowY: number;
   } | null>(null);
+  const addNodesModalOpenedAt = useRef<number>(0);
+
+  const openAddNodesModal = useCallback(
+    (screenX: number, screenY: number, flowX?: number, flowY?: number) => {
+      addNodesModalOpenedAt.current = Date.now();
+      const flow =
+        flowX !== undefined && flowY !== undefined
+          ? { x: flowX, y: flowY }
+          : rf.screenToFlowPosition({ x: screenX, y: screenY });
+      setAddNodesModal({
+        x: screenX,
+        y: screenY,
+        flowX: Math.round(flow.x),
+        flowY: Math.round(flow.y),
+      });
+    },
+    [rf],
+  );
 
   const selectNode = useCallback(
     (nodeId: string) => {
@@ -1412,7 +1430,8 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       onDragOver={(e) => e.preventDefault()}
       onDrop={onDrop}
       onClick={() => {
-        if (Date.now() - dropConnectMenuOpenedAt.current < 300) return;
+        if (Date.now() - dropConnectMenuOpenedAt.current < 350) return;
+        if (Date.now() - addNodesModalOpenedAt.current < 350) return;
         if (menu) setMenu(null);
         if (dropConnectMenu) setDropConnectMenu(null);
         if (addNodesModal) setAddNodesModal(null);
@@ -1443,7 +1462,8 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           }
         }}
         onPaneClick={() => {
-          if (Date.now() - dropConnectMenuOpenedAt.current < 300) return;
+          if (Date.now() - dropConnectMenuOpenedAt.current < 350) return;
+          if (Date.now() - addNodesModalOpenedAt.current < 350) return;
           if (menu) setMenu(null);
           if (dropConnectMenu) setDropConnectMenu(null);
           if (addNodesModal) setAddNodesModal(null);
@@ -1511,18 +1531,12 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
             target.closest('.react-flow__node') ||
             target.closest('.canvas-tool') ||
             target.closest('.react-flow__controls') ||
-            target.closest('.react-flow__panel') ||
-            target.closest('[data-magnetic-handle="true"]')
+            target.closest('[data-magnetic-handle="true"]') ||
+            (target.closest('.react-flow__panel') && !target.closest('[data-canvas-empty-prompt="true"]'))
           ) {
             return;
           }
-          const flow = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
-          setAddNodesModal({
-            x: e.clientX,
-            y: e.clientY,
-            flowX: Math.round(flow.x),
-            flowY: Math.round(flow.y),
-          });
+          openAddNodesModal(e.clientX, e.clientY);
         }}
         proOptions={{ hideAttribution: true }}
         deleteKeyCode={['Backspace', 'Delete']}
@@ -1532,6 +1546,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         panOnScroll={navMode === 'trackpad'}
         zoomOnScroll={navMode === 'mouse'}
         zoomOnPinch={true}
+        zoomOnDoubleClick={false}
         minZoom={0.05}
         maxZoom={3.0}
         className="bg-paper"
@@ -1598,13 +1613,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
               onOpenAddModal={() => {
                 const cx = window.innerWidth / 2;
                 const cy = window.innerHeight / 2;
-                const flow = rf.screenToFlowPosition({ x: cx, y: cy });
-                setAddNodesModal({
-                  x: cx,
-                  y: Math.max(80, cy - 140),
-                  flowX: Math.round(flow.x),
-                  flowY: Math.round(flow.y),
-                });
+                openAddNodesModal(cx, Math.max(80, cy - 140));
               }}
               onCreateTextToVideo={() => {
                 const cx = window.innerWidth / 2;

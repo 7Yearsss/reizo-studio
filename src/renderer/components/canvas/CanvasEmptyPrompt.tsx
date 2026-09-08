@@ -25,21 +25,33 @@ export default function CanvasEmptyPrompt({
   onCreateAudioToVideo,
   onLoadTemplate,
 }: CanvasEmptyPromptProps) {
+  const handleTriggerModal = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onOpenAddModal();
+  };
+
   return (
     <motion.div
+      data-canvas-empty-prompt="true"
       initial={{ opacity: 0, y: 14, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 10, scale: 0.97 }}
       transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-      className="pointer-events-auto flex flex-col items-center gap-3 select-none"
+      className="pointer-events-auto flex flex-col items-center gap-3 select-none cursor-default"
+      onDoubleClick={handleTriggerModal}
     >
       {/* Top hint pill */}
-      <div className="flex items-center gap-2.5 rounded-full bg-black/45 px-3 py-1.5 backdrop-blur-md border border-white/[0.08] shadow-lg">
+      <div
+        onClick={handleTriggerModal}
+        onDoubleClick={handleTriggerModal}
+        className="flex items-center gap-2.5 rounded-full bg-black/55 px-3 py-1.5 backdrop-blur-md border border-white/10 shadow-lg cursor-pointer hover:border-white/25 hover:bg-black/70 transition-all"
+        title="双击画布空白处或点击此处添加节点"
+      >
         <button
           type="button"
-          onClick={onOpenAddModal}
+          onClick={handleTriggerModal}
+          onDoubleClick={handleTriggerModal}
           className="group flex items-center gap-1.5 rounded-lg bg-[#27272a] px-2.5 py-1 text-xs font-medium text-white/95 border border-white/10 shadow-sm hover:bg-[#323238] hover:border-white/20 active:scale-95 transition-all cursor-pointer"
-          title="双击画布空白处或点击此处添加节点"
         >
           {/* Custom shiny cursor / sparkle icon */}
           <div className="relative flex items-center justify-center">
@@ -63,10 +75,7 @@ export default function CanvasEmptyPrompt({
           <span>双击</span>
         </button>
 
-        <span
-          onClick={onOpenAddModal}
-          className="text-xs text-zinc-300/80 hover:text-zinc-100 transition-colors cursor-pointer tracking-wide"
-        >
+        <span className="text-xs text-zinc-300/90 hover:text-zinc-100 transition-colors tracking-wide">
           画布自由生成,或查看模板
         </span>
       </div>
