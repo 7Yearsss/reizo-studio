@@ -48,7 +48,9 @@ export default function AddNodesModal({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
+    const openedAt = Date.now();
     const handleClickOutside = (e: MouseEvent) => {
+      if (Date.now() - openedAt < 350) return;
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         onClose();
       }
@@ -57,7 +59,7 @@ export default function AddNodesModal({
     // Delay adding click listener so the triggering double-click doesn't instantly close it
     const t = setTimeout(() => {
       window.addEventListener('mousedown', handleClickOutside);
-    }, 50);
+    }, 350);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       clearTimeout(t);
@@ -68,7 +70,8 @@ export default function AddNodesModal({
   // Adjust card position to stay fully on screen
   const menuWidth = 270;
   const menuHeight = 520;
-  const left = Math.max(16, Math.min(x, window.innerWidth - menuWidth - 16));
+  const centeredLeft = x > window.innerWidth / 3 && x < (window.innerWidth * 2) / 3 ? x - menuWidth / 2 : x;
+  const left = Math.max(16, Math.min(centeredLeft, window.innerWidth - menuWidth - 16));
   const top = Math.max(16, Math.min(y, window.innerHeight - menuHeight - 16));
 
   const handleSelect = (type: CanvasNodeType, initialParams?: Record<string, unknown>) => {
