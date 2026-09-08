@@ -2,6 +2,8 @@
 
 本目录用于存放 TapNow 官方画布实测截图。截图不是营销参考图，而是帮助实施 AI 理解空间关系、节点状态和交互层级的视觉证据。
 
+节点操作逻辑的文字版参考见 [`../10_canvas_node_interaction_reference.md`](../10_canvas_node_interaction_reference.md)，实测原始笔记见 [`../08_canvas_interaction_field_notes.md`](../08_canvas_interaction_field_notes.md)。
+
 当前仓库目前只有截图索引，截图二进制尚未落盘。此前截图只在对话界面内展示，未形成可被其他 AI 打开的本地附件。重新取得截图后，应按下表命名并放入本目录：
 
 | 文件名 | 应记录的状态 | 对应调查笔记 |

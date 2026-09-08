@@ -7,6 +7,7 @@ export interface CuttableEdgeData extends Record<string, unknown> {
   sourceType?: string;
   targetType?: string;
   isRunning?: boolean;
+  isRevealed?: boolean;
   onCutEdge?: (edgeId: string) => void;
   onRerouteEdge?: (edgeId: string, screenPos: { x: number; y: number }) => void;
 }
@@ -37,7 +38,7 @@ function CuttableEdge({
   targetHandleId,
   data,
 }: EdgeProps) {
-  const { sourceType, targetType, isRunning, onCutEdge, onRerouteEdge } = (data as CuttableEdgeData) || {};
+  const { sourceType, targetType, isRunning, isRevealed = true, onCutEdge, onRerouteEdge } = (data as CuttableEdgeData) || {};
 
   const [armed, setArmed] = useState(false);
   const [dying, setDying] = useState(false);
@@ -91,19 +92,20 @@ function CuttableEdge({
   const arm = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      if (dying) return;
+      if (dying || !isRevealed) return;
       setArmed(true);
       window.dispatchEvent(new CustomEvent(ARMED_EVENT, { detail: id }));
     },
-    [dying, id],
+    [dying, id, isRevealed],
   );
 
   const handleDoubleClick = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
+      if (!isRevealed) return;
       onRerouteEdge?.(id, { x: e.clientX, y: e.clientY });
     },
-    [id, onRerouteEdge],
+    [id, isRevealed, onRerouteEdge],
   );
 
   const cut = useCallback(() => {
@@ -150,13 +152,13 @@ function CuttableEdge({
         strokeDashoffset={dying && pathLength > 0 ? pathLength : undefined}
         style={{
           pointerEvents: 'none',
-          opacity: armed ? 0.9 : 0.8,
-          transition: dying ? 'stroke-dashoffset 350ms ease-in' : 'stroke-width 150ms ease, opacity 150ms ease',
+          opacity: !isRevealed ? 0 : armed ? 0.9 : 0.8,
+          transition: dying ? 'stroke-dashoffset 350ms ease-in' : 'stroke-width 150ms ease, opacity 200ms ease',
         }}
       />
 
       {/* energy flow overlay — only active when running to avoid ambient noise */}
-      {!dying && !armed && !reduced && isRunning && (
+      {!dying && !armed && !reduced && isRunning && isRevealed && (
         <path
           d={edgePath}
           fill="none"
@@ -164,7 +166,7 @@ function CuttableEdge({
           strokeWidth={2.4}
           strokeLinecap="round"
           className="edge-flow edge-flow-running"
-          style={{ pointerEvents: 'none', opacity: 0.9 }}
+          style={{ pointerEvents: 'none', opacity: 0.9, transition: 'opacity 200ms ease' }}
         />
       )}
 
@@ -176,10 +178,10 @@ function CuttableEdge({
         strokeWidth={20}
         onClick={arm}
         onDoubleClick={handleDoubleClick}
-        style={{ cursor: 'pointer', pointerEvents: dying ? 'none' : 'stroke' }}
+        style={{ cursor: isRevealed ? 'pointer' : 'default', pointerEvents: dying || !isRevealed ? 'none' : 'stroke' }}
       />
 
-      {armed && !dying ? (
+      {armed && !dying && isRevealed ? (
         <EdgeLabelRenderer>
           <div
             ref={badgeRef}

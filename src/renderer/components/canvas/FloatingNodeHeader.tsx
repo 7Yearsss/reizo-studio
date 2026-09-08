@@ -45,7 +45,7 @@ export function NodeTitle({
         }}
         onClick={(e) => e.stopPropagation()}
         className={cn(
-          'nodrag min-w-0 max-w-[160px] rounded bg-paper-inset px-1 text-xs font-semibold text-ink outline-none ring-1 ring-accent/40',
+          'nodrag cursor-text min-w-0 max-w-[160px] rounded bg-paper-inset px-1 text-xs font-semibold text-ink outline-none ring-1 ring-accent/40',
           className,
         )}
       />
@@ -55,7 +55,7 @@ export function NodeTitle({
   return (
     <span
       className={cn(
-        'truncate text-xs font-semibold text-ink/90 hover:text-ink cursor-text select-none tracking-tight drop-shadow-[0_1px_2px_rgba(0,0,0,0.35)]',
+        'truncate text-xs font-semibold text-ink/90 hover:text-ink cursor-default select-none tracking-tight drop-shadow-[0_1px_2px_rgba(0,0,0,0.35)]',
         className,
       )}
       title="双击重命名"
@@ -126,7 +126,7 @@ function FloatingNodeHeader({
   return (
     <div
       className={cn(
-        'floating-node-header nodrag pointer-events-auto absolute bottom-[calc(100%+6px)] left-0 z-10 flex items-center gap-1.5 select-none whitespace-nowrap',
+        'floating-node-header nodrag cursor-default pointer-events-auto absolute bottom-[calc(100%+6px)] left-0 z-10 flex items-center gap-1.5 select-none whitespace-nowrap',
         className,
       )}
       style={{

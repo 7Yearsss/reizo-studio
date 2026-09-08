@@ -49,6 +49,13 @@ export interface ComposerSeed {
   replaceFromId?: string;
 }
 
+export interface NodeRef {
+  id: string;
+  label: string;
+  type?: string;
+  thumbnail?: string;
+}
+
 export interface ChatState {
   sessions: SessionSummary[];
   sessionsLoaded: boolean;
@@ -75,7 +82,9 @@ export interface ChatState {
   queueBySession: Record<string, QueuedTurn[]>;
   composerSeedBySession: Record<string, ComposerSeed | undefined>;
   /** Canvas nodes the user pulled into the composer as `@`-style references. */
-  nodeRefsBySession: Record<string, { id: string; label: string }[]>;
+  nodeRefsBySession: Record<string, NodeRef[]>;
+  /** When true, clicking nodes on canvas adds them to the composer as references. */
+  pickingReferenceBySession: Record<string, boolean>;
   /** Sessions where the user dismissed the "interrupted turn" banner. */
   interruptDismissedBySession: Record<string, boolean>;
 }
@@ -103,10 +112,11 @@ let state: ChatState = {
   queueBySession: {},
   composerSeedBySession: {},
   nodeRefsBySession: {},
+  pickingReferenceBySession: {},
   interruptDismissedBySession: {},
 };
 
-export function addNodeRef(sessionId: string, ref: { id: string; label: string }): void {
+export function addNodeRef(sessionId: string, ref: NodeRef): void {
   const current = state.nodeRefsBySession[sessionId] ?? [];
   if (current.some((r) => r.id === ref.id)) return;
   setState({ nodeRefsBySession: { ...state.nodeRefsBySession, [sessionId]: [...current, ref] } });
@@ -120,6 +130,16 @@ export function removeNodeRef(sessionId: string, id: string): void {
 export function clearNodeRefs(sessionId: string): void {
   if (!(state.nodeRefsBySession[sessionId]?.length)) return;
   setState({ nodeRefsBySession: { ...state.nodeRefsBySession, [sessionId]: [] } });
+}
+
+export function setPickingReference(sessionId: string, active: boolean): void {
+  if (state.pickingReferenceBySession[sessionId] === active) return;
+  setState({
+    pickingReferenceBySession: {
+      ...state.pickingReferenceBySession,
+      [sessionId]: active,
+    },
+  });
 }
 
 const abortBySession = new Map<string, AbortController>();

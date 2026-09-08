@@ -64,10 +64,12 @@ import {
   Type,
   Volume2,
   Magnet,
+  Workflow,
 } from 'lucide-react';
 import * as canvasStore from '../../state/canvasStore';
 import * as chatStore from '../../state/chatStore';
 import { useCanvasStore } from '../../state/useCanvasStore';
+import { useChatStore } from '../../state/useChatStore';
 import { cn } from '../../lib/cn';
 import { layoutGraph, wouldCycle, isPortCompatible } from '../../../shared/canvasGraph';
 import { estimateGraphCost } from '../../../shared/canvasPricing';
@@ -92,9 +94,15 @@ import AssetShelf from './AssetShelf';
 import AgentActivityStrip from './AgentActivityStrip';
 import StoryboardModal from './StoryboardModal';
 import CuttableEdge from './edges/CuttableEdge';
+import AddNodesModal from './AddNodesModal';
+import ReturnToNodesToast from './ReturnToNodesToast';
+import MultiSelectToolbar from './MultiSelectToolbar';
+import InsertFromCanvasBanner from './InsertFromCanvasBanner';
+import { getCanvasNodeThumbnail } from './canvasThumbnail';
 import ErrorBoundary from '../ErrorBoundary';
 import Tooltip from '../ui/Tooltip';
 import { motion, AnimatePresence } from 'motion/react';
+import { canvasAssetUrlSync } from '../../api';
 
 const NODE_TYPES: NodeTypes = {
   image: ImageNode,
@@ -212,6 +220,57 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         /* ignore */
       }
       flash(next ? '🧲 智能对齐与磁吸吸附已开启' : '智能对齐与磁吸吸附已关闭');
+      return next;
+    });
+  }, [flash]);
+
+  // TapNow-style workflow edges visibility toggle and hover reveal.
+  const [wiresVisible, setWiresVisible] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('reizo:canvas-wires-visible');
+      return saved !== null ? saved === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
+  const isPickingReference = useChatStore((s) => (sessionId ? s.pickingReferenceBySession[sessionId] : false)) ?? false;
+
+  useEffect(() => {
+    const handleClear = (e: Event) => {
+      const detail = (e as CustomEvent<{ sessionId?: string }>).detail;
+      if (!detail?.sessionId || detail.sessionId === sessionId) {
+        rf.setNodes((nds) => nds.map((n) => (n.selected ? { ...n, selected: false } : n)));
+        setSelectedNodeIds([]);
+      }
+    };
+    const handleDeselect = (e: Event) => {
+      const detail = (e as CustomEvent<{ sessionId?: string; nodeId?: string }>).detail;
+      if (detail?.nodeId && (!detail.sessionId || detail.sessionId === sessionId)) {
+        rf.setNodes((nds) =>
+          nds.map((n) => (n.id === detail.nodeId && n.selected ? { ...n, selected: false } : n)),
+        );
+        setSelectedNodeIds((prev) => prev.filter((id) => id !== detail.nodeId));
+      }
+    };
+    window.addEventListener('reizo:clear-canvas-selection', handleClear);
+    window.addEventListener('reizo:deselect-canvas-node', handleDeselect);
+    return () => {
+      window.removeEventListener('reizo:clear-canvas-selection', handleClear);
+      window.removeEventListener('reizo:deselect-canvas-node', handleDeselect);
+    };
+  }, [sessionId, rf]);
+
+  const toggleWires = useCallback(() => {
+    setWiresVisible((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('reizo:canvas-wires-visible', String(next));
+      } catch {
+        /* ignore */
+      }
+      flash(next ? '连线已显示' : '连线已隐藏 (悬停节点可穿透透视)');
       return next;
     });
   }, [flash]);
@@ -475,6 +534,12 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         const sourceMeta = nodeMetaMap.get(edge.sourceId);
         const targetMeta = nodeMetaMap.get(edge.targetId);
         const isRunning = Boolean(targetMeta?.isRunning || sourceMeta?.isRunning);
+        const isRevealed =
+          wiresVisible ||
+          hoveredNodeId === edge.sourceId ||
+          hoveredNodeId === edge.targetId ||
+          selectedNodeIds.includes(edge.sourceId) ||
+          selectedNodeIds.includes(edge.targetId);
         return {
           id: edge.id,
           type: 'cuttable',
@@ -487,12 +552,13 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
             sourceType: sourceMeta?.type,
             targetType: targetMeta?.type,
             isRunning,
+            isRevealed,
             onCutEdge: handleCutEdge,
             onRerouteEdge: handleRerouteEdge,
           },
         };
       }),
-    [storeEdges, nodeMetaMap, handleCutEdge, handleRerouteEdge],
+    [storeEdges, nodeMetaMap, wiresVisible, hoveredNodeId, selectedNodeIds, handleCutEdge, handleRerouteEdge],
   );
 
   const onNodesChange = useCallback(
@@ -531,7 +597,6 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     [sessionId],
   );
 
-  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const connectingNode = useRef<{ nodeId: string; handleId: string | null; handleType: 'source' | 'target' } | null>(null);
   const [dropConnectMenu, setDropConnectMenu] = useState<{
     nodeId: string;
@@ -544,6 +609,12 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     isDragDrop?: boolean;
   } | null>(null);
   const dropConnectMenuOpenedAt = useRef<number>(0);
+  const [addNodesModal, setAddNodesModal] = useState<{
+    x: number;
+    y: number;
+    flowX: number;
+    flowY: number;
+  } | null>(null);
 
   const selectNode = useCallback(
     (nodeId: string) => {
@@ -572,10 +643,93 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     [selectNode],
   );
 
+  const handleUploadFileAt = useCallback(
+    async (file: File, pos: { x: number; y: number }) => {
+      try {
+        if (file.type.startsWith('image/')) {
+          await canvasStore.importImage(sessionId, file, pos);
+          flash('已导入图片节点');
+        } else if (file.type.startsWith('video/')) {
+          const newNodeId = await canvasStore.addNode(sessionId, 'video', pos);
+          if (newNodeId) {
+            await canvasStore.uploadAssetToNode(sessionId, newNodeId, file);
+            selectNode(newNodeId);
+            flash('已导入视频节点');
+          }
+        } else if (file.type.startsWith('audio/')) {
+          const newNodeId = await canvasStore.addNode(sessionId, 'audio', pos);
+          if (newNodeId) {
+            await canvasStore.uploadAssetToNode(sessionId, newNodeId, file);
+            selectNode(newNodeId);
+            flash('已导入音频节点');
+          }
+        } else {
+          const text = await file.text();
+          const newNodeId = await canvasStore.addNode(sessionId, 'note', pos);
+          if (newNodeId) {
+            await canvasStore.updateNodeParams(sessionId, newNodeId, { content: text });
+            selectNode(newNodeId);
+            flash('已导入文本节点');
+          }
+        }
+      } catch (err: unknown) {
+        flash(err instanceof Error ? err.message : '导入失败');
+      }
+    },
+    [sessionId, flash, selectNode],
+  );
+
   const selectedNodes = useMemo(
     () => storeNodes.filter((n) => selectedNodeIds.includes(n.id)),
     [storeNodes, selectedNodeIds],
   );
+
+  const addSelectedToComposer = useCallback(() => {
+    if (selectedNodes.length === 0) return;
+    for (const node of selectedNodes) {
+      const p = (node.params as Record<string, unknown>) ?? {};
+      const label = (node.title || p.prompt || p.instruction || p.content || node.type).toString().slice(0, 24);
+      const thumbnail = getCanvasNodeThumbnail(node) || (p.imageUrl as string | undefined) || (p.videoUrl as string | undefined);
+      chatStore.addNodeRef(sessionId, { id: node.id, label, type: node.type, thumbnail });
+    }
+    flash(`已将 ${selectedNodes.length} 个节点加入对话引用`);
+  }, [sessionId, selectedNodes, flash]);
+
+  const createGroupFromSelection = useCallback(async () => {
+    if (selectedNodes.length === 0) return;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const n of selectedNodes) {
+      minX = Math.min(minX, n.x);
+      minY = Math.min(minY, n.y);
+      maxX = Math.max(maxX, n.x + (n.w || 260));
+      maxY = Math.max(maxY, n.y + (n.h || 180));
+    }
+    const padding = 36;
+    const groupId = await canvasStore.addNode(sessionId, 'group', {
+      x: Math.round(minX - padding),
+      y: Math.round(minY - padding - 24),
+    });
+    if (groupId) {
+      void canvasStore.commitResize(
+        sessionId,
+        groupId,
+        { w: 320, h: 240 },
+        {
+          w: Math.round(maxX - minX + padding * 2),
+          h: Math.round(maxY - minY + padding * 2 + 24),
+        },
+      );
+      void canvasStore.updateNodeParams(sessionId, groupId, {
+        memberIds: selectedNodes.map((n) => n.id),
+        color: '#3b82f6',
+      });
+      selectNode(groupId);
+      flash(`已创建包含 ${selectedNodes.length} 个节点的编组`);
+    }
+  }, [sessionId, selectedNodes, selectNode, flash]);
 
   const isMoodboard = useCanvasStore((s) => s.moodboardBySession[sessionId] ?? false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -644,6 +798,24 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           setSearchOpen(false);
           return;
         }
+        if (isPickingReference) {
+          chatStore.setPickingReference(sessionId, false);
+          return;
+        }
+      }
+
+      // Alt+W -> Toggle Workflow Wires
+      if (!isInput && e.altKey && e.key.toLowerCase() === 'w') {
+        e.preventDefault();
+        toggleWires();
+        return;
+      }
+
+      // Ctrl/Cmd+G -> Create Group from selection
+      if (!isInput && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'g' && !e.shiftKey) {
+        e.preventDefault();
+        void createGroupFromSelection();
+        return;
       }
 
       if (isInput || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -1015,9 +1187,10 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
   const refToComposer = (nodeId: string) => {
     const node = storeNodes.find((n) => n.id === nodeId);
     if (!node) return;
-    const p = (node.params as { prompt?: string; instruction?: string }) ?? {};
-    const label = (node.title || p.prompt || p.instruction || node.type).toString().slice(0, 24);
-    chatStore.addNodeRef(sessionId, { id: nodeId, label });
+    const p = (node.params as Record<string, unknown>) ?? {};
+    const label = (node.title || p.prompt || p.instruction || p.content || node.type).toString().slice(0, 24);
+    const thumbnail = getCanvasNodeThumbnail(node) || (p.imageUrl as string | undefined) || (p.videoUrl as string | undefined);
+    chatStore.addNodeRef(sessionId, { id: nodeId, label, type: node.type, thumbnail });
     flash('已加入输入框引用');
   };
 
@@ -1105,7 +1278,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     <div
       data-dragging={isInteracting ? 'true' : undefined}
       data-lowzoom={isLowZoom ? 'true' : undefined}
-      className="h-full w-full outline-none"
+      className={cn("h-full w-full outline-none", isPickingReference && "!cursor-crosshair")}
       tabIndex={0}
       onKeyDown={onKeyDown}
       onDragOver={(e) => e.preventDefault()}
@@ -1114,6 +1287,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         if (Date.now() - dropConnectMenuOpenedAt.current < 300) return;
         if (menu) setMenu(null);
         if (dropConnectMenu) setDropConnectMenu(null);
+        if (addNodesModal) setAddNodesModal(null);
         if (openTool) setOpenTool(null);
       }}
     >
@@ -1128,13 +1302,28 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         onConnect={onConnect}
         onConnectStart={onConnectStart}
         onConnectEnd={onConnectEnd}
+        onNodeClick={(_, rfNode) => {
+          if (isPickingReference) {
+            const node = storeNodes.find((n) => n.id === rfNode.id);
+            if (node) {
+              const p = (node.params as Record<string, unknown>) ?? {};
+              const label = (node.title || p.prompt || p.instruction || p.content || node.type).toString().slice(0, 24);
+              const thumbnail = getCanvasNodeThumbnail(node) || (p.imageUrl as string | undefined) || (p.videoUrl as string | undefined);
+              chatStore.addNodeRef(sessionId, { id: node.id, label, type: node.type, thumbnail });
+              flash(`已添加引用: ${label}`);
+            }
+          }
+        }}
         onPaneClick={() => {
           if (Date.now() - dropConnectMenuOpenedAt.current < 300) return;
           if (menu) setMenu(null);
           if (dropConnectMenu) setDropConnectMenu(null);
+          if (addNodesModal) setAddNodesModal(null);
         }}
         isValidConnection={isValidConnection}
         onSelectionChange={onSelectionChange}
+        onNodeMouseEnter={(_, node) => setHoveredNodeId(node.id)}
+        onNodeMouseLeave={() => setHoveredNodeId(null)}
         onNodeDragStart={(_, __, dragged) => {
           isDraggingRef.current = true;
           setIsInteracting(true);
@@ -1194,12 +1383,18 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
             target.closest('.react-flow__node') ||
             target.closest('.canvas-tool') ||
             target.closest('.react-flow__controls') ||
-            target.closest('.react-flow__panel')
+            target.closest('.react-flow__panel') ||
+            target.closest('[data-magnetic-handle="true"]')
           ) {
             return;
           }
           const flow = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
-          setMenu({ kind: 'pane', x: e.clientX, y: e.clientY, flowX: flow.x, flowY: flow.y });
+          setAddNodesModal({
+            x: e.clientX,
+            y: e.clientY,
+            flowX: Math.round(flow.x),
+            flowY: Math.round(flow.y),
+          });
         }}
         proOptions={{ hideAttribution: true }}
         deleteKeyCode={['Backspace', 'Delete']}
@@ -1226,6 +1421,33 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         <AssetShelf sessionId={sessionId} selectedTargetIds={selectedNodeIds} flash={flash} />
         <AgentActivityStrip sessionId={sessionId} />
         <AlignmentGuides sessionId={sessionId} enabled={snapEnabled} />
+        <ReturnToNodesToast sessionId={sessionId} />
+        <InsertFromCanvasBanner sessionId={sessionId} />
+        <MultiSelectToolbar
+          sessionId={sessionId}
+          selectedNodes={selectedNodes}
+          onAddToChat={addSelectedToComposer}
+          onGroup={createGroupFromSelection}
+          onRunSelected={() => {
+            const runnables = selectedNodes.filter((n) =>
+              ['image', 'video', 'agent', 'music', 'sound'].includes(n.type),
+            );
+            if (runnables.length === 0) {
+              flash('选中节点中无待执行节点');
+              return;
+            }
+            for (const n of runnables) {
+              void canvasStore.runNode(sessionId, n.id);
+            }
+            flash(`已启动执行 ${runnables.length} 个节点`);
+          }}
+          onDelete={() => {
+            for (const n of selectedNodes) {
+              void canvasStore.removeNode(sessionId, n.id);
+            }
+            flash(`已删除 ${selectedNodes.length} 个节点`);
+          }}
+        />
 
         {/* Agent Proposal Diff Review Bar */}
         <Panel position="top-center" className="mt-3 pointer-events-none z-30">
@@ -1446,6 +1668,17 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
               <BoxSelect size={14} />
             </NavButton>
             <NavButton
+              active={wiresVisible}
+              onClick={toggleWires}
+              title={
+                wiresVisible
+                  ? '连线可见 (Alt+W 点击隐藏，隐藏后悬停节点可穿透透视)'
+                  : '连线已隐藏 (Alt+W 点击显示)'
+              }
+            >
+              <Workflow size={14} />
+            </NavButton>
+            <NavButton
               active={navMode === 'trackpad'}
               onClick={toggleNavMode}
               title={
@@ -1614,10 +1847,10 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
 
       {dropConnectMenu ? (
         <div
-          className="fixed z-[160] min-w-48 overflow-hidden rounded-xl border border-line bg-paper-raised p-1 text-xs shadow-2xl backdrop-blur-md"
+          className="fixed z-[180] flex w-[250px] flex-col rounded-2xl border border-line/60 bg-[#161618]/95 p-2 text-xs shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150 select-none cursor-default"
           style={{
-            left: Math.max(12, Math.min(dropConnectMenu.screenX, window.innerWidth - 230)),
-            top: Math.max(12, Math.min(dropConnectMenu.screenY, window.innerHeight - 260)),
+            left: Math.max(16, Math.min(dropConnectMenu.screenX, window.innerWidth - 266)),
+            top: Math.max(16, Math.min(dropConnectMenu.screenY, window.innerHeight - 300)),
           }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -1630,34 +1863,28 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
               const box = defaultNodeBox(type);
               if (dropConnectMenu.isDragDrop) {
                 if (isBackward) {
-                  // Dragged upstream to the left:
-                  // Wire connects to new node's output handle (right side at x + box.w, y + box.h/2).
-                  // Place new node to the left of the drop point so its right handle lands right at the drop point!
                   return {
                     x: Math.round(dropConnectMenu.flowX - box.w),
                     y: Math.round(dropConnectMenu.flowY - box.h / 2),
                   };
                 } else {
-                  // Dragged downstream to the right:
-                  // Wire connects to new node's input handle (left side at x, y + box.h/2).
-                  // Place new node to the right of the drop point so its left handle lands right at the drop point!
                   return {
                     x: Math.round(dropConnectMenu.flowX),
                     y: Math.round(dropConnectMenu.flowY - box.h / 2),
                   };
                 }
               } else {
-                // Clicked plus handle directly without dragging:
+                // Clicked plus handle directly without dragging: generous spacing for clean layout
                 if (isBackward) {
                   const anchor = anchorNode || { x: dropConnectMenu.flowX, y: dropConnectMenu.flowY, w: 320 };
                   return {
-                    x: Math.round(anchor.x - box.w - 60),
+                    x: Math.round(anchor.x - box.w - 120),
                     y: Math.round(anchor.y),
                   };
                 } else {
                   const anchor = anchorNode || { x: dropConnectMenu.flowX, y: dropConnectMenu.flowY, w: 320 };
                   return {
-                    x: Math.round(anchor.x + anchor.w + 60),
+                    x: Math.round(anchor.x + anchor.w + 140),
                     y: Math.round(anchor.y),
                   };
                 }
@@ -1667,16 +1894,142 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
             if (isBackward) {
               return (
                 <>
-                  <div className="flex items-center justify-between px-2 py-1 text-[10px] font-semibold text-accent">
-                    <span>接入上游输入源</span>
-                    <span className="text-[9px] font-normal text-ink-muted truncate max-w-[90px]">➔ {nodeTitle}</span>
+                  <div className="flex items-center justify-between px-2.5 pt-1.5 pb-1 text-[11px] font-medium text-ink-muted/70">
+                    <span>接入上游输入源 (Input)</span>
+                    <span className="text-[10px] text-accent/80 truncate max-w-[80px]">➔ {nodeTitle}</span>
                   </div>
-                  <MenuItem
-                    icon={<Type size={13} className="text-[#4ade80]" />}
-                    label="加文本节点 / 提示词"
+
+                  <div className="flex flex-col gap-0.5 mt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleCreateAndSelect(
+                          canvasStore.addNodeAndConnectToTarget(
+                            sessionId,
+                            {
+                              type: 'note',
+                              ...getSpawnPos('note'),
+                              title: '提示词',
+                            },
+                            dropConnectMenu.nodeId,
+                            'prompt',
+                            'prompt_out',
+                          ),
+                        );
+                      }}
+                      className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left transition-all hover:bg-white/10 active:scale-[0.98] cursor-pointer"
+                    >
+                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-400 group-hover:bg-emerald-500/25 transition-colors">
+                        <Type size={14} />
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-xs font-medium text-ink group-hover:text-white">Text / 提示词</span>
+                        <span className="text-[10px] text-ink-muted truncate">提供提示词或剧本文本</span>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleCreateAndSelect(
+                          canvasStore.addNodeAndConnectToTarget(
+                            sessionId,
+                            {
+                              type: 'image',
+                              ...getSpawnPos('image'),
+                              title: '参考图',
+                            },
+                            dropConnectMenu.nodeId,
+                            'prompt',
+                            'image_out',
+                          ),
+                        );
+                      }}
+                      className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left transition-all hover:bg-white/10 active:scale-[0.98] cursor-pointer"
+                    >
+                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-indigo-500/15 text-indigo-400 group-hover:bg-indigo-500/25 transition-colors">
+                        <ImageIcon size={14} />
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-xs font-medium text-ink group-hover:text-white">Image / 参考图</span>
+                        <span className="text-[10px] text-ink-muted truncate">提供首帧或画面参考</span>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleCreateAndSelect(
+                          canvasStore.addNodeAndConnectToTarget(
+                            sessionId,
+                            {
+                              type: 'video',
+                              ...getSpawnPos('video'),
+                              title: '前序视频',
+                              params: { prompt: '', duration: '5s', ratio: '16:9' },
+                            },
+                            dropConnectMenu.nodeId,
+                            'prompt',
+                            'video_out',
+                          ),
+                        );
+                      }}
+                      className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left transition-all hover:bg-white/10 active:scale-[0.98] cursor-pointer"
+                    >
+                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-rose-500/15 text-rose-400 group-hover:bg-rose-500/25 transition-colors">
+                        <Video size={14} />
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-xs font-medium text-ink group-hover:text-white">Video / 前序视频</span>
+                        <span className="text-[10px] text-ink-muted truncate">作为前序镜头继续接戏</span>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleCreateAndSelect(
+                          canvasStore.addNodeAndConnectToTarget(
+                            sessionId,
+                            {
+                              type: 'audio',
+                              ...getSpawnPos('audio'),
+                              title: '配乐音频',
+                            },
+                            dropConnectMenu.nodeId,
+                            'prompt',
+                            'audio_out',
+                          ),
+                        );
+                      }}
+                      className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left transition-all hover:bg-white/10 active:scale-[0.98] cursor-pointer"
+                    >
+                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-400 group-hover:bg-amber-500/25 transition-colors">
+                        <Volume2 size={14} />
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-xs font-medium text-ink group-hover:text-white">Audio / 配乐</span>
+                        <span className="text-[10px] text-ink-muted truncate">提供背景音频轨道</span>
+                      </div>
+                    </button>
+                  </div>
+                </>
+              );
+            }
+
+            return (
+              <>
+                <div className="flex items-center justify-between px-2.5 pt-1.5 pb-1 text-[11px] font-medium text-ink-muted/70">
+                  <span>Generate from this node</span>
+                  <span className="text-[10px] text-accent/80 truncate max-w-[80px]">➔ {nodeTitle}</span>
+                </div>
+
+                <div className="flex flex-col gap-0.5 mt-1">
+                  <button
+                    type="button"
                     onClick={() => {
                       void handleCreateAndSelect(
-                        canvasStore.addNodeAndConnectToTarget(
+                        canvasStore.addNodeAndConnect(
                           sessionId,
                           {
                             type: 'note',
@@ -1684,162 +2037,24 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
                             title: '提示词',
                           },
                           dropConnectMenu.nodeId,
-                          'prompt',
-                          'prompt_out',
+                          dropConnectMenu.handleId,
+                          'text_in',
                         ),
                       );
                     }}
-                  />
-                  <MenuItem
-                    icon={<ImageIcon size={13} className="text-[#818cf8]" />}
-                    label="加生图节点 (参考/首帧)"
-                    onClick={() => {
-                      void handleCreateAndSelect(
-                        canvasStore.addNodeAndConnectToTarget(
-                          sessionId,
-                          {
-                            type: 'image',
-                            ...getSpawnPos('image'),
-                            title: '参考图',
-                          },
-                          dropConnectMenu.nodeId,
-                          'prompt',
-                          'image_out',
-                        ),
-                      );
-                    }}
-                  />
-                  <MenuItem
-                    icon={<Video size={13} className="text-[#f43f5e]" />}
-                    label="加视频节点 (前序视频)"
-                    onClick={() => {
-                      void handleCreateAndSelect(
-                        canvasStore.addNodeAndConnectToTarget(
-                          sessionId,
-                          {
-                            type: 'video',
-                            ...getSpawnPos('video'),
-                            title: '前序视频',
-                            params: { prompt: '', duration: '5s', ratio: '16:9' },
-                          },
-                          dropConnectMenu.nodeId,
-                          'prompt',
-                          'video_out',
-                        ),
-                      );
-                    }}
-                  />
-                  <MenuItem
-                    icon={<Volume2 size={13} className="text-[#f59e0b]" />}
-                    label="加音频节点 (配乐/台词)"
-                    onClick={() => {
-                      void handleCreateAndSelect(
-                        canvasStore.addNodeAndConnectToTarget(
-                          sessionId,
-                          {
-                            type: 'audio',
-                            ...getSpawnPos('audio'),
-                            title: '配乐音频',
-                          },
-                          dropConnectMenu.nodeId,
-                          'prompt',
-                          'audio_out',
-                        ),
-                      );
-                    }}
-                  />
-                </>
-              );
-            }
+                    className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left transition-all hover:bg-white/10 active:scale-[0.98] cursor-pointer"
+                  >
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-400 group-hover:bg-emerald-500/25 transition-colors">
+                      <Type size={14} />
+                    </div>
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-xs font-medium text-ink group-hover:text-white">Text Generation</span>
+                      <span className="text-[10px] text-ink-muted truncate">Script, Ad copy, Brand text</span>
+                    </div>
+                  </button>
 
-            return (
-              <>
-                <div className="flex items-center justify-between px-2 py-1 text-[10px] font-semibold text-accent">
-                  <span>从此处延伸流水线</span>
-                  <span className="text-[9px] font-normal text-ink-muted truncate max-w-[90px]">由 {nodeTitle} 派生</span>
-                </div>
-
-                <MenuItem
-                  icon={<ImageIcon size={13} className="text-[#818cf8]" />}
-                  label="加图片节点"
-                  onClick={() => {
-                    void handleCreateAndSelect(
-                      canvasStore.addNodeAndConnect(
-                        sessionId,
-                        {
-                          type: 'image',
-                          ...getSpawnPos('image'),
-                          title: '生图',
-                        },
-                        dropConnectMenu.nodeId,
-                        dropConnectMenu.handleId,
-                        'prompt',
-                      ),
-                    );
-                  }}
-                />
-                <MenuItem
-                  icon={<Video size={13} className="text-[#f43f5e]" />}
-                  label="加视频节点"
-                  onClick={() => {
-                    void handleCreateAndSelect(
-                      canvasStore.addNodeAndConnect(
-                        sessionId,
-                        {
-                          type: 'video',
-                          ...getSpawnPos('video'),
-                          title: '视频生成',
-                          params: { prompt: '', duration: '5s', ratio: '16:9' },
-                        },
-                        dropConnectMenu.nodeId,
-                        dropConnectMenu.handleId,
-                        'prompt',
-                      ),
-                    );
-                  }}
-                />
-                <MenuItem
-                  icon={<Volume2 size={13} className="text-[#f59e0b]" />}
-                  label="加音频节点"
-                  onClick={() => {
-                    void handleCreateAndSelect(
-                      canvasStore.addNodeAndConnect(
-                        sessionId,
-                        {
-                          type: 'audio',
-                          ...getSpawnPos('audio'),
-                          title: '音频播放',
-                        },
-                        dropConnectMenu.nodeId,
-                        dropConnectMenu.handleId,
-                        'prompt',
-                      ),
-                    );
-                  }}
-                />
-                <MenuItem
-                  icon={<StickyNote size={13} className="text-[#4ade80]" />}
-                  label="加文本节点"
-                  onClick={() => {
-                    void handleCreateAndSelect(
-                      canvasStore.addNodeAndConnect(
-                        sessionId,
-                        {
-                          type: 'note',
-                          ...getSpawnPos('note'),
-                          title: '分镜便签',
-                        },
-                        dropConnectMenu.nodeId,
-                        dropConnectMenu.handleId,
-                        'prompt',
-                      ),
-                    );
-                  }}
-                />
-                {anchorNode?.type === 'image' && (
-                  <MenuItem
-                    icon={<GitBranchPlus size={13} className="text-accent" />}
-                    label="派生变体分支"
+                  <button
+                    type="button"
                     onClick={() => {
                       void handleCreateAndSelect(
                         canvasStore.addNodeAndConnect(
@@ -1847,8 +2062,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
                           {
                             type: 'image',
                             ...getSpawnPos('image'),
-                            title: `${anchorNode.title || '图片'} (变体)`,
-                            params: { ...(anchorNode.params as Record<string, unknown>) },
+                            title: '生图',
                           },
                           dropConnectMenu.nodeId,
                           dropConnectMenu.handleId,
@@ -1856,12 +2070,127 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
                         ),
                       );
                     }}
-                  />
-                )}
+                    className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left transition-all hover:bg-white/10 active:scale-[0.98] cursor-pointer"
+                  >
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-indigo-500/15 text-indigo-400 group-hover:bg-indigo-500/25 transition-colors">
+                      <ImageIcon size={14} />
+                    </div>
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-xs font-medium text-ink group-hover:text-white">Image Generation</span>
+                      <span className="text-[10px] text-ink-muted truncate">基于上游画面或提示词生图</span>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleCreateAndSelect(
+                        canvasStore.addNodeAndConnect(
+                          sessionId,
+                          {
+                            type: 'video',
+                            ...getSpawnPos('video'),
+                            title: '视频生成',
+                            params: { prompt: '', duration: '5s', ratio: '16:9' },
+                          },
+                          dropConnectMenu.nodeId,
+                          dropConnectMenu.handleId,
+                          'prompt',
+                        ),
+                      );
+                    }}
+                    className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left transition-all hover:bg-white/10 active:scale-[0.98] cursor-pointer"
+                  >
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-rose-500/15 text-rose-400 group-hover:bg-rose-500/25 transition-colors">
+                      <Video size={14} />
+                    </div>
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-xs font-medium text-ink group-hover:text-white">Video Generation</span>
+                      <span className="text-[10px] text-ink-muted truncate">首帧动效与运镜生成</span>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleCreateAndSelect(
+                        canvasStore.addNodeAndConnect(
+                          sessionId,
+                          {
+                            type: 'audio',
+                            ...getSpawnPos('audio'),
+                            title: '音频播放',
+                          },
+                          dropConnectMenu.nodeId,
+                          dropConnectMenu.handleId,
+                          'prompt',
+                        ),
+                      );
+                    }}
+                    className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left transition-all hover:bg-white/10 active:scale-[0.98] cursor-pointer"
+                  >
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-400 group-hover:bg-amber-500/25 transition-colors">
+                      <Volume2 size={14} />
+                    </div>
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-xs font-medium text-ink group-hover:text-white">Audio</span>
+                      <span className="text-[10px] text-ink-muted truncate">配乐与声音生成</span>
+                    </div>
+                  </button>
+
+                  {anchorNode?.type === 'image' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleCreateAndSelect(
+                          canvasStore.addNodeAndConnect(
+                            sessionId,
+                            {
+                              type: 'image',
+                              ...getSpawnPos('image'),
+                              title: `${anchorNode.title || '图片'} (变体)`,
+                              params: { ...(anchorNode.params as Record<string, unknown>) },
+                            },
+                            dropConnectMenu.nodeId,
+                            dropConnectMenu.handleId,
+                            'prompt',
+                          ),
+                        );
+                      }}
+                      className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left transition-all hover:bg-white/10 active:scale-[0.98] cursor-pointer"
+                    >
+                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-accent/15 text-accent group-hover:bg-accent/25 transition-colors">
+                        <GitBranchPlus size={14} />
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-xs font-medium text-ink group-hover:text-white">派生变体分支</span>
+                        <span className="text-[10px] text-ink-muted truncate">快速生成画面变体</span>
+                      </div>
+                    </button>
+                  )}
+                </div>
               </>
             );
           })()}
         </div>
+      ) : null}
+
+      {addNodesModal ? (
+        <AddNodesModal
+          x={addNodesModal.x}
+          y={addNodesModal.y}
+          flowX={addNodesModal.flowX}
+          flowY={addNodesModal.flowY}
+          onClose={() => setAddNodesModal(null)}
+          onSelectType={(type, pos) => {
+            void canvasStore.addNode(sessionId, type, pos).then((newNodeId) => {
+              if (newNodeId) {
+                selectNode(newNodeId);
+              }
+            });
+          }}
+          onUploadFile={handleUploadFileAt}
+        />
       ) : null}
 
       {showShortcuts ? (
@@ -1915,6 +2244,14 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
             <div className="flex justify-between items-center py-0.5 border-b border-line/60">
               <span className="text-ink-muted">撤销 / 重做</span>
               <kbd className="rounded bg-paper-inset px-1.5 py-0.5 font-mono text-[10px]">Ctrl + Z / Y</kbd>
+            </div>
+            <div className="flex justify-between items-center py-0.5 border-b border-line/60">
+              <span className="text-ink-muted">选区打包为编组</span>
+              <kbd className="rounded bg-paper-inset px-1.5 py-0.5 font-mono text-[10px]">Ctrl / ⌘ + G</kbd>
+            </div>
+            <div className="flex justify-between items-center py-0.5 border-b border-line/60">
+              <span className="text-ink-muted">连线显隐 / 悬停透视</span>
+              <kbd className="rounded bg-paper-inset px-1.5 py-0.5 font-mono text-[10px]">Alt + W</kbd>
             </div>
             <div className="flex justify-between items-center py-0.5 border-b border-line/60">
               <span className="text-ink-muted">快速添加节点</span>

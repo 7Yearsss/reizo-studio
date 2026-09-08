@@ -12,12 +12,14 @@ import * as uiStore from '../state/uiStore';
 import { toast } from '../lib/toast';
 import { StatefulButton, type ButtonState } from '../components/motion/button/stateful';
 import { Input } from '../components/motion/input';
+import { AdminProvidersSection } from './settings/AdminProvidersSection';
 
-type SectionId = 'general' | 'providers' | 'about';
+type SectionId = 'general' | 'providers' | 'admin' | 'about';
 
 const SECTIONS: { id: SectionId; label: string }[] = [
   { id: 'general', label: '通用' },
   { id: 'providers', label: '模型供应商' },
+  { id: 'admin', label: '平台管理 (Admin)' },
   { id: 'about', label: '关于' },
 ];
 
@@ -58,6 +60,7 @@ export default function SettingsPage() {
       <div className="flex-1 overflow-y-auto px-10 py-8">
         {section === 'general' && <GeneralSection />}
         {section === 'providers' && <ProvidersSection />}
+        {section === 'admin' && <AdminProvidersSection />}
         {section === 'about' && <AboutSection />}
       </div>
     </div>

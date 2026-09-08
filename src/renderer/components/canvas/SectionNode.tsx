@@ -220,7 +220,7 @@ function SectionNode({ id, data, selected }: NodeProps) {
               }}
               autoFocus
               placeholder="输入场景描述（如：雨夜霓虹街头，主角撑伞走过积水路面）..."
-              className="w-full rounded-md border border-line bg-paper px-2 py-0.5 text-xs text-ink outline-none focus:border-accent"
+              className="nodrag cursor-text w-full rounded-md border border-line bg-paper px-2 py-0.5 text-xs text-ink outline-none focus:border-accent"
             />
           ) : (
             <div

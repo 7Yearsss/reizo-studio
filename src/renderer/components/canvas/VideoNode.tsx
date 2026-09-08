@@ -178,6 +178,7 @@ function VideoNode({ id, data, selected }: NodeProps) {
         kind="prompt"
         label="添加上下文"
         top="50%"
+        nodeHovered={hovered || selected}
       />
       <MagneticHandle
         type="source"
@@ -187,6 +188,7 @@ function VideoNode({ id, data, selected }: NodeProps) {
         kind="prompt"
         label="引用该节点生成"
         top="50%"
+        nodeHovered={hovered || selected}
       />
 
       {/* Floating anti-zoom header outside the card boundary (TapNow design) */}

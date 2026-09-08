@@ -369,7 +369,7 @@ const MentionTextArea = forwardRef<MentionTextAreaHandle, MentionTextAreaProps>(
   }, []);
 
   return (
-    <div className="relative">
+    <div className="relative cursor-text">
       <div
         ref={ref}
         contentEditable
@@ -396,7 +396,7 @@ const MentionTextArea = forwardRef<MentionTextAreaHandle, MentionTextAreaProps>(
         }}
         onWheel={(e) => e.stopPropagation()}
         className={cn(
-          'mention-input nodrag nopan nowheel w-full resize-none whitespace-pre-wrap break-words text-xs text-ink outline-none leading-relaxed transition-all',
+          'mention-input nodrag nopan nowheel cursor-text w-full resize-none whitespace-pre-wrap break-words text-xs text-ink outline-none leading-relaxed transition-all',
           variant === 'flat'
             ? 'border-0 bg-transparent p-0 focus:ring-0 focus:border-0 focus:outline-none placeholder:text-ink-muted/40 selection:bg-accent/25'
             : 'rounded-xl border border-line/60 bg-paper-inset/40 p-2.5 focus:border-accent focus:bg-paper-inset/70 focus:ring-1 focus:ring-accent/30',

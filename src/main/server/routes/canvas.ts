@@ -7,11 +7,13 @@ import { defaultNodeBox, type CanvasNodeType } from '../../../shared/canvas';
 import type { SettingsStore } from '../storage/settingsStore';
 import type { CanvasStore } from '../storage/canvasStore';
 import type { ArtifactStore } from '../storage/artifactStore';
+import type { ProviderStore } from '../storage/providerStore';
 import { getCanvasChannel } from '../canvas/channel';
 import { broadcastDownstreamDirty, canvasAssetsDir, readCanvasAsset, runImageNode } from '../canvas/imageExecutor';
 import { isCanvasRunning, runGraph, stopCanvasRun } from '../canvas/graphExecutor';
 import { runAgentNode } from '../canvas/agentExecutor';
 import { runVideoNode } from '../canvas/videoExecutor';
+import { runAudioNode } from '../canvas/audioExecutor';
 import { setCanvasSelection } from '../canvas/selection';
 import { exportWorkflowZip } from '../canvas/exportWorkflow';
 import { importWorkflowZip } from '../canvas/importWorkflow';
@@ -38,6 +40,7 @@ export function createCanvasRouter(
   sessionStore: SessionStore,
   dataRoot: string,
   artifactStore?: ArtifactStore,
+  providerStore?: ProviderStore,
 ) {
   const router = new Hono();
 
@@ -210,6 +213,23 @@ export function createCanvasRouter(
         node,
         providerId: typeof body.providerId === 'string' ? body.providerId : undefined,
       });
+      return c.json({ ok: true }, 202);
+    }
+
+    if (node.type === 'audio') {
+      if (body?.confirmedSpend !== true) {
+        return c.json({ error: 'confirmedSpend required for a paid generation' }, 402);
+      }
+      if (providerStore) {
+        void runAudioNode({
+          canvasStore,
+          providerStore,
+          dataRoot,
+          canvasId,
+          node,
+          providerId: typeof body.providerId === 'string' ? body.providerId : undefined,
+        });
+      }
       return c.json({ ok: true }, 202);
     }
 

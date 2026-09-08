@@ -403,4 +403,30 @@ describe('chatStore streaming fold', () => {
     release();
     await pending;
   });
+
+  it('manages pickingReferenceBySession and nodeRefs state', () => {
+    expect(store.getSnapshot().pickingReferenceBySession.s1).toBeFalsy();
+    store.setPickingReference('s1', true);
+    expect(store.getSnapshot().pickingReferenceBySession.s1).toBe(true);
+    store.setPickingReference('s1', false);
+    expect(store.getSnapshot().pickingReferenceBySession.s1).toBe(false);
+
+    store.addNodeRef('s1', { id: 'n1', label: 'Node 1', type: 'image' });
+    expect(store.getSnapshot().nodeRefsBySession.s1).toHaveLength(1);
+    expect(store.getSnapshot().nodeRefsBySession.s1[0].id).toBe('n1');
+
+    // Duplicate add should be ignored
+    store.addNodeRef('s1', { id: 'n1', label: 'Node 1 dup', type: 'image' });
+    expect(store.getSnapshot().nodeRefsBySession.s1).toHaveLength(1);
+
+    store.addNodeRef('s1', { id: 'n2', label: 'Node 2', type: 'video' });
+    expect(store.getSnapshot().nodeRefsBySession.s1).toHaveLength(2);
+
+    store.removeNodeRef('s1', 'n1');
+    expect(store.getSnapshot().nodeRefsBySession.s1).toHaveLength(1);
+    expect(store.getSnapshot().nodeRefsBySession.s1[0].id).toBe('n2');
+
+    store.clearNodeRefs('s1');
+    expect(store.getSnapshot().nodeRefsBySession.s1).toHaveLength(0);
+  });
 });

@@ -39,12 +39,15 @@ export interface CanvasState {
   moodboardBySession: Record<string, boolean>;
   /** Node(s) currently in Agent proposal diff state (rendered with glowing dashed border). */
   proposalsBySession: Record<string, string[]>;
+  /** Selected node IDs per session on the canvas. */
+  selectedNodeIdsBySession: Record<string, string[]>;
 }
 
 export const EMPTY_NODES: CanvasNode[] = [];
 export const EMPTY_EDGES: CanvasEdge[] = [];
 export const EMPTY_PROPOSALS: string[] = [];
 export const EMPTY_TRAIL: AgentTrailEntry[] = [];
+export const EMPTY_SELECTED_IDS: string[] = [];
 
 const TRAIL_CAP = 30;
 
@@ -59,6 +62,7 @@ let state: CanvasState = {
   historyBySession: {},
   moodboardBySession: {},
   proposalsBySession: {},
+  selectedNodeIdsBySession: {},
 };
 
 const listeners = new Set<() => void>();
@@ -388,16 +392,17 @@ export async function addNode(
   type: CanvasNodeType,
   at: { x: number; y: number },
   params?: CanvasNodeParams,
-): Promise<void> {
+): Promise<string | null> {
   const spec = { type, x: at.x, y: at.y, params };
   let currentId = await _addNode(sessionId, spec);
-  if (!currentId) return;
+  if (!currentId) return null;
   record(sessionId, {
     undo: () => (currentId ? _deleteNode(sessionId, currentId) : Promise.resolve()),
     redo: async () => {
       currentId = await _addNode(sessionId, spec);
     },
   });
+  return currentId;
 }
 
 export async function duplicateNode(sessionId: string, nodeId: string): Promise<void> {
@@ -2078,6 +2083,16 @@ export async function importWorkflow(
 const pendingSelection = new Map<string, string[]>();
 
 export function setSelection(sessionId: string, ids: string[]): void {
+  const current = state.selectedNodeIdsBySession[sessionId] ?? EMPTY_SELECTED_IDS;
+  const isSame = current.length === ids.length && current.every((id, i) => id === ids[i]);
+  if (!isSame) {
+    setState({
+      selectedNodeIdsBySession: {
+        ...state.selectedNodeIdsBySession,
+        [sessionId]: ids,
+      },
+    });
+  }
   const id = canvasId(sessionId);
   if (!id) return;
   pendingSelection.set(sessionId, ids);
@@ -2091,6 +2106,24 @@ export function setSelection(sessionId: string, ids: string[]): void {
       void api.setCanvasSelection(id, ids).catch((): void => undefined);
     }, 300),
   );
+}
+
+/** Clears canvas selection both in store and notifies CanvasPanel. */
+export function clearSelection(sessionId: string): void {
+  setSelection(sessionId, []);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('reizo:clear-canvas-selection', { detail: { sessionId } }));
+  }
+}
+
+/** Removes a single node from the canvas selection. */
+export function deselectNode(sessionId: string, nodeId: string): void {
+  const current = state.selectedNodeIdsBySession[sessionId] ?? [];
+  const next = current.filter((id) => id !== nodeId);
+  setSelection(sessionId, next);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('reizo:deselect-canvas-node', { detail: { sessionId, nodeId } }));
+  }
 }
 
 /** Immediately synchronizes pending selection to the backend, preventing debounce race conditions. */
