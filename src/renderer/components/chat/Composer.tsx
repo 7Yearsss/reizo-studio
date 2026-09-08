@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AtSign, FolderTree, Paperclip, Image as ImageIcon, Video, Type, Volume2, Bot, Sparkles, BoxSelect, Layers } from 'lucide-react';
 import { isImeComposingEvent } from '../../lib/ime';
+import { cn } from '../../lib/cn';
 import { PromptInput } from '../agents/prompt-input';
 import ModelPicker from './ModelPicker';
 import MentionMenu, { extractMentionQuery } from './MentionMenu';
@@ -49,6 +50,7 @@ export default function Composer({
   showInterruptBanner = false,
   onRetryTurn,
   onDismissInterrupt,
+  compact = false,
 }: {
   sessionId?: string;
   disabled: boolean;
@@ -72,6 +74,7 @@ export default function Composer({
   showInterruptBanner?: boolean;
   onRetryTurn?: () => void;
   onDismissInterrupt?: () => void;
+  compact?: boolean;
 }) {
   const [draft, setDraft] = useState('');
   const [mentions, setMentions] = useState<string[]>([]);
@@ -174,7 +177,12 @@ export default function Composer({
   ) : null;
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-0 px-6 pt-16 pb-6 bg-gradient-to-t from-paper via-paper to-paper-a0">
+    <div
+      className={cn(
+        'pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-paper via-paper to-paper-a0',
+        compact ? 'px-3 pb-3 pt-8' : 'px-6 pb-6 pt-16',
+      )}
+    >
       <div className="pointer-events-auto relative mx-auto max-w-3xl">
         {!sending && turnOutcome === 'error' && turnError && (
           <div className="mb-2 flex items-center gap-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[13px] text-ink" role="alert">
@@ -259,7 +267,7 @@ export default function Composer({
             }}
           >
             {(activeSkill || attachments.length > 0 || nodeRefs.length > 0 || mentions.length > 0 || unpinnedSelectionNodes.length > 0) && (
-              <div className="mb-2 flex flex-wrap gap-1.5">
+              <div className={cn("mb-2 flex flex-wrap gap-1.5", compact && "max-h-24 overflow-y-auto pr-0.5")}>
                 {sessionId && unpinnedSelectionNodes.length > 0 && (
                   <div
                     className="group inline-flex items-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 py-0.5 pl-1.5 pr-2 text-xs shadow-sm backdrop-blur-sm transition-all hover:border-sky-500/60 hover:bg-sky-500/15"
@@ -424,20 +432,36 @@ export default function Composer({
                   }
                 }}
                 leadingAction={
-                  <div className="flex min-w-0 items-center gap-1">
-                    <ModelPicker />
-                    <SelectField
-                      ariaLabel="权限模式"
-                      value={permissionMode}
-                      options={(Object.keys(MODE_LABEL) as PermissionMode[]).map((mode) => ({
-                        value: mode,
-                        label: MODE_LABEL[mode],
-                      }))}
-                      onChange={(mode) =>
-                        void settingsStore.patchSettings({ permissionMode: mode as PermissionMode })
-                      }
-                      className="max-w-[120px]"
-                    />
+                  <div className="flex min-w-0 shrink items-center gap-1">
+                    <ModelPicker compact={compact} />
+                    {compact ? (
+                      <SelectField
+                        ariaLabel="权限模式"
+                        value={permissionMode}
+                        options={(Object.keys(MODE_LABEL) as PermissionMode[]).map((mode) => ({
+                          value: mode,
+                          label: mode === 'full' ? '允许' : mode === 'workspace' ? '工作区' : '询问',
+                          hint: MODE_LABEL[mode],
+                        }))}
+                        onChange={(mode) =>
+                          void settingsStore.patchSettings({ permissionMode: mode as PermissionMode })
+                        }
+                        className="max-w-[76px] px-1.5 py-1 text-[11px]"
+                      />
+                    ) : (
+                      <SelectField
+                        ariaLabel="权限模式"
+                        value={permissionMode}
+                        options={(Object.keys(MODE_LABEL) as PermissionMode[]).map((mode) => ({
+                          value: mode,
+                          label: MODE_LABEL[mode],
+                        }))}
+                        onChange={(mode) =>
+                          void settingsStore.patchSettings({ permissionMode: mode as PermissionMode })
+                        }
+                        className="max-w-[120px]"
+                      />
+                    )}
                   </div>
                 }
                 actions={[

@@ -1,10 +1,12 @@
 import React, { useRef, useEffect } from 'react';
 import {
-  Type,
+  AlignLeft,
   ImageIcon,
   Video,
-  Volume2,
-  FolderKanban,
+  AudioLines,
+  Box,
+  Film,
+  Orbit,
   Upload,
 } from 'lucide-react';
 import type { CanvasNodeType } from '../../../shared/canvas';
@@ -15,15 +17,17 @@ export interface AddNodesModalProps {
   flowX: number;
   flowY: number;
   onClose: () => void;
-  onSelectType: (type: CanvasNodeType, position: { x: number; y: number }) => void;
+  onSelectType: (type: CanvasNodeType, position: { x: number; y: number }, initialParams?: Record<string, unknown>) => void;
   onUploadFile?: (file: File, position: { x: number; y: number }) => void;
+  onOpenTimeline?: () => void;
+  onOpen3DStudio?: () => void;
 }
 
 /**
- * TapNow-style "Add Nodes" floating menu card (screenshot 30-dblclick-add-menu.png):
- * - Triggered by double-clicking on canvas blank area
- * - Categorized: Basic Nodes, Utilities, Add Source
- * - Sleek dark glassmorphism card with subtitles
+ * Modern AI Canvas "Add Nodes" floating menu card:
+ * - Triggered by double-clicking on canvas blank area or clicking empty prompt
+ * - Sections: 添加节点 (Add Node), 辅助工具 (Auxiliary Tools), 添加资源 (Add Resources)
+ * - Sleek dark glassmorphism card matching modern AI canvas aesthetic
  */
 export default function AddNodesModal({
   x,
@@ -33,6 +37,8 @@ export default function AddNodesModal({
   onClose,
   onSelectType,
   onUploadFile,
+  onOpenTimeline,
+  onOpen3DStudio,
 }: AddNodesModalProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -60,13 +66,13 @@ export default function AddNodesModal({
   }, [onClose]);
 
   // Adjust card position to stay fully on screen
-  const menuWidth = 260;
-  const menuHeight = 380;
+  const menuWidth = 270;
+  const menuHeight = 520;
   const left = Math.max(16, Math.min(x, window.innerWidth - menuWidth - 16));
   const top = Math.max(16, Math.min(y, window.innerHeight - menuHeight - 16));
 
-  const handleSelect = (type: CanvasNodeType) => {
-    onSelectType(type, { x: flowX, y: flowY });
+  const handleSelect = (type: CanvasNodeType, initialParams?: Record<string, unknown>) => {
+    onSelectType(type, { x: flowX, y: flowY }, initialParams);
     onClose();
   };
 
@@ -81,7 +87,7 @@ export default function AddNodesModal({
   return (
     <div
       ref={menuRef}
-      className="fixed z-[180] flex w-[260px] flex-col rounded-2xl border border-line/60 bg-[#161618]/95 p-2 text-xs shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150 select-none cursor-default"
+      className="fixed z-[180] flex w-[270px] flex-col rounded-2xl border border-white/[0.08] bg-[#18181b]/95 p-2 text-xs shadow-2xl backdrop-blur-2xl animate-in fade-in zoom-in-95 duration-150 select-none cursor-default"
       style={{ left, top }}
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
@@ -94,113 +100,138 @@ export default function AddNodesModal({
         onChange={handleFileChange}
       />
 
-      {/* Header */}
-      <div className="px-2.5 pt-1.5 pb-1 text-[11px] font-medium text-ink-muted/70 tracking-wide">
-        Add Nodes
+      {/* 1. 添加节点 */}
+      <div className="px-2.5 pt-1.5 pb-1 text-xs font-normal text-white/50 tracking-wide">
+        添加节点
       </div>
 
-      {/* Primary Nodes */}
       <div className="flex flex-col gap-0.5">
-        {/* Text */}
+        {/* 文本 */}
         <button
           type="button"
           onClick={() => handleSelect('note')}
-          className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-all hover:bg-white/10 active:scale-[0.98] cursor-pointer"
+          className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-white/[0.08] active:scale-[0.98] cursor-pointer"
         >
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-400 group-hover:bg-emerald-500/25 transition-colors">
-            <Type size={14} />
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#27272a] text-zinc-200 group-hover:bg-[#323236] group-hover:text-white transition-colors">
+            <AlignLeft size={16} strokeWidth={2.2} />
           </div>
           <div className="flex flex-col min-w-0">
-            <span className="text-xs font-medium text-ink group-hover:text-white">Text</span>
-            <span className="text-[10px] text-ink-muted truncate">Script, Ad copy, Brand text</span>
+            <span className="text-xs font-medium text-zinc-100 group-hover:text-white">文本</span>
+            <span className="text-[10px] text-zinc-400/80 truncate">脚本、广告词、品牌文案</span>
           </div>
         </button>
 
-        {/* Image */}
+        {/* 图片 */}
         <button
           type="button"
           onClick={() => handleSelect('image')}
-          className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-all hover:bg-white/10 active:scale-[0.98] cursor-pointer"
+          className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left transition-colors hover:bg-white/[0.08] active:scale-[0.98] cursor-pointer"
         >
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-indigo-500/15 text-indigo-400 group-hover:bg-indigo-500/25 transition-colors">
-            <ImageIcon size={14} />
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#27272a] text-zinc-200 group-hover:bg-[#323236] group-hover:text-white transition-colors">
+            <ImageIcon size={16} strokeWidth={2} />
           </div>
-          <div className="flex flex-col min-w-0">
-            <span className="text-xs font-medium text-ink group-hover:text-white">Image</span>
-            <span className="text-[10px] text-ink-muted truncate">生图与画面参考</span>
-          </div>
+          <span className="text-xs font-medium text-zinc-100 group-hover:text-white">图片</span>
         </button>
 
-        {/* Video */}
+        {/* 视频 */}
         <button
           type="button"
           onClick={() => handleSelect('video')}
-          className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-all hover:bg-white/10 active:scale-[0.98] cursor-pointer"
+          className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left transition-colors hover:bg-white/[0.08] active:scale-[0.98] cursor-pointer"
         >
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-rose-500/15 text-rose-400 group-hover:bg-rose-500/25 transition-colors">
-            <Video size={14} />
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#27272a] text-zinc-200 group-hover:bg-[#323236] group-hover:text-white transition-colors">
+            <Video size={16} strokeWidth={2} />
           </div>
-          <div className="flex flex-col min-w-0">
-            <span className="text-xs font-medium text-ink group-hover:text-white">Video</span>
-            <span className="text-[10px] text-ink-muted truncate">视频生成与运镜</span>
-          </div>
+          <span className="text-xs font-medium text-zinc-100 group-hover:text-white">视频</span>
         </button>
 
-        {/* Audio */}
+        {/* 音频 (带蓝点标识) */}
         <button
           type="button"
           onClick={() => handleSelect('audio')}
-          className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-all hover:bg-white/10 active:scale-[0.98] cursor-pointer"
+          className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left transition-colors hover:bg-white/[0.08] active:scale-[0.98] cursor-pointer"
         >
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-400 group-hover:bg-amber-500/25 transition-colors">
-            <Volume2 size={14} />
+          <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#27272a] text-zinc-200 group-hover:bg-[#323236] group-hover:text-white transition-colors">
+            <AudioLines size={16} strokeWidth={2} />
+            <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-sky-400 ring-2 ring-[#18181b]" />
           </div>
-          <div className="flex flex-col min-w-0">
-            <span className="text-xs font-medium text-ink group-hover:text-white">Audio</span>
-            <span className="text-[10px] text-ink-muted truncate">配乐与声音生成</span>
-          </div>
+          <span className="text-xs font-medium text-zinc-100 group-hover:text-white">音频</span>
         </button>
-      </div>
 
-      {/* Utilities Section */}
-      <div className="my-1 border-t border-line/40 px-2.5 pt-2 pb-0.5 text-[10px] font-medium text-ink-muted/60 tracking-wider uppercase">
-        Utilities
-      </div>
-
-      <div className="flex flex-col gap-0.5">
+        {/* 3D (带蓝点标识) */}
         <button
           type="button"
-          onClick={() => handleSelect('section')}
-          className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left transition-all hover:bg-white/10 active:scale-[0.98] cursor-pointer"
+          onClick={() => handleSelect('agent', { title: '3D 概念生成', instruction: '生成 3D 资产与多视角预览' })}
+          className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left transition-colors hover:bg-white/[0.08] active:scale-[0.98] cursor-pointer"
         >
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-500/15 text-blue-400 group-hover:bg-blue-500/25 transition-colors">
-            <FolderKanban size={14} />
+          <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#27272a] text-zinc-200 group-hover:bg-[#323236] group-hover:text-white transition-colors">
+            <Box size={16} strokeWidth={2} />
+            <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-sky-400 ring-2 ring-[#18181b]" />
           </div>
-          <div className="flex flex-col min-w-0">
-            <span className="text-xs font-medium text-ink group-hover:text-white">Section</span>
-            <span className="text-[10px] text-ink-muted truncate">场景大区分组管理</span>
-          </div>
+          <span className="text-xs font-medium text-zinc-100 group-hover:text-white">3D</span>
         </button>
       </div>
 
-      {/* Add Source Section */}
-      <div className="my-1 border-t border-line/40 px-2.5 pt-2 pb-0.5 text-[10px] font-medium text-ink-muted/60 tracking-wider uppercase">
-        Add Source
+      {/* 2. 辅助工具 */}
+      <div className="mt-2.5 px-2.5 pt-1 pb-1 text-xs font-normal text-white/50 tracking-wide">
+        辅助工具
       </div>
 
       <div className="flex flex-col gap-0.5">
+        {/* 剪辑时间线 (Beta) */}
+        <button
+          type="button"
+          onClick={() => {
+            if (onOpenTimeline) onOpenTimeline();
+            onClose();
+          }}
+          className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left transition-colors hover:bg-white/[0.08] active:scale-[0.98] cursor-pointer"
+        >
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#27272a] text-zinc-200 group-hover:bg-[#323236] group-hover:text-white transition-colors">
+            <Film size={16} strokeWidth={2} />
+          </div>
+          <div className="flex items-center">
+            <span className="text-xs font-medium text-zinc-100 group-hover:text-white">剪辑时间线</span>
+            <span className="ml-2 rounded-full bg-white/[0.08] px-1.5 py-0.5 text-[10px] font-medium text-white/60">Beta</span>
+          </div>
+        </button>
+
+        {/* 3D 片场 */}
+        <button
+          type="button"
+          onClick={() => {
+            if (onOpen3DStudio) {
+              onOpen3DStudio();
+            } else {
+              handleSelect('section', { title: '3D 片场', description: '场景多机位与空间编排' });
+            }
+            onClose();
+          }}
+          className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left transition-colors hover:bg-white/[0.08] active:scale-[0.98] cursor-pointer"
+        >
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#27272a] text-zinc-200 group-hover:bg-[#323236] group-hover:text-white transition-colors">
+            <Orbit size={16} strokeWidth={2} />
+          </div>
+          <span className="text-xs font-medium text-zinc-100 group-hover:text-white">3D 片场</span>
+        </button>
+      </div>
+
+      {/* 3. 添加资源 */}
+      <div className="mt-2.5 px-2.5 pt-1 pb-1 text-xs font-normal text-white/50 tracking-wide">
+        添加资源
+      </div>
+
+      <div className="flex flex-col gap-0.5">
+        {/* 上传 */}
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left transition-all hover:bg-white/10 active:scale-[0.98] cursor-pointer"
+          className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left transition-colors hover:bg-white/[0.08] active:scale-[0.98] cursor-pointer"
         >
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/10 text-ink group-hover:bg-white/20 transition-colors">
-            <Upload size={14} />
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#27272a] text-zinc-200 group-hover:bg-[#323236] group-hover:text-white transition-colors">
+            <Upload size={16} strokeWidth={2} />
           </div>
-          <div className="flex flex-col min-w-0">
-            <span className="text-xs font-medium text-ink group-hover:text-white">Upload</span>
-            <span className="text-[10px] text-ink-muted truncate">导入本地图片、视频或音频</span>
-          </div>
+          <span className="text-xs font-medium text-zinc-100 group-hover:text-white">上传</span>
         </button>
       </div>
     </div>

@@ -21,6 +21,7 @@ export interface TopRightToolbarProps {
   onRename?: () => void;
   onDelete?: () => void;
   onOpenCanvas?: () => void;
+  compact?: boolean;
 }
 
 export default function TopRightToolbar({
@@ -30,6 +31,7 @@ export default function TopRightToolbar({
   onRename,
   onDelete,
   onOpenCanvas,
+  compact = false,
 }: TopRightToolbarProps) {
   const rightPanelTab = useUiStore((s) => s.rightPanelTab);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -55,68 +57,78 @@ export default function TopRightToolbar({
   };
 
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex shrink-0 items-center gap-1">
       {onSearch && (
         <button
           type="button"
           onClick={onSearch}
           className={cn(
-            'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] transition-colors duration-150',
+            compact
+              ? 'inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors duration-150'
+              : 'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] transition-colors duration-150',
             searchOpen ? 'bg-paper-inset text-ink' : 'text-ink-muted hover:bg-paper-inset/70 hover:text-ink',
           )}
           title="搜索对话 (Ctrl/⌘F)"
+          aria-label="搜索对话"
         >
-          <Search size={13} />
-          搜索
+          <Search size={compact ? 14 : 13} />
+          {!compact && <span>搜索</span>}
         </button>
       )}
       <button
         type="button"
         onClick={handleCanvasClick}
         className={cn(
-          'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors duration-150',
+          compact
+            ? 'inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors duration-150'
+            : 'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors duration-150',
           rightPanelTab === 'canvas'
             ? 'bg-accent/15 text-accent border border-accent/30'
             : 'text-ink-muted hover:bg-paper-inset/70 hover:text-ink',
         )}
         title="画布视窗"
+        aria-label="画布视窗"
       >
-        <Workflow size={13} />
-        画布
+        <Workflow size={compact ? 14 : 13} />
+        {!compact && <span>画布</span>}
       </button>
-      <button
-        type="button"
-        onClick={() => uiStore.toggleRightPanelTab('terminal')}
-        className={cn(
-          'inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors duration-150',
-          rightPanelTab === 'terminal'
-            ? 'bg-paper-inset text-ink shadow-sm'
-            : 'text-ink-muted hover:bg-paper-inset/70 hover:text-ink',
-        )}
-        title="终端控制台"
-      >
-        <Terminal size={14} />
-      </button>
-      <button
-        type="button"
-        onClick={() => uiStore.toggleRightPanelTab('git')}
-        className={cn(
-          'inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors duration-150',
-          rightPanelTab === 'git'
-            ? 'bg-paper-inset text-ink shadow-sm'
-            : 'text-ink-muted hover:bg-paper-inset/70 hover:text-ink',
-        )}
-        title="Git 变更"
-      >
-        <GitBranch size={14} />
-      </button>
+      {!compact && (
+        <>
+          <button
+            type="button"
+            onClick={() => uiStore.toggleRightPanelTab('terminal')}
+            className={cn(
+              'inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors duration-150',
+              rightPanelTab === 'terminal'
+                ? 'bg-paper-inset text-ink shadow-sm'
+                : 'text-ink-muted hover:bg-paper-inset/70 hover:text-ink',
+            )}
+            title="终端控制台"
+          >
+            <Terminal size={14} />
+          </button>
+          <button
+            type="button"
+            onClick={() => uiStore.toggleRightPanelTab('git')}
+            className={cn(
+              'inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors duration-150',
+              rightPanelTab === 'git'
+                ? 'bg-paper-inset text-ink shadow-sm'
+                : 'text-ink-muted hover:bg-paper-inset/70 hover:text-ink',
+            )}
+            title="Git 变更"
+          >
+            <GitBranch size={14} />
+          </button>
+        </>
+      )}
       <div className="relative" ref={moreMenuRef}>
         <button
           type="button"
           onClick={() => setMoreOpen((o) => !o)}
           className={cn(
             'inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors duration-150',
-            moreOpen || rightPanelTab === 'files' || rightPanelTab === 'artifacts'
+            moreOpen || (compact && (rightPanelTab === 'terminal' || rightPanelTab === 'git')) || rightPanelTab === 'files' || rightPanelTab === 'artifacts'
               ? 'bg-paper-inset text-ink'
               : 'text-ink-muted hover:bg-paper-inset/70 hover:text-ink',
           )}
@@ -126,6 +138,41 @@ export default function TopRightToolbar({
         </button>
         {moreOpen && (
           <div className="absolute right-0 top-full mt-1.5 z-30 w-44 overflow-hidden rounded-xl border border-line bg-paper-raised/95 py-1 text-xs shadow-xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-100">
+            {compact && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    uiStore.toggleRightPanelTab('terminal');
+                    setMoreOpen(false);
+                  }}
+                  className={cn(
+                    'flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-paper-inset/70',
+                    rightPanelTab === 'terminal' ? 'font-medium text-ink' : 'text-ink-muted',
+                  )}
+                >
+                  <Terminal size={13} />
+                  <span>终端控制台</span>
+                  {rightPanelTab === 'terminal' && <span className="ml-auto text-[10px] text-accent">●</span>}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    uiStore.toggleRightPanelTab('git');
+                    setMoreOpen(false);
+                  }}
+                  className={cn(
+                    'flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-paper-inset/70',
+                    rightPanelTab === 'git' ? 'font-medium text-ink' : 'text-ink-muted',
+                  )}
+                >
+                  <GitBranch size={13} />
+                  <span>Git 变更</span>
+                  {rightPanelTab === 'git' && <span className="ml-auto text-[10px] text-accent">●</span>}
+                </button>
+                <div className="my-1 border-t border-line/60" />
+              </>
+            )}
             <button
               type="button"
               onClick={() => {

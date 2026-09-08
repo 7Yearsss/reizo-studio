@@ -31,6 +31,7 @@ export default function MessageList({
   onEditLastUser,
   onRetryLastAssistant,
   onPickHint,
+  compact = false,
 }: {
   messages: ChatMessage[];
   streaming: string;
@@ -47,6 +48,7 @@ export default function MessageList({
   onEditLastUser?: () => void;
   onRetryLastAssistant?: () => void;
   onPickHint?: (text: string) => void;
+  compact?: boolean;
 }) {
   const viewportRef = useRef<HTMLElement>(null);
   const [following, setFollowing] = useState(true);
@@ -107,7 +109,11 @@ export default function MessageList({
         label="对话"
         className="absolute inset-0"
         viewportRef={viewportRef}
-        viewportClassName={`px-8 pt-4 ${sending ? 'pb-56' : 'pb-44'}`}
+        viewportClassName={
+          compact
+            ? `px-3.5 pt-3 ${sending ? 'pb-48' : 'pb-36'}`
+            : `px-8 pt-4 ${sending ? 'pb-56' : 'pb-44'}`
+        }
         contentClassName="mx-auto max-w-3xl space-y-8"
         viewportProps={{
           onScroll: (event) => {

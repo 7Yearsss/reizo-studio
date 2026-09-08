@@ -29,10 +29,11 @@ export const SIDEBAR_COLLAPSE_THRESHOLD = 110;
 
 export const RIGHT_PANEL_MIN = 320;
 export const RIGHT_PANEL_DEFAULT = 480;
+export const CHAT_PANEL_MIN = 300;
 
 export function getRightPanelMax(): number {
   if (typeof window === 'undefined') return 1200;
-  return Math.max(RIGHT_PANEL_MIN, window.innerWidth - 220);
+  return Math.max(RIGHT_PANEL_MIN, window.innerWidth - CHAT_PANEL_MIN);
 }
 
 function readMode(): SidebarMode {

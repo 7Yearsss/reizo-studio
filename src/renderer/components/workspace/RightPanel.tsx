@@ -72,7 +72,7 @@ export default function RightPanel({
         uiStore.setRightPanelMaximized(false);
         const restoredWidth = Math.max(
           uiStore.RIGHT_PANEL_MIN,
-          Math.min(maxAvailable - 220, window.innerWidth - e.clientX),
+          Math.min(maxAvailable - uiStore.CHAT_PANEL_MIN, window.innerWidth - e.clientX),
         );
         uiStore.setRightPanelWidth(restoredWidth);
       }
@@ -82,13 +82,13 @@ export default function RightPanel({
     const calculatedWidth = startWidth.current + delta;
     const remainingChatWidth = maxAvailable - calculatedWidth;
 
-    // Check snap to maximize: dragging close to the left edge / remaining chat < 220px
-    if (remainingChatWidth < 220 || e.clientX < currentSidebarW + 220) {
+    // Check snap to maximize: dragging close to the left edge / remaining chat < 240px
+    if (remainingChatWidth < 240 || e.clientX < currentSidebarW + 240) {
       uiStore.setRightPanelMaximized(true);
       return;
     }
 
-    if (maximized && remainingChatWidth >= 220) {
+    if (maximized && remainingChatWidth >= 240) {
       uiStore.setRightPanelMaximized(false);
     }
 
