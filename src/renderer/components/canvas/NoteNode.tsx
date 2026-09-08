@@ -15,12 +15,32 @@ function NoteNode({ id, data, selected }: NodeProps) {
   const { sessionId, node, highlighted, agentMark, isProposal } = data as CanvasNodeData;
   const params = (node.params as CanvasNoteParams) || { content: '' };
   const [content, setContent] = useState(params.content || '');
+  const [isEditing, setIsEditing] = useState(false);
   const resizeStart = useRef<{ w: number; h: number } | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { hovered, hoverProps } = useHoverIntent();
 
   useEffect(() => {
     setContent(params.content || '');
   }, [params.content]);
+
+  // Exit editing when the node is deselected externally
+  useEffect(() => {
+    if (!selected && isEditing) {
+      commitContent();
+      setIsEditing(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected]);
+
+  // Auto-focus textarea when entering edit mode
+  useEffect(() => {
+    if (isEditing) {
+      // Small delay so React Flow doesn't immediately cancel focus
+      const t = setTimeout(() => textareaRef.current?.focus(), 30);
+      return () => clearTimeout(t);
+    }
+  }, [isEditing]);
 
   const commitContent = () => {
     if (content === (params.content || '')) return;
@@ -30,10 +50,15 @@ function NoteNode({ id, data, selected }: NodeProps) {
     });
   };
 
+  const handleBlur = () => {
+    commitContent();
+    setIsEditing(false);
+  };
+
   const askAgentToExpand = () => {
     void chatStore.sendMessage(
       sessionId,
-      `这是我在画布文本节点「${node.title || '剧本/提示词'}」中写的内容：\n“${content || '（暂无草稿内容）'}”\n\n请帮我将这段文本扩写为富于视听细节与画质描述的专业提示词，并保留适合分镜生成的节奏。`,
+      `这是我在画布文本节点「${node.title || '剧本/提示词'}」中写的内容：\n"${content || '（暂无草稿内容）'}"\n\n请帮我将这段文本扩写为富于视听细节与画质描述的专业提示词，并保留适合分镜生成的节奏。`,
       [],
       {},
     );
@@ -76,6 +101,7 @@ function NoteNode({ id, data, selected }: NodeProps) {
         kind="prompt"
         label="添加上下文"
         top="50%"
+        nodeHovered={hovered || selected}
       />
       <MagneticHandle
         type="source"
@@ -85,6 +111,7 @@ function NoteNode({ id, data, selected }: NodeProps) {
         kind="prompt"
         label="引用该节点生成"
         top="50%"
+        nodeHovered={hovered || selected}
       />
 
       {/* Floating anti-zoom header outside the card boundary (TapNow design) */}
@@ -103,20 +130,41 @@ function NoteNode({ id, data, selected }: NodeProps) {
         }
       />
 
-      {/* Body textarea - large prominent text area */}
+      {/* Body: read-only drag view OR editable textarea */}
       <div className="relative flex-1 min-h-0 flex flex-col">
-        <textarea
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          onBlur={commitContent}
-          placeholder="输入提示词、分镜剧本、旁白台词或灵感文本…&#10;可拉出右侧端口连入下游生图、视频或音频节点。"
-          className="nodrag h-full w-full resize-none rounded-lg border border-line/70 bg-paper-inset/40 p-2.5 text-xs text-ink placeholder:text-ink-muted/50 focus:border-accent focus:bg-paper-inset/70 focus:outline-none leading-relaxed transition-colors selection:bg-accent/20 font-sans"
-        />
+        {isEditing ? (
+          /* Edit mode: real textarea, nodrag so RF doesn't fight with text selection */
+          <textarea
+            ref={textareaRef}
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            onBlur={handleBlur}
+            placeholder={'输入提示词、分镜剧本、旁白台词或灵感文本…\n可拉出右侧端口连入下游生图、视频或音频节点。'}
+            className="nodrag h-full w-full resize-none rounded-lg border border-accent/60 bg-paper-inset/70 p-2.5 text-xs text-ink placeholder:text-ink-muted/50 focus:outline-none leading-relaxed transition-colors selection:bg-accent/20 font-sans cursor-text"
+          />
+        ) : (
+          /* View mode: draggable, double-click to edit */
+          <div
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              setIsEditing(true);
+            }}
+            title="双击编辑 · 按住可拖动节点"
+            className={cn(
+              'h-full w-full rounded-lg border border-line/70 bg-paper-inset/40 p-2.5 text-xs leading-relaxed font-sans cursor-grab active:cursor-grabbing select-none overflow-auto',
+              content ? 'text-ink' : 'text-ink-muted/50',
+            )}
+          >
+            {content || '输入提示词、分镜剧本、旁白台词或灵感文本…\n可拉出右侧端口连入下游生图、视频或音频节点。'}
+          </div>
+        )}
       </div>
 
       {/* Footer hint */}
       <div className="mt-1.5 flex items-center justify-between text-[10px] text-ink-muted/70 px-0.5">
-        <span className="truncate max-w-[65%] select-none">拉出右侧端点连入画面/视频 ➔</span>
+        <span className="truncate max-w-[65%] select-none">
+          {isEditing ? '点击外部完成编辑' : '双击编辑 · 拉出右侧端点连入画面/视频 ➔'}
+        </span>
         <button
           type="button"
           onClick={askAgentToExpand}

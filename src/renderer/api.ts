@@ -9,6 +9,11 @@ import { parseStreamLine, type ChatStreamEvent } from '../shared/stream';
 import { isLiveEnvelope } from '../shared/liveRevision';
 import type { CanvasSnapshot, CanvasEdge, CanvasNode, CanvasNodeParams, CanvasNodeType, CanvasNodeOutput } from '../shared/canvas';
 import { isCanvasEnvelope, type CanvasEvent } from '../shared/canvasStream';
+import type {
+  ProviderCatalogResponse,
+  ProviderCategory,
+  ManagedProviderConfig,
+} from '../shared/providerRegistry';
 
 export interface StreamMeta {
   rev: number;
@@ -685,3 +690,89 @@ export async function readCanvasStream(
   }
   dispatch(buffer);
 }
+
+// ==========================================
+// Multimodal Provider Registry APIs
+// ==========================================
+
+export async function getPublicProviderCatalog(category?: ProviderCategory): Promise<ProviderCatalogResponse> {
+  const query = category ? `?category=${category}` : '';
+  const res = await api(`/api/providers/catalog${query}`);
+  if (!res.ok) throw new Error(`Failed to load provider catalog: ${res.status}`);
+  return res.json();
+}
+
+export async function verifyAdminPasskey(passkey: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const origin = await apiOrigin();
+    const res = await fetch(`${origin}/api/admin/providers/verify`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ passkey }),
+    });
+    if (res.status === 404) {
+      return { ok: false, error: '后端主进程尚未加载新路由，请彻底重启客户端应用终端 (404)' };
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      return { ok: false, error: data.error || '管理员口令错误' };
+    }
+    return { ok: true };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || '请求失败，请检查服务连接' };
+  }
+}
+
+export async function getAdminProviders(passkey: string): Promise<ManagedProviderConfig[]> {
+  const res = await api('/api/admin/providers', {
+    headers: { 'x-admin-passkey': passkey },
+  });
+  if (!res.ok) throw new Error('Unauthorized or failed to load admin providers');
+  const data = await res.json();
+  return data.providers ?? [];
+}
+
+export async function saveAdminProvider(
+  passkey: string,
+  provider: Partial<ManagedProviderConfig> & { id: string; name: string; category: ProviderCategory; driverType: string },
+): Promise<ManagedProviderConfig> {
+  const res = await api('/api/admin/providers', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-admin-passkey': passkey,
+    },
+    body: JSON.stringify(provider),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to save provider');
+  }
+  const data = await res.json();
+  return data.provider;
+}
+
+export async function deleteAdminProvider(passkey: string, id: string): Promise<void> {
+  const res = await api(`/api/admin/providers/${id}`, {
+    method: 'DELETE',
+    headers: { 'x-admin-passkey': passkey },
+  });
+  if (!res.ok) throw new Error('Failed to delete provider');
+}
+
+export async function setDefaultAdminProvider(passkey: string, category: ProviderCategory, id: string): Promise<void> {
+  const res = await api(`/api/admin/providers/${id}/set-default?category=${category}`, {
+    method: 'POST',
+    headers: { 'x-admin-passkey': passkey },
+  });
+  if (!res.ok) throw new Error('Failed to set default provider');
+}
+
+export async function testAdminProvider(passkey: string, id: string): Promise<{ ok: boolean; message?: string; error?: string }> {
+  const res = await api(`/api/admin/providers/${id}/test`, {
+    method: 'POST',
+    headers: { 'x-admin-passkey': passkey },
+  });
+  return res.json();
+}
+

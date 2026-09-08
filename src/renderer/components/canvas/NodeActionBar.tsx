@@ -48,7 +48,7 @@ export default function NodeActionBar({
   return (
     <div
       className={cn(
-        'node-action-bar nodrag absolute bottom-[calc(100%+6px)] left-0 z-20 flex items-center gap-1 rounded-lg border border-line bg-paper-raised/95 px-1 py-0.5 shadow-md backdrop-blur-sm whitespace-nowrap transition-opacity',
+        'node-action-bar nodrag cursor-default absolute bottom-[calc(100%+6px)] left-0 z-20 flex items-center gap-1 rounded-lg border border-line bg-paper-raised/95 px-1 py-0.5 shadow-md backdrop-blur-sm whitespace-nowrap transition-opacity',
         visible ? 'opacity-100' : 'pointer-events-none opacity-0',
         className,
       )}
@@ -71,7 +71,7 @@ export default function NodeActionBar({
               action.onClick();
             }}
             className={cn(
-              'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium hover:bg-paper-inset disabled:opacity-40 disabled:hover:bg-transparent',
+              'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium hover:bg-paper-inset disabled:opacity-40 disabled:hover:bg-transparent cursor-pointer disabled:cursor-not-allowed',
               action.tone === 'accent' ? 'text-accent' : 'text-ink',
             )}
           >

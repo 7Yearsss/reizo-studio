@@ -1,4 +1,4 @@
-import React, { memo, useMemo, useRef } from 'react';
+import React, { memo, useMemo, useRef, useState, useEffect } from 'react';
 import { useStore } from '@xyflow/react';
 import {
   Play,
@@ -101,6 +101,73 @@ function NodeFloatingPanel({
   // Inverse scale: 1 / zoom, clamped safely to prevent extreme scales (down to 0.1x zoom)
   const floatScale = Math.min(10, Math.max(0.5, 1 / zoom));
 
+  // Read the node's dragging flag straight from the RF store — same source RF uses
+  // internally, so it flips to true the instant the drag starts with zero lag.
+  const isDragging = useStore((s) => {
+    const rfNode = s.nodes.find((n) => n.id === node.id);
+    return rfNode?.dragging ?? false;
+  });
+
+  // Debounced render gate:
+  //   - When visible+notDragging, we wait 100ms before actually showing.
+  //     If isDragging becomes true within that window (drag started), the timer
+  //     is cancelled and the panel never renders at all → zero flash at drag start.
+  //   - When isDragging becomes true (mid-drag) shouldRender drops to false immediately.
+  //   - When drag ends (isDragging→false, visible still true), the 100ms runs again
+  //     and the panel appears after the node has settled at its new position.
+  const [shouldRender, setShouldRender] = useState(false);
+
+  useEffect(() => {
+    // Immediately hide whenever the caller hides it or the node is being dragged
+    if (!visible || isDragging) {
+      setShouldRender(false);
+      return;
+    }
+    // Defer show so a drag-start that happens within the delay cancels the render
+    const timer = setTimeout(() => setShouldRender(true), 100);
+    return () => clearTimeout(timer);
+  }, [visible, isDragging]);
+
+  // ── All hooks must be called before any early return (Rules of Hooks) ──────
+
+  const mentionAreaRef = useRef<MentionTextAreaHandle>(null);
+
+  // 1. Deduplicate upstream sources by sourceNodeId to eliminate redundant badges
+  const uniqueUpstreamSources = useMemo(() => {
+    const seen = new Set<string>();
+    const out: UpstreamSourceItem[] = [];
+    for (const s of upstreamSources) {
+      if (!seen.has(s.sourceNodeId)) {
+        seen.add(s.sourceNodeId);
+        out.push(s);
+      }
+    }
+    return out;
+  }, [upstreamSources]);
+
+  // 2. Identify which upstream nodes are already explicitly referenced in the prompt text
+  const mentionedNodeIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const tok of parseMentionTokens(prompt)) {
+      if (tok.type === 'mention') set.add(tok.id);
+    }
+    return set;
+  }, [prompt]);
+
+  // 3. Only display quick insertion buttons for connected upstream sources that are NOT yet mentioned inline
+  const unmentionedSources = useMemo(() => {
+    return uniqueUpstreamSources.filter((s) => !mentionedNodeIds.has(s.sourceNodeId));
+  }, [uniqueUpstreamSources, mentionedNodeIds]);
+
+  const pinnedNodeIds = useMemo(
+    () => uniqueUpstreamSources.map((s) => s.sourceNodeId),
+    [uniqueUpstreamSources],
+  );
+
+  // ── Early return after all hooks ─────────────────────────────────────────
+  if (!shouldRender) return null;
+
+  // ── Non-hook computations (safe after the early return) ──────────────────
   const isVideo = nodeType === 'video';
   const defaultModel = isVideo ? 'kling-1.5' : 'flux-schnell';
   const currentModel = model || defaultModel;
@@ -146,39 +213,7 @@ function NodeFloatingPanel({
     return null;
   };
 
-  const mentionAreaRef = useRef<MentionTextAreaHandle>(null);
 
-  // 1. Deduplicate upstream sources by sourceNodeId to eliminate redundant badges
-  const uniqueUpstreamSources = useMemo(() => {
-    const seen = new Set<string>();
-    const out: UpstreamSourceItem[] = [];
-    for (const s of upstreamSources) {
-      if (!seen.has(s.sourceNodeId)) {
-        seen.add(s.sourceNodeId);
-        out.push(s);
-      }
-    }
-    return out;
-  }, [upstreamSources]);
-
-  // 2. Identify which upstream nodes are already explicitly referenced in the prompt text
-  const mentionedNodeIds = useMemo(() => {
-    const set = new Set<string>();
-    for (const tok of parseMentionTokens(prompt)) {
-      if (tok.type === 'mention') set.add(tok.id);
-    }
-    return set;
-  }, [prompt]);
-
-  // 3. Only display quick insertion buttons for connected upstream sources that are NOT yet mentioned inline
-  const unmentionedSources = useMemo(() => {
-    return uniqueUpstreamSources.filter((s) => !mentionedNodeIds.has(s.sourceNodeId));
-  }, [uniqueUpstreamSources, mentionedNodeIds]);
-
-  const pinnedNodeIds = useMemo(
-    () => uniqueUpstreamSources.map((s) => s.sourceNodeId),
-    [uniqueUpstreamSources],
-  );
 
   const handleInsertSource = (source: UpstreamSourceItem) => {
     const targetNode = candidates.find((c) => c.id === source.sourceNodeId);
@@ -201,11 +236,10 @@ function NodeFloatingPanel({
       ? '已接入上游提示词，可在此输入补充修饰词或风格细节…'
       : '描述画面的主体、光影与艺术质感（可输入 @ 引用其他节点画面）…';
 
-  if (!visible) return null;
 
   return (
     <div
-      className="nodrag nopan nowheel absolute top-full left-1/2 -translate-x-1/2 mt-2.5 z-40 pointer-events-auto"
+      className="nodrag nopan nowheel absolute top-full left-1/2 -translate-x-1/2 mt-2.5 z-40 pointer-events-auto cursor-default"
       style={{
         transform: `translateX(-50%) scale(${floatScale})`,
         transformOrigin: 'top center',
@@ -215,7 +249,7 @@ function NodeFloatingPanel({
       onPointerDown={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
     >
-      <div className="flex flex-col gap-2 rounded-2xl border border-line/50 bg-[#161618]/95 dark:bg-[#161618]/95 p-3 text-xs shadow-2xl backdrop-blur-xl transition-all">
+      <div className="flex flex-col gap-2 rounded-2xl border border-line/50 bg-[#161618]/95 dark:bg-[#161618]/95 p-3 text-xs shadow-2xl backdrop-blur-xl transition-all cursor-default">
         {/* 1. Context Sources Bar: Clean, deduplicated, unmentioned-only helper */}
         {unmentionedSources.length > 0 ? (
           <div className="flex items-center gap-1.5 flex-wrap pb-0.5 text-[11px]">
@@ -277,7 +311,7 @@ function NodeFloatingPanel({
         ) : null}
 
         {/* 2. MentionTextArea Prompt Input (Rich inline chips, flat, borderless) */}
-        <div className="relative px-1 pt-0.5">
+        <div className="relative px-1 pt-0.5 cursor-text">
           <MentionTextArea
             ref={mentionAreaRef}
             variant="flat"

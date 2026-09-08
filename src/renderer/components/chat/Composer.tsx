@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { AtSign, FolderTree, Paperclip } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AtSign, FolderTree, Paperclip, Image as ImageIcon, Video, Type, Volume2, Bot, Sparkles, BoxSelect, Layers } from 'lucide-react';
 import { isImeComposingEvent } from '../../lib/ime';
 import { PromptInput } from '../agents/prompt-input';
 import ModelPicker from './ModelPicker';
@@ -16,8 +16,11 @@ import SelectField from '../ui/SelectField';
 import { useSettingsStore } from '../../state/useSettingsStore';
 import { useSkillStore } from '../../state/useSkillStore';
 import { useChatStore } from '../../state/useChatStore';
+import { useCanvasStore } from '../../state/useCanvasStore';
 import * as settingsStore from '../../state/settingsStore';
 import * as chatStore from '../../state/chatStore';
+import * as canvasStore from '../../state/canvasStore';
+import { getCanvasNodeThumbnail } from '../canvas/canvasThumbnail';
 import type { PermissionMode } from '../../../shared/settings';
 import type { TurnOutcome } from '../../../shared/stream';
 
@@ -92,6 +95,18 @@ export default function Composer({
   ).length ?? 0;
   const seed = useChatStore((s) => (sessionId ? s.composerSeedBySession[sessionId] : undefined));
   const nodeRefs = useChatStore((s) => (sessionId ? s.nodeRefsBySession[sessionId] : undefined)) ?? [];
+  const selectedNodeIds = useCanvasStore((s) => (sessionId ? s.selectedNodeIdsBySession[sessionId] : undefined)) ?? canvasStore.EMPTY_SELECTED_IDS;
+  const canvasNodes = useCanvasStore((s) => (sessionId ? s.nodesBySession[sessionId] : undefined)) ?? canvasStore.EMPTY_NODES;
+
+  const activeSelectedNodes = useMemo(() => {
+    if (!selectedNodeIds.length || !canvasNodes.length) return [];
+    return canvasNodes.filter((n) => selectedNodeIds.includes(n.id));
+  }, [selectedNodeIds, canvasNodes]);
+
+  const unpinnedSelectionNodes = useMemo(() => {
+    return activeSelectedNodes.filter((n) => !nodeRefs.some((r) => r.id === n.id));
+  }, [activeSelectedNodes, nodeRefs]);
+
   const mentionQuery = extractMentionQuery(draft);
   const slashQuery = extractSlashQuery(draft);
   const slashCommands = buildSlashCommands(skills);
@@ -105,7 +120,8 @@ export default function Composer({
 
   function submit() {
     if (!draft.trim() || disabled) return;
-    const allMentions = [...mentions, ...nodeRefs.map((r) => `canvas:${r.id}`)];
+    const selectionMentions = unpinnedSelectionNodes.map((n) => `canvas:${n.id}`);
+    const allMentions = [...mentions, ...nodeRefs.map((r) => `canvas:${r.id}`), ...selectionMentions];
     onSend(draft, allMentions, { skillId, attachments, replaceFromId: replaceFromIdRef.current });
     setDraft('');
     setMentions([]);
@@ -115,6 +131,7 @@ export default function Composer({
     if (sessionId) {
       chatStore.clearComposerSeed(sessionId);
       chatStore.clearNodeRefs(sessionId);
+      chatStore.setPickingReference(sessionId, false);
     }
   }
 
@@ -202,8 +219,10 @@ export default function Composer({
               const replaced = draft.replace(/@([^\s@]*)$/, '');
               setDraft(replaced);
               if (sessionId) {
-                const label = (node.title || (node.params as Record<string, string>)?.prompt || node.type).slice(0, 24);
-                chatStore.addNodeRef(sessionId, { id: node.id, label });
+                const p = (node.params as Record<string, unknown>) ?? {};
+                const label = (node.title || p.prompt || p.instruction || p.content || node.type).toString().slice(0, 24);
+                const thumbnail = (node as { assets?: { url: string }[] }).assets?.[0]?.url || (p.imageUrl as string | undefined) || (p.videoUrl as string | undefined);
+                chatStore.addNodeRef(sessionId, { id: node.id, label, type: node.type, thumbnail });
               }
             }}
             onPick={(path) => {
@@ -239,8 +258,66 @@ export default function Composer({
               if (e.dataTransfer.files.length) void addDroppedFiles(e.dataTransfer.files);
             }}
           >
-            {(activeSkill || attachments.length > 0 || nodeRefs.length > 0 || mentions.length > 0) && (
+            {(activeSkill || attachments.length > 0 || nodeRefs.length > 0 || mentions.length > 0 || unpinnedSelectionNodes.length > 0) && (
               <div className="mb-2 flex flex-wrap gap-1.5">
+                {sessionId && unpinnedSelectionNodes.length > 0 && (
+                  <div
+                    className="group inline-flex items-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 py-0.5 pl-1.5 pr-2 text-xs shadow-sm backdrop-blur-sm transition-all hover:border-sky-500/60 hover:bg-sky-500/15"
+                    title="画布当前选区 · 发送消息时自动作为上下文带入"
+                  >
+                    <span className="flex h-5 w-5 items-center justify-center rounded bg-sky-500/20 text-sky-400 shrink-0" title="画布选中">
+                      <BoxSelect size={12} />
+                    </span>
+                    <div className="flex items-center -space-x-1.5 hover:space-x-1 transition-all overflow-hidden py-0.5">
+                      {unpinnedSelectionNodes.map((node) => {
+                        const p = (node.params as Record<string, unknown>) ?? {};
+                        const label = (node.title || p.prompt || p.instruction || p.content || node.type).toString().slice(0, 20);
+                        const thumbnail = getCanvasNodeThumbnail(node) || (p.imageUrl as string | undefined) || (p.videoUrl as string | undefined);
+                        return (
+                          <div
+                            key={node.id}
+                            className="relative group/thumb shrink-0"
+                            title={`画布选中: ${label}`}
+                          >
+                            {thumbnail ? (
+                              <img
+                                src={thumbnail}
+                                alt={label}
+                                className="h-5 w-5 rounded object-cover border border-white/20 shadow-xs transition-transform group-hover/thumb:scale-110"
+                              />
+                            ) : (
+                              <span className="flex h-5 w-5 items-center justify-center rounded border border-sky-400/30 bg-sky-950/60 text-sky-200 text-[9px] font-medium uppercase">
+                                {node.type.slice(0, 2)}
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                canvasStore.deselectNode(sessionId, node.id);
+                              }}
+                              className="absolute -top-1 -right-1 hidden group-hover/thumb:flex h-3 w-3 items-center justify-center rounded-full bg-black/80 text-white hover:bg-black text-[9px] leading-none"
+                              title="取消选中此节点"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <span className="text-[11px] font-medium text-sky-200">
+                      选区 {unpinnedSelectionNodes.length}
+                    </span>
+                    <button
+                      type="button"
+                      className="ml-0.5 flex h-4 w-4 items-center justify-center rounded-full text-sky-300 hover:bg-sky-400/20 hover:text-white transition-colors cursor-pointer text-[12px] leading-none"
+                      onClick={() => canvasStore.clearSelection(sessionId)}
+                      title="清空画布选区"
+                    >
+                      ×
+                    </button>
+                  </div>
+                )}
                 {mentions.map((m) => (
                   <span key={m} className="rounded-full bg-paper-inset px-2 py-0.5 text-[11px] text-ink">
                     @{m.split(/[/\\]/).pop() || m}
@@ -255,12 +332,42 @@ export default function Composer({
                 ))}
                 {sessionId &&
                   nodeRefs.map((ref) => (
-                    <span key={ref.id} className="rounded-full bg-accent/10 px-2 py-0.5 text-[11px] text-accent">
-                      ◇ {ref.label}
+                    <span
+                      key={ref.id}
+                      className="group inline-flex items-center gap-1.5 rounded-lg border border-accent/30 bg-accent/10 py-0.5 pl-1 pr-1.5 text-xs text-ink shadow-sm backdrop-blur-sm transition-all hover:border-accent/60 hover:bg-accent/15"
+                      title={`画布节点引用: ${ref.label}`}
+                    >
+                      {ref.thumbnail ? (
+                        <img
+                          src={ref.thumbnail}
+                          alt={ref.label}
+                          className="h-5 w-5 rounded object-cover border border-white/10 shrink-0"
+                        />
+                      ) : (
+                        <span className="flex h-5 w-5 items-center justify-center rounded bg-accent/20 text-accent shrink-0">
+                          {ref.type === 'image' ? (
+                            <ImageIcon size={11} />
+                          ) : ref.type === 'video' ? (
+                            <Video size={11} />
+                          ) : ref.type === 'audio' ? (
+                            <Volume2 size={11} />
+                          ) : ref.type === 'note' ? (
+                            <Type size={11} />
+                          ) : ref.type === 'agent' ? (
+                            <Bot size={11} />
+                          ) : (
+                            <Sparkles size={11} />
+                          )}
+                        </span>
+                      )}
+                      <span className="max-w-[120px] truncate text-[11px] font-medium text-ink">
+                        {ref.label}
+                      </span>
                       <button
                         type="button"
-                        className="ml-1 text-accent/60"
+                        className="flex h-4 w-4 items-center justify-center rounded-full text-ink-muted hover:bg-white/20 hover:text-ink transition-colors cursor-pointer text-[12px] leading-none"
                         onClick={() => chatStore.removeNodeRef(sessionId, ref.id)}
+                        title="移除引用"
                       >
                         ×
                       </button>
@@ -334,7 +441,10 @@ export default function Composer({
                   </div>
                 }
                 actions={[
-                  { value: 'attach', label: '附件', icon: <Paperclip size={14} /> },
+                  { value: 'attach', label: '上传附件', icon: <Paperclip size={14} /> },
+                  ...(sessionId
+                    ? [{ value: 'canvas-pick', label: '从画布引用 (Insert from canvas)', description: '点击画布节点加入引用', icon: <Layers size={14} /> }]
+                    : []),
                   ...(workspacePath
                     ? [{ value: 'mention', label: '引用文件', description: '插入 @ 路径', icon: <AtSign size={14} /> }]
                     : []),
@@ -344,6 +454,7 @@ export default function Composer({
                 ]}
                 onAction={(action) => {
                   if (action === 'attach') fileInputRef.current?.click();
+                  if (action === 'canvas-pick' && sessionId) chatStore.setPickingReference(sessionId, true);
                   if (action === 'mention') setDraft((d) => (d.endsWith('@') ? d : `${d}@`));
                   if (action === 'tree') onToggleTree?.();
                 }}

@@ -1,5 +1,5 @@
-import React, { useState, useRef, useCallback, memo } from 'react';
-import { Handle, Position, type HandleType, useReactFlow, useStore } from '@xyflow/react';
+import React, { useState, useRef, useCallback, useEffect, memo } from 'react';
+import { Handle, Position, type HandleType, useReactFlow, useStore, useUpdateNodeInternals } from '@xyflow/react';
 import { Plus } from 'lucide-react';
 import { cn } from '../../lib/cn';
 import { colorForKind, type EdgeKind } from './edges/edgeStyles';
@@ -25,6 +25,13 @@ export interface MagneticHandleProps {
   label?: string;
   top?: string;
   disabled?: boolean;
+  /**
+   * Whether the parent node is currently hovered or selected.
+   * When false the plus button is hidden (scale 0, translated back into the
+   * node edge) so the canvas stays clean. When true it springs out.
+   * Defaults to true for backwards-compat.
+   */
+  nodeHovered?: boolean;
 }
 
 /**
@@ -45,6 +52,7 @@ function MagneticHandle({
   label,
   top = '50%',
   disabled = false,
+  nodeHovered = true,
 }: MagneticHandleProps) {
   const [offset, setOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isHovered, setIsHovered] = useState(false);
@@ -53,6 +61,7 @@ function MagneticHandle({
   const pointerStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
   const hasDraggedRef = useRef(false);
   const rf = useReactFlow();
+  const updateNodeInternals = useUpdateNodeInternals();
 
   const isLeft = position === Position.Left;
   const isRight = position === Position.Right;
@@ -63,6 +72,39 @@ function MagneticHandle({
   // Inverse scale: maintain comfortable physical button size on screen when zoomed out
   // Clamped between 1x and 5x (supports bird's-eye view down to ~20% zoom)
   const scale = Math.min(5, Math.max(1, 1 / zoom));
+
+  // Read the node's dragging flag straight from the RF store — same source RF uses
+  // internally, so it flips to true the instant the drag starts with zero lag.
+  // This prevents the button from briefly popping out at the start of a drag.
+  const isDragging = useStore((s) => {
+    const node = s.nodes.find((n) => n.id === nodeId);
+    return node?.dragging ?? false;
+  });
+
+  // Check if any edge is currently connected to this handle
+  const isConnected = useStore(
+    useCallback(
+      (s) =>
+        s.edges.some((e) => {
+          if (type === 'source') {
+            if (e.source !== nodeId) return false;
+            return !e.sourceHandle || !id || e.sourceHandle === id;
+          } else {
+            if (e.target !== nodeId) return false;
+            return !e.targetHandle || !id || e.targetHandle === id;
+          }
+        }),
+      [type, nodeId, id],
+    ),
+  );
+
+  // The button is only visible when the parent node is hovered/selected AND not being dragged.
+  const visible = nodeHovered && !isDragging;
+
+  // Immediately notify React Flow to measure this handle geometry on mount and on connection changes
+  useEffect(() => {
+    updateNodeInternals(nodeId);
+  }, [nodeId, updateNodeInternals, isConnected, visible]);
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
@@ -182,28 +224,15 @@ function MagneticHandle({
       ? '继续生成 / 引用该节点'
       : '添加上下文输入';
 
-  // Distance from node border to button center:
-  // Button radius is 10px (for 20px button), plus a subtle 8px screen gap ("一丝丝的距离").
-  // Multiplied by scale so the physical screen gap remains constant across all zoom levels.
+  // Distance from node border to button center when popped out (in handle local space).
+  // The outer container is already scaled by `scale`, so popDistance here must NOT multiply by `scale` again!
   const baseRadius = 10;
-  const gap = 8;
-  const offsetPx = (baseRadius + gap) * scale;
+  const gap = 6;
+  const popDistance = baseRadius + gap;
 
   return (
-    <div
-      data-magnetic-handle="true"
-      data-node-id={nodeId}
-      data-handle-type={type}
-      data-handle-id={id ?? ''}
-      style={{
-        top,
-        left: isLeft ? `calc(0px - ${offsetPx}px)` : `calc(100% + ${offsetPx}px)`,
-        transform: `translate(-50%, -50%) scale(${scale})`,
-        transformOrigin: 'center center',
-      }}
-      className="nodrag nopan absolute z-30 flex items-center justify-center select-none pointer-events-none magnetic-handle-wrapper"
-    >
-      {/* 1. Transparent true React Flow Handle (exact topological anchor centered in button) */}
+    <>
+      {/* 1. Precision Border Socket / React Flow Handle */}
       <Handle
         ref={handleRef}
         type={type}
@@ -215,79 +244,114 @@ function MagneticHandle({
         data-handle-type={type}
         data-handle-id={id ?? ''}
         style={{
-          position: 'absolute',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          width: '1px',
-          height: '1px',
-          minWidth: '1px',
-          minHeight: '1px',
-          opacity: 0,
-          border: 'none',
-          background: 'transparent',
+          top,
+          borderColor: isConnected || isHovered ? activeColor : 'var(--line-strong, #52525b)',
+          backgroundColor: isConnected ? activeColor : isHovered ? activeColor : 'var(--paper-raised, #18181b)',
+          boxShadow: isConnected
+            ? `0 0 8px ${activeColor}cc, 0 0 2px 1px ${activeColor}55`
+            : isHovered
+              ? `0 0 5px ${activeColor}77`
+              : undefined,
+          opacity: isConnected ? 1 : visible ? 0.75 : 0,
           pointerEvents: disabled ? 'none' : 'auto',
+          zIndex: 20,
         }}
-        className="!cursor-crosshair"
+        className={cn(
+          '!cursor-crosshair transition-all duration-150',
+          isConnected
+            ? '!h-2.5 !w-2.5 !border-[1.5px] !border-black/60 shadow-xs'
+            : visible
+              ? '!h-2 !w-2 !border border-black/40'
+              : '!h-1 !w-1 !opacity-0',
+        )}
       />
 
-      {/* 2. Magnetic Hit Container (~48px hit box centered on anchor) */}
+      {/* 3. Floating Action Pop-out (+ button for branching / dragging new connection) */}
       <div
-        ref={hitRef}
         data-magnetic-handle="true"
         data-node-id={nodeId}
         data-handle-type={type}
         data-handle-id={id ?? ''}
-        onPointerMove={handlePointerMove}
-        onPointerLeave={handlePointerLeave}
-        className={cn(
-          'relative flex h-12 w-12 items-center justify-center cursor-pointer pointer-events-auto',
-          disabled && 'pointer-events-none opacity-40',
-        )}
+        style={{
+          top,
+          left: isLeft ? 0 : '100%',
+          transform: `translate(-50%, -50%) scale(${scale})`,
+          transformOrigin: 'center center',
+          pointerEvents: 'none',
+        }}
+        className="nodrag nopan absolute z-30 flex items-center justify-center select-none magnetic-handle-wrapper"
       >
-        {/* 3. Visible springy plus button with magnetic translate */}
-        <button
-          type="button"
-          data-magnetic-handle="true"
-          data-node-id={nodeId}
-          data-handle-type={type}
-          data-handle-id={id ?? ''}
-          onPointerDown={handleButtonPointerDown}
-          onClick={handleClick}
-          title={tooltipText}
+        {/* Animated pop-out container: launches from the border socket outwards */}
+        <div
           style={{
-            transform: `translate3d(${offset.x}px, ${offset.y}px, 0)`,
-            transition: isHovered
-              ? 'transform 250ms cubic-bezier(0.34, 1.8, 0.64, 1), background-color 150ms, border-color 150ms, box-shadow 150ms'
-              : 'transform 400ms cubic-bezier(0.34, 1.56, 0.64, 1), background-color 200ms, border-color 200ms',
-            borderColor: isHovered ? activeColor : 'var(--line-strong, #52525b)',
-            boxShadow: isHovered ? `0 0 10px ${activeColor}55` : undefined,
+            opacity: visible ? 1 : 0,
+            transform: visible
+              ? `translate3d(${isLeft ? -popDistance + offset.x : popDistance + offset.x}px, ${offset.y}px, 0) scale(1)`
+              : `translate3d(0px, 0, 0) scale(0.3)`,
+            transition: visible
+              ? isHovered
+                ? 'transform 240ms cubic-bezier(0.34, 1.9, 0.64, 1), opacity 160ms ease'
+                : 'transform 280ms cubic-bezier(0.34, 1.7, 0.64, 1), opacity 180ms ease'
+              : 'transform 180ms cubic-bezier(0.55, 0, 1, 0.45), opacity 140ms ease',
+            transformOrigin: 'center center',
+            pointerEvents: visible && !disabled ? 'auto' : 'none',
           }}
-          className={cn(
-            'group relative flex h-5 w-5 items-center justify-center rounded-full border bg-paper-raised text-ink transition-transform active:scale-90 shadow-xs',
-            isHovered ? 'scale-125 bg-paper' : 'hover:scale-110',
-          )}
         >
-          <Plus
-            size={11}
-            style={{ color: isHovered ? activeColor : undefined }}
-            className="shrink-0 transition-colors group-hover:scale-110 stroke-[2.5]"
-          />
-
-          {/* Micro label capsule on hover */}
-          {isHovered && label ? (
-            <span
+          {/* Magnetic Hit Box */}
+          <div
+            ref={hitRef}
+            data-magnetic-handle="true"
+            data-node-id={nodeId}
+            data-handle-type={type}
+            data-handle-id={id ?? ''}
+            onPointerMove={handlePointerMove}
+            onPointerLeave={handlePointerLeave}
+            className={cn(
+              'relative flex h-10 w-10 items-center justify-center cursor-pointer',
+              disabled && 'opacity-40',
+            )}
+          >
+            <button
+              type="button"
+              data-magnetic-handle="true"
+              data-node-id={nodeId}
+              data-handle-type={type}
+              data-handle-id={id ?? ''}
+              onPointerDown={handleButtonPointerDown}
+              onClick={handleClick}
+              title={tooltipText}
+              style={{
+                borderColor: isHovered ? activeColor : 'var(--line-strong, #52525b)',
+                boxShadow: isHovered ? `0 0 10px ${activeColor}55` : '0 2px 8px rgba(0,0,0,0.4)',
+                transition: 'background-color 150ms, border-color 150ms, box-shadow 150ms',
+              }}
               className={cn(
-                'pointer-events-none absolute z-40 whitespace-nowrap rounded-md border border-line bg-paper-raised px-1.5 py-0.5 text-[9px] font-medium text-ink shadow-md select-none',
-                isLeft ? 'right-full mr-2' : 'left-full ml-2',
+                'group relative flex h-5 w-5 items-center justify-center rounded-full border bg-paper-raised text-ink active:scale-90 shadow-xs',
+                isHovered ? 'scale-125 bg-paper' : 'hover:scale-110',
               )}
             >
-              {label}
-            </span>
-          ) : null}
-        </button>
+              <Plus
+                size={11}
+                style={{ color: isHovered ? activeColor : undefined }}
+                className="shrink-0 transition-colors group-hover:scale-110 stroke-[2.5]"
+              />
+
+              {/* Micro label capsule on hover */}
+              {isHovered && label ? (
+                <span
+                  className={cn(
+                    'pointer-events-none absolute z-40 whitespace-nowrap rounded-md border border-line bg-paper-raised px-1.5 py-0.5 text-[9px] font-medium text-ink shadow-md select-none',
+                    isLeft ? 'right-full mr-2' : 'left-full ml-2',
+                  )}
+                >
+                  {label}
+                </span>
+              ) : null}
+            </button>
+          </div>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 

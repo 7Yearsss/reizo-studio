@@ -18,6 +18,9 @@ import { createRefsRouter } from './routes/refs';
 import { createCanvasRouter } from './routes/canvas';
 import { createCanvasStore } from './storage/canvasStore';
 import { openDb, type DbHandle } from './db/client';
+import { createProviderStore, type ProviderStore } from './storage/providerStore';
+import { createAdminProvidersRouter } from './routes/adminProviders';
+import { createPublicProvidersRouter } from './routes/publicProviders';
 
 export interface CreateAppOptions {
   /** Directory the local session/settings JSON files live under. */
@@ -27,6 +30,7 @@ export interface CreateAppOptions {
   /** Vite dev server origin in dev, so the renderer's fetches aren't rejected. */
   devServerOrigin?: string;
   settingsStore?: ReturnType<typeof createSettingsStore>;
+  providerStore?: ProviderStore;
   /** Injected session store. Defaults to the JSON file store when omitted. */
   sessionStore?: SessionStore;
   skillsDirs?: string[];
@@ -120,6 +124,7 @@ function originGuard(options: CreateAppOptions): MiddlewareHandler {
 export function createApp(options: CreateAppOptions) {
   const sessionStore = options.sessionStore ?? createFileSessionStore(options.dataRoot);
   const settingsStore = options.settingsStore ?? createSettingsStore(options.dataRoot);
+  const providerStore = options.providerStore ?? createProviderStore(options.dataRoot);
   const projectStore = createProjectStore(options.dataRoot);
   const largeValueStore = createLargeValueStore(options.dataRoot);
 
@@ -150,13 +155,15 @@ export function createApp(options: CreateAppOptions) {
   const scheduleStore = options.scheduleStore ?? createScheduleStore(options.dataRoot);
   const thoughtStore = options.thoughtStore ?? createThoughtStore(options.dataRoot);
   app.route('/api/settings', createSettingsRouter(settingsStore));
+  app.route('/api/admin/providers', createAdminProvidersRouter(providerStore));
+  app.route('/api/providers', createPublicProvidersRouter(providerStore));
   app.route('/api/skills', createSkillsRouter(skillsDirs));
   app.route('/api/schedules', createSchedulesRouter(scheduleStore, thoughtStore));
 
   if (canvasStore) {
     app.route(
       '/api/canvas',
-      createCanvasRouter(canvasStore, settingsStore, sessionStore, options.dataRoot, artifactStore),
+      createCanvasRouter(canvasStore, settingsStore, sessionStore, options.dataRoot, artifactStore, providerStore),
     );
   }
 

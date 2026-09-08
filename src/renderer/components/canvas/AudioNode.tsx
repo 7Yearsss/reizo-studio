@@ -13,11 +13,13 @@ import {
   Sparkles,
   Loader2,
   Music,
+  RotateCw,
 } from 'lucide-react';
 import type { CanvasAudioParams } from '../../../shared/canvas';
 import * as canvasStore from '../../state/canvasStore';
 import * as chatStore from '../../state/chatStore';
 import { cn } from '../../lib/cn';
+import { useProvidersByCategory, loadProviderCatalog } from '../../state/providerCatalogStore';
 import FloatingNodeHeader from './FloatingNodeHeader';
 import { NodeTitle, type CanvasNodeData } from './ImageNode';
 import MentionTextArea from './MentionTextArea';
@@ -75,6 +77,42 @@ function AudioNode({ id, data, selected }: NodeProps) {
   const [isMuted, setIsMuted] = useState(false);
   const [isLoop, setIsLoop] = useState(false);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
+
+  const audioProviders = useProvidersByCategory('audio');
+
+  useEffect(() => {
+    void loadProviderCatalog();
+  }, []);
+
+  const activeProviderId =
+    (params as any).providerId ||
+    audioProviders.find((p) => p.isDefault)?.id ||
+    audioProviders[0]?.id;
+
+  const currentProvider =
+    audioProviders.find((p) => p.id === activeProviderId) || audioProviders[0];
+
+  const handleProviderSelect = (providerId: string) => {
+    const selectedP = audioProviders.find((p) => p.id === providerId);
+    if (!selectedP) return;
+
+    const sample = selectedP.sampleParams || {};
+    const updatedParams = {
+      ...params,
+      providerId: selectedP.id,
+      model: (sample.model as string) || selectedP.availableModels?.[0]?.id,
+      voiceId: (sample.voice_id as string) || (sample.voice as string) || selectedP.voicePresets?.[0]?.id,
+      speed: (sample.speed as number) ?? 1.0,
+      pitch: (sample.pitch as number) ?? 0,
+      format: (sample.format as 'mp3' | 'wav') || 'mp3',
+    };
+    void canvasStore.updateNodeParams(sessionId, node.id, updatedParams);
+  };
+
+  const run = () => {
+    commitPrompt();
+    void canvasStore.runNode(sessionId, node.id);
+  };
 
   const candidates = useMemo(() => {
     if (!expanded) return [];
@@ -214,6 +252,7 @@ function AudioNode({ id, data, selected }: NodeProps) {
         kind="prompt"
         label="添加上下文"
         top="50%"
+        nodeHovered={hovered || selected}
       />
       <MagneticHandle
         type="source"
@@ -223,6 +262,7 @@ function AudioNode({ id, data, selected }: NodeProps) {
         kind="audio"
         label="引用该节点生成"
         top="50%"
+        nodeHovered={hovered || selected}
       />
 
       {/* Floating anti-zoom header outside the card boundary (TapNow design) */}
@@ -359,6 +399,18 @@ function AudioNode({ id, data, selected }: NodeProps) {
 
             {/* Right action icons */}
             <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  run();
+                }}
+                disabled={running}
+                className="nodrag rounded p-1 text-ink-muted hover:bg-paper-inset hover:text-ink transition-colors"
+                title="按当前配置重新生成音频"
+              >
+                {running ? <Loader2 size={11} className="animate-spin" /> : <RotateCw size={11} />}
+              </button>
               <a
                 href={assetUrl}
                 download
@@ -426,7 +478,7 @@ function AudioNode({ id, data, selected }: NodeProps) {
           </div>
           <span className="text-xs font-medium text-ink pointer-events-none">待配置音频节点</span>
           <p className="mt-1 text-[10px] text-ink-muted/80 pointer-events-none">支持 MP3, WAV, M4A, OGG 音乐与音效</p>
-          <div className="mt-3 flex items-center gap-1.5">
+          <div className="mt-3 flex items-center gap-1.5 flex-wrap justify-center">
             <button
               type="button"
               onClick={(e) => {
@@ -436,7 +488,19 @@ function AudioNode({ id, data, selected }: NodeProps) {
               }}
               className="nodrag rounded-md bg-paper-raised border border-line px-2.5 py-1 text-[10px] text-ink-muted hover:text-ink hover:border-accent transition-colors"
             >
-              配置提示词 ⚙️
+              {currentProvider ? `⚙️ ${currentProvider.name.split(' ')[0]}` : '配置提示词 ⚙️'}
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                run();
+              }}
+              disabled={running}
+              className="nodrag flex items-center gap-1 rounded-md bg-accent text-accent-ink px-2.5 py-1 text-[10px] font-medium shadow-xs hover:opacity-90 active:scale-95 transition-all disabled:opacity-50"
+            >
+              {running ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
+              生成
             </button>
             <button
               type="button"
@@ -448,7 +512,7 @@ function AudioNode({ id, data, selected }: NodeProps) {
               title="上传本地音频文件"
             >
               <Upload size={10} />
-              上传音频
+              上传
             </button>
           </div>
         </div>
@@ -456,7 +520,7 @@ function AudioNode({ id, data, selected }: NodeProps) {
 
       {/* Config / Prompt Input Area (when explicitly opened via Sliders) */}
       {showConfig ? (
-        <div className="flex flex-col flex-1 min-h-0">
+        <div className="flex flex-col flex-1 min-h-0 space-y-2">
           <div className="mt-1">
             <MentionTextArea
               value={prompt}
@@ -467,12 +531,110 @@ function AudioNode({ id, data, selected }: NodeProps) {
             />
           </div>
 
-          <div className="mt-2.5 flex items-center justify-between gap-1.5 flex-wrap">
-            <div className="flex items-center gap-1.5">
-              <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent font-medium">
-                🎵 音频端口就绪
-              </span>
+          {/* Provider and Model Selection */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-[10px] text-ink-muted shrink-0">服务商:</span>
+            <select
+              value={activeProviderId}
+              onChange={(e) => handleProviderSelect(e.target.value)}
+              className="nodrag rounded border border-line bg-paper-inset px-2 py-0.5 text-[10px] text-ink font-medium focus:border-accent"
+            >
+              {audioProviders.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} {p.isDefault ? '★ (推荐)' : ''}
+                </option>
+              ))}
+            </select>
+
+            {currentProvider?.availableModels && currentProvider.availableModels.length > 1 ? (
+              <select
+                value={(params as any).model || currentProvider.availableModels[0]?.id}
+                onChange={(e) => {
+                  void canvasStore.updateNodeParams(sessionId, node.id, {
+                    ...params,
+                    model: e.target.value,
+                  });
+                }}
+                className="nodrag rounded border border-line bg-paper-inset px-1.5 py-0.5 text-[10px] text-ink-muted"
+              >
+                {currentProvider.availableModels.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+          </div>
+
+          {/* Preset Voices Chips */}
+          {currentProvider?.voicePresets && currentProvider.voicePresets.length > 0 ? (
+            <div className="flex items-center gap-1 flex-wrap">
+              <span className="text-[10px] text-ink-muted shrink-0">音色:</span>
+              {currentProvider.voicePresets.map((v) => {
+                const isCur =
+                  (params as any).voiceId === v.id ||
+                  (!(params as any).voiceId && v.id === currentProvider.sampleParams.voice_id);
+                return (
+                  <button
+                    key={v.id}
+                    type="button"
+                    onClick={() => {
+                      void canvasStore.updateNodeParams(sessionId, node.id, {
+                        ...params,
+                        voiceId: v.id,
+                      });
+                    }}
+                    className={cn(
+                      'nodrag rounded-full px-2 py-0.5 text-[9px] transition-colors',
+                      isCur
+                        ? 'bg-accent text-accent-ink font-semibold shadow-2xs'
+                        : 'bg-paper-inset text-ink-muted hover:text-ink hover:bg-paper-inset/80',
+                    )}
+                    title={v.tag ? `${v.name} (${v.tag})` : v.name}
+                  >
+                    {v.name}
+                  </button>
+                );
+              })}
             </div>
+          ) : null}
+
+          {/* Speed Selector Chips */}
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-ink-muted shrink-0">语速:</span>
+            {[0.8, 1.0, 1.2, 1.5].map((spd) => {
+              const isSpd = ((params as any).speed ?? 1.0) === spd;
+              return (
+                <button
+                  key={spd}
+                  type="button"
+                  onClick={() => {
+                    void canvasStore.updateNodeParams(sessionId, node.id, {
+                      ...params,
+                      speed: spd,
+                    });
+                  }}
+                  className={cn(
+                    'nodrag rounded px-1.5 py-0.2 text-[9px] font-mono transition-colors',
+                    isSpd ? 'bg-accent/20 text-accent font-semibold' : 'text-ink-muted hover:text-ink',
+                  )}
+                >
+                  {spd}x
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="mt-2 flex items-center justify-between gap-1.5 pt-2 border-t border-line/40">
+            <button
+              type="button"
+              onClick={run}
+              disabled={running}
+              className="nodrag flex items-center gap-1 rounded-lg bg-accent text-accent-ink px-3 py-1 text-[10px] font-medium shadow-xs hover:opacity-90 active:scale-95 transition-all disabled:opacity-50"
+            >
+              {running ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
+              {running ? '生成中...' : '生成音频'}
+            </button>
 
             <div className="flex items-center gap-1 ml-auto">
               <button
@@ -486,9 +648,9 @@ function AudioNode({ id, data, selected }: NodeProps) {
               <button
                 type="button"
                 onClick={() => setShowConfig(false)}
-                className="nodrag rounded-lg bg-accent text-accent-ink px-3 py-1 text-[10px] font-medium shadow-xs hover:opacity-90 active:scale-95 transition-all"
+                className="nodrag rounded-lg border border-line px-2.5 py-1 text-[10px] text-ink-muted hover:bg-paper-inset hover:text-ink transition-colors"
               >
-                完成
+                收起
               </button>
             </div>
           </div>
