@@ -3,6 +3,7 @@ import {
   ReactFlow,
   ReactFlowProvider,
   Background,
+  BackgroundVariant,
   MiniMap,
   Panel,
   useReactFlow,
@@ -95,6 +96,8 @@ import AgentActivityStrip from './AgentActivityStrip';
 import StoryboardModal from './StoryboardModal';
 import CuttableEdge from './edges/CuttableEdge';
 import AddNodesModal from './AddNodesModal';
+import CanvasContextMenu from './CanvasContextMenu';
+import CanvasEmptyPrompt from './CanvasEmptyPrompt';
 import ReturnToNodesToast from './ReturnToNodesToast';
 import MultiSelectToolbar from './MultiSelectToolbar';
 import InsertFromCanvasBanner from './InsertFromCanvasBanner';
@@ -679,6 +682,125 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     [sessionId, flash, selectNode],
   );
 
+  const paneFileInputRef = useRef<HTMLInputElement>(null);
+  const paneUploadTargetPosRef = useRef<{ x: number; y: number } | null>(null);
+  const copiedNodesRef = useRef<Array<{
+    type: CanvasNodeType;
+    title?: string;
+    w?: number;
+    h?: number;
+    params?: unknown;
+  }> | null>(null);
+
+  const handleCopyNodes = useCallback(
+    (nodeIds: string[]) => {
+      const nodesToCopy = storeNodes.filter((n) => nodeIds.includes(n.id));
+      if (nodesToCopy.length === 0) return;
+      copiedNodesRef.current = nodesToCopy.map((n) => ({
+        type: n.type,
+        title: n.title,
+        w: n.w,
+        h: n.h,
+        params: n.params ? JSON.parse(JSON.stringify(n.params)) : undefined,
+      }));
+      try {
+        void navigator.clipboard?.writeText(
+          JSON.stringify({ reizoNodes: copiedNodesRef.current }, null, 2),
+        );
+      } catch {
+        /* ignore */
+      }
+      flash(nodesToCopy.length === 1 ? '已复制节点 (Ctrl+C)' : `已复制 ${nodesToCopy.length} 个节点`);
+    },
+    [storeNodes, flash],
+  );
+
+  const handlePasteAt = useCallback(
+    async (targetPos?: { x: number; y: number }) => {
+      const pos =
+        targetPos ??
+        (() => {
+          const cx = window.innerWidth / 2;
+          const cy = window.innerHeight / 2;
+          const flow = rf.screenToFlowPosition({ x: cx, y: cy });
+          return { x: Math.round(flow.x), y: Math.round(flow.y) };
+        })();
+
+      // 1. Try copiedNodesRef first
+      if (copiedNodesRef.current && copiedNodesRef.current.length > 0) {
+        const newIds: string[] = [];
+        for (let i = 0; i < copiedNodesRef.current.length; i++) {
+          const item = copiedNodesRef.current[i];
+          const newId = await canvasStore.addNode(
+            sessionId,
+            item.type,
+            { x: pos.x + i * 40, y: pos.y + i * 40 },
+            item.params as Record<string, unknown>,
+          );
+          if (newId) newIds.push(newId);
+        }
+        if (newIds.length > 0) {
+          setSelectedNodeIds(newIds);
+          canvasStore.setSelection(sessionId, newIds);
+          flash(`已粘贴 ${newIds.length} 个节点`);
+          return;
+        }
+      }
+
+      // 2. Try OS clipboard
+      try {
+        if (navigator.clipboard) {
+          const items: ClipboardItem[] = await navigator.clipboard.read().catch((): ClipboardItem[] => []);
+          for (const item of items) {
+            const imageType = item.types.find((t: string) => t.startsWith('image/'));
+            if (imageType) {
+              const blob = await item.getType(imageType);
+              const file = new File([blob], 'pasted-image.png', { type: imageType });
+              await handleUploadFileAt(file, pos);
+              return;
+            }
+          }
+          const text = await navigator.clipboard.readText().catch((): string => '');
+          if (text) {
+            try {
+              const parsed = JSON.parse(text);
+              if (parsed && Array.isArray(parsed.reizoNodes)) {
+                const newIds: string[] = [];
+                for (let i = 0; i < parsed.reizoNodes.length; i++) {
+                  const n = parsed.reizoNodes[i];
+                  const newId = await canvasStore.addNode(
+                    sessionId,
+                    n.type,
+                    { x: pos.x + i * 40, y: pos.y + i * 40 },
+                    n.params,
+                  );
+                  if (newId) newIds.push(newId);
+                }
+                if (newIds.length > 0) {
+                  setSelectedNodeIds(newIds);
+                  canvasStore.setSelection(sessionId, newIds);
+                  flash(`已粘贴 ${newIds.length} 个节点`);
+                  return;
+                }
+              }
+            } catch {
+              /* not json */
+            }
+            const newId = await canvasStore.addNode(sessionId, 'note', pos, { content: text } as Record<string, unknown>);
+            if (newId) {
+              selectNode(newId);
+              flash('已粘贴文本便签');
+              return;
+            }
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    },
+    [rf, sessionId, handleUploadFileAt, flash, selectNode],
+  );
+
   const selectedNodes = useMemo(
     () => storeNodes.filter((n) => selectedNodeIds.includes(n.id)),
     [storeNodes, selectedNodeIds],
@@ -1227,6 +1349,12 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         } else if ((k === 'z' && e.shiftKey) || k === 'y') {
           e.preventDefault();
           void canvasStore.redo(sessionId);
+        } else if (k === 'c' && !isInput && selectedNodeIds.length > 0) {
+          e.preventDefault();
+          handleCopyNodes(selectedNodeIds);
+        } else if (k === 'v' && !isInput) {
+          e.preventDefault();
+          void handlePasteAt();
         } else if (k === 'a' && !isInput) {
           e.preventDefault();
           const allIds = storeNodes.map((n) => n.id);
@@ -1271,7 +1399,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         }
       }
     },
-    [sessionId, storeNodes, selectedNodeIds, rf, flash, zoomToSelection],
+    [sessionId, storeNodes, selectedNodeIds, rf, flash, zoomToSelection, handleCopyNodes, handlePasteAt],
   );
 
   return (
@@ -1408,7 +1536,12 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         maxZoom={3.0}
         className="bg-paper"
       >
-        <Background gap={16} color="var(--line)" />
+        <Background
+          variant={BackgroundVariant.Dots}
+          gap={24}
+          size={1.5}
+          color="var(--canvas-dot, rgba(255, 255, 255, 0.22))"
+        />
         <MiniMap
           pannable
           zoomable
@@ -1460,82 +1593,95 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         </Panel>
 
         {storeNodes.length === 0 ? (
-          <Panel position="top-center" className="mt-24 pointer-events-none select-none">
-            <div className="flex flex-col items-center justify-center rounded-2xl border border-line bg-paper-raised/95 p-6 text-center shadow-xl backdrop-blur-md pointer-events-auto max-w-sm">
-              <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-accent/10 text-accent">
-                <LayoutGrid size={22} />
-              </div>
-              <h3 className="text-sm font-semibold text-ink">多模态创意流水线画布</h3>
-              <p className="mt-1 text-xs text-ink-muted leading-relaxed">
-                可视化编排图片生成、运镜视频与多模态 Agent 质检。支持首尾帧插值与变体派生。
-              </p>
-              <div className="mt-4 flex w-full flex-col gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    void canvasStore.loadStarterFlow(sessionId).then(() => {
-                      flash('已载入「雨夜霓虹街头」影视分镜工作流');
-                      setTimeout(() => rf.fitView({ padding: 0.2, duration: 400 }), 150);
-                    });
-                  }}
-                  className="flex items-center justify-center gap-2 rounded-xl bg-accent px-3 py-2.5 text-xs font-semibold text-accent-ink shadow-md hover:opacity-95 active:scale-98 transition-all"
-                >
-                  <Sparkles size={14} />
-                  一键载入起手影视工作流 (Flow Template)
-                </button>
-                <div className="my-1 flex items-center gap-2">
-                  <div className="h-px flex-1 bg-line" />
-                  <span className="text-[10px] text-ink-muted">或者从空白开始</span>
-                  <div className="h-px flex-1 bg-line" />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => addNode('image', { x: 80, y: 80 })}
-                  className="flex items-center justify-center gap-2 rounded-lg bg-ink px-3 py-2 text-xs font-medium text-paper-raised hover:opacity-90 transition-opacity"
-                >
-                  <ImageIcon size={14} />
-                  创建图片生成卡片
-                </button>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => addNode('video', { x: 80, y: 80 })}
-                    className="flex flex-1 min-w-[100px] items-center justify-center gap-1.5 rounded-lg border border-line bg-paper px-2.5 py-1.5 text-xs text-ink hover:bg-paper-inset transition-colors"
-                  >
-                    <Video size={13} className="text-accent" />
-                    运镜视频
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => addNode('audio', { x: 80, y: 80 })}
-                    className="flex flex-1 min-w-[100px] items-center justify-center gap-1.5 rounded-lg border border-line bg-paper px-2.5 py-1.5 text-xs text-ink hover:bg-paper-inset transition-colors"
-                  >
-                    <Volume2 size={13} className="text-accent" />
-                    音频播放
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => addNode('note', { x: 80, y: 80 })}
-                    className="flex flex-1 min-w-[100px] items-center justify-center gap-1.5 rounded-lg border border-line bg-paper px-2.5 py-1.5 text-xs text-ink hover:bg-paper-inset transition-colors"
-                  >
-                    <Type size={13} className="text-accent" />
-                    文本节点
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => addNode('agent', { x: 80, y: 80 })}
-                    className="flex flex-1 min-w-[100px] items-center justify-center gap-1.5 rounded-lg border border-line bg-paper px-2.5 py-1.5 text-xs text-ink hover:bg-paper-inset transition-colors"
-                  >
-                    <Bot size={13} className="text-accent" />
-                    Agent 卡片
-                  </button>
-                </div>
-              </div>
-              <span className="mt-3 text-[10px] text-ink-muted/70">
-                双击空白处或右键打开菜单，也可直接拖入电脑里的图片或音频文件
-              </span>
-            </div>
-          </Panel>
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center select-none">
+            <CanvasEmptyPrompt
+              onOpenAddModal={() => {
+                const cx = window.innerWidth / 2;
+                const cy = window.innerHeight / 2;
+                const flow = rf.screenToFlowPosition({ x: cx, y: cy });
+                setAddNodesModal({
+                  x: cx,
+                  y: Math.max(80, cy - 140),
+                  flowX: Math.round(flow.x),
+                  flowY: Math.round(flow.y),
+                });
+              }}
+              onCreateTextToVideo={() => {
+                const cx = window.innerWidth / 2;
+                const cy = window.innerHeight / 2;
+                const flow = rf.screenToFlowPosition({ x: cx, y: cy });
+                void canvasStore
+                  .addNode(
+                    sessionId,
+                    'video',
+                    { x: Math.round(flow.x - 170), y: Math.round(flow.y - 100) },
+                    { prompt: '' } as Record<string, unknown>,
+                  )
+                  .then(() => {
+                    flash('已创建「文字生视频」卡片');
+                  });
+              }}
+              onCreateImageNode={() => {
+                const cx = window.innerWidth / 2;
+                const cy = window.innerHeight / 2;
+                const flow = rf.screenToFlowPosition({ x: cx, y: cy });
+                void canvasStore
+                  .addNode(
+                    sessionId,
+                    'image',
+                    { x: Math.round(flow.x - 160), y: Math.round(flow.y - 100) },
+                    { prompt: '' } as Record<string, unknown>,
+                  )
+                  .then(() => {
+                    flash('已创建「图片换背景」卡片');
+                  });
+              }}
+              onCreateFirstFrameToVideo={async () => {
+                const cx = window.innerWidth / 2;
+                const cy = window.innerHeight / 2;
+                const flow = rf.screenToFlowPosition({ x: cx, y: cy });
+                const startX = Math.round(flow.x - 360);
+                const startY = Math.round(flow.y - 120);
+                const imageId = await canvasStore.addNode(
+                  sessionId,
+                  'image',
+                  { x: startX, y: startY },
+                  { prompt: '电影首帧概念设计，35mm 胶片质感，冷暖对比光影，8k' } as Record<string, unknown>,
+                );
+                const videoId = await canvasStore.addNode(
+                  sessionId,
+                  'video',
+                  { x: startX + 380, y: startY },
+                  { prompt: '镜头向前平滑推近，环境光微动' } as Record<string, unknown>,
+                );
+                if (imageId && videoId) {
+                  await canvasStore.connectNodes(sessionId, imageId, videoId, 'output', 'start_frame');
+                }
+                flash('已创建「首帧生成视频」流水线');
+                setTimeout(() => rf.fitView({ padding: 0.25, duration: 300 }), 120);
+              }}
+              onCreateAudioToVideo={async () => {
+                const cx = window.innerWidth / 2;
+                const cy = window.innerHeight / 2;
+                const flow = rf.screenToFlowPosition({ x: cx, y: cy });
+                const startX = Math.round(flow.x - 340);
+                const startY = Math.round(flow.y - 100);
+                const audioId = await canvasStore.addNode(sessionId, 'audio', { x: startX, y: startY });
+                const videoId = await canvasStore.addNode(sessionId, 'video', { x: startX + 380, y: startY });
+                if (audioId && videoId) {
+                  await canvasStore.connectNodes(sessionId, audioId, videoId, 'output', 'reference');
+                }
+                flash('已创建「音频生视频」卡片');
+                setTimeout(() => rf.fitView({ padding: 0.25, duration: 300 }), 120);
+              }}
+              onLoadTemplate={() => {
+                void canvasStore.loadStarterFlow(sessionId).then(() => {
+                  flash('已载入「雨夜霓虹街头」影视分镜工作流');
+                  setTimeout(() => rf.fitView({ padding: 0.2, duration: 400 }), 150);
+                });
+              }}
+            />
+          </div>
         ) : null}
 
         {/* Left rail — create / organise / run (Runway RW-2). */}
@@ -1813,36 +1959,86 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       </ReactFlow>
 
       {menu ? (
-        <div
-          className="fixed z-[150] min-w-44 overflow-hidden rounded-lg border border-line bg-paper-raised py-1 text-xs shadow-xl"
-          style={{ left: menu.x, top: menu.y }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {menu.kind === 'node' ? (
-            <>
-              <MenuItem icon={<Play size={13} />} label="运行这个节点" onClick={() => { void canvasStore.runNode(sessionId, menu.nodeId); setMenu(null); }} />
-              <MenuItem icon={<PlayCircle size={13} />} label="从这里往下运行" onClick={() => { void canvasStore.runGraph(sessionId, menu.nodeId); setMenu(null); }} />
-              <MenuItem icon={<GitBranchPlus size={13} />} label="派生变体分支" onClick={() => { void canvasStore.forkNode(sessionId, menu.nodeId); setMenu(null); }} />
-              <MenuItem icon={<MessagesSquare size={13} />} label="让 agent 处理" onClick={() => { askAgent(menu.nodeId); setMenu(null); }} />
-              <MenuItem icon={<AtSign size={13} />} label="引用到输入框" onClick={() => { refToComposer(menu.nodeId); setMenu(null); }} />
-              <MenuItem icon={<Copy size={13} />} label="克隆节点" onClick={() => { void canvasStore.duplicateNode(sessionId, menu.nodeId); setMenu(null); }} />
-              <div className="my-1 h-px bg-line" />
-              <MenuItem icon={<Trash2 size={13} />} label="删除节点" danger onClick={() => { void canvasStore.removeNode(sessionId, menu.nodeId); setMenu(null); }} />
-            </>
-          ) : (
-            <>
-              <MenuItem icon={<ImageIcon size={13} />} label="加图片节点" onClick={() => { addNode('image', { x: menu.flowX, y: menu.flowY }); setMenu(null); }} />
-              <MenuItem icon={<Video size={13} />} label="加视频节点" onClick={() => { addNode('video', { x: menu.flowX, y: menu.flowY }); setMenu(null); }} />
-              <MenuItem icon={<Volume2 size={13} />} label="加音频节点" onClick={() => { addNode('audio', { x: menu.flowX, y: menu.flowY }); setMenu(null); }} />
-              <MenuItem icon={<Type size={13} />} label="加文本节点" onClick={() => { addNode('note', { x: menu.flowX, y: menu.flowY }); setMenu(null); }} />
-              <MenuItem icon={<Bot size={13} />} label="加 Agent 节点" onClick={() => { addNode('agent', { x: menu.flowX, y: menu.flowY }); setMenu(null); }} />
-              <MenuItem icon={<FolderKanban size={13} />} label="加场景大区 (Section)" onClick={() => { addNode('section', { x: menu.flowX, y: menu.flowY }); setMenu(null); }} />
-              <div className="my-1 h-px bg-line" />
-              <MenuItem icon={<LayoutGrid size={13} />} label="整理布局" onClick={() => { tidy(); setMenu(null); }} />
-              <MenuItem icon={<PlayCircle size={13} />} label="适应视图" onClick={() => { rf.fitView({ padding: 0.2, duration: 200 }); setMenu(null); }} />
-            </>
-          )}
-        </div>
+        <CanvasContextMenu
+          menu={menu}
+          onClose={() => setMenu(null)}
+          onUploadClick={() => {
+            if (menu.kind === 'pane') {
+              paneUploadTargetPosRef.current = { x: menu.flowX, y: menu.flowY };
+              paneFileInputRef.current?.click();
+            }
+          }}
+          onAddAssetClick={() => {
+            if (menu.kind === 'pane') {
+              void canvasStore
+                .addNode(sessionId, 'anchor', { x: menu.flowX, y: menu.flowY }, {
+                  role: 'character',
+                  label: '资产图钉',
+                } as Record<string, unknown>)
+                .then((id) => {
+                  if (id) {
+                    selectNode(id);
+                    flash('已添加资产图钉');
+                  }
+                });
+            }
+          }}
+          onOpenAddNodesModal={() => {
+            if (menu.kind === 'pane') {
+              setAddNodesModal({
+                x: menu.x,
+                y: menu.y,
+                flowX: menu.flowX,
+                flowY: menu.flowY,
+              });
+            }
+          }}
+          onAddNode={(type, initialParams) => {
+            if (menu.kind === 'pane') {
+              void canvasStore
+                .addNode(sessionId, type, { x: menu.flowX, y: menu.flowY }, initialParams as Record<string, unknown>)
+                .then((id) => {
+                  if (id) selectNode(id);
+                });
+            }
+          }}
+          onOpenTimeline={() => setShowStoryboard(true)}
+          onOpen3DStudio={() => {
+            if (menu.kind === 'pane') {
+              void canvasStore
+                .addNode(sessionId, 'section', { x: menu.flowX, y: menu.flowY }, {
+                  title: '3D 片场',
+                  description: '场景多机位与空间编排',
+                } as Record<string, unknown>)
+                .then((id) => {
+                  if (id) selectNode(id);
+                });
+            }
+          }}
+          onTidyLayout={tidy}
+          onFitView={() => rf.fitView({ padding: 0.2, duration: 200 })}
+          onUndo={() => {
+            void canvasStore.undo(sessionId);
+          }}
+          onRedo={() => {
+            void canvasStore.redo(sessionId);
+          }}
+          onPaste={() => {
+            if (menu.kind === 'pane') {
+              void handlePasteAt({ x: menu.flowX, y: menu.flowY });
+            }
+          }}
+          canUndo={Boolean(history?.canUndo)}
+          canRedo={Boolean(history?.canRedo)}
+          canPaste={true}
+          onRunNode={(nodeId) => void canvasStore.runNode(sessionId, nodeId)}
+          onRunGraph={(nodeId) => void canvasStore.runGraph(sessionId, nodeId)}
+          onForkNode={(nodeId) => void canvasStore.forkNode(sessionId, nodeId)}
+          onAskAgent={askAgent}
+          onRefToComposer={refToComposer}
+          onCopyNode={(nodeId) => handleCopyNodes([nodeId])}
+          onDeleteNode={(nodeId) => void canvasStore.removeNode(sessionId, nodeId)}
+        />
       ) : null}
 
       {dropConnectMenu ? (
@@ -2182,14 +2378,23 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           flowX={addNodesModal.flowX}
           flowY={addNodesModal.flowY}
           onClose={() => setAddNodesModal(null)}
-          onSelectType={(type, pos) => {
-            void canvasStore.addNode(sessionId, type, pos).then((newNodeId) => {
+          onSelectType={(type, pos, initialParams) => {
+            void canvasStore.addNode(sessionId, type, pos, initialParams as Record<string, unknown>).then((newNodeId) => {
               if (newNodeId) {
                 selectNode(newNodeId);
               }
             });
           }}
           onUploadFile={handleUploadFileAt}
+          onOpenTimeline={() => setShowStoryboard(true)}
+          onOpen3DStudio={() => {
+            void canvasStore.addNode(sessionId, 'section', { x: addNodesModal.flowX, y: addNodesModal.flowY }, {
+              title: '3D 片场',
+              description: '场景多机位与空间编排',
+            } as Record<string, unknown>).then((id) => {
+              if (id) selectNode(id);
+            });
+          }}
         />
       ) : null}
 
@@ -2271,6 +2476,21 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           onClose={() => setShowStoryboard(false)}
         />
       ) : null}
+
+      <input
+        ref={paneFileInputRef}
+        type="file"
+        accept="image/*,video/*,audio/*"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          const pos = paneUploadTargetPosRef.current ?? { x: 80, y: 80 };
+          if (file) {
+            void handleUploadFileAt(file, pos);
+          }
+          e.target.value = '';
+        }}
+      />
     </div>
   );
 }

@@ -194,7 +194,7 @@ export function PromptInput({
         className="scrollbar-hide block w-full resize-none overflow-y-auto bg-transparent px-2 pt-1.5 text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground/55"
       />
 
-      <div className="mt-1 flex min-h-8 items-center gap-1">
+      <div className="mt-1 flex min-h-8 min-w-0 items-center gap-1">
         {actions.length ? (
           <MorphPopover open={actionsOpen} onOpenChange={setActionsOpen}>
             <MorphPopoverTrigger>

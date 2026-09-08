@@ -55,7 +55,7 @@ export default function SelectField({
       <SelectTrigger
         aria-label={ariaLabel}
         className={cn(
-          'h-auto rounded-lg border-0 px-2.5 py-1.5 text-[13px] text-ink shadow-none',
+          'h-auto min-w-0 max-w-full truncate rounded-lg border-0 px-2 py-1 text-[12px] text-ink shadow-none',
           'hover:bg-paper-inset/60 focus-visible:ring-0 data-[state=open]:bg-paper-inset',
           className,
         )}

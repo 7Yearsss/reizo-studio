@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as chatStore from '../state/chatStore';
 import * as tabStore from '../state/tabStore';
 import { useChatStore } from '../state/useChatStore';
@@ -9,6 +9,7 @@ import TopRightToolbar from '../components/chat/TopRightToolbar';
 import { collectMessageMatches } from '../lib/highlightText';
 import type { ReplyPhase } from '../components/chat/ReplyStatusBar';
 import { liveReplyPhase } from '../state/liveReply';
+import { cn } from '../lib/cn';
 
 export default function ChatPage({
   sessionId,
@@ -100,6 +101,23 @@ export default function ChatPage({
     : undefined;
   const replyStartedAt = turnStartedAt;
 
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(600);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setContainerWidth(entry.contentRect.width);
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const isCompact = containerWidth < 460;
+
   function commitRename() {
     const next = titleDraft.trim();
     setRenaming(false);
@@ -108,8 +126,13 @@ export default function ChatPage({
   }
 
   return (
-    <div className="relative flex h-full min-w-0 flex-col">
-      <header className="flex shrink-0 items-center gap-2 px-8 pt-4 pb-2">
+    <div ref={containerRef} className="relative flex h-full min-w-0 flex-col">
+      <header
+        className={cn(
+          'flex shrink-0 items-center gap-2',
+          isCompact ? 'px-3.5 pt-3 pb-1' : 'px-8 pt-4 pb-2',
+        )}
+      >
         {renaming ? (
           <input
             autoFocus
@@ -123,7 +146,10 @@ export default function ChatPage({
                 setRenaming(false);
               }
             }}
-            className="min-w-0 flex-1 rounded-md bg-paper-inset/70 px-2 py-0.5 text-lg font-semibold tracking-tight text-ink outline-none"
+            className={cn(
+              'min-w-0 flex-1 rounded-md bg-paper-inset/70 px-2 py-0.5 font-semibold tracking-tight text-ink outline-none',
+              isCompact ? 'text-base' : 'text-lg',
+            )}
             aria-label="会话标题"
           />
         ) : (
@@ -133,14 +159,18 @@ export default function ChatPage({
               setTitleDraft(session?.title ?? '');
               setRenaming(true);
             }}
-            className="min-w-0 flex-1 truncate text-left text-lg font-semibold tracking-tight"
-            title="点击重命名"
+            className={cn(
+              'min-w-0 flex-1 truncate text-left font-semibold tracking-tight transition-colors',
+              isCompact ? 'text-base' : 'text-lg',
+            )}
+            title={session?.title ? `${session.title} (点击重命名)` : '点击重命名'}
           >
             {session?.title ?? '对话'}
           </button>
         )}
         <TopRightToolbar
           sessionId={sessionId}
+          compact={isCompact}
           onSearch={() => setSearchOpen((open) => !open)}
           searchOpen={searchOpen}
           onRename={() => {
@@ -171,6 +201,7 @@ export default function ChatPage({
       )}
       <MessageList
         messages={messages}
+        compact={isCompact}
         streaming={streaming}
         streamingTools={streamingTools}
         streamingReasoning={streamingReasoning}
@@ -188,6 +219,7 @@ export default function ChatPage({
       />
       <Composer
         sessionId={sessionId}
+        compact={isCompact}
         disabled={false}
         sending={sending}
         onSend={(text, mentions, extra) => void chatStore.sendMessage(sessionId, text, mentions, extra)}
