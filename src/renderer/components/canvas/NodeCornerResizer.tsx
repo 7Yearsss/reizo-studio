@@ -25,22 +25,22 @@ const ALL_CORNERS: CornerConfig[] = [
   {
     position: 'top-right',
     cursor: '!cursor-nesw-resize',
-    path: 'M 5 10.5 A 16 16 0 0 1 17.5 23',
+    path: 'M 3.2 6.8 A 10.3 10.3 0 0 1 11.3 14.8',
   },
   {
     position: 'bottom-right',
     cursor: '!cursor-nwse-resize',
-    path: 'M 17.5 5 A 16 16 0 0 1 5 17.5',
+    path: 'M 11.3 3.2 A 10.3 10.3 0 0 1 3.2 11.3',
   },
   {
     position: 'bottom-left',
     cursor: '!cursor-nesw-resize',
-    path: 'M 23 17.5 A 16 16 0 0 1 10.5 5',
+    path: 'M 14.8 11.3 A 10.3 10.3 0 0 1 6.8 3.2',
   },
   {
     position: 'top-left',
     cursor: '!cursor-nwse-resize',
-    path: 'M 10.5 23 A 16 16 0 0 1 23 10.5',
+    path: 'M 6.8 14.8 A 10.3 10.3 0 0 1 14.8 6.8',
   },
 ];
 
@@ -91,23 +91,23 @@ function NodeCornerResizer({
           onResizeStart={handleResizeStart}
           onResizeEnd={handleResizeEnd}
           className={cn(
-            '!w-7 !h-7 !bg-transparent !border-0 !p-0 !rounded-none flex items-center justify-center group/handle transition-transform hover:scale-110 active:scale-105 z-30 select-none',
+            '!w-[18px] !h-[18px] !bg-transparent !border-0 !p-0 !rounded-none flex items-center justify-center group/handle transition-transform hover:scale-105 active:scale-100 z-30 select-none',
             cursor,
           )}
         >
           <svg
-            width="28"
-            height="28"
-            viewBox="0 0 28 28"
+            width="18"
+            height="18"
+            viewBox="0 0 18 18"
             fill="none"
-            className="overflow-visible pointer-events-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)]"
+            className="overflow-visible pointer-events-none drop-shadow-[0_1px_1px_rgba(0,0,0,0.45)]"
           >
             <path
               d={path}
               stroke="white"
-              strokeWidth="2.5"
+              strokeWidth="1.75"
               strokeLinecap="round"
-              className="opacity-90 transition-opacity group-hover/handle:opacity-100 group-hover/handle:stroke-[2.75]"
+              className="opacity-80 transition-opacity group-hover/handle:opacity-100"
             />
           </svg>
         </NodeResizeControl>
