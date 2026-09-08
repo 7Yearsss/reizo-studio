@@ -474,6 +474,12 @@ pre,
   transition: none !important;
 }
 
+/* While actively dragging nodes or canvas, suppress any resize controls so dragging stays clean */
+.react-flow__node.dragging .react-flow__resize-control,
+[data-dragging='true'] .react-flow__resize-control {
+  display: none !important;
+}
+
 .react-flow__minimap {
   contain: strict;
 }

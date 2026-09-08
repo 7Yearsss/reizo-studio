@@ -1,5 +1,5 @@
 import { useEffect, useState, memo, useRef } from 'react';
-import { NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
+import { Position, type NodeProps } from '@xyflow/react';
 import { AlignLeft, Bot, Type } from 'lucide-react';
 import type { CanvasNoteParams } from '../../../shared/canvas';
 import * as canvasStore from '../../state/canvasStore';
@@ -16,7 +16,6 @@ function NoteNode({ id, data, selected }: NodeProps) {
   const params = (node.params as CanvasNoteParams) || { content: '' };
   const [content, setContent] = useState(params.content || '');
   const [isEditing, setIsEditing] = useState(false);
-  const resizeStart = useRef<{ w: number; h: number } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { hovered, hoverProps } = useHoverIntent();
 
@@ -75,22 +74,6 @@ function NoteNode({ id, data, selected }: NodeProps) {
       )}
     >
       <AgentMark show={agentMark} />
-
-      <NodeResizer
-        minWidth={240}
-        minHeight={160}
-        isVisible={selected}
-        lineClassName="!border-accent/40"
-        handleClassName="!h-2 !w-2 !rounded-sm !border-accent !bg-paper"
-        onResizeStart={(_, p: ResizeParams) => {
-          resizeStart.current = { w: p.width, h: p.height };
-        }}
-        onResizeEnd={(_, p: ResizeParams) => {
-          const from = resizeStart.current;
-          resizeStart.current = null;
-          if (from) canvasStore.commitResize(sessionId, id, from, { w: p.width, h: p.height });
-        }}
-      />
 
       {/* TapNow magnetic handles with elastic follow and click-to-create */}
       <MagneticHandle

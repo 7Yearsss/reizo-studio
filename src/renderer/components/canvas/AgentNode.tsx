@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, memo } from 'react';
-import { NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
+import { Position, type NodeProps } from '@xyflow/react';
 import { Bot, Loader2, Play } from 'lucide-react';
 import type { CanvasAgentParams } from '../../../shared/canvas';
 import * as canvasStore from '../../state/canvasStore';
@@ -16,7 +16,6 @@ function AgentNode({ id, data, selected }: NodeProps) {
   const { sessionId, node, highlighted, agentMark, isProposal } = data as CanvasNodeData;
   const params = node.params as CanvasAgentParams;
   const [instruction, setInstruction] = useState(params.instruction ?? '');
-  const resizeStart = useRef<{ w: number; h: number } | null>(null);
   const { hovered, hoverProps } = useHoverIntent();
   const expanded = selected || hovered;
   const running = node.runState === 'running';
@@ -51,21 +50,6 @@ function AgentNode({ id, data, selected }: NodeProps) {
     >
       <AgentMark show={agentMark} />
 
-      <NodeResizer
-        minWidth={240}
-        minHeight={160}
-        isVisible={selected}
-        lineClassName="!border-accent/40"
-        handleClassName="!h-2 !w-2 !rounded-sm !border-accent !bg-paper"
-        onResizeStart={(_, p: ResizeParams) => {
-          resizeStart.current = { w: p.width, h: p.height };
-        }}
-        onResizeEnd={(_, p: ResizeParams) => {
-          const from = resizeStart.current;
-          resizeStart.current = null;
-          if (from) canvasStore.commitResize(sessionId, id, from, { w: p.width, h: p.height });
-        }}
-      />
       <NodeHandle type="target" position={Position.Left} kind="image" label="上游输入" expanded={expanded} />
       <NodeHandle type="source" position={Position.Right} kind="prompt" label="文本" expanded={expanded} />
 

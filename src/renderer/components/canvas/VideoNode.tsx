@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, memo } from 'react';
-import { NodeResizer, Position, type NodeProps, type ResizeParams, useStore } from '@xyflow/react';
+import { Position, type NodeProps, useStore } from '@xyflow/react';
 import { Download, FolderPlus, Loader2, Play, Video, Camera, Sparkles, RotateCw, X, Bot } from 'lucide-react';
 import type { CanvasVideoParams } from '../../../shared/canvas';
 import { getVideoModelCapabilities } from '../../../shared/canvas';
@@ -37,7 +37,6 @@ function VideoNode({ id, data, selected }: NodeProps) {
   const [prompt, setPrompt] = useState(params.prompt ?? '');
   const [showConfig, setShowConfig] = useState(false);
   const [assetIdx, setAssetIdx] = useState(node.output?.activeAssetIndex ?? 0);
-  const resizeStart = useRef<{ w: number; h: number } | null>(null);
   const running = node.runState === 'running';
   const assets = node.output?.assets ?? [];
   const current = assets[Math.min(assetIdx, assets.length - 1)];
@@ -152,22 +151,6 @@ function VideoNode({ id, data, selected }: NodeProps) {
       )}
     >
       <AgentMark show={agentMark} />
-
-      <NodeResizer
-        minWidth={280}
-        minHeight={200}
-        isVisible={selected}
-        lineClassName="!border-accent/40"
-        handleClassName="!h-2 !w-2 !rounded-sm !border-accent !bg-paper"
-        onResizeStart={(_, p: ResizeParams) => {
-          resizeStart.current = { w: p.width, h: p.height };
-        }}
-        onResizeEnd={(_, p: ResizeParams) => {
-          const from = resizeStart.current;
-          resizeStart.current = null;
-          if (from) canvasStore.commitResize(sessionId, id, from, { w: p.width, h: p.height });
-        }}
-      />
 
       {/* TapNow magnetic handles with elastic follow and click-to-create */}
       <MagneticHandle

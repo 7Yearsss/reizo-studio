@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, memo } from 'react';
-import { NodeResizer, Position, type NodeProps, type ResizeParams } from '@xyflow/react';
+import { Position, type NodeProps } from '@xyflow/react';
 import { Download, FolderPlus, Loader2, Play, Sparkles, ImageIcon, RotateCw, X, FileUp, Maximize2, Bot } from 'lucide-react';
 import type { CanvasImageParams, CanvasNode } from '../../../shared/canvas';
 import { estimateNodeCost } from '../../../shared/canvasPricing';
@@ -115,7 +115,6 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
   const [variationsCount, setVariationsCount] = useState<1 | 2 | 4>(
     params.count === 4 ? 4 : params.count === 2 ? 2 : 1,
   );
-  const resizeStart = useRef<{ w: number; h: number } | null>(null);
   const { hovered, hoverProps } = useHoverIntent();
   const size = params.size ?? '1024x1024';
   const running = node.runState === 'running';
@@ -219,21 +218,6 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
       )}
     >
       <AgentMark show={agentMark} />
-      <NodeResizer
-        minWidth={240}
-        minHeight={180}
-        isVisible={selected}
-        lineClassName="!border-accent/40"
-        handleClassName="!h-2 !w-2 !rounded-sm !border-accent !bg-paper"
-        onResizeStart={(_, p: ResizeParams) => {
-          resizeStart.current = { w: p.width, h: p.height };
-        }}
-        onResizeEnd={(_, p: ResizeParams) => {
-          const from = resizeStart.current;
-          resizeStart.current = null;
-          if (from) canvasStore.commitResize(sessionId, id, from, { w: p.width, h: p.height });
-        }}
-      />
       {/* TapNow magnetic handles with elastic follow and click-to-create */}
       <MagneticHandle
         type="target"
