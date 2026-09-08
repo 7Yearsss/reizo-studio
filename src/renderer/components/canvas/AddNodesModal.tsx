@@ -8,6 +8,8 @@ import {
   Film,
   Orbit,
   Upload,
+  Scissors,
+  Layers,
 } from 'lucide-react';
 import type { CanvasNodeType } from '../../../shared/canvas';
 
@@ -69,7 +71,7 @@ export default function AddNodesModal({
 
   // Adjust card position to stay fully on screen
   const menuWidth = 270;
-  const menuHeight = 520;
+  const menuHeight = 560;
   const centeredLeft = x > window.innerWidth / 3 && x < (window.innerWidth * 2) / 3 ? x - menuWidth / 2 : x;
   const left = Math.max(16, Math.min(centeredLeft, window.innerWidth - menuWidth - 16));
   const top = Math.max(16, Math.min(y, window.innerHeight - menuHeight - 16));
@@ -90,10 +92,14 @@ export default function AddNodesModal({
   return (
     <div
       ref={menuRef}
-      className="fixed z-[180] flex w-[270px] flex-col rounded-2xl border border-white/[0.08] bg-[#18181b]/95 p-2 text-xs shadow-2xl backdrop-blur-2xl animate-in fade-in zoom-in-95 duration-150 select-none cursor-default"
+      className="fixed z-[180] flex w-[270px] max-h-[calc(100vh-32px)] overflow-y-auto flex-col rounded-2xl border border-white/[0.08] bg-[#18181b]/95 p-2 text-xs shadow-2xl backdrop-blur-2xl animate-in fade-in zoom-in-95 duration-150 select-none cursor-default"
       style={{ left, top }}
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
     >
       <input
         ref={fileInputRef}
@@ -217,6 +223,18 @@ export default function AddNodesModal({
           </div>
           <span className="text-xs font-medium text-zinc-100 group-hover:text-white">3D 片场</span>
         </button>
+
+        {/* 提取首尾帧 */}
+        <button
+          type="button"
+          onClick={() => handleSelect('frameExtractor')}
+          className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left transition-colors hover:bg-white/[0.08] active:scale-[0.98] cursor-pointer"
+        >
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#27272a] text-zinc-200 group-hover:bg-[#323236] group-hover:text-white transition-colors">
+            <Scissors size={16} strokeWidth={2} />
+          </div>
+          <span className="text-xs font-medium text-zinc-100 group-hover:text-white">提取首尾帧</span>
+        </button>
       </div>
 
       {/* 3. 添加资源 */}
@@ -235,6 +253,18 @@ export default function AddNodesModal({
             <Upload size={16} strokeWidth={2} />
           </div>
           <span className="text-xs font-medium text-zinc-100 group-hover:text-white">上传</span>
+        </button>
+
+        {/* 资产图钉 */}
+        <button
+          type="button"
+          onClick={() => handleSelect('anchor', { role: 'character', label: '资产图钉' })}
+          className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left transition-colors hover:bg-white/[0.08] active:scale-[0.98] cursor-pointer"
+        >
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#27272a] text-zinc-200 group-hover:bg-[#323236] group-hover:text-white transition-colors">
+            <Layers size={16} strokeWidth={2} />
+          </div>
+          <span className="text-xs font-medium text-zinc-100 group-hover:text-white">资产图钉</span>
         </button>
       </div>
     </div>

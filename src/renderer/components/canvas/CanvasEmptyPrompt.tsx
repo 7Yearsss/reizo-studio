@@ -39,13 +39,17 @@ export default function CanvasEmptyPrompt({
       transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
       className="pointer-events-auto flex flex-col items-center gap-3 select-none cursor-default"
       onDoubleClick={handleTriggerModal}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        handleTriggerModal(e);
+      }}
     >
       {/* Top hint pill */}
       <div
         onClick={handleTriggerModal}
         onDoubleClick={handleTriggerModal}
         className="flex items-center gap-2.5 rounded-full bg-black/55 px-3 py-1.5 backdrop-blur-md border border-white/10 shadow-lg cursor-pointer hover:border-white/25 hover:bg-black/70 transition-all"
-        title="双击画布空白处或点击此处添加节点"
+        title="右键或双击画布空白处添加节点"
       >
         <button
           type="button"
@@ -72,7 +76,7 @@ export default function CanvasEmptyPrompt({
               <path d="M1 8h2" />
             </svg>
           </div>
-          <span>双击</span>
+          <span>右键 / 双击</span>
         </button>
 
         <span className="text-xs text-zinc-300/90 hover:text-zinc-100 transition-colors tracking-wide">

@@ -30,17 +30,17 @@ export interface CanvasContextMenuProps {
     | { kind: 'pane'; x: number; y: number; flowX: number; flowY: number };
   onClose: () => void;
   // Pane operations
-  onUploadClick: () => void;
-  onAddAssetClick: () => void;
-  onOpenAddNodesModal: () => void;
-  onAddNode: (type: CanvasNodeType, initialParams?: Record<string, unknown>) => void;
-  onOpenTimeline: () => void;
-  onOpen3DStudio: () => void;
-  onTidyLayout: () => void;
-  onFitView: () => void;
-  onUndo: () => void;
-  onRedo: () => void;
-  onPaste: () => void;
+  onUploadClick?: () => void;
+  onAddAssetClick?: () => void;
+  onOpenAddNodesModal?: () => void;
+  onAddNode?: (type: CanvasNodeType, initialParams?: Record<string, unknown>) => void;
+  onOpenTimeline?: () => void;
+  onOpen3DStudio?: () => void;
+  onTidyLayout?: () => void;
+  onFitView?: () => void;
+  onUndo?: () => void;
+  onRedo?: () => void;
+  onPaste?: () => void;
   canUndo?: boolean;
   canRedo?: boolean;
   canPaste?: boolean;
@@ -131,7 +131,7 @@ export default function CanvasContextMenu({
             type="button"
             onMouseEnter={() => setActiveSubmenu('none')}
             onClick={() => {
-              onUploadClick();
+              onUploadClick?.();
               onClose();
             }}
             className="group flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-zinc-200 transition-colors hover:bg-white/[0.08] hover:text-white cursor-pointer active:scale-[0.99]"
@@ -144,7 +144,7 @@ export default function CanvasContextMenu({
             type="button"
             onMouseEnter={() => setActiveSubmenu('none')}
             onClick={() => {
-              onAddAssetClick();
+              onAddAssetClick?.();
               onClose();
             }}
             className="group flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-zinc-200 transition-colors hover:bg-white/[0.08] hover:text-white cursor-pointer active:scale-[0.99]"
@@ -164,7 +164,7 @@ export default function CanvasContextMenu({
             <button
               type="button"
               onClick={() => {
-                onOpenAddNodesModal();
+                onOpenAddNodesModal?.();
                 onClose();
               }}
               className={cn(
@@ -189,7 +189,7 @@ export default function CanvasContextMenu({
                 <button
                   type="button"
                   onClick={() => {
-                    onAddNode('note');
+                    onAddNode?.('note');
                     onClose();
                   }}
                   className="group flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-zinc-200 hover:bg-white/[0.08] hover:text-white cursor-pointer"
@@ -202,7 +202,7 @@ export default function CanvasContextMenu({
                 <button
                   type="button"
                   onClick={() => {
-                    onAddNode('image');
+                    onAddNode?.('image');
                     onClose();
                   }}
                   className="group flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-zinc-200 hover:bg-white/[0.08] hover:text-white cursor-pointer"
@@ -215,7 +215,7 @@ export default function CanvasContextMenu({
                 <button
                   type="button"
                   onClick={() => {
-                    onAddNode('video');
+                    onAddNode?.('video');
                     onClose();
                   }}
                   className="group flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-zinc-200 hover:bg-white/[0.08] hover:text-white cursor-pointer"
@@ -228,7 +228,7 @@ export default function CanvasContextMenu({
                 <button
                   type="button"
                   onClick={() => {
-                    onAddNode('audio');
+                    onAddNode?.('audio');
                     onClose();
                   }}
                   className="group flex w-full items-center justify-between rounded-xl px-2.5 py-2 text-left text-zinc-200 hover:bg-white/[0.08] hover:text-white cursor-pointer"
@@ -244,7 +244,7 @@ export default function CanvasContextMenu({
                 <button
                   type="button"
                   onClick={() => {
-                    onAddNode('agent', { title: '3D 概念生成', instruction: '生成 3D 资产与多视角预览' });
+                    onAddNode?.('agent', { title: '3D 概念生成', instruction: '生成 3D 资产与多视角预览' });
                     onClose();
                   }}
                   className="group flex w-full items-center justify-between rounded-xl px-2.5 py-2 text-left text-zinc-200 hover:bg-white/[0.08] hover:text-white cursor-pointer"
@@ -292,7 +292,7 @@ export default function CanvasContextMenu({
                 <button
                   type="button"
                   onClick={() => {
-                    onOpenTimeline();
+                    onOpenTimeline?.();
                     onClose();
                   }}
                   className="group flex w-full items-center justify-between rounded-xl px-2.5 py-2 text-left text-zinc-200 hover:bg-white/[0.08] hover:text-white cursor-pointer"
@@ -308,7 +308,7 @@ export default function CanvasContextMenu({
                 <button
                   type="button"
                   onClick={() => {
-                    onOpen3DStudio();
+                    onOpen3DStudio?.();
                     onClose();
                   }}
                   className="group flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-zinc-200 hover:bg-white/[0.08] hover:text-white cursor-pointer"
@@ -321,7 +321,7 @@ export default function CanvasContextMenu({
                 <button
                   type="button"
                   onClick={() => {
-                    onAddNode('frameExtractor');
+                    onAddNode?.('frameExtractor');
                     onClose();
                   }}
                   className="group flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-zinc-200 hover:bg-white/[0.08] hover:text-white cursor-pointer"
@@ -334,7 +334,7 @@ export default function CanvasContextMenu({
                 <button
                   type="button"
                   onClick={() => {
-                    onTidyLayout();
+                    onTidyLayout?.();
                     onClose();
                   }}
                   className="group flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-zinc-200 hover:bg-white/[0.08] hover:text-white cursor-pointer"
@@ -347,7 +347,7 @@ export default function CanvasContextMenu({
                 <button
                   type="button"
                   onClick={() => {
-                    onFitView();
+                    onFitView?.();
                     onClose();
                   }}
                   className="group flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-zinc-200 hover:bg-white/[0.08] hover:text-white cursor-pointer"
@@ -369,7 +369,7 @@ export default function CanvasContextMenu({
             onMouseEnter={() => setActiveSubmenu('none')}
             onClick={() => {
               if (canUndo) {
-                onUndo();
+                onUndo?.();
                 onClose();
               }
             }}
@@ -391,7 +391,7 @@ export default function CanvasContextMenu({
             onMouseEnter={() => setActiveSubmenu('none')}
             onClick={() => {
               if (canRedo) {
-                onRedo();
+                onRedo?.();
                 onClose();
               }
             }}
@@ -412,7 +412,7 @@ export default function CanvasContextMenu({
             disabled={!canPaste}
             onMouseEnter={() => setActiveSubmenu('none')}
             onClick={() => {
-              onPaste();
+              onPaste?.();
               onClose();
             }}
             className={cn(

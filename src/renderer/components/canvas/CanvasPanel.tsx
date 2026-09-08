@@ -622,6 +622,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
 
   const openAddNodesModal = useCallback(
     (screenX: number, screenY: number, flowX?: number, flowY?: number) => {
+      if (menu) setMenu(null);
       addNodesModalOpenedAt.current = Date.now();
       const flow =
         flowX !== undefined && flowY !== undefined
@@ -634,7 +635,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         flowY: Math.round(flow.y),
       });
     },
-    [rf],
+    [rf, menu],
   );
 
   const selectNode = useCallback(
@@ -1517,13 +1518,15 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         }}
         onNodeContextMenu={(e, node) => {
           e.preventDefault();
+          if (addNodesModal) setAddNodesModal(null);
           setMenu({ kind: 'node', x: e.clientX, y: e.clientY, nodeId: node.id });
         }}
         onPaneContextMenu={(e) => {
           e.preventDefault();
           const pe = e as unknown as MouseEvent;
           const flow = rf.screenToFlowPosition({ x: pe.clientX, y: pe.clientY });
-          setMenu({ kind: 'pane', x: pe.clientX, y: pe.clientY, flowX: flow.x, flowY: flow.y });
+          if (menu) setMenu(null);
+          openAddNodesModal(pe.clientX, pe.clientY, flow.x, flow.y);
         }}
         onDoubleClick={(e) => {
           const target = e.target as HTMLElement;
@@ -2469,7 +2472,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
             </div>
             <div className="flex justify-between items-center py-0.5 border-b border-line/60">
               <span className="text-ink-muted">快速添加节点</span>
-              <span className="text-ink text-[10px]">双击空白画布</span>
+              <span className="text-ink text-[10px]">右键 / 双击空白画布</span>
             </div>
             <div className="flex justify-between items-center py-0.5">
               <span className="text-ink-muted">流水线智能延伸</span>
