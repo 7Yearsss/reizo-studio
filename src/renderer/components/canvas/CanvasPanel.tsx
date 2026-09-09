@@ -78,6 +78,7 @@ import { defaultNodeBox, type CanvasEdge, type CanvasGroupParams, type CanvasNod
 import { extractSubgraph, formatSubgraphForPrompt } from '../../../shared/canvasSubgraph';
 import { nodeReadinessIssues } from '../../../shared/canvasReadiness';
 import { OPEN_HANDLE_MENU_EVENT, type HandleMenuEventDetail } from './MagneticHandle';
+import { openImageEdit } from './imageEdit/openImageEdit';
 import ImageNode, { type CanvasNodeData } from './ImageNode';
 import AgentNode from './AgentNode';
 import VideoNode from './VideoNode';
@@ -1528,19 +1529,6 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           if (menu) setMenu(null);
           openAddNodesModal(pe.clientX, pe.clientY, flow.x, flow.y);
         }}
-        onDoubleClick={(e) => {
-          const target = e.target as HTMLElement;
-          if (
-            target.closest('.react-flow__node') ||
-            target.closest('.canvas-tool') ||
-            target.closest('.react-flow__controls') ||
-            target.closest('[data-magnetic-handle="true"]') ||
-            (target.closest('.react-flow__panel') && !target.closest('[data-canvas-empty-prompt="true"]'))
-          ) {
-            return;
-          }
-          openAddNodesModal(e.clientX, e.clientY);
-        }}
         proOptions={{ hideAttribution: true }}
         deleteKeyCode={['Backspace', 'Delete']}
         panActivationKeyCode="Space"
@@ -2050,6 +2038,14 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           onRefToComposer={refToComposer}
           onCopyNode={(nodeId) => handleCopyNodes([nodeId])}
           onDeleteNode={(nodeId) => void canvasStore.removeNode(sessionId, nodeId)}
+          canEditImage={
+            menu.kind === 'node' &&
+            storeNodes.find((n) => n.id === menu.nodeId)?.type === 'image' &&
+            (storeNodes.find((n) => n.id === menu.nodeId)?.output?.assets?.length ?? 0) > 0
+          }
+          onEditImage={(nodeId, kind) => {
+            openImageEdit({ sessionId, nodeId, kind, commitMode: 'derive' });
+          }}
         />
       ) : null}
 
