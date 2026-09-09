@@ -26,6 +26,7 @@ export default function MultiSelectToolbar({
   onRunSelected,
   onDelete,
 }: MultiSelectToolbarProps) {
+  const ty = useStore((s) => s.transform[1]);
   const zoom = useStore((s) => s.transform[2]) || 1;
   const scale = Math.min(3, Math.max(1, 1 / zoom));
 
@@ -46,6 +47,8 @@ export default function MultiSelectToolbar({
     return {
       centerX: (minX + maxX) / 2,
       topY: minY - 14,
+      bottomY: maxY + 14,
+      minY,
       count: selectedNodes.length,
     };
   }, [selectedNodes]);
@@ -54,15 +57,18 @@ export default function MultiSelectToolbar({
     return null;
   }
 
+  // Flip below the selection when the bar would clip the viewport's top edge.
+  const placeBelow = bounds.minY * zoom + ty < 56;
+
   return (
     <ViewportPortal>
       <div
         className="nodrag cursor-default absolute z-30 flex items-center gap-1 rounded-xl border border-line/90 bg-[#18181b]/95 px-1.5 py-1 text-ink shadow-2xl backdrop-blur-md whitespace-nowrap animate-in fade-in zoom-in-95 duration-150 select-none"
         style={{
           left: `${bounds.centerX}px`,
-          top: `${bounds.topY}px`,
-          transform: `translate(-50%, -100%) scale(${scale})`,
-          transformOrigin: 'bottom center',
+          top: `${placeBelow ? bounds.bottomY : bounds.topY}px`,
+          transform: `translate(-50%, ${placeBelow ? '0' : '-100%'}) scale(${scale})`,
+          transformOrigin: placeBelow ? 'top center' : 'bottom center',
           pointerEvents: 'auto',
         }}
         onClick={(e) => e.stopPropagation()}

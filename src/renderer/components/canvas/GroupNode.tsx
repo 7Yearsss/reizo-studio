@@ -61,6 +61,7 @@ function GroupNode({ id, data, selected }: NodeProps) {
               { duration: 400, padding: 0.15 },
             )
           }
+          onFit={() => void canvasStore.refitGroup(sessionId, node.id)}
           onToggleLock={() =>
             void canvasStore.updateNodeParams(sessionId, node.id, { ...params, locked: !locked })
           }

@@ -10,6 +10,7 @@ import {
   useStore,
   applyNodeChanges,
   ConnectionMode,
+  SelectionMode,
   type Node,
   type Edge,
   type NodeChange,
@@ -48,7 +49,7 @@ import {
   ChevronDown,
   Pin,
   MousePointer2,
-  BoxSelect,
+  Hand,
   ZoomIn,
   ZoomOut,
   Focus,
@@ -180,8 +181,26 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
   const [openTool, setOpenTool] = useState<
     'create' | 'more' | 'askAgent' | 'batchRatio' | 'batchDuration' | null
   >(null);
-  // Runway-style canvas interaction mode: pan-on-drag vs marquee box-select.
-  const [mode, setMode] = useState<'select' | 'marquee'>('select');
+  // Canvas interaction tool, Figma/tldraw convention:
+  //   'select' — left-drag on empty canvas draws a marquee (the default);
+  //              pan via Space-drag, middle-mouse-drag, or trackpad scroll.
+  //   'pan'    — the hand tool: any left-drag pans; no marquee.
+  // Persisted so it survives tab switches / reloads.
+  const [mode, setMode] = useState<'select' | 'pan'>(() => {
+    try {
+      return (localStorage.getItem('reizo:canvas-tool') as 'select' | 'pan') || 'select';
+    } catch {
+      return 'select';
+    }
+  });
+  const setToolMode = useCallback((next: 'select' | 'pan') => {
+    setMode(next);
+    try {
+      localStorage.setItem('reizo:canvas-tool', next);
+    } catch {
+      /* ignore */
+    }
+  }, []);
   // Navigation mode: mouse (wheel zooms) vs trackpad (two-finger scroll pans).
   const [navMode, setNavMode] = useState<'mouse' | 'trackpad'>(() => {
     try {
@@ -1400,13 +1419,15 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           e.preventDefault();
           rf.fitView({ padding: 0.2, duration: 250 });
           flash('全景居中 (F)');
-        } else if (k === 'v') {
-          e.preventDefault();
-          setMode('select');
         } else if (k === 'm') {
           e.preventDefault();
-          setMode('marquee');
-          flash('框选模式：空白拖拽多选 (M)');
+          setToolMode('select');
+          flash('选择工具：空白处拖拽框选 · 按住空格拖动画布');
+        } else if (k === 'v' && selectedNodeIds.length !== 1) {
+          // Bare V only reasserts the select tool; with one node selected it is
+          // the "new video node" shortcut handled by the window listener.
+          e.preventDefault();
+          setToolMode('select');
         } else if (k === 'z') {
           e.preventDefault();
           zoomToSelection();
@@ -1419,7 +1440,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         }
       }
     },
-    [sessionId, storeNodes, selectedNodeIds, rf, flash, zoomToSelection, handleCopyNodes, handlePasteAt],
+    [sessionId, storeNodes, selectedNodeIds, rf, flash, zoomToSelection, handleCopyNodes, handlePasteAt, setToolMode],
   );
 
   return (
@@ -1502,6 +1523,18 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
             for (const memberId of canvasStore.groupMemberIds(sessionId, n.id)) collect(memberId);
           }
           canvasStore.commitMoveBatch(sessionId, moves);
+          // A member dragged on its own leaves the container box out of sync —
+          // snap it back around its members. Dragging the group itself already
+          // moves members in lockstep, so its box stays correct.
+          const refitted = new Set<string>();
+          for (const n of dragged) {
+            if (n.type === 'group') continue;
+            const g = canvasStore.groupOf(sessionId, n.id);
+            if (g && !refitted.has(g.id)) {
+              refitted.add(g.id);
+              void canvasStore.refitGroup(sessionId, g.id);
+            }
+          }
         }}
         onInit={restoreViewport}
         onMoveStart={() => {
@@ -1532,8 +1565,9 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         proOptions={{ hideAttribution: true }}
         deleteKeyCode={['Backspace', 'Delete']}
         panActivationKeyCode="Space"
-        panOnDrag={mode === 'marquee' ? [1] : true}
-        selectionOnDrag={mode === 'marquee'}
+        panOnDrag={mode === 'pan' ? true : [1]}
+        selectionOnDrag={mode === 'select'}
+        selectionMode={SelectionMode.Partial}
         panOnScroll={navMode === 'trackpad'}
         zoomOnScroll={navMode === 'mouse'}
         zoomOnPinch={true}
@@ -1807,11 +1841,19 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         {/* Bottom nav bar — pan/marquee + zoom + history (Runway RW-1). */}
         <Panel position="bottom-center" className="pb-3">
           <div className="flex items-center gap-0.5 rounded-xl border border-line bg-paper-raised/95 px-1 py-1 shadow-xl backdrop-blur-md">
-            <NavButton active={mode === 'select'} onClick={() => setMode('select')} title="选择 / 平移 (V)">
+            <NavButton
+              active={mode === 'select'}
+              onClick={() => setToolMode('select')}
+              title="选择工具：空白处拖拽框选，按住空格拖动画布 (V)"
+            >
               <MousePointer2 size={14} />
             </NavButton>
-            <NavButton active={mode === 'marquee'} onClick={() => setMode('marquee')} title="框选：空白拖拽多选 (M)">
-              <BoxSelect size={14} />
+            <NavButton
+              active={mode === 'pan'}
+              onClick={() => setToolMode('pan')}
+              title="抓手工具：拖拽平移画布（也可随时按住空格临时平移）"
+            >
+              <Hand size={14} />
             </NavButton>
             <NavButton
               active={wiresVisible}

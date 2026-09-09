@@ -1,5 +1,5 @@
 import { ViewportPortal, useStore } from '@xyflow/react';
-import { Play, Crosshair, Lock, Unlock, Unlink, Trash2 } from 'lucide-react';
+import { Play, Crosshair, Frame, Lock, Unlock, Unlink, Trash2 } from 'lucide-react';
 import type { CanvasNode } from '../../../shared/canvas';
 
 export interface GroupToolbarProps {
@@ -9,6 +9,7 @@ export interface GroupToolbarProps {
   color: string;
   onRun: () => void;
   onFocus: () => void;
+  onFit: () => void;
   onToggleLock: () => void;
   onUngroup: () => void;
   onDelete: () => void;
@@ -28,12 +29,18 @@ export default function GroupToolbar({
   color,
   onRun,
   onFocus,
+  onFit,
   onToggleLock,
   onUngroup,
   onDelete,
 }: GroupToolbarProps) {
+  const ty = useStore((s) => s.transform[1]);
   const zoom = useStore((s) => s.transform[2]) || 1;
   const scale = Math.min(3, Math.max(1, 1 / zoom));
+  // Flip below the group header when there isn't room for the bar above the
+  // viewport's top edge (same trick Figma/tldraw use for selection toolbars).
+  const screenY = group.y * zoom + ty;
+  const placeBelow = screenY < 56;
 
   return (
     <ViewportPortal>
@@ -41,9 +48,9 @@ export default function GroupToolbar({
         className="nodrag cursor-default absolute z-30 flex items-center gap-1 rounded-xl border border-line/90 bg-[#18181b]/95 px-1.5 py-1 text-ink shadow-2xl backdrop-blur-md whitespace-nowrap animate-in fade-in zoom-in-95 duration-150 select-none"
         style={{
           left: `${group.x + group.w / 2}px`,
-          top: `${group.y - 14}px`,
-          transform: `translate(-50%, -100%) scale(${scale})`,
-          transformOrigin: 'bottom center',
+          top: `${placeBelow ? group.y + 44 : group.y - 14}px`,
+          transform: `translate(-50%, ${placeBelow ? '0' : '-100%'}) scale(${scale})`,
+          transformOrigin: placeBelow ? 'top center' : 'bottom center',
           pointerEvents: 'auto',
         }}
         onClick={(e) => e.stopPropagation()}
@@ -70,6 +77,15 @@ export default function GroupToolbar({
         >
           <Crosshair size={12} className="text-sky-400" />
           <span>聚焦</span>
+        </button>
+        <button
+          type="button"
+          onClick={onFit}
+          className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium hover:bg-white/10 text-ink cursor-pointer transition-colors"
+          title="收拢边框贴合当前成员（增删成员后用）"
+        >
+          <Frame size={12} className="text-ink-muted" />
+          <span>整理</span>
         </button>
         <button
           type="button"
