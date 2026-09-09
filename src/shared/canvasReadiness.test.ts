@@ -61,6 +61,20 @@ describe('nodeReadinessIssues', () => {
     expect(nodeReadinessIssues(n, [], new Map())).toEqual(['任务描述为空']);
   });
 
+  it('uses edit readiness and skips empty-prompt for derived image nodes', () => {
+    const src = node({ id: 'src', type: 'image', title: '原图', output: { assets: ['c1/a.png'] } });
+    const edit = node({
+      id: 'e',
+      type: 'image',
+      params: { prompt: '', size: '1024x1024', edit: { kind: 'matting', sourceNodeId: 'src' } },
+    });
+    const edges: CanvasEdge[] = [
+      { id: 'edge', canvasId: 'c1', sourceId: 'src', sourceHandle: 'image_out', targetId: 'e', targetHandle: 'edit_src' },
+    ];
+    expect(nodeReadinessIssues(edit, edges, new Map([['src', src]]))).toEqual([]);
+    expect(nodeReadinessIssues(edit, [], new Map())).toEqual(['缺少源图输入']);
+  });
+
   it('never warns for group / note nodes', () => {
     expect(nodeReadinessIssues(node({ id: 'g', type: 'group', params: { memberIds: [] } }), [], new Map())).toEqual([]);
     expect(nodeReadinessIssues(node({ id: 'n', type: 'note', params: { content: '' } }), [], new Map())).toEqual([]);

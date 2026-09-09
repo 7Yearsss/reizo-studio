@@ -84,19 +84,19 @@ export default function MultiSelectToolbar({
           type="button"
           onClick={onGroup}
           className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium hover:bg-white/10 text-ink cursor-pointer transition-colors"
-          title="将选中节点打包为编组 (Ctrl+G)"
+          title="将选中节点打包为一个组 (Ctrl+G)"
         >
           <FolderPlus size={13} className="text-sky-400" />
-          <span>编组</span>
+          <span>打组</span>
         </button>
         <button
           type="button"
           onClick={onRunSelected}
           className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium hover:bg-white/10 text-ink cursor-pointer transition-colors"
-          title="批量执行选中的待跑节点"
+          title="按连线依赖顺序执行选区内的待跑节点"
         >
           <Play size={12} className="text-emerald-400" />
-          <span>运行选中</span>
+          <span>运行选区</span>
         </button>
         <button
           type="button"

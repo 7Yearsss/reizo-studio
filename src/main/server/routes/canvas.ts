@@ -370,6 +370,21 @@ export function createCanvasRouter(
     return c.json({ node: withAsset?.node ?? node }, 200);
   });
 
+  /** Upload a mask PNG for an edit node. Does not mutate node output. */
+  router.post('/:canvasId/nodes/:id/mask', async (c) => {
+    const canvasId = c.req.param('canvasId');
+    const id = c.req.param('id');
+    if (!canvasStore.getNode(canvasId, id)) return c.json({ error: 'Node not found' }, 404);
+    const body = await c.req.json().catch((): null => null);
+    if (!body || typeof body.dataBase64 !== 'string') return c.json({ error: 'dataBase64 is required' }, 400);
+    const bytes = Buffer.from(body.dataBase64, 'base64');
+    const dir = canvasAssetsDir(dataRoot, canvasId);
+    await mkdir(dir, { recursive: true });
+    const file = `${id}-mask-${nanoid(6)}.png`;
+    await writeFile(path.join(dir, file), bytes);
+    return c.json({ maskAsset: `${canvasId}/${file}` }, 201);
+  });
+
   /** Download the whole canvas as a portable `.reizo.zip` (workflow.json + assets). */
   router.get('/:canvasId/workflow/export', async (c) => {
     const canvasId = c.req.param('canvasId');

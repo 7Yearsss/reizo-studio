@@ -7,6 +7,7 @@ import NodeHandle from './NodeHandle';
 import { NodeTitle, type CanvasNodeData } from './ImageNode';
 import { useAssetUrl } from './useAssetUrl';
 import { useHoverIntent } from './NodeActionBar';
+import { useIsSoloSelected } from './useSelectionCount';
 import { cn } from '../../lib/cn';
 
 function FrameExtractorNode({ id, data, selected }: NodeProps) {
@@ -15,7 +16,8 @@ function FrameExtractorNode({ id, data, selected }: NodeProps) {
   const hideControls = isLowLOD;
 
   const { hovered, hoverProps } = useHoverIntent();
-  const expanded = selected || hovered;
+  const solo = useIsSoloSelected(selected);
+  const expanded = solo || hovered;
 
   const params = (node?.params as CanvasFrameExtractorParams) || { mode: 'end' };
   const mode = params.mode ?? 'end';

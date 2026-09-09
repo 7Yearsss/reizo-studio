@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { generateImage } from 'ai';
 import type { AnchorRole, AnchorStrength, CanvasImageParams, CanvasNode } from '../../../shared/canvas';
+import { buildEditPrompt } from '../../../shared/canvasImageEdit';
 import { getProviderPreset } from '../../../shared/providers';
 import { createOpenAiProvider } from '../agent/provider/openai';
 import type { SettingsStore } from '../storage/settingsStore';
@@ -57,8 +58,85 @@ export async function readCanvasAsset(dataRoot: string, relPath: string): Promis
   return readFile(assetAbsPath(dataRoot, relPath));
 }
 
-function isImageParams(value: unknown): value is CanvasImageParams {
-  return Boolean(value && typeof value === 'object' && typeof (value as CanvasImageParams).prompt === 'string');
+async function resolveImageProvider(
+  settingsStore: SettingsStore,
+  providerId: string | undefined,
+  params: CanvasImageParams,
+): Promise<{ provider: ReturnType<typeof createOpenAiProvider>; modelId: string } | { error: string }> {
+  const settings = await settingsStore.get();
+  const resolvedId = providerId || 'openai';
+  const preset = getProviderPreset(resolvedId);
+  const stored = settings.providers[resolvedId];
+  if (!preset || !stored?.apiKey) {
+    return { error: `No API key configured for ${preset?.name ?? resolvedId}. Add one in Settings.` };
+  }
+  const baseUrl = stored.baseUrl || preset.baseUrl;
+  const isOfficial = !baseUrl || baseUrl.includes('api.openai.com');
+  const modelId = params.model || (isOfficial ? 'dall-e-3' : 'gpt-image-2');
+  const provider = createOpenAiProvider({ apiKey: stored.apiKey, baseUrl });
+  return { provider, modelId };
+}
+
+async function writeImageAssetsAndBroadcast(options: {
+  canvasStore: CanvasStore;
+  dataRoot: string;
+  canvasId: string;
+  node: CanvasNode;
+  upstream: CanvasNode[];
+  rawPrompt: string;
+  results: Array<{ images: Array<{ mediaType?: string; uint8Array: Uint8Array }> }>;
+  forcePng?: boolean;
+}): Promise<void> {
+  const { canvasStore, dataRoot, canvasId, node, upstream, rawPrompt, results, forcePng } = options;
+  const channel = getCanvasChannel(canvasId);
+  const dir = canvasAssetsDir(dataRoot, canvasId);
+  await mkdir(dir, { recursive: true });
+  const rels: string[] = [];
+  let n = 0;
+  for (const res of results) {
+    for (const image of res.images) {
+      const ext = forcePng ? 'png' : image.mediaType?.includes('jpeg') ? 'jpg' : 'png';
+      const file = `${node.id}-${Date.now().toString(36)}-${n}.${ext}`;
+      await writeFile(path.join(dir, file), Buffer.from(image.uint8Array));
+      rels.push(`${canvasId}/${file}`);
+      n += 1;
+    }
+  }
+
+  const prevAssets = node.output?.assets ?? [];
+  const combinedAssets = [...rels, ...prevAssets.filter((p) => !rels.includes(p))].slice(0, 10);
+  const nowIso = new Date().toISOString();
+  const newResultSetItems = rels.map((asset) => ({
+    asset,
+    createdAt: nowIso,
+    prompt: rawPrompt,
+  }));
+  const prevResultSet = node.output?.resultSet ?? [];
+  const combinedResultSet = [
+    ...newResultSetItems,
+    ...prevResultSet.filter((it) => !rels.includes(it.asset)),
+  ].slice(0, 20);
+
+  const outputPayload = {
+    assets: combinedAssets,
+    resultSet: combinedResultSet,
+    activeAssetIndex: 0,
+  };
+
+  const done = canvasStore.updateNode(canvasId, node.id, {
+    runState: 'done',
+    output: outputPayload,
+    paramsHash: inputHash(node, upstream),
+  });
+  if (done) {
+    channel.broadcast(done.rev, {
+      type: 'node_output',
+      id: node.id,
+      output: done.node.output ?? outputPayload,
+      runState: 'done',
+    });
+    broadcastDownstreamDirty(canvasStore, canvasId, node.id, done.rev, false);
+  }
 }
 
 async function upstreamImageBytes(
@@ -125,6 +203,53 @@ export async function runImageNode(options: {
     const params = (node.params || {}) as CanvasImageParams;
     let rawPrompt = (typeof params.prompt === 'string' ? params.prompt : '').trim();
 
+    const edit = params.edit;
+    if (edit) {
+      rawPrompt = buildEditPrompt(edit);
+      const snap = canvasStore.getSnapshot(canvasId);
+      const srcEdge = snap?.edges.find((e) => e.targetId === node.id && e.targetHandle === 'edit_src');
+      const srcNode =
+        (srcEdge && snap?.nodes.find((n) => n.id === srcEdge.sourceId)) ||
+        canvasStore.upstreamNodes(canvasId, node.id).find((u) => (u.output?.assets?.length ?? 0) > 0);
+      if (!srcNode?.output?.assets?.length) {
+        fail('编辑节点缺少源图输入');
+        return;
+      }
+      const srcAssets = srcNode.output.assets;
+      const srcRel = srcAssets[srcNode.output.activeAssetIndex ?? 0] ?? srcAssets[0];
+      const imgs: Uint8Array[] = [new Uint8Array(await readCanvasAsset(dataRoot, srcRel))];
+      if (edit.maskAsset) {
+        try {
+          imgs.push(new Uint8Array(await readCanvasAsset(dataRoot, edit.maskAsset)));
+        } catch {
+          /* ignore missing mask file */
+        }
+      }
+      const resolved = await resolveImageProvider(settingsStore, options.providerId, params);
+      if ('error' in resolved) {
+        fail(resolved.error);
+        return;
+      }
+      const srcParams = (srcNode.params || {}) as CanvasImageParams;
+      const size = params.size ?? srcParams.size ?? '1024x1024';
+      const result = await generateImage({
+        model: resolved.provider.image(resolved.modelId),
+        prompt: { text: rawPrompt, images: imgs },
+        size,
+      });
+      await writeImageAssetsAndBroadcast({
+        canvasStore,
+        dataRoot,
+        canvasId,
+        node,
+        upstream,
+        rawPrompt,
+        results: [result],
+        forcePng: edit.kind === 'matting',
+      });
+      return;
+    }
+
     if (!rawPrompt) {
       for (const u of upstream) {
         if (u.type === 'note') {
@@ -148,19 +273,12 @@ export async function runImageNode(options: {
       return;
     }
 
-    const settings = await settingsStore.get();
-    const providerId = options.providerId || 'openai';
-    const preset = getProviderPreset(providerId);
-    const stored = settings.providers[providerId];
-    if (!preset || !stored?.apiKey) {
-      fail(`No API key configured for ${preset?.name ?? providerId}. Add one in Settings.`);
+    const resolved = await resolveImageProvider(settingsStore, options.providerId, params);
+    if ('error' in resolved) {
+      fail(resolved.error);
       return;
     }
-    const baseUrl = stored.baseUrl || preset.baseUrl;
-    const isOfficial = !baseUrl || baseUrl.includes('api.openai.com');
-    const modelId = params.model || (isOfficial ? 'dall-e-3' : 'gpt-image-2');
-
-    const provider = createOpenAiProvider({ apiKey: stored.apiKey, baseUrl });
+    const { provider, modelId } = resolved;
     let images: Uint8Array[] = [];
 
     const readRefBytes = async (rel: string): Promise<void> => {
@@ -245,57 +363,15 @@ export async function runImageNode(options: {
       }),
     );
     const results = await Promise.all(genPromises);
-
-    const dir = canvasAssetsDir(dataRoot, canvasId);
-    await mkdir(dir, { recursive: true });
-    const rels: string[] = [];
-    let n = 0;
-    for (const res of results) {
-      for (const image of res.images) {
-        const ext = image.mediaType?.includes('jpeg') ? 'jpg' : 'png';
-        const file = `${node.id}-${Date.now().toString(36)}-${n}.${ext}`;
-        await writeFile(path.join(dir, file), Buffer.from(image.uint8Array));
-        rels.push(`${canvasId}/${file}`);
-        n += 1;
-      }
-    }
-
-    const prevAssets = node.output?.assets ?? [];
-    const combinedAssets = [...rels, ...prevAssets.filter((p) => !rels.includes(p))].slice(0, 10);
-
-    const nowIso = new Date().toISOString();
-    const newResultSetItems = rels.map((asset) => ({
-      asset,
-      createdAt: nowIso,
-      prompt: rawPrompt,
-    }));
-    const prevResultSet = node.output?.resultSet ?? [];
-    const combinedResultSet = [
-      ...newResultSetItems,
-      ...prevResultSet.filter((it) => !rels.includes(it.asset)),
-    ].slice(0, 20);
-
-    const outputPayload = {
-      assets: combinedAssets,
-      resultSet: combinedResultSet,
-      activeAssetIndex: 0,
-    };
-
-    const done = canvasStore.updateNode(canvasId, node.id, {
-      runState: 'done',
-      output: outputPayload,
-      paramsHash: inputHash(node, upstream),
+    await writeImageAssetsAndBroadcast({
+      canvasStore,
+      dataRoot,
+      canvasId,
+      node,
+      upstream,
+      rawPrompt,
+      results,
     });
-    if (done) {
-      channel.broadcast(done.rev, {
-        type: 'node_output',
-        id: node.id,
-        output: done.node.output ?? outputPayload,
-        runState: 'done',
-      });
-      // Include self: it just ran, so its own `dirty` clears.
-      broadcastDownstreamDirty(canvasStore, canvasId, node.id, done.rev, false);
-    }
   } catch (err) {
     const classified = classifyMediaError(err);
     if (classified.raw !== classified.message) {

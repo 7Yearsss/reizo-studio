@@ -1,9 +1,11 @@
 import { useCallback, useState, memo, useRef } from 'react';
 import { NodeResizer, type NodeProps, type ResizeParams, useReactFlow } from '@xyflow/react';
-import { Lock, Unlock, Play, Maximize2, Trash2, Unlink } from 'lucide-react';
+import { Lock } from 'lucide-react';
 import type { CanvasGroupParams } from '../../../shared/canvas';
 import * as canvasStore from '../../state/canvasStore';
 import { NodeTitle, type CanvasNodeData } from './ImageNode';
+import { useIsSoloSelected } from './useSelectionCount';
+import GroupToolbar from './GroupToolbar';
 
 const GROUP_COLORS = [
   '#3b82f6', // Blue
@@ -22,19 +24,9 @@ function GroupNode({ id, data, selected }: NodeProps) {
   const currentColor = params.color || '#3b82f6';
   const [colorPickerOpen, setColorPickerOpen] = useState(false);
   const resizeStart = useRef<{ w: number; h: number } | null>(null);
+  const solo = useIsSoloSelected(selected);
 
   const rf = useReactFlow();
-
-  const handleToggleLock = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      void canvasStore.updateNodeParams(sessionId, node.id, {
-        ...params,
-        locked: !locked,
-      });
-    },
-    [sessionId, node.id, params, locked],
-  );
 
   const handleColorSelect = useCallback(
     (c: string) => {
@@ -47,41 +39,6 @@ function GroupNode({ id, data, selected }: NodeProps) {
     [sessionId, node.id, params],
   );
 
-  const handleFocus = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      rf.fitBounds(
-        { x: node.x, y: node.y, width: node.w, height: node.h },
-        { duration: 400, padding: 0.15 },
-      );
-    },
-    [rf, node],
-  );
-
-  const handleRunGroup = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      void canvasStore.runGroup(sessionId, node.id);
-    },
-    [sessionId, node.id],
-  );
-
-  const handleUngroup = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      void canvasStore.ungroupNodes(sessionId, node.id);
-    },
-    [sessionId, node.id],
-  );
-
-  const handleDelete = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      void canvasStore.removeNode(sessionId, node.id);
-    },
-    [sessionId, node.id],
-  );
-
   return (
     <div
       className="group relative flex h-full w-full flex-col rounded-2xl border transition-[border-color,box-shadow] duration-150"
@@ -91,6 +48,27 @@ function GroupNode({ id, data, selected }: NodeProps) {
         boxShadow: selected ? `0 0 0 1px ${currentColor}, 0 4px 20px ${currentColor}1a` : undefined,
       }}
     >
+      {solo ? (
+        <GroupToolbar
+          group={node}
+          memberCount={memberIds.length}
+          locked={locked}
+          color={currentColor}
+          onRun={() => canvasStore.runGroup(sessionId, node.id)}
+          onFocus={() =>
+            rf.fitBounds(
+              { x: node.x, y: node.y, width: node.w, height: node.h },
+              { duration: 400, padding: 0.15 },
+            )
+          }
+          onToggleLock={() =>
+            void canvasStore.updateNodeParams(sessionId, node.id, { ...params, locked: !locked })
+          }
+          onUngroup={() => void canvasStore.ungroupNodes(sessionId, node.id)}
+          onDelete={() => void canvasStore.removeNode(sessionId, node.id)}
+        />
+      ) : null}
+
       <NodeResizer
         minWidth={240}
         minHeight={160}
@@ -132,54 +110,9 @@ function GroupNode({ id, data, selected }: NodeProps) {
           >
             {memberIds.length} 成员
           </span>
-        </div>
-
-        {/* Action icons */}
-        <div className="flex items-center gap-1 shrink-0 nodrag">
-          <button
-            type="button"
-            onClick={handleToggleLock}
-            className="flex h-5 w-5 items-center justify-center rounded text-ink-muted hover:text-ink hover:bg-paper-inset transition-colors"
-            title={locked ? '解锁分组 (允许移动成员)' : '锁定分组 (固定成员相对位置)'}
-          >
-            {locked ? <Lock size={12} className="text-amber-500" /> : <Unlock size={12} />}
-          </button>
-
-          <button
-            type="button"
-            onClick={handleFocus}
-            className="flex h-5 w-5 items-center justify-center rounded text-ink-muted hover:text-ink hover:bg-paper-inset transition-colors"
-            title="居中聚焦到本分组"
-          >
-            <Maximize2 size={12} />
-          </button>
-
-          <button
-            type="button"
-            onClick={handleRunGroup}
-            className="flex h-5 w-5 items-center justify-center rounded text-ink-muted hover:text-ink hover:bg-paper-inset transition-colors"
-            title="仅运行本组内的节点流水线"
-          >
-            <Play size={11} className="fill-current text-accent" />
-          </button>
-
-          <button
-            type="button"
-            onClick={handleUngroup}
-            className="flex h-5 w-5 items-center justify-center rounded text-ink-muted hover:text-ink hover:bg-paper-inset transition-colors"
-            title="解散分组 (保留成员节点)"
-          >
-            <Unlink size={12} />
-          </button>
-
-          <button
-            type="button"
-            onClick={handleDelete}
-            className="flex h-5 w-5 items-center justify-center rounded text-ink-muted hover:text-danger hover:bg-danger/10 transition-colors"
-            title="删除分组容器 (保留成员节点)"
-          >
-            <Trash2 size={12} />
-          </button>
+          {locked ? (
+            <Lock size={11} className="text-amber-500 shrink-0" aria-label="已锁定" />
+          ) : null}
         </div>
       </div>
 

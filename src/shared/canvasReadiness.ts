@@ -1,4 +1,5 @@
 import { getVideoModelCapabilities, type CanvasEdge, type CanvasNode } from './canvas';
+import { editReadiness, type ImageEditSpec } from './canvasImageEdit';
 import { CANONICAL_MENTION_RE } from './resolveMentions';
 
 /**
@@ -21,6 +22,19 @@ export function nodeReadinessIssues(
     while ((m = re.exec(text)) !== null) out.push({ label: m[1], id: m[2] });
     return out;
   };
+
+  const edit = params.edit as ImageEditSpec | undefined;
+  if (node.type === 'image' && edit) {
+    const hasUpstreamImage = edges.some((e) => {
+      if (e.targetId !== node.id) return false;
+      const src = nodesById.get(e.sourceId);
+      return (
+        (e.targetHandle === 'edit_src' || src?.type === 'image' || src?.type === 'video') &&
+        (src?.output?.assets?.length ?? 0) > 0
+      );
+    });
+    return editReadiness(node, hasUpstreamImage);
+  }
 
   if (node.type === 'image' || node.type === 'video') {
     const prompt = typeof params.prompt === 'string' ? params.prompt.trim() : '';

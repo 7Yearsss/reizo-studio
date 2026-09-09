@@ -14,7 +14,15 @@ vi.mock('ai', async (importOriginal) => {
   };
 });
 
+vi.mock('../canvas/imageExecutor', () => ({
+  runImageNode: vi.fn(async () => undefined),
+}));
+
 import { createImageTools } from './imageTools';
+import { createCanvasStore } from '../storage/canvasStore';
+import { createSqliteSessionStore } from '../storage/sqliteSessionStore';
+import { openDb } from '../db/client';
+import { runImageNode } from '../canvas/imageExecutor';
 
 describe('imageTools', () => {
   it('defines generate_image tool with correct schema and description', () => {
@@ -92,5 +100,79 @@ describe('imageTools', () => {
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
     }
+  });
+
+  it('defines canvas_edit_image and derives a matting node from a source image', async () => {
+    const handle = openDb(':memory:');
+    const sessions = createSqliteSessionStore(handle);
+    const canvasStore = createCanvasStore(handle);
+    const session = await sessions.create('s', null, null);
+    const canvas = canvasStore.ensureCanvas(session.id);
+    const src = canvasStore.addNode(canvas.id, {
+      type: 'image',
+      x: 0,
+      y: 0,
+      w: 320,
+      h: 380,
+      params: { prompt: 'globe', size: '1024x1024' },
+    }).node;
+    canvasStore.updateNode(canvas.id, src.id, { runState: 'done', output: { assets: [`${canvas.id}/src.png`] } });
+
+    const tools = createImageTools({
+      settingsStore: {
+        get: async () => ({ activeProviderId: 'reizo', providers: { reizo: { apiKey: 'sk' } } }),
+      } as unknown as SettingsStore,
+      dataRoot: 'test',
+      sessionId: session.id,
+      canvasStore,
+    });
+
+    const res = (await (tools.canvas_edit_image.execute as any)({
+      nodeId: src.id,
+      kind: 'matting',
+    })) as { ok: boolean; id: string; kind: string };
+
+    expect(res.ok).toBe(true);
+    expect(res.kind).toBe('matting');
+    const created = canvasStore.getNode(canvas.id, res.id);
+    expect((created?.params as { edit?: { kind: string; sourceNodeId: string } }).edit).toMatchObject({
+      kind: 'matting',
+      sourceNodeId: src.id,
+    });
+    const snap = canvasStore.getSnapshot(canvas.id);
+    expect(snap?.edges.some((e) => e.sourceId === src.id && e.targetId === res.id && e.targetHandle === 'edit_src')).toBe(
+      true,
+    );
+    expect(runImageNode).toHaveBeenCalled();
+  });
+
+  it('rejects canvas_edit_image when the source has no image', async () => {
+    const handle = openDb(':memory:');
+    const sessions = createSqliteSessionStore(handle);
+    const canvasStore = createCanvasStore(handle);
+    const session = await sessions.create('s', null, null);
+    const canvas = canvasStore.ensureCanvas(session.id);
+    const src = canvasStore.addNode(canvas.id, {
+      type: 'image',
+      x: 0,
+      y: 0,
+      w: 100,
+      h: 100,
+      params: { prompt: '', size: '1024x1024' },
+    }).node;
+
+    const tools = createImageTools({
+      settingsStore: {} as SettingsStore,
+      dataRoot: 'test',
+      sessionId: session.id,
+      canvasStore,
+    });
+    const res = (await (tools.canvas_edit_image.execute as any)({
+      nodeId: src.id,
+      kind: 'relight',
+      params: { colorTempK: 3000 },
+    })) as { ok: boolean; error?: string };
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/还没有生成/);
   });
 });

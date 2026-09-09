@@ -14,6 +14,7 @@ import { type CanvasNodeData } from './ImageNode';
 import { useHoverIntent } from './NodeActionBar';
 import MagneticHandle from './MagneticHandle';
 import NodeFloatingPanel, { type UpstreamSourceItem } from './NodeFloatingPanel';
+import { useIsSoloSelected } from './useSelectionCount';
 import AgentMark from './AgentMark';
 import MissingInputWarning from './MissingInputWarning';
 import { useAssetUrl } from './useAssetUrl';
@@ -49,8 +50,14 @@ function VideoNode({ id, data, selected }: NodeProps) {
   const [frameError, setFrameError] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const { hovered, hoverProps } = useHoverIntent();
-  const expanded = selected || hovered;
+  const solo = useIsSoloSelected(selected);
+  const expanded = solo || hovered;
   const showVideo = (expanded || isPlaying) && !isLowLOD;
+
+  // Multi-select collapses per-node chrome; drop any manually-opened config too.
+  useEffect(() => {
+    if (!solo) setShowConfig(false);
+  }, [solo]);
 
   const candidates = useMemo(() => {
     if (!expanded) return [];
@@ -492,7 +499,7 @@ function VideoNode({ id, data, selected }: NodeProps) {
       <NodeFloatingPanel
         sessionId={sessionId}
         node={node}
-        visible={Boolean(selected || showConfig)}
+        visible={Boolean(solo || showConfig)}
         nodeType="video"
         prompt={prompt}
         onPromptChange={setPrompt}

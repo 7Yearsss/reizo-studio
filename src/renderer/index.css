@@ -159,6 +159,34 @@ pre,
   -webkit-app-region: no-drag;
 }
 
+.edit-slider {
+  height: 6px;
+  width: 100%;
+  appearance: none;
+  border-radius: 999px;
+  background: var(--paper-inset);
+  accent-color: var(--accent);
+  outline: none;
+}
+.edit-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--accent);
+  border: 2px solid var(--paper-raised);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 12%, transparent);
+  cursor: pointer;
+}
+.edit-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--accent);
+  border: 2px solid var(--paper-raised);
+  cursor: pointer;
+}
+
 .scrollbar-hide {
   -ms-overflow-style: none;
   scrollbar-width: none;
@@ -377,6 +405,35 @@ pre,
 .canvas-node-highlight {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent);
   border-color: var(--accent);
+}
+
+.canvas-checker {
+  background-color: #1c1c1c;
+  background-image:
+    linear-gradient(45deg, #2a2a2a 25%, transparent 25%),
+    linear-gradient(-45deg, #2a2a2a 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #2a2a2a 75%),
+    linear-gradient(-45deg, transparent 75%, #2a2a2a 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+
+/* Perspective floor for the multi-angle turntable. */
+.turntable-stage::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 8%;
+  width: 150%;
+  height: 42%;
+  transform: translateX(-50%) rotateX(72deg);
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--ink) 12%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--ink) 12%, transparent) 1px, transparent 1px);
+  background-size: 40px 40px;
+  -webkit-mask-image: radial-gradient(ellipse at center top, #000 10%, transparent 70%);
+  mask-image: radial-gradient(ellipse at center top, #000 10%, transparent 70%);
+  pointer-events: none;
 }
 
 /* Edge "energy flow" — dashes drift from source toward target. */

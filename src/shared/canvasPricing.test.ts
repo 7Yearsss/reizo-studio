@@ -13,6 +13,18 @@ describe('canvasPricing', () => {
     expect(estimateNodeCost({ type: 'video', params: { model: 'minimax', duration: '5s' } })).toBe(15);
     expect(estimateNodeCost({ type: 'agent' })).toBe(1);
     expect(estimateNodeCost({ type: 'note' })).toBe(0);
+    expect(
+      estimateNodeCost({
+        type: 'image',
+        params: { prompt: '', size: '1024x1024', edit: { kind: 'crop', sourceNodeId: 'src' } },
+      }),
+    ).toBe(0);
+    expect(
+      estimateNodeCost({
+        type: 'image',
+        params: { prompt: '', size: '1024x1024', model: 'flux-schnell', edit: { kind: 'enhance', sourceNodeId: 'src' } },
+      }),
+    ).toBe(2);
   });
 
   it('computes graph cost differentiating cached vs runnable nodes', () => {
