@@ -480,6 +480,13 @@ pre,
   display: none !important;
 }
 
+/* A node being dragged is auto-selected by React Flow — drop the accent selection
+   outline/ring on its card for the duration of the gesture so the move stays clean. */
+.react-flow__node.dragging > * {
+  --tw-ring-color: transparent !important;
+  border-color: var(--line) !important;
+}
+
 .react-flow__minimap {
   contain: strict;
 }
