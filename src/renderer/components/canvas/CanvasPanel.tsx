@@ -1511,6 +1511,9 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           groupDragPrev.current[node.id] = { x: node.position.x, y: node.position.y };
           const memberIds = new Set(canvasStore.groupMemberIds(sessionId, node.id));
           if (memberIds.size === 0) return;
+          // Shift both React Flow (smooth visual follow) and the canvas store
+          // (so commitMoveBatch persists real deltas and no reconcile after
+          // drop snaps a member back — the "flash").
           rf.setNodes((nds) =>
             nds.map((n) =>
               memberIds.has(n.id)
@@ -1518,6 +1521,12 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
                 : n,
             ),
           );
+          const storeNodesNow = canvasStore.getSnapshot().nodesBySession[sessionId] ?? [];
+          const liveMoves = new Map<string, { x: number; y: number }>();
+          for (const n of storeNodesNow) {
+            if (memberIds.has(n.id)) liveMoves.set(n.id, { x: n.x + dx, y: n.y + dy });
+          }
+          canvasStore.moveNodesBatchLive(sessionId, liveMoves);
         }}
         onNodeDragStop={(_, __, dragged) => {
           isDraggingRef.current = false;
