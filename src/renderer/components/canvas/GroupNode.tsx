@@ -135,8 +135,10 @@ function GroupNode({ id, data, selected }: NodeProps) {
         </div>
       )}
 
-      {/* Body: transparent interior so underlying nodes can be interacted with directly */}
-      <div className="flex-1 pointer-events-none" />
+      {/* Body: a drag surface for the whole frame (Figma/tldraw). Member nodes
+          sit at a higher z-index, so they stay individually grabbable; only the
+          empty area between them drags the group (and its members) as one. */}
+      <div className="flex-1 cursor-grab active:cursor-grabbing" />
     </div>
   );
 }
