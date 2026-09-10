@@ -789,14 +789,7 @@ export function commitMoveBatch(
     return;
   }
   const apply = (pick: 'from' | 'to') => async () => {
-    // One synchronous store update for the whole batch first, so a reconcile
-    // that lands between the per-node API patches can't snap any node back to
-    // its pre-drag position (the "flash" at drag end).
-    moveNodesBatchLive(
-      sessionId,
-      new Map(real.map((m) => [m.id, { x: m[pick].x, y: m[pick].y }])),
-    );
-    await Promise.all(real.map((m) => _setPosition(sessionId, m.id, m[pick].x, m[pick].y)));
+    for (const m of real) await _setPosition(sessionId, m.id, m[pick].x, m[pick].y);
   };
   void apply('to')();
   record(sessionId, { undo: apply('from'), redo: apply('to') });
