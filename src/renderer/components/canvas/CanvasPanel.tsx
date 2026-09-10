@@ -226,6 +226,10 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const confirmTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const dragStart = useRef<Record<string, { x: number; y: number }>>({});
+  // Live position of each group being dragged, so onNodeDrag can shift its
+  // members by the per-frame delta (rf.getNode already reflects the new
+  // position by the time onNodesChange runs, so a delta there is always 0).
+  const groupDragPrev = useRef<Record<string, { x: number; y: number }>>({});
   const workflowFileRef = useRef<HTMLInputElement>(null);
 
   const flash = useCallback((msg: string) => {
@@ -589,26 +593,12 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       for (const change of changes) {
         if (change.type === 'remove') {
           void canvasStore.removeNode(sessionId, change.id);
-        } else if (change.type === 'position' && change.position) {
-          const before = rf.getNode(change.id);
-          if (before?.type === 'group' && before.position) {
-            const dx = change.position.x - before.position.x;
-            const dy = change.position.y - before.position.y;
-            if (dx !== 0 || dy !== 0) {
-              const memberIds = new Set(canvasStore.groupMemberIds(sessionId, change.id));
-              rf.setNodes((currentNodes) =>
-                currentNodes.map((n) =>
-                  memberIds.has(n.id)
-                    ? { ...n, position: { x: n.position.x + dx, y: n.position.y + dy } }
-                    : n,
-                ),
-              );
-            }
-          }
         }
       }
+      // Group→members follow is handled in onNodeDrag (rf.getNode is already
+      // updated here, so a delta computed from it would always be zero).
     },
-    [sessionId, rf],
+    [sessionId],
   );
 
   const onEdgesChange = useCallback(
@@ -1500,6 +1490,9 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           setIsInteracting(true);
           for (const n of dragged) {
             dragStart.current[n.id] = { x: n.position.x, y: n.position.y };
+            if (n.type === 'group') {
+              groupDragPrev.current[n.id] = { x: n.position.x, y: n.position.y };
+            }
             // A group drag also moves its members — snapshot them too so the
             // whole gesture can be undone in one step.
             for (const memberId of canvasStore.groupMemberIds(sessionId, n.id)) {
@@ -1507,6 +1500,24 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
               if (member) dragStart.current[memberId] = { x: member.position.x, y: member.position.y };
             }
           }
+        }}
+        onNodeDrag={(_, node) => {
+          if (node.type !== 'group') return;
+          const prev = groupDragPrev.current[node.id];
+          if (!prev) return;
+          const dx = node.position.x - prev.x;
+          const dy = node.position.y - prev.y;
+          if (dx === 0 && dy === 0) return;
+          groupDragPrev.current[node.id] = { x: node.position.x, y: node.position.y };
+          const memberIds = new Set(canvasStore.groupMemberIds(sessionId, node.id));
+          if (memberIds.size === 0) return;
+          rf.setNodes((nds) =>
+            nds.map((n) =>
+              memberIds.has(n.id)
+                ? { ...n, position: { x: n.position.x + dx, y: n.position.y + dy } }
+                : n,
+            ),
+          );
         }}
         onNodeDragStop={(_, __, dragged) => {
           isDraggingRef.current = false;
@@ -1520,6 +1531,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           };
           for (const n of dragged) {
             collect(n.id);
+            delete groupDragPrev.current[n.id];
             for (const memberId of canvasStore.groupMemberIds(sessionId, n.id)) collect(memberId);
           }
           canvasStore.commitMoveBatch(sessionId, moves);
