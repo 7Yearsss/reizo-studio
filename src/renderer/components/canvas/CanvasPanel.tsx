@@ -166,6 +166,73 @@ function computeNodeInputMeta(
   };
 }
 
+/**
+ * Compute layered z-indexes for canvas nodes:
+ * 1. Sections: background containers (zIndex = -1).
+ * 2. Standalone nodes: base zIndex = 1 (or 20 when actively selected).
+ * 3. Group containers: base zIndex = 10 + index * 4 (or 50 when selected).
+ *    Because groupZ (10+) > standaloneZ (1), moving a group over outside nodes
+ *    causes the group's solid gray background to cleanly occlude the outside nodes.
+ * 4. Group members: zIndex = groupZ + 1 (or groupZ + 2 when selected).
+ *    Members are always strictly above their group container, so they are never
+ *    covered by the group background.
+ */
+export function computeNodeZIndexes(
+  nodes: CanvasNode[],
+  isSelectedFn?: (id: string) => boolean,
+): Map<string, number> {
+  const zIndexMap = new Map<string, number>();
+
+  const groupNodes: CanvasNode[] = [];
+  const memberToGroup = new Map<string, { group: CanvasNode; groupIndex: number }>();
+
+  for (const n of nodes) {
+    if (n.type === 'group') {
+      const idx = groupNodes.length;
+      groupNodes.push(n);
+      const params = n.params as CanvasGroupParams;
+      if (Array.isArray(params?.memberIds)) {
+        for (const mId of params.memberIds) {
+          memberToGroup.set(mId, { group: n, groupIndex: idx });
+        }
+      }
+    }
+  }
+
+  // Pre-calculate group z-indexes
+  const groupZMap = new Map<string, number>();
+  groupNodes.forEach((g, idx) => {
+    const isSelected = isSelectedFn ? isSelectedFn(g.id) : false;
+    const groupZ = isSelected ? 15 : 10 + idx * 2;
+    groupZMap.set(g.id, groupZ);
+    zIndexMap.set(g.id, groupZ);
+  });
+
+  // Calculate for all other nodes
+  for (const n of nodes) {
+    if (n.type === 'section') {
+      zIndexMap.set(n.id, -1);
+      continue;
+    }
+    if (n.type === 'group') {
+      continue; // already set above
+    }
+
+    const groupInfo = memberToGroup.get(n.id);
+    if (groupInfo) {
+      const baseGroupZ = groupZMap.get(groupInfo.group.id) ?? 10;
+      const isMemberSelected = isSelectedFn ? isSelectedFn(n.id) : false;
+      // Member nodes are always strictly above group container (base 20+)
+      zIndexMap.set(n.id, isMemberSelected ? baseGroupZ + 15 : baseGroupZ + 10);
+    } else {
+      const isSelected = isSelectedFn ? isSelectedFn(n.id) : false;
+      zIndexMap.set(n.id, isSelected ? 30 : 1);
+    }
+  }
+
+  return zIndexMap;
+}
+
 function CanvasInner({ sessionId }: { sessionId: string }) {
   const storeNodes = useCanvasStore((s) => s.nodesBySession[sessionId] ?? canvasStore.EMPTY_NODES);
   const storeEdges = useCanvasStore((s) => s.edgesBySession[sessionId] ?? canvasStore.EMPTY_EDGES);
@@ -419,6 +486,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       if (list) list.push(e);
       else edgesByTarget.set(e.targetId, [e]);
     }
+    const zIndexes = computeNodeZIndexes(storeNodes);
     return storeNodes.map((node) => {
       const meta = computeNodeInputMeta(node, edgesByTarget, nodesById);
       return {
@@ -427,7 +495,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         position: { x: node.x, y: node.y },
         width: node.w,
         height: node.h,
-        zIndex: node.type === 'section' ? -1 : node.type === 'group' ? 0 : 1,
+        zIndex: zIndexes.get(node.id) ?? 1,
         draggable: lockedMembers.has(node.id) ? false : undefined,
         data: {
           sessionId,
@@ -455,6 +523,8 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         else edgesByTarget.set(e.targetId, [e]);
       }
 
+      const zIndexes = computeNodeZIndexes(storeNodes, (id) => prevMap.get(id)?.selected ?? false);
+
       const nextNodes: Node<CanvasNodeData>[] = [];
       for (const node of storeNodes) {
         const prev = prevMap.get(node.id);
@@ -462,7 +532,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         const isAgentMark = agentMarkedIds.has(node.id);
         const isProposal = proposals.includes(node.id);
         const isLocked = lockedMembers.has(node.id);
-        const zIndex = node.type === 'section' ? -1 : node.type === 'group' ? 0 : 1;
+        const zIndex = zIndexes.get(node.id) ?? 1;
         const draggable = isLocked ? false : undefined;
 
         const {
@@ -848,37 +918,12 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
 
   const createGroupFromSelection = useCallback(async () => {
     if (selectedNodes.length === 0) return;
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const n of selectedNodes) {
-      minX = Math.min(minX, n.x);
-      minY = Math.min(minY, n.y);
-      maxX = Math.max(maxX, n.x + (n.w || 260));
-      maxY = Math.max(maxY, n.y + (n.h || 180));
-    }
-    const padding = 36;
-    const groupId = await canvasStore.addNode(sessionId, 'group', {
-      x: Math.round(minX - padding),
-      y: Math.round(minY - padding - 24),
-    });
+    const memberIds = selectedNodes.filter((n) => n.type !== 'group').map((n) => n.id);
+    if (memberIds.length === 0) return;
+    const groupId = await canvasStore.groupNodes(sessionId, memberIds);
     if (groupId) {
-      void canvasStore.commitResize(
-        sessionId,
-        groupId,
-        { w: 320, h: 240 },
-        {
-          w: Math.round(maxX - minX + padding * 2),
-          h: Math.round(maxY - minY + padding * 2 + 24),
-        },
-      );
-      void canvasStore.updateNodeParams(sessionId, groupId, {
-        memberIds: selectedNodes.map((n) => n.id),
-        color: '#3b82f6',
-      });
       selectNode(groupId);
-      flash(`已创建包含 ${selectedNodes.length} 个节点的编组`);
+      flash(`已创建包含 ${memberIds.length} 个节点的编组`);
     }
   }, [sessionId, selectedNodes, selectNode, flash]);
 
@@ -1456,6 +1501,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         edges={edges}
         nodeTypes={NODE_TYPES}
         edgeTypes={EDGE_TYPES}
+        elevateNodesOnSelect={false}
         connectionMode={ConnectionMode.Loose}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
@@ -1488,17 +1534,26 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         onNodeDragStart={(_, __, dragged) => {
           isDraggingRef.current = true;
           setIsInteracting(true);
+          const allMemberIds = new Set<string>();
           for (const n of dragged) {
             dragStart.current[n.id] = { x: n.position.x, y: n.position.y };
             if (n.type === 'group') {
               groupDragPrev.current[n.id] = { x: n.position.x, y: n.position.y };
+              for (const memberId of canvasStore.groupMemberIds(sessionId, n.id)) {
+                allMemberIds.add(memberId);
+                const member = rf.getNode(memberId);
+                if (member) dragStart.current[memberId] = { x: member.position.x, y: member.position.y };
+              }
             }
-            // A group drag also moves its members — snapshot them too so the
-            // whole gesture can be undone in one step.
-            for (const memberId of canvasStore.groupMemberIds(sessionId, n.id)) {
-              const member = rf.getNode(memberId);
-              if (member) dragStart.current[memberId] = { x: member.position.x, y: member.position.y };
-            }
+          }
+          if (allMemberIds.size > 0) {
+            rf.setNodes((nds) =>
+              nds.map((item) =>
+                allMemberIds.has(item.id)
+                  ? { ...item, zIndex: Math.max(item.zIndex ?? 20, 25) }
+                  : item,
+              ),
+            );
           }
         }}
         onNodeDrag={(_, node) => {
@@ -1517,7 +1572,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           rf.setNodes((nds) =>
             nds.map((n) =>
               memberIds.has(n.id)
-                ? { ...n, position: { x: n.position.x + dx, y: n.position.y + dy } }
+                ? { ...n, position: { x: n.position.x + dx, y: n.position.y + dy }, zIndex: Math.max(n.zIndex ?? 20, 25) }
                 : n,
             ),
           );

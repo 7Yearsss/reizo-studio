@@ -1,20 +1,12 @@
-import { useCallback, useState, memo, useRef } from 'react';
-import { NodeResizer, type NodeProps, type ResizeParams, useReactFlow } from '@xyflow/react';
+import { useCallback, useState, memo, useRef, useEffect } from 'react';
+import { type NodeProps, useReactFlow, useStore } from '@xyflow/react';
 import { Lock } from 'lucide-react';
 import type { CanvasGroupParams } from '../../../shared/canvas';
 import * as canvasStore from '../../state/canvasStore';
-import { NodeTitle, type CanvasNodeData } from './ImageNode';
+import type { CanvasNodeData } from './ImageNode';
 import { useIsSoloSelected } from './useSelectionCount';
 import GroupToolbar from './GroupToolbar';
-
-const GROUP_COLORS = [
-  '#3b82f6', // Blue
-  '#0d9488', // Teal
-  '#ec4899', // Pink
-  '#f59e0b', // Amber
-  '#10b981', // Emerald
-  '#8b5cf6', // Violet
-];
+import NodeCornerResizer from './NodeCornerResizer';
 
 function GroupNode({ id, data, selected }: NodeProps) {
   const { sessionId, node } = data as CanvasNodeData;
@@ -22,15 +14,40 @@ function GroupNode({ id, data, selected }: NodeProps) {
   const memberIds = params.memberIds || [];
   const locked = params.locked ?? false;
   const currentColor = params.color || '#3b82f6';
-  const [colorPickerOpen, setColorPickerOpen] = useState(false);
-  const resizeStart = useRef<{ w: number; h: number } | null>(null);
   const solo = useIsSoloSelected(selected);
 
+  const [hovered, setHovered] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(node.title || '新建组');
+  const inputRef = useRef<HTMLInputElement>(null);
+
   const rf = useReactFlow();
+  const zoom = useStore((s) => s.transform[2]) || 1;
+  // Inverse scale: 1 / zoom, clamped safely to keep title legible at low zoom
+  const titleScale = Math.min(8, Math.max(1, 1 / zoom));
+
+  useEffect(() => {
+    setDraft(node.title || '新建组');
+  }, [node.title]);
+
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [editing]);
+
+  const commitRename = useCallback(() => {
+    setEditing(false);
+    const trimmed = draft.trim();
+    const finalTitle = trimmed || '新建组';
+    if (finalTitle !== node.title) {
+      void canvasStore.renameNode(sessionId, node.id, finalTitle);
+    }
+  }, [draft, node.id, node.title, sessionId]);
 
   const handleColorSelect = useCallback(
     (c: string) => {
-      setColorPickerOpen(false);
       void canvasStore.updateNodeParams(sessionId, node.id, {
         ...params,
         color: c,
@@ -41,13 +58,72 @@ function GroupNode({ id, data, selected }: NodeProps) {
 
   return (
     <div
-      className="group relative flex h-full w-full flex-col rounded-2xl border transition-[border-color,box-shadow] duration-150"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className="group relative h-full w-full rounded-[20px] transition-[border-color,box-shadow] duration-150 backdrop-blur-xs"
       style={{
-        borderColor: `${currentColor}66`,
-        background: `${currentColor}0a`,
-        boxShadow: selected ? `0 0 0 1px ${currentColor}, 0 4px 20px ${currentColor}1a` : undefined,
+        borderWidth: '1.5px',
+        borderStyle: 'solid',
+        borderColor: selected
+          ? 'rgba(255, 255, 255, 0.4)'
+          : 'var(--group-container-border, rgba(255, 255, 255, 0.12))',
+        backgroundColor: 'var(--group-container-bg, rgba(30, 30, 35, 0.75))',
+        boxShadow: selected
+          ? '0 0 0 1px rgba(255, 255, 255, 0.15), 0 8px 32px rgba(0, 0, 0, 0.45)'
+          : '0 4px 20px rgba(0, 0, 0, 0.25)',
       }}
     >
+      {/* Drag surface for moving the entire group and its members */}
+      <div className="absolute inset-0 cursor-grab active:cursor-grabbing rounded-[20px]" />
+
+      {/* Title positioned above the top-left edge with anti-zoom LOD scaling (matching FloatingNodeHeader) */}
+      <div
+        className="nodrag absolute bottom-[calc(100%+6px)] left-1 z-20 flex items-center gap-1.5 pointer-events-auto select-none whitespace-nowrap"
+        style={{
+          transform: `scale(${titleScale})`,
+          transformOrigin: 'bottom left',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {editing ? (
+          <input
+            ref={inputRef}
+            type="text"
+            value={draft}
+            placeholder="请输入标题"
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commitRename}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitRename();
+              if (e.key === 'Escape') {
+                setDraft(node.title || '新建组');
+                setEditing(false);
+              }
+            }}
+            className="nodrag cursor-text rounded border border-accent/60 bg-paper-raised px-1.5 py-0.5 text-xs font-medium text-ink outline-none shadow-sm ring-1 ring-accent/30"
+            style={{ minWidth: '100px' }}
+          />
+        ) : (
+          <div
+            onClick={(e) => {
+              e.stopPropagation();
+              setEditing(true);
+            }}
+            className="group/title flex items-center gap-1.5 cursor-pointer rounded px-1.5 py-0.5 transition-colors hover:bg-white/10 select-none"
+            title="点击编辑组标题"
+          >
+            <span className="text-xs font-semibold text-ink/90 group-hover/title:text-ink transition-colors tracking-tight truncate max-w-[240px] drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]">
+              {node.title?.trim() || '新建组'}
+            </span>
+            {locked ? (
+              <span title="已锁定">
+                <Lock size={12} className="text-amber-400 shrink-0" />
+              </span>
+            ) : null}
+          </div>
+        )}
+      </div>
+
       {solo ? (
         <GroupToolbar
           group={node}
@@ -67,78 +143,20 @@ function GroupNode({ id, data, selected }: NodeProps) {
           }
           onUngroup={() => void canvasStore.ungroupNodes(sessionId, node.id)}
           onDelete={() => void canvasStore.removeNode(sessionId, node.id)}
+          onColorChange={handleColorSelect}
         />
       ) : null}
 
-      <NodeResizer
-        minWidth={240}
-        minHeight={160}
-        isVisible={selected && !locked}
-        lineClassName="!border-line/60"
-        handleClassName="!h-2 !w-2 !rounded-sm !border-line !bg-paper"
-        onResizeStart={(_, p: ResizeParams) => {
-          resizeStart.current = { w: p.width, h: p.height };
-        }}
-        onResizeEnd={(_, p: ResizeParams) => {
-          const from = resizeStart.current;
-          resizeStart.current = null;
-          if (from) canvasStore.commitResize(sessionId, id, from, { w: p.width, h: p.height });
-        }}
-      />
-
-      {/* Header bar */}
-      <div
-        className="flex items-center justify-between gap-2 px-3 py-2 rounded-t-2xl border-b select-none backdrop-blur-xs"
-        style={{
-          borderColor: `${currentColor}22`,
-          background: `${currentColor}14`,
-        }}
-      >
-        <div className="flex items-center gap-2 min-w-0">
-          <div
-            className="h-2.5 w-2.5 rounded-full shrink-0 cursor-pointer"
-            style={{ backgroundColor: currentColor }}
-            onClick={(e) => {
-              e.stopPropagation();
-              setColorPickerOpen((v) => !v);
-            }}
-            title="点击切换分组主题色"
-          />
-          <NodeTitle sessionId={sessionId} nodeId={node.id} title={node.title} fallback="分组容器" />
-          <span
-            className="rounded px-1.5 py-0.2 text-[9px] font-medium"
-            style={{ color: currentColor, backgroundColor: `${currentColor}20` }}
-          >
-            {memberIds.length} 成员
-          </span>
-          {locked ? (
-            <Lock size={11} className="text-amber-500 shrink-0" aria-label="已锁定" />
-          ) : null}
-        </div>
-      </div>
-
-      {/* Color picker popup */}
-      {colorPickerOpen && (
-        <div
-          className="nodrag absolute top-9 left-3 z-50 flex gap-1 rounded-lg border border-line bg-paper-raised p-1.5 shadow-xl backdrop-blur-md"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {GROUP_COLORS.map((c) => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => handleColorSelect(c)}
-              className="h-4 w-4 rounded-full border border-black/20 transition-transform hover:scale-125"
-              style={{ backgroundColor: c }}
-            />
-          ))}
-        </div>
+      {/* Resize controls matching ImageNode's 4 corner curved arc handles */}
+      {!locked && (
+        <NodeCornerResizer
+          nodeId={node.id}
+          sessionId={sessionId}
+          hovered={Boolean(selected || hovered)}
+          minWidth={240}
+          minHeight={160}
+        />
       )}
-
-      {/* Body: a drag surface for the whole frame (Figma/tldraw). Member nodes
-          sit at a higher z-index, so they stay individually grabbable; only the
-          empty area between them drags the group (and its members) as one. */}
-      <div className="flex-1 cursor-grab active:cursor-grabbing" />
     </div>
   );
 }

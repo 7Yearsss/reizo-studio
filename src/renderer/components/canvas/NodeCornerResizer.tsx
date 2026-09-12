@@ -54,7 +54,7 @@ function NodeCornerResizer({
   corners = ['top-right', 'bottom-right', 'bottom-left', 'top-left'],
 }: NodeCornerResizerProps) {
   const [isResizing, setIsResizing] = useState(false);
-  const resizeStart = useRef<{ w: number; h: number } | null>(null);
+  const resizeStart = useRef<{ w: number; h: number; x?: number; y?: number } | null>(null);
 
   const isVisible = hovered || isResizing;
   if (!isVisible) return null;
@@ -63,17 +63,25 @@ function NodeCornerResizer({
 
   const handleResizeStart = (_: unknown, p: ResizeParams) => {
     setIsResizing(true);
-    resizeStart.current = { w: p.width, h: p.height };
+    resizeStart.current = { w: p.width, h: p.height, x: p.x, y: p.y };
   };
 
   const handleResizeEnd = (_: unknown, p: ResizeParams) => {
     setIsResizing(false);
     const from = resizeStart.current;
     resizeStart.current = null;
-    if (from && (from.w !== p.width || from.h !== p.height)) {
+    if (
+      from &&
+      (from.w !== p.width ||
+        from.h !== p.height ||
+        (from.x !== undefined && from.x !== p.x) ||
+        (from.y !== undefined && from.y !== p.y))
+    ) {
       canvasStore.commitResize(sessionId, nodeId, from, {
         w: Math.round(p.width),
         h: Math.round(p.height),
+        x: p.x !== undefined ? Math.round(p.x) : undefined,
+        y: p.y !== undefined ? Math.round(p.y) : undefined,
       });
     }
   };

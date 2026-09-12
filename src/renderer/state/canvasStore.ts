@@ -363,6 +363,20 @@ async function _setSize(sessionId: string, nodeId: string, w: number, h: number)
   if (id) await api.patchCanvasNode(id, nodeId, { w: Math.round(w), h: Math.round(h) }).catch((): void => undefined);
 }
 
+async function _setBox(
+  sessionId: string,
+  nodeId: string,
+  box: { w: number; h: number; x?: number; y?: number },
+): Promise<void> {
+  const nodes = state.nodesBySession[sessionId] ?? [];
+  const patch: Partial<CanvasNode> = { w: Math.round(box.w), h: Math.round(box.h) };
+  if (box.x !== undefined) patch.x = Math.round(box.x);
+  if (box.y !== undefined) patch.y = Math.round(box.y);
+  setNodes(sessionId, nodes.map((n) => (n.id === nodeId ? { ...n, ...patch } : n)));
+  const id = canvasId(sessionId);
+  if (id) await api.patchCanvasNode(id, nodeId, patch).catch((): void => undefined);
+}
+
 async function _setNode(
   sessionId: string,
   nodeId: string,
@@ -856,14 +870,21 @@ export function lockedMemberIds(sessionId: string): Set<string> {
 export function commitResize(
   sessionId: string,
   nodeId: string,
-  from: { w: number; h: number },
-  to: { w: number; h: number },
+  from: { w: number; h: number; x?: number; y?: number },
+  to: { w: number; h: number; x?: number; y?: number },
 ): void {
-  if (from.w === to.w && from.h === to.h) return;
-  void _setSize(sessionId, nodeId, to.w, to.h);
+  if (
+    from.w === to.w &&
+    from.h === to.h &&
+    (from.x === undefined || from.x === to.x) &&
+    (from.y === undefined || from.y === to.y)
+  ) {
+    return;
+  }
+  void _setBox(sessionId, nodeId, to);
   record(sessionId, {
-    undo: () => _setSize(sessionId, nodeId, from.w, from.h),
-    redo: () => _setSize(sessionId, nodeId, to.w, to.h),
+    undo: () => _setBox(sessionId, nodeId, from),
+    redo: () => _setBox(sessionId, nodeId, to),
   });
 }
 
@@ -1295,9 +1316,8 @@ export function applyLayout(sessionId: string, positions: Record<string, { x: nu
   record(sessionId, { undo: apply(before), redo: apply(positions) });
 }
 
-/** Container box that wraps `members`, leaving room for the group header bar. */
-const GROUP_PADDING = 28;
-const GROUP_HEADER = 42;
+/** Container box that wraps `members` with comfortable padding on all sides. */
+const GROUP_PADDING = 36;
 
 function groupBox(members: CanvasNode[]): { x: number; y: number; w: number; h: number } {
   let minX = Infinity;
@@ -1305,16 +1325,19 @@ function groupBox(members: CanvasNode[]): { x: number; y: number; w: number; h: 
   let maxX = -Infinity;
   let maxY = -Infinity;
   for (const n of members) {
+    const box = defaultNodeBox(n.type);
+    const nw = n.w || box.w;
+    const nh = n.h || box.h;
     minX = Math.min(minX, n.x);
     minY = Math.min(minY, n.y);
-    maxX = Math.max(maxX, n.x + n.w);
-    maxY = Math.max(maxY, n.y + n.h);
+    maxX = Math.max(maxX, n.x + nw);
+    maxY = Math.max(maxY, n.y + nh);
   }
   return {
     x: Math.round(minX - GROUP_PADDING),
-    y: Math.round(minY - GROUP_HEADER),
+    y: Math.round(minY - GROUP_PADDING),
     w: Math.round(maxX - minX + GROUP_PADDING * 2),
-    h: Math.round(maxY - minY + GROUP_HEADER + GROUP_PADDING),
+    h: Math.round(maxY - minY + GROUP_PADDING * 2),
   };
 }
 
@@ -1330,7 +1353,7 @@ export async function groupNodes(
   const spec = {
     type: 'group' as const,
     ...groupBox(nodes),
-    title: '分镜组',
+    title: '新建组',
     params: { memberIds: nodes.map((n) => n.id), color: '#3b82f6', locked: false },
   };
 
