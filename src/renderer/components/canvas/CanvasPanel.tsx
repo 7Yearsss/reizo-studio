@@ -10,6 +10,7 @@ import {
   useStore,
   applyNodeChanges,
   ConnectionMode,
+  SelectionMode,
   type Node,
   type Edge,
   type NodeChange,
@@ -48,7 +49,7 @@ import {
   ChevronDown,
   Pin,
   MousePointer2,
-  BoxSelect,
+  Hand,
   ZoomIn,
   ZoomOut,
   Focus,
@@ -78,6 +79,7 @@ import { defaultNodeBox, type CanvasEdge, type CanvasGroupParams, type CanvasNod
 import { extractSubgraph, formatSubgraphForPrompt } from '../../../shared/canvasSubgraph';
 import { nodeReadinessIssues } from '../../../shared/canvasReadiness';
 import { OPEN_HANDLE_MENU_EVENT, type HandleMenuEventDetail } from './MagneticHandle';
+import { openImageEdit } from './imageEdit/openImageEdit';
 import ImageNode, { type CanvasNodeData } from './ImageNode';
 import AgentNode from './AgentNode';
 import VideoNode from './VideoNode';
@@ -164,6 +166,73 @@ function computeNodeInputMeta(
   };
 }
 
+/**
+ * Compute layered z-indexes for canvas nodes:
+ * 1. Sections: background containers (zIndex = -1).
+ * 2. Standalone nodes: base zIndex = 1 (or 20 when actively selected).
+ * 3. Group containers: base zIndex = 10 + index * 4 (or 50 when selected).
+ *    Because groupZ (10+) > standaloneZ (1), moving a group over outside nodes
+ *    causes the group's solid gray background to cleanly occlude the outside nodes.
+ * 4. Group members: zIndex = groupZ + 1 (or groupZ + 2 when selected).
+ *    Members are always strictly above their group container, so they are never
+ *    covered by the group background.
+ */
+export function computeNodeZIndexes(
+  nodes: CanvasNode[],
+  isSelectedFn?: (id: string) => boolean,
+): Map<string, number> {
+  const zIndexMap = new Map<string, number>();
+
+  const groupNodes: CanvasNode[] = [];
+  const memberToGroup = new Map<string, { group: CanvasNode; groupIndex: number }>();
+
+  for (const n of nodes) {
+    if (n.type === 'group') {
+      const idx = groupNodes.length;
+      groupNodes.push(n);
+      const params = n.params as CanvasGroupParams;
+      if (Array.isArray(params?.memberIds)) {
+        for (const mId of params.memberIds) {
+          memberToGroup.set(mId, { group: n, groupIndex: idx });
+        }
+      }
+    }
+  }
+
+  // Pre-calculate group z-indexes
+  const groupZMap = new Map<string, number>();
+  groupNodes.forEach((g, idx) => {
+    const isSelected = isSelectedFn ? isSelectedFn(g.id) : false;
+    const groupZ = isSelected ? 15 : 10 + idx * 2;
+    groupZMap.set(g.id, groupZ);
+    zIndexMap.set(g.id, groupZ);
+  });
+
+  // Calculate for all other nodes
+  for (const n of nodes) {
+    if (n.type === 'section') {
+      zIndexMap.set(n.id, -1);
+      continue;
+    }
+    if (n.type === 'group') {
+      continue; // already set above
+    }
+
+    const groupInfo = memberToGroup.get(n.id);
+    if (groupInfo) {
+      const baseGroupZ = groupZMap.get(groupInfo.group.id) ?? 10;
+      const isMemberSelected = isSelectedFn ? isSelectedFn(n.id) : false;
+      // Member nodes are always strictly above group container (base 20+)
+      zIndexMap.set(n.id, isMemberSelected ? baseGroupZ + 15 : baseGroupZ + 10);
+    } else {
+      const isSelected = isSelectedFn ? isSelectedFn(n.id) : false;
+      zIndexMap.set(n.id, isSelected ? 30 : 1);
+    }
+  }
+
+  return zIndexMap;
+}
+
 function CanvasInner({ sessionId }: { sessionId: string }) {
   const storeNodes = useCanvasStore((s) => s.nodesBySession[sessionId] ?? canvasStore.EMPTY_NODES);
   const storeEdges = useCanvasStore((s) => s.edgesBySession[sessionId] ?? canvasStore.EMPTY_EDGES);
@@ -179,8 +248,26 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
   const [openTool, setOpenTool] = useState<
     'create' | 'more' | 'askAgent' | 'batchRatio' | 'batchDuration' | null
   >(null);
-  // Runway-style canvas interaction mode: pan-on-drag vs marquee box-select.
-  const [mode, setMode] = useState<'select' | 'marquee'>('select');
+  // Canvas interaction tool, Figma/tldraw convention:
+  //   'select' — left-drag on empty canvas draws a marquee (the default);
+  //              pan via Space-drag, middle-mouse-drag, or trackpad scroll.
+  //   'pan'    — the hand tool: any left-drag pans; no marquee.
+  // Persisted so it survives tab switches / reloads.
+  const [mode, setMode] = useState<'select' | 'pan'>(() => {
+    try {
+      return (localStorage.getItem('reizo:canvas-tool') as 'select' | 'pan') || 'select';
+    } catch {
+      return 'select';
+    }
+  });
+  const setToolMode = useCallback((next: 'select' | 'pan') => {
+    setMode(next);
+    try {
+      localStorage.setItem('reizo:canvas-tool', next);
+    } catch {
+      /* ignore */
+    }
+  }, []);
   // Navigation mode: mouse (wheel zooms) vs trackpad (two-finger scroll pans).
   const [navMode, setNavMode] = useState<'mouse' | 'trackpad'>(() => {
     try {
@@ -206,6 +293,10 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const confirmTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const dragStart = useRef<Record<string, { x: number; y: number }>>({});
+  // Live position of each group being dragged, so onNodeDrag can shift its
+  // members by the per-frame delta (rf.getNode already reflects the new
+  // position by the time onNodesChange runs, so a delta there is always 0).
+  const groupDragPrev = useRef<Record<string, { x: number; y: number }>>({});
   const workflowFileRef = useRef<HTMLInputElement>(null);
 
   const flash = useCallback((msg: string) => {
@@ -395,6 +486,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       if (list) list.push(e);
       else edgesByTarget.set(e.targetId, [e]);
     }
+    const zIndexes = computeNodeZIndexes(storeNodes);
     return storeNodes.map((node) => {
       const meta = computeNodeInputMeta(node, edgesByTarget, nodesById);
       return {
@@ -403,7 +495,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         position: { x: node.x, y: node.y },
         width: node.w,
         height: node.h,
-        zIndex: node.type === 'section' ? -1 : node.type === 'group' ? 0 : 1,
+        zIndex: zIndexes.get(node.id) ?? 1,
         draggable: lockedMembers.has(node.id) ? false : undefined,
         data: {
           sessionId,
@@ -431,6 +523,8 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         else edgesByTarget.set(e.targetId, [e]);
       }
 
+      const zIndexes = computeNodeZIndexes(storeNodes, (id) => prevMap.get(id)?.selected ?? false);
+
       const nextNodes: Node<CanvasNodeData>[] = [];
       for (const node of storeNodes) {
         const prev = prevMap.get(node.id);
@@ -438,7 +532,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         const isAgentMark = agentMarkedIds.has(node.id);
         const isProposal = proposals.includes(node.id);
         const isLocked = lockedMembers.has(node.id);
-        const zIndex = node.type === 'section' ? -1 : node.type === 'group' ? 0 : 1;
+        const zIndex = zIndexes.get(node.id) ?? 1;
         const draggable = isLocked ? false : undefined;
 
         const {
@@ -569,26 +663,12 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       for (const change of changes) {
         if (change.type === 'remove') {
           void canvasStore.removeNode(sessionId, change.id);
-        } else if (change.type === 'position' && change.position) {
-          const before = rf.getNode(change.id);
-          if (before?.type === 'group' && before.position) {
-            const dx = change.position.x - before.position.x;
-            const dy = change.position.y - before.position.y;
-            if (dx !== 0 || dy !== 0) {
-              const memberIds = new Set(canvasStore.groupMemberIds(sessionId, change.id));
-              rf.setNodes((currentNodes) =>
-                currentNodes.map((n) =>
-                  memberIds.has(n.id)
-                    ? { ...n, position: { x: n.position.x + dx, y: n.position.y + dy } }
-                    : n,
-                ),
-              );
-            }
-          }
         }
       }
+      // Group→members follow is handled in onNodeDrag (rf.getNode is already
+      // updated here, so a delta computed from it would always be zero).
     },
-    [sessionId, rf],
+    [sessionId],
   );
 
   const onEdgesChange = useCallback(
@@ -838,37 +918,12 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
 
   const createGroupFromSelection = useCallback(async () => {
     if (selectedNodes.length === 0) return;
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const n of selectedNodes) {
-      minX = Math.min(minX, n.x);
-      minY = Math.min(minY, n.y);
-      maxX = Math.max(maxX, n.x + (n.w || 260));
-      maxY = Math.max(maxY, n.y + (n.h || 180));
-    }
-    const padding = 36;
-    const groupId = await canvasStore.addNode(sessionId, 'group', {
-      x: Math.round(minX - padding),
-      y: Math.round(minY - padding - 24),
-    });
+    const memberIds = selectedNodes.filter((n) => n.type !== 'group').map((n) => n.id);
+    if (memberIds.length === 0) return;
+    const groupId = await canvasStore.groupNodes(sessionId, memberIds);
     if (groupId) {
-      void canvasStore.commitResize(
-        sessionId,
-        groupId,
-        { w: 320, h: 240 },
-        {
-          w: Math.round(maxX - minX + padding * 2),
-          h: Math.round(maxY - minY + padding * 2 + 24),
-        },
-      );
-      void canvasStore.updateNodeParams(sessionId, groupId, {
-        memberIds: selectedNodes.map((n) => n.id),
-        color: '#3b82f6',
-      });
       selectNode(groupId);
-      flash(`已创建包含 ${selectedNodes.length} 个节点的编组`);
+      flash(`已创建包含 ${memberIds.length} 个节点的编组`);
     }
   }, [sessionId, selectedNodes, selectNode, flash]);
 
@@ -1399,13 +1454,15 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           e.preventDefault();
           rf.fitView({ padding: 0.2, duration: 250 });
           flash('全景居中 (F)');
-        } else if (k === 'v') {
-          e.preventDefault();
-          setMode('select');
         } else if (k === 'm') {
           e.preventDefault();
-          setMode('marquee');
-          flash('框选模式：空白拖拽多选 (M)');
+          setToolMode('select');
+          flash('选择工具：空白处拖拽框选 · 按住空格拖动画布');
+        } else if (k === 'v' && selectedNodeIds.length !== 1) {
+          // Bare V only reasserts the select tool; with one node selected it is
+          // the "new video node" shortcut handled by the window listener.
+          e.preventDefault();
+          setToolMode('select');
         } else if (k === 'z') {
           e.preventDefault();
           zoomToSelection();
@@ -1418,7 +1475,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         }
       }
     },
-    [sessionId, storeNodes, selectedNodeIds, rf, flash, zoomToSelection, handleCopyNodes, handlePasteAt],
+    [sessionId, storeNodes, selectedNodeIds, rf, flash, zoomToSelection, handleCopyNodes, handlePasteAt, setToolMode],
   );
 
   return (
@@ -1444,6 +1501,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         edges={edges}
         nodeTypes={NODE_TYPES}
         edgeTypes={EDGE_TYPES}
+        elevateNodesOnSelect={false}
         connectionMode={ConnectionMode.Loose}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
@@ -1476,15 +1534,54 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         onNodeDragStart={(_, __, dragged) => {
           isDraggingRef.current = true;
           setIsInteracting(true);
+          const allMemberIds = new Set<string>();
           for (const n of dragged) {
             dragStart.current[n.id] = { x: n.position.x, y: n.position.y };
-            // A group drag also moves its members — snapshot them too so the
-            // whole gesture can be undone in one step.
-            for (const memberId of canvasStore.groupMemberIds(sessionId, n.id)) {
-              const member = rf.getNode(memberId);
-              if (member) dragStart.current[memberId] = { x: member.position.x, y: member.position.y };
+            if (n.type === 'group') {
+              groupDragPrev.current[n.id] = { x: n.position.x, y: n.position.y };
+              for (const memberId of canvasStore.groupMemberIds(sessionId, n.id)) {
+                allMemberIds.add(memberId);
+                const member = rf.getNode(memberId);
+                if (member) dragStart.current[memberId] = { x: member.position.x, y: member.position.y };
+              }
             }
           }
+          if (allMemberIds.size > 0) {
+            rf.setNodes((nds) =>
+              nds.map((item) =>
+                allMemberIds.has(item.id)
+                  ? { ...item, zIndex: Math.max(item.zIndex ?? 20, 25) }
+                  : item,
+              ),
+            );
+          }
+        }}
+        onNodeDrag={(_, node) => {
+          if (node.type !== 'group') return;
+          const prev = groupDragPrev.current[node.id];
+          if (!prev) return;
+          const dx = node.position.x - prev.x;
+          const dy = node.position.y - prev.y;
+          if (dx === 0 && dy === 0) return;
+          groupDragPrev.current[node.id] = { x: node.position.x, y: node.position.y };
+          const memberIds = new Set(canvasStore.groupMemberIds(sessionId, node.id));
+          if (memberIds.size === 0) return;
+          // Shift both React Flow (smooth visual follow) and the canvas store
+          // (so commitMoveBatch persists real deltas and no reconcile after
+          // drop snaps a member back — the "flash").
+          rf.setNodes((nds) =>
+            nds.map((n) =>
+              memberIds.has(n.id)
+                ? { ...n, position: { x: n.position.x + dx, y: n.position.y + dy }, zIndex: Math.max(n.zIndex ?? 20, 25) }
+                : n,
+            ),
+          );
+          const storeNodesNow = canvasStore.getSnapshot().nodesBySession[sessionId] ?? [];
+          const liveMoves = new Map<string, { x: number; y: number }>();
+          for (const n of storeNodesNow) {
+            if (memberIds.has(n.id)) liveMoves.set(n.id, { x: n.x + dx, y: n.y + dy });
+          }
+          canvasStore.moveNodesBatchLive(sessionId, liveMoves);
         }}
         onNodeDragStop={(_, __, dragged) => {
           isDraggingRef.current = false;
@@ -1498,9 +1595,22 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           };
           for (const n of dragged) {
             collect(n.id);
+            delete groupDragPrev.current[n.id];
             for (const memberId of canvasStore.groupMemberIds(sessionId, n.id)) collect(memberId);
           }
           canvasStore.commitMoveBatch(sessionId, moves);
+          // A member dragged on its own leaves the container box out of sync —
+          // snap it back around its members. Dragging the group itself already
+          // moves members in lockstep, so its box stays correct.
+          const refitted = new Set<string>();
+          for (const n of dragged) {
+            if (n.type === 'group') continue;
+            const g = canvasStore.groupOf(sessionId, n.id);
+            if (g && !refitted.has(g.id)) {
+              refitted.add(g.id);
+              void canvasStore.refitGroup(sessionId, g.id);
+            }
+          }
         }}
         onInit={restoreViewport}
         onMoveStart={() => {
@@ -1528,24 +1638,12 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           if (menu) setMenu(null);
           openAddNodesModal(pe.clientX, pe.clientY, flow.x, flow.y);
         }}
-        onDoubleClick={(e) => {
-          const target = e.target as HTMLElement;
-          if (
-            target.closest('.react-flow__node') ||
-            target.closest('.canvas-tool') ||
-            target.closest('.react-flow__controls') ||
-            target.closest('[data-magnetic-handle="true"]') ||
-            (target.closest('.react-flow__panel') && !target.closest('[data-canvas-empty-prompt="true"]'))
-          ) {
-            return;
-          }
-          openAddNodesModal(e.clientX, e.clientY);
-        }}
         proOptions={{ hideAttribution: true }}
         deleteKeyCode={['Backspace', 'Delete']}
         panActivationKeyCode="Space"
-        panOnDrag={mode === 'marquee' ? [1] : true}
-        selectionOnDrag={mode === 'marquee'}
+        panOnDrag={mode === 'pan' ? true : [1]}
+        selectionOnDrag={mode === 'select'}
+        selectionMode={SelectionMode.Partial}
         panOnScroll={navMode === 'trackpad'}
         zoomOnScroll={navMode === 'mouse'}
         zoomOnPinch={true}
@@ -1819,11 +1917,19 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         {/* Bottom nav bar — pan/marquee + zoom + history (Runway RW-1). */}
         <Panel position="bottom-center" className="pb-3">
           <div className="flex items-center gap-0.5 rounded-xl border border-line bg-paper-raised/95 px-1 py-1 shadow-xl backdrop-blur-md">
-            <NavButton active={mode === 'select'} onClick={() => setMode('select')} title="选择 / 平移 (V)">
+            <NavButton
+              active={mode === 'select'}
+              onClick={() => setToolMode('select')}
+              title="选择工具：空白处拖拽框选，按住空格拖动画布 (V)"
+            >
               <MousePointer2 size={14} />
             </NavButton>
-            <NavButton active={mode === 'marquee'} onClick={() => setMode('marquee')} title="框选：空白拖拽多选 (M)">
-              <BoxSelect size={14} />
+            <NavButton
+              active={mode === 'pan'}
+              onClick={() => setToolMode('pan')}
+              title="抓手工具：拖拽平移画布（也可随时按住空格临时平移）"
+            >
+              <Hand size={14} />
             </NavButton>
             <NavButton
               active={wiresVisible}
@@ -2050,6 +2156,14 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           onRefToComposer={refToComposer}
           onCopyNode={(nodeId) => handleCopyNodes([nodeId])}
           onDeleteNode={(nodeId) => void canvasStore.removeNode(sessionId, nodeId)}
+          canEditImage={
+            menu.kind === 'node' &&
+            storeNodes.find((n) => n.id === menu.nodeId)?.type === 'image' &&
+            (storeNodes.find((n) => n.id === menu.nodeId)?.output?.assets?.length ?? 0) > 0
+          }
+          onEditImage={(nodeId, kind) => {
+            openImageEdit({ sessionId, nodeId, kind, commitMode: 'derive' });
+          }}
         />
       ) : null}
 

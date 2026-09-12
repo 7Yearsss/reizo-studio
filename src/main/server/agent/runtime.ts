@@ -297,7 +297,7 @@ export async function runChatTurn(options: {
     : undefined;
 
   const imageTools = dataRoot
-    ? createImageTools({ settingsStore, dataRoot })
+    ? createImageTools({ settingsStore, dataRoot, sessionId, canvasStore })
     : undefined;
 
   const tools =

@@ -50,6 +50,8 @@
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
   --duration-fast: 140ms;
   --duration-base: 200ms;
+  --group-container-bg: rgba(236, 236, 240, 0.75);
+  --group-container-border: rgba(0, 0, 0, 0.12);
 }
 
 :root.dark {
@@ -69,6 +71,8 @@
   --danger: #fb7185;
 
   --paper-a0: rgb(13 13 13 / 0);
+  --group-container-bg: rgba(30, 30, 35, 0.75);
+  --group-container-border: rgba(255, 255, 255, 0.12);
 
   --background: var(--paper);
   --foreground: var(--ink);
@@ -157,6 +161,34 @@ pre,
 
 .titlebar-no-drag {
   -webkit-app-region: no-drag;
+}
+
+.edit-slider {
+  height: 6px;
+  width: 100%;
+  appearance: none;
+  border-radius: 999px;
+  background: var(--paper-inset);
+  accent-color: var(--accent);
+  outline: none;
+}
+.edit-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--accent);
+  border: 2px solid var(--paper-raised);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 12%, transparent);
+  cursor: pointer;
+}
+.edit-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--accent);
+  border: 2px solid var(--paper-raised);
+  cursor: pointer;
 }
 
 .scrollbar-hide {
@@ -379,6 +411,35 @@ pre,
   border-color: var(--accent);
 }
 
+.canvas-checker {
+  background-color: #1c1c1c;
+  background-image:
+    linear-gradient(45deg, #2a2a2a 25%, transparent 25%),
+    linear-gradient(-45deg, #2a2a2a 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #2a2a2a 75%),
+    linear-gradient(-45deg, transparent 75%, #2a2a2a 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+
+/* Perspective floor for the multi-angle turntable. */
+.turntable-stage::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 8%;
+  width: 150%;
+  height: 42%;
+  transform: translateX(-50%) rotateX(72deg);
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--ink) 12%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--ink) 12%, transparent) 1px, transparent 1px);
+  background-size: 40px 40px;
+  -webkit-mask-image: radial-gradient(ellipse at center top, #000 10%, transparent 70%);
+  mask-image: radial-gradient(ellipse at center top, #000 10%, transparent 70%);
+  pointer-events: none;
+}
+
 /* Edge "energy flow" — dashes drift from source toward target. */
 @keyframes edge-flow {
   to { stroke-dashoffset: -24; }
@@ -441,6 +502,44 @@ pre,
 .react-flow__node {
   contain: layout style;
 }
+
+/* Reset React Flow's default opinionated styling for 'group' nodes.
+   By default, xyflow applies 10px padding, a 5px border-radius, and a milky
+   opaque rgba(240, 240, 240, 0.25) background which ruins dark canvas contrast
+   and creates an awkward double-border gap. */
+.react-flow__node.react-flow__node-group,
+.react-flow__node.react-flow__node-group:hover,
+.react-flow__node.react-flow__node-group.selected,
+.react-flow__node.react-flow__node-group:focus,
+.react-flow__node.react-flow__node-group:focus-visible,
+.react-flow__node.react-flow__node-group.selectable:hover,
+.react-flow__node.react-flow__node-group.selectable.selected,
+.react-flow__node.react-flow__node-group.selectable:focus,
+.react-flow__node.react-flow__node-group.selectable:focus-visible {
+  padding: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+  text-align: left !important;
+}
+
+/* Group container layering:
+   The group must stay above outside standalone nodes (zIndex 1) so its semi-transparent
+   frosted background covers outside nodes, but must NEVER jump above its member
+   nodes (zIndex >= 20), even when selected or being dragged. */
+.react-flow__node.react-flow__node-group {
+  z-index: 10 !important;
+}
+.react-flow__node.react-flow__node-group.selected,
+.react-flow__node.react-flow__node-group.dragging {
+  z-index: 15 !important;
+}
+.react-flow__node:not(.react-flow__node-group).dragging {
+  z-index: 1000 !important;
+}
 .react-flow__node.dragging {
   will-change: transform;
 }
@@ -478,6 +577,13 @@ pre,
 .react-flow__node.dragging .react-flow__resize-control,
 [data-dragging='true'] .react-flow__resize-control {
   display: none !important;
+}
+
+/* A node being dragged is auto-selected by React Flow — drop the accent selection
+   outline/ring on its card for the duration of the gesture so the move stays clean. */
+.react-flow__node.dragging > * {
+  --tw-ring-color: transparent !important;
+  border-color: var(--line) !important;
 }
 
 .react-flow__minimap {

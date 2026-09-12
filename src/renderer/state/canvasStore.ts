@@ -10,7 +10,16 @@ import type {
   CanvasSectionParams,
   CanvasSubgraphParams,
   CanvasNodeOutput,
+  CanvasImageParams,
 } from '../../shared/canvas';
+import { defaultNodeBox } from '../../shared/canvas';
+import {
+  type ImageEditSpec,
+  EDIT_META,
+  isLocalEdit,
+  editNodeTitle,
+} from '../../shared/canvasImageEdit';
+import { blobToBase64 } from '../lib/blobToBase64';
 import { gridArrange } from '../../shared/arrangeNodes';
 import { variantGrid } from '../../shared/variantLayout';
 import type { AgentTrailEntry } from '../../shared/agentTrail';
@@ -352,6 +361,20 @@ async function _setSize(sessionId: string, nodeId: string, w: number, h: number)
   setNodes(sessionId, nodes.map((n) => (n.id === nodeId ? { ...n, w, h } : n)));
   const id = canvasId(sessionId);
   if (id) await api.patchCanvasNode(id, nodeId, { w: Math.round(w), h: Math.round(h) }).catch((): void => undefined);
+}
+
+async function _setBox(
+  sessionId: string,
+  nodeId: string,
+  box: { w: number; h: number; x?: number; y?: number },
+): Promise<void> {
+  const nodes = state.nodesBySession[sessionId] ?? [];
+  const patch: Partial<CanvasNode> = { w: Math.round(box.w), h: Math.round(box.h) };
+  if (box.x !== undefined) patch.x = Math.round(box.x);
+  if (box.y !== undefined) patch.y = Math.round(box.y);
+  setNodes(sessionId, nodes.map((n) => (n.id === nodeId ? { ...n, ...patch } : n)));
+  const id = canvasId(sessionId);
+  if (id) await api.patchCanvasNode(id, nodeId, patch).catch((): void => undefined);
 }
 
 async function _setNode(
@@ -847,14 +870,21 @@ export function lockedMemberIds(sessionId: string): Set<string> {
 export function commitResize(
   sessionId: string,
   nodeId: string,
-  from: { w: number; h: number },
-  to: { w: number; h: number },
+  from: { w: number; h: number; x?: number; y?: number },
+  to: { w: number; h: number; x?: number; y?: number },
 ): void {
-  if (from.w === to.w && from.h === to.h) return;
-  void _setSize(sessionId, nodeId, to.w, to.h);
+  if (
+    from.w === to.w &&
+    from.h === to.h &&
+    (from.x === undefined || from.x === to.x) &&
+    (from.y === undefined || from.y === to.y)
+  ) {
+    return;
+  }
+  void _setBox(sessionId, nodeId, to);
   record(sessionId, {
-    undo: () => _setSize(sessionId, nodeId, from.w, from.h),
-    redo: () => _setSize(sessionId, nodeId, to.w, to.h),
+    undo: () => _setBox(sessionId, nodeId, from),
+    redo: () => _setBox(sessionId, nodeId, to),
   });
 }
 
@@ -1286,9 +1316,8 @@ export function applyLayout(sessionId: string, positions: Record<string, { x: nu
   record(sessionId, { undo: apply(before), redo: apply(positions) });
 }
 
-/** Container box that wraps `members`, leaving room for the group header bar. */
-const GROUP_PADDING = 28;
-const GROUP_HEADER = 42;
+/** Container box that wraps `members` with comfortable padding on all sides. */
+const GROUP_PADDING = 36;
 
 function groupBox(members: CanvasNode[]): { x: number; y: number; w: number; h: number } {
   let minX = Infinity;
@@ -1296,16 +1325,19 @@ function groupBox(members: CanvasNode[]): { x: number; y: number; w: number; h: 
   let maxX = -Infinity;
   let maxY = -Infinity;
   for (const n of members) {
+    const box = defaultNodeBox(n.type);
+    const nw = n.w || box.w;
+    const nh = n.h || box.h;
     minX = Math.min(minX, n.x);
     minY = Math.min(minY, n.y);
-    maxX = Math.max(maxX, n.x + n.w);
-    maxY = Math.max(maxY, n.y + n.h);
+    maxX = Math.max(maxX, n.x + nw);
+    maxY = Math.max(maxY, n.y + nh);
   }
   return {
     x: Math.round(minX - GROUP_PADDING),
-    y: Math.round(minY - GROUP_HEADER),
+    y: Math.round(minY - GROUP_PADDING),
     w: Math.round(maxX - minX + GROUP_PADDING * 2),
-    h: Math.round(maxY - minY + GROUP_HEADER + GROUP_PADDING),
+    h: Math.round(maxY - minY + GROUP_PADDING * 2),
   };
 }
 
@@ -1321,7 +1353,7 @@ export async function groupNodes(
   const spec = {
     type: 'group' as const,
     ...groupBox(nodes),
-    title: '分镜组',
+    title: '新建组',
     params: { memberIds: nodes.map((n) => n.id), color: '#3b82f6', locked: false },
   };
 
@@ -2023,15 +2055,166 @@ export async function saveAsset(sessionId: string, nodeId: string, assetIndex = 
 export async function uploadAssetToNode(sessionId: string, nodeId: string, file: File): Promise<void> {
   const id = canvasId(sessionId);
   if (!id) return;
-  const buffer = await file.arrayBuffer();
-  let binary = '';
-  const bytes = new Uint8Array(buffer);
-  for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+  const dataBase64 = await blobToBase64(file);
   const updatedNode = await api.setCanvasNodeAsset(id, nodeId, {
     name: file.name,
-    dataBase64: btoa(binary),
+    dataBase64,
   });
   applyEvent(sessionId, { type: 'node_updated', node: updatedNode });
+}
+
+const EDIT_NODE_GAP = 80;
+
+/**
+ * 从源图节点派生一次编辑：建新 image 节点 + edge(image_out → edit_src)。
+ * 本地类在客户端算像素并上传；模型类上传蒙版（若有）后 runNode。
+ */
+export async function deriveImageEdit(
+  sessionId: string,
+  sourceNodeId: string,
+  spec: Omit<ImageEditSpec, 'sourceNodeId'>,
+  opts?: { localResultBlob?: Blob; maskBlob?: Blob },
+): Promise<string | null> {
+  const src = nodeById(sessionId, sourceNodeId);
+  if (!src) return null;
+  const at = { x: src.x + src.w + EDIT_NODE_GAP, y: src.y };
+  const fullSpec: ImageEditSpec = { ...spec, sourceNodeId };
+  const srcParams = (src.params as CanvasImageParams) ?? { prompt: '', size: '1024x1024' };
+
+  const newId = await addNodeAndConnect(
+    sessionId,
+    {
+      type: 'image',
+      x: at.x,
+      y: at.y,
+      title: editNodeTitle(spec.kind),
+      params: {
+        prompt: '',
+        size: srcParams.size ?? '1024x1024',
+        model: srcParams.model,
+        edit: fullSpec,
+      },
+    },
+    sourceNodeId,
+    'image_out',
+    'edit_src',
+  );
+  if (!newId) return null;
+
+  if (isLocalEdit(spec.kind)) {
+    if (opts?.localResultBlob) {
+      await uploadAssetToNode(
+        sessionId,
+        newId,
+        new File([opts.localResultBlob], `${spec.kind}.png`, { type: 'image/png' }),
+      );
+    }
+    return newId;
+  }
+
+  if (EDIT_META[spec.kind].needsMask && opts?.maskBlob) {
+    const cid = canvasId(sessionId);
+    if (cid) {
+      const b64 = await blobToBase64(opts.maskBlob);
+      const { maskAsset } = await api.uploadCanvasNodeMask(cid, newId, b64);
+      const current = nodeById(sessionId, newId);
+      const currentParams = (current?.params as CanvasImageParams) ?? srcParams;
+      await updateNodeParams(sessionId, newId, {
+        ...currentParams,
+        edit: { ...fullSpec, maskAsset },
+      });
+    }
+  }
+  await runNode(sessionId, newId);
+  return newId;
+}
+
+/**
+ * 就地改写已有编辑节点的 params.edit，可选上传新像素/蒙版后重跑。
+ * 不建新节点。
+ */
+export async function reviseImageEdit(
+  sessionId: string,
+  nodeId: string,
+  patch: Partial<Pick<ImageEditSpec, 'params' | 'instruction' | 'cropRect' | 'maskAsset' | 'regions'>>,
+  opts?: { localResultBlob?: Blob; maskBlob?: Blob; rerun?: boolean },
+): Promise<void> {
+  const node = nodeById(sessionId, nodeId);
+  if (!node) return;
+  const params = (node.params as CanvasImageParams) ?? { prompt: '', size: '1024x1024' };
+  if (!params.edit) return;
+  let nextEdit: ImageEditSpec = { ...params.edit, ...patch };
+  if (opts?.maskBlob) {
+    const cid = canvasId(sessionId);
+    if (cid) {
+      const b64 = await blobToBase64(opts.maskBlob);
+      const { maskAsset } = await api.uploadCanvasNodeMask(cid, nodeId, b64);
+      nextEdit = { ...nextEdit, maskAsset };
+    }
+  }
+  await updateNodeParams(sessionId, nodeId, { ...params, edit: nextEdit });
+  if (isLocalEdit(nextEdit.kind)) {
+    if (opts?.localResultBlob) {
+      await uploadAssetToNode(
+        sessionId,
+        nodeId,
+        new File([opts.localResultBlob], `${nextEdit.kind}.png`, { type: 'image/png' }),
+      );
+    }
+    return;
+  }
+  if (opts?.rerun === false) return;
+  await runNode(sessionId, nodeId);
+}
+
+/** 快速切分：源图切成 N 块，每块建一个 image 节点。一条 undo 记录包住全部。 */
+export async function deriveImageSplit(
+  sessionId: string,
+  sourceNodeId: string,
+  grid: '2x2' | '3x3' | '4x4',
+  tiles: Blob[],
+): Promise<string[]> {
+  const src = nodeById(sessionId, sourceNodeId);
+  if (!src || tiles.length === 0) return [];
+  const cols = grid === '2x2' ? 2 : grid === '3x3' ? 3 : 4;
+  const box = defaultNodeBox('image');
+  const srcParams = (src.params as CanvasImageParams) ?? { prompt: '', size: '1024x1024' };
+  const createdIds: string[] = [];
+  const createdEdgeIds: string[] = [];
+
+  for (let i = 0; i < tiles.length; i += 1) {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const spec = {
+      type: 'image' as const,
+      x: src.x + src.w + EDIT_NODE_GAP + col * (box.w + EDIT_NODE_GAP),
+      y: src.y + row * (box.h + EDIT_NODE_GAP),
+      title: `切分 ${i + 1}`,
+      params: {
+        prompt: '',
+        size: srcParams.size ?? '1024x1024',
+        edit: { kind: 'split' as const, sourceNodeId, params: { grid } },
+      },
+    };
+    const newId = await _addNode(sessionId, spec);
+    if (!newId) continue;
+    createdIds.push(newId);
+    const edgeId = await _addEdge(sessionId, sourceNodeId, newId, 'image_out', 'edit_src');
+    if (edgeId) createdEdgeIds.push(edgeId);
+    await uploadAssetToNode(sessionId, newId, new File([tiles[i]], `split-${i + 1}.png`, { type: 'image/png' }));
+  }
+
+  if (createdIds.length === 0) return [];
+  record(sessionId, {
+    undo: async () => {
+      for (const eId of createdEdgeIds) await _deleteEdge(sessionId, eId);
+      for (const nId of createdIds) await _deleteNode(sessionId, nId);
+    },
+    redo: async () => {
+      await deriveImageSplit(sessionId, sourceNodeId, grid, tiles);
+    },
+  });
+  return createdIds;
 }
 
 /** Download the current canvas as a portable `.reizo.zip`. */

@@ -1,4 +1,5 @@
 import type { CanvasEdge, CanvasImageParams, CanvasNode, CanvasVideoParams } from './canvas';
+import { isLocalEdit } from './canvasImageEdit';
 import { inputHash } from './canvasGraph';
 
 /**
@@ -9,11 +10,14 @@ export function estimateNodeCost(node: { type: string; params?: unknown }): numb
   if (node.type === 'agent') return 1;
   if (node.type === 'image') {
     const p = node.params as CanvasImageParams | undefined;
+    if (p?.edit && isLocalEdit(p.edit.kind)) return 0;
     const model = (p?.model || '').toLowerCase();
-    if (model.includes('flux-dev') || model.includes('recraft-v3')) return 2;
-    if (model.includes('dall-e-3')) return 3;
-    if (model.includes('midjourney')) return 2;
-    return 1;
+    let cost = 1;
+    if (model.includes('flux-dev') || model.includes('recraft-v3')) cost = 2;
+    else if (model.includes('dall-e-3')) cost = 3;
+    else if (model.includes('midjourney')) cost = 2;
+    if (p?.edit?.kind === 'enhance') return Math.ceil(cost * 1.5);
+    return cost;
   }
   if (node.type === 'video') {
     const p = node.params as CanvasVideoParams | undefined;

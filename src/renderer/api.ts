@@ -567,6 +567,19 @@ export async function setCanvasNodeAsset(
   return node;
 }
 
+export async function uploadCanvasNodeMask(
+  canvasId: string,
+  nodeId: string,
+  dataBase64: string,
+): Promise<{ maskAsset: string }> {
+  const res = await api(`/api/canvas/${canvasId}/nodes/${nodeId}/mask`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ dataBase64 }),
+  });
+  return res.json() as Promise<{ maskAsset: string }>;
+}
+
 export async function runCanvasNode(
   canvasId: string,
   id: string,

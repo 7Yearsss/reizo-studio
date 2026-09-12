@@ -24,6 +24,7 @@ import FloatingNodeHeader from './FloatingNodeHeader';
 import { NodeTitle, type CanvasNodeData } from './ImageNode';
 import MentionTextArea from './MentionTextArea';
 import { useHoverIntent } from './NodeActionBar';
+import { useIsSoloSelected } from './useSelectionCount';
 import MagneticHandle from './MagneticHandle';
 import AgentMark from './AgentMark';
 import MissingInputWarning from './MissingInputWarning';
@@ -58,7 +59,13 @@ function AudioNode({ id, data, selected }: NodeProps) {
   const [showConfig, setShowConfig] = useState(false);
   const [assetIdx, setAssetIdx] = useState(0);
   const { hovered, hoverProps } = useHoverIntent();
-  const expanded = selected || hovered;
+  const solo = useIsSoloSelected(selected);
+  const expanded = solo || hovered;
+
+  // Multi-select collapses per-node chrome; drop any manually-opened config too.
+  useEffect(() => {
+    if (!solo) setShowConfig(false);
+  }, [solo]);
 
   const running = node.runState === 'running';
   const assets = node.output?.assets ?? [];

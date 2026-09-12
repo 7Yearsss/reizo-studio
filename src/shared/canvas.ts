@@ -6,8 +6,10 @@
  */
 
 import type { CameraControl } from './cameraMotion';
+import type { ImageEditSpec } from './canvasImageEdit';
 
 export type { CameraControl } from './cameraMotion';
+export type { ImageEditSpec, ImageEditKind, ImageEditParams } from './canvasImageEdit';
 
 export type CanvasNodeType =
   | 'image'
@@ -29,6 +31,8 @@ export interface CanvasImageParams {
   size: '1024x1024' | '1024x1536' | '1536x1024';
   model?: string;
   count?: 1 | 2 | 4;
+  /** 存在时，本节点是一次「编辑派生」节点，由 runImageNode 的 edit 分支处理。 */
+  edit?: ImageEditSpec;
 }
 
 export interface CanvasAgentParams {

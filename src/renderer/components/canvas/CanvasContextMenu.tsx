@@ -22,7 +22,9 @@ import {
   Trash2,
 } from 'lucide-react';
 import type { CanvasNodeType } from '../../../shared/canvas';
+import { EDIT_META, IMAGE_EDIT_KINDS, type ImageEditKind } from '../../../shared/canvasImageEdit';
 import { cn } from '../../lib/cn';
+import { EditKindIcon } from './imageEdit/editIcons';
 
 export interface CanvasContextMenuProps {
   menu:
@@ -52,6 +54,8 @@ export interface CanvasContextMenuProps {
   onRefToComposer?: (nodeId: string) => void;
   onCopyNode?: (nodeId: string) => void;
   onDeleteNode?: (nodeId: string) => void;
+  canEditImage?: boolean;
+  onEditImage?: (nodeId: string, kind: import('../../../shared/canvasImageEdit').ImageEditKind) => void;
 }
 
 export default function CanvasContextMenu({
@@ -78,9 +82,11 @@ export default function CanvasContextMenu({
   onRefToComposer,
   onCopyNode,
   onDeleteNode,
+  canEditImage = false,
+  onEditImage,
 }: CanvasContextMenuProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [activeSubmenu, setActiveSubmenu] = useState<'none' | 'nodes' | 'tools'>('none');
+  const [activeSubmenu, setActiveSubmenu] = useState<'none' | 'nodes' | 'tools' | 'edit'>('none');
   const [submenuTop, setSubmenuTop] = useState<number>(0);
 
   // Close on outside click or Escape
@@ -452,6 +458,55 @@ export default function CanvasContextMenu({
             <PlayCircle size={14} className="text-zinc-400 group-hover:text-white" />
             <span className="text-xs font-normal">从这里往下运行</span>
           </button>
+
+          {canEditImage ? (
+            <div
+              className="relative"
+              onMouseEnter={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                setSubmenuTop(rect.top - top);
+                setActiveSubmenu('edit');
+              }}
+            >
+              <button
+                type="button"
+                className={cn(
+                  'group flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-zinc-200 transition-colors hover:bg-white/[0.08] hover:text-white cursor-pointer',
+                  activeSubmenu === 'edit' && 'bg-white/[0.08] text-white',
+                )}
+              >
+                <div className="flex items-center gap-2.5">
+                  <ImageIcon size={14} className="text-zinc-400 group-hover:text-white" />
+                  <span className="text-xs font-normal">编辑</span>
+                </div>
+                <ChevronRight size={14} className="text-zinc-400 group-hover:text-white transition-colors" />
+              </button>
+              {activeSubmenu === 'edit' && menu.kind === 'node' ? (
+                <div
+                  className={cn(
+                    'absolute z-[190] flex w-44 flex-col rounded-2xl border border-white/[0.08] bg-[#18181b]/98 p-1.5 text-xs shadow-2xl backdrop-blur-2xl',
+                    openSubmenuToLeft ? 'right-full mr-1.5' : 'left-full ml-1.5',
+                  )}
+                  style={{ top: submenuTop }}
+                >
+                  {IMAGE_EDIT_KINDS.map((kind: ImageEditKind) => (
+                    <button
+                      key={kind}
+                      type="button"
+                      onClick={() => {
+                        onEditImage?.(menu.nodeId, kind);
+                        onClose();
+                      }}
+                      className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-left text-zinc-200 hover:bg-white/[0.08] hover:text-white cursor-pointer"
+                    >
+                      <EditKindIcon kind={kind} size={13} />
+                      <span>{EDIT_META[kind].label}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           <button
             type="button"

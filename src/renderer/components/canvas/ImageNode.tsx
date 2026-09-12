@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, memo } from 'react';
 import { Position, type NodeProps } from '@xyflow/react';
 import { Download, FolderPlus, Loader2, Play, Sparkles, ImageIcon, RotateCw, X, FileUp, Maximize2, Bot } from 'lucide-react';
 import type { CanvasImageParams, CanvasNode } from '../../../shared/canvas';
+import { editNodeTitle, type ImageEditKind } from '../../../shared/canvasImageEdit';
 import { estimateNodeCost } from '../../../shared/canvasPricing';
 import { serializeMention } from '../../../shared/resolveMentions';
 import * as canvasStore from '../../state/canvasStore';
@@ -12,10 +13,23 @@ import Lightbox from './Lightbox';
 import { useHoverIntent } from './NodeActionBar';
 import MagneticHandle from './MagneticHandle';
 import NodeFloatingPanel from './NodeFloatingPanel';
+import { useIsSoloSelected } from './useSelectionCount';
 import AgentMark from './AgentMark';
 import NodeCornerResizer from './NodeCornerResizer';
 import MissingInputWarning from './MissingInputWarning';
 import { useAssetUrl } from './useAssetUrl';
+import ImageNodeEditToolbar from './imageEdit/ImageNodeEditToolbar';
+import { EditKindIcon } from './imageEdit/editIcons';
+import CropOverlay from './imageEdit/CropOverlay';
+import AnnotateOverlay from './imageEdit/AnnotateOverlay';
+import MaskOverlay from './imageEdit/MaskOverlay';
+import MultiAnglePanel from './imageEdit/MultiAnglePanel';
+import RelightPanel from './imageEdit/RelightPanel';
+import OutpaintOverlay from './imageEdit/OutpaintOverlay';
+import ParamPopover from './imageEdit/ParamPopover';
+import EditParamsPanel from './imageEdit/EditParamsPanel';
+import type { EditCommitMode } from './imageEdit/commitEdit';
+import { OPEN_IMAGE_EDIT_EVENT, openImageEdit, type OpenImageEditDetail } from './imageEdit/openImageEdit';
 
 export interface CanvasNodeData extends Record<string, unknown> {
   sessionId: string;
@@ -34,6 +48,83 @@ export interface CanvasNodeData extends Record<string, unknown> {
 
 import FloatingNodeHeader, { NodeTitle } from './FloatingNodeHeader';
 export { NodeTitle, FloatingNodeHeader };
+
+function ImageEditOverlay({
+  kind,
+  sessionId,
+  node,
+  imageUrl,
+  commitMode = 'derive',
+  onClose,
+}: {
+  kind: ImageEditKind;
+  sessionId: string;
+  node: CanvasNode;
+  imageUrl: string;
+  commitMode?: EditCommitMode;
+  onClose: () => void;
+}) {
+  if (kind === 'crop') {
+    return (
+      <CropOverlay
+        sessionId={sessionId}
+        node={node}
+        imageUrl={imageUrl}
+        commitMode={commitMode}
+        onClose={onClose}
+      />
+    );
+  }
+  if (kind === 'annotate') {
+    return (
+      <AnnotateOverlay
+        sessionId={sessionId}
+        node={node}
+        imageUrl={imageUrl}
+        commitMode={commitMode}
+        onClose={onClose}
+      />
+    );
+  }
+  if (kind === 'inpaint' || kind === 'erase') {
+    return (
+      <MaskOverlay
+        sessionId={sessionId}
+        node={node}
+        imageUrl={imageUrl}
+        mode={kind}
+        commitMode={commitMode}
+        onClose={onClose}
+      />
+    );
+  }
+  if (kind === 'multiAngle') return <MultiAnglePanel sessionId={sessionId} node={node} imageUrl={imageUrl} onClose={onClose} />;
+  if (kind === 'relight') return <RelightPanel sessionId={sessionId} node={node} imageUrl={imageUrl} onClose={onClose} />;
+  if (kind === 'outpaint') {
+    return (
+      <OutpaintOverlay
+        sessionId={sessionId}
+        node={node}
+        imageUrl={imageUrl}
+        commitMode={commitMode}
+        onClose={onClose}
+      />
+    );
+  }
+  if (kind === 'resize' || kind === 'enhance' || kind === 'split') {
+    return (
+      <ParamPopover
+        sessionId={sessionId}
+        node={node}
+        imageUrl={imageUrl}
+        kind={kind}
+        commitMode={commitMode}
+        onClose={onClose}
+      />
+    );
+  }
+  return null;
+}
 
 function VariantThumbnail({
   asset,
@@ -109,9 +200,12 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
   } = data as CanvasNodeData;
 
   const params = node.params as CanvasImageParams;
+  const edit = params.edit;
   const [prompt, setPrompt] = useState(params.prompt ?? '');
   const [showConfig, setShowConfig] = useState(false);
   const [zoom, setZoom] = useState<string | null>(null);
+  const [activeOverlay, setActiveOverlay] = useState<ImageEditKind | null>(null);
+  const [overlayCommitMode, setOverlayCommitMode] = useState<EditCommitMode>('derive');
   const [assetIdx, setAssetIdx] = useState(node.output?.activeAssetIndex ?? 0);
   const [variationsCount, setVariationsCount] = useState<1 | 2 | 4>(
     params.count === 4 ? 4 : params.count === 2 ? 2 : 1,
@@ -121,11 +215,14 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
   const running = node.runState === 'running';
   const assets = node.output?.assets ?? [];
   const current = assets[Math.min(assetIdx, assets.length - 1)];
-  const assetUrl = useAssetUrl(current);
-  const hasImage = Boolean(assetUrl);
-
   const edges = useCanvasStore((s) => s.edgesBySession[sessionId] ?? canvasStore.EMPTY_EDGES);
   const allNodes = useCanvasStore((s) => s.nodesBySession[sessionId] ?? canvasStore.EMPTY_NODES);
+  const assetUrl = useAssetUrl(current);
+  const hasImage = Boolean(assetUrl);
+  const sourceNode = allNodes.find((n) => n.id === edit?.sourceNodeId);
+  const sourceRel =
+    sourceNode?.output?.assets?.[sourceNode.output.activeAssetIndex ?? 0] ?? sourceNode?.output?.assets?.[0];
+  const sourceUrl = useAssetUrl(sourceRel);
 
   const upstreamSources = useMemo(() => {
     const inEdges = edges.filter((e) => e.targetId === node.id);
@@ -141,14 +238,35 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
     });
   }, [edges, allNodes, node.id]);
 
-  const expanded = selected || hovered;
+  const solo = useIsSoloSelected(selected);
+  const expanded = solo || hovered;
   const candidates = useMemo(() => {
     if (!expanded) return [];
     const snapshot = canvasStore.getSnapshot().nodesBySession[sessionId] ?? [];
     return snapshot.filter((n) => n.id !== node.id && n.type !== 'anchor');
   }, [expanded, sessionId, node.id]);
 
+  // Multi-select collapses per-node chrome; drop any manually-opened config too.
+  useEffect(() => {
+    if (!solo) setShowConfig(false);
+  }, [solo]);
+
   const autoSeededRef = useRef(false);
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const detail = (e as CustomEvent<OpenImageEditDetail>).detail;
+      if (!detail || detail.sessionId !== sessionId || detail.nodeId !== node.id) return;
+      if (detail.kind === 'matting') {
+        void canvasStore.deriveImageEdit(sessionId, node.id, { kind: 'matting' });
+        return;
+      }
+      setOverlayCommitMode(detail.commitMode ?? 'derive');
+      setActiveOverlay(detail.kind);
+    };
+    window.addEventListener(OPEN_IMAGE_EDIT_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_IMAGE_EDIT_EVENT, onOpen);
+  }, [sessionId, node.id]);
+
   useEffect(() => {
     if (!autoSeededRef.current && !params.prompt && upstreamSources.length > 0) {
       const firstNote = upstreamSources.find((s) => s.sourceType === 'note');
@@ -237,6 +355,18 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
         top="50%"
         nodeHovered={hovered || selected}
       />
+      {edit ? (
+        <MagneticHandle
+          type="target"
+          position={Position.Left}
+          id="edit_src"
+          nodeId={node.id}
+          kind="image"
+          label="源图"
+          top="28%"
+          nodeHovered={hovered || selected}
+        />
+      ) : null}
       <MagneticHandle
         type="source"
         position={Position.Right}
@@ -253,8 +383,14 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
         sessionId={sessionId}
         nodeId={node.id}
         title={node.title}
-        fallback="生图"
-        icon={<ImageIcon size={13} className="text-indigo-400 shrink-0" />}
+        fallback={edit ? editNodeTitle(edit.kind) : '生图'}
+        icon={
+          edit ? (
+            <EditKindIcon kind={edit.kind} size={13} />
+          ) : (
+            <ImageIcon size={13} className="text-indigo-400 shrink-0" />
+          )
+        }
         selected={selected}
         hovered={hovered}
         running={running}
@@ -340,7 +476,12 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
             </>
           ) : null}
 
-          <div className="group/image relative z-10 min-h-0 flex-1 overflow-hidden rounded-lg border border-line bg-black/40 select-none">
+          <div
+            className={cn(
+              'group/image relative z-10 min-h-0 flex-1 overflow-hidden rounded-lg border border-line select-none',
+              edit?.kind === 'matting' ? 'canvas-checker' : 'bg-black/40',
+            )}
+          >
             <img
               src={assetUrl!}
               alt=""
@@ -443,8 +584,34 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
         </div>
       ) : null}
 
+      {hasImage ? (
+        <ImageNodeEditToolbar sessionId={sessionId} node={node} visible={hovered || solo} />
+      ) : null}
+
+      {edit && !hasImage ? (
+        <div className="mt-1 flex min-h-0 flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-line bg-black/20 p-4 text-center select-none">
+          {running ? <Loader2 size={18} className="mb-2 animate-spin text-accent" /> : <Sparkles size={18} className="mb-2 text-ink-muted" />}
+          <span className="text-xs font-medium text-ink">
+            {running ? '正在编辑生成' : '等待编辑生成'}
+          </span>
+          <p className="mt-1 text-[10px] text-ink-muted">
+            来源：{allNodes.find((n) => n.id === edit.sourceNodeId)?.title || '源图'}
+          </p>
+          {!running ? (
+            <button
+              type="button"
+              onClick={() => void canvasStore.runNode(sessionId, node.id)}
+              className="nodrag mt-3 inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-ink"
+            >
+              <Play size={11} className="fill-current" />
+              运行
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
       {/* Upstream Connected Ready State (when no image yet and upstream prompt exists) */}
-      {!hasImage && hasUpstreamPrompt ? (
+      {!hasImage && !edit && hasUpstreamPrompt ? (
         <div className="mt-1 flex min-h-0 flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-accent/40 bg-accent/5 p-4 text-center select-none">
           <Sparkles size={20} className="text-accent mb-1.5 animate-pulse-subtle pointer-events-none" />
           <span className="text-xs font-semibold text-ink pointer-events-none">已接入上游提示词</span>
@@ -465,7 +632,7 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
       ) : null}
 
       {/* Clean Cover Placeholder / Dropzone (when standalone and no image yet) */}
-      {!hasImage && !hasUpstreamPrompt ? (
+      {!hasImage && !edit && !hasUpstreamPrompt ? (
         <div
           onDragOver={(e) => {
             e.preventDefault();
@@ -515,10 +682,21 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
       ) : null}
 
       {/* TapNow floating generation panel with inverse-scale compensation */}
+      {edit ? (
+        <EditParamsPanel
+          sessionId={sessionId}
+          node={node}
+          visible={solo}
+          running={running}
+          onRedraw={(kind) => {
+            openImageEdit({ sessionId, nodeId: node.id, kind, commitMode: 'revise' });
+          }}
+        />
+      ) : (
       <NodeFloatingPanel
         sessionId={sessionId}
         node={node}
-        visible={Boolean(selected || showConfig)}
+        visible={Boolean(solo || showConfig)}
         prompt={prompt}
         onPromptChange={setPrompt}
         onPromptCommit={commitPrompt}
@@ -538,8 +716,19 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
         onVariationsCountChange={setVariationsCount}
         estimatedCost={estimateNodeCost(node)}
       />
+      )}
 
       {zoom ? <Lightbox src={zoom} onClose={() => setZoom(null)} /> : null}
+      {activeOverlay && (overlayCommitMode === 'revise' ? sourceUrl || assetUrl : assetUrl) ? (
+        <ImageEditOverlay
+          kind={activeOverlay}
+          sessionId={sessionId}
+          node={node}
+          imageUrl={(overlayCommitMode === 'revise' ? sourceUrl || assetUrl : assetUrl)!}
+          commitMode={overlayCommitMode}
+          onClose={() => setActiveOverlay(null)}
+        />
+      ) : null}
     </div>
   );
 }, (prev, next) => {
