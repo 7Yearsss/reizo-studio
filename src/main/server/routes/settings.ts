@@ -34,6 +34,13 @@ export function createSettingsRouter(settingsStore: SettingsStore) {
       patch.permissionMode = body.permissionMode;
     }
 
+    if (body.computerUse !== undefined) {
+      if (typeof body.computerUse !== 'boolean') {
+        return c.json({ error: 'computerUse must be a boolean' }, 400);
+      }
+      patch.computerUse = body.computerUse;
+    }
+
     if (body.activeProviderId !== undefined) {
       if (typeof body.activeProviderId !== 'string') {
         return c.json({ error: 'activeProviderId must be a string' }, 400);

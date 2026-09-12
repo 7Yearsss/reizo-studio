@@ -14,6 +14,8 @@ export interface LocalSettings {
   activeProviderId: string;
   workspacePath: string | null;
   permissionMode: PermissionMode;
+  /** Let the agent drive the real mouse/keyboard/screen (the `computer` tool). Off by default. */
+  computerUse: boolean;
   providers: Record<string, StoredProvider>;
 }
 
@@ -29,12 +31,14 @@ export interface PublicSettings {
   activeProviderId: string;
   workspacePath: string | null;
   permissionMode: PermissionMode;
+  computerUse: boolean;
   providers: PublicProvider[];
 }
 
 export interface SettingsPatch {
   appearance?: Appearance;
   permissionMode?: PermissionMode;
+  computerUse?: boolean;
   activeProviderId?: string;
   workspacePath?: string | null;
   provider?: {
@@ -47,4 +51,5 @@ export interface SettingsPatch {
 
 export const DEFAULT_APPEARANCE: Appearance = 'system';
 export const DEFAULT_PERMISSION_MODE: PermissionMode = 'ask';
+export const DEFAULT_COMPUTER_USE = false;
 export const DEFAULT_PROVIDER_ID = 'openai';

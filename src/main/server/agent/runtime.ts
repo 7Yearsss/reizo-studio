@@ -7,6 +7,9 @@ import { createWorkspaceTools } from './workspaceTools';
 import { createCanvasTools } from './canvasTools';
 import { createArtifactTools } from './artifactTools';
 import { createImageTools } from './imageTools';
+import { createComputerTools, isComputerUseSupported } from './computerTools';
+import { COMPUTER_TOOL_NAME, SCREENSHOT_RETENTION } from '../../../shared/computerUse';
+import { readScreenshotSync, screenshotContentOutput } from '../../computerUse/store';
 import { getCanvasSelection } from '../canvas/selection';
 import type { CanvasStore } from '../storage/canvasStore';
 import type { CanvasImageParams } from '../../../shared/canvas';
@@ -219,6 +222,9 @@ export async function runChatTurn(options: {
     }
   }
 
+  const computerEnabled =
+    Boolean(dataRoot) && settings.computerUse === true && isComputerUseSupported();
+
   const systemParts = [
     workspacePath
       ? `You are Reizo Studio, a local desktop agent that finishes real work in the user's files. The workspace is at: ${workspacePath}. Prefer tools over guessing. Use list_dir/read_file/find_files/grep to inspect, edit_file/write_file to change files, run_command for tests and git, ask_user when you need a choice, todo_write for a visible plan, and memory_read/memory_write for durable notes in MEMORY.md.`
@@ -233,6 +239,12 @@ export async function runChatTurn(options: {
     artifactStore
       ? 'When the user asks for a flowchart, sequence diagram, system architecture diagram, or mind map, call generate_diagram with Mermaid syntax to produce an interactive Excalidraw canvas artifact in the right panel. When the user asks for a spreadsheet, budget, financial report, or table calculation, call generate_sheet with rows, columns, and formulas to render a full-featured Excel sheet artifact in the right panel.'
       : '',
+    computerEnabled
+      ? 'Computer control is available via the `computer` tool — you can screenshot the screen and move/click/drag the mouse, scroll, type text, and press keys on THIS machine. ' +
+        'Use it only when the task genuinely needs the GUI (a desktop app with no CLI, a visual check). Prefer workspace tools for files, `run_command` for anything a shell can do. ' +
+        'Workflow: call `computer {action:"screenshot"}` first, decide from the image, act with pixel coordinates from that screenshot (top-left origin), then screenshot again to verify. Work in small steps. ' +
+        'The user approves once at the start of the session. Never type passwords, card numbers, or other secrets — ask the user to do that themselves.'
+      : '',
     memory ? `Workspace MEMORY.md:\n${redactSecrets(memory)}` : '',
     skill ? `The user invoked skill "${skill.name}". Follow this skill:\n${skill.body}` : '',
     projectInstructions ? `Project "${projectName}" working rules:\n${projectInstructions}` : '',
@@ -242,6 +254,14 @@ export async function runChatTurn(options: {
   // `ai` v7 rejects a `system`-role entry in `messages`; the system prompt
   // goes to `instructions`. Preserve completed tool pairs so each new turn
   // knows what was already inspected and does not repeat the same search.
+  // Which `computer` tool results get their screenshot re-sent to the model as
+  // an image (vs. a one-line text stub). Only the most recent few, so a long
+  // GUI session can't blow the context window.
+  const screenshotCtx =
+    computerEnabled && dataRoot
+      ? { dataRoot, inlineIds: recentComputerResultIds(session.messages, SCREENSHOT_RETENTION) }
+      : undefined;
+
   const history: ModelMessage[] = [];
   for (const message of session.messages) {
     if (message.role === 'user') {
@@ -254,7 +274,9 @@ export async function runChatTurn(options: {
       history.push({ role: 'assistant', content: message.content });
       continue;
     }
-    history.push(...assistantTurnToModelMessages(message.content, compactAssistantParts(parts)));
+    history.push(
+      ...assistantTurnToModelMessages(message.content, compactAssistantParts(parts), screenshotCtx),
+    );
   }
 
   // `emit` is bound to the live stream once `startAgentTurn` opens it; tools
@@ -300,13 +322,24 @@ export async function runChatTurn(options: {
     ? createImageTools({ settingsStore, dataRoot, sessionId, canvasStore })
     : undefined;
 
+  const computerTools =
+    computerEnabled && dataRoot
+      ? createComputerTools({
+          sessionId,
+          dataRoot,
+          permissionMode: settings.permissionMode,
+          emit: (event) => emit(event),
+        })
+      : undefined;
+
   const tools =
-    toolset?.tools || canvasTools || artifactTools || imageTools
+    toolset?.tools || canvasTools || artifactTools || imageTools || computerTools
       ? {
           ...(toolset?.tools ?? {}),
           ...(canvasTools ?? {}),
           ...(artifactTools ?? {}),
           ...(imageTools ?? {}),
+          ...(computerTools?.tools ?? {}),
         }
       : undefined;
 
@@ -399,9 +432,14 @@ export async function runChatTurn(options: {
           });
           continue;
         }
-        const outcome = (await toolset?.executeApproved(item.name, item.args)) ?? {
-          error: 'This turn has no workspace tools',
-        };
+        const outcome =
+          item.name === COMPUTER_TOOL_NAME
+            ? ((await computerTools?.executeApproved(item.args)) ?? {
+                error: 'Computer control is not enabled for this turn',
+              })
+            : ((await toolset?.executeApproved(item.name, item.args)) ?? {
+                error: 'This turn has no workspace tools',
+              });
         emitToolResult({
           toolCallId: item.toolCallId,
           name: item.name,
@@ -413,7 +451,19 @@ export async function runChatTurn(options: {
       if (signal.aborted) return null;
       const snap = getAssistant();
       return buildStream(
-        [...history, ...assistantTurnToModelMessages(snap.text, compactAssistantParts(snap.parts))],
+        [
+          ...history,
+          ...assistantTurnToModelMessages(
+            snap.text,
+            compactAssistantParts(snap.parts),
+            screenshotCtx
+              ? {
+                  dataRoot: screenshotCtx.dataRoot,
+                  inlineIds: recentComputerResultIdsFromParts(snap.parts, SCREENSHOT_RETENTION),
+                }
+              : undefined,
+          ),
+        ],
         signal,
       );
     },
@@ -426,7 +476,16 @@ export async function runChatTurn(options: {
       return buildStream(
         [
           ...history,
-          ...assistantTurnToModelMessages(snap.text, compactAssistantParts(snap.parts)),
+          ...assistantTurnToModelMessages(
+            snap.text,
+            compactAssistantParts(snap.parts),
+            screenshotCtx
+              ? {
+                  dataRoot: screenshotCtx.dataRoot,
+                  inlineIds: recentComputerResultIdsFromParts(snap.parts, SCREENSHOT_RETENTION),
+                }
+              : undefined,
+          ),
           { role: 'user', content: CONTINUE_USER_MESSAGE },
         ],
         signal,
@@ -435,11 +494,63 @@ export async function runChatTurn(options: {
   });
 }
 
+interface ScreenshotCtx {
+  dataRoot: string;
+  inlineIds: Set<string>;
+}
+
+/** Ids of the last `limit` completed `computer` tool results across all messages. */
+function recentComputerResultIds(messages: ChatMessage[], limit: number): Set<string> {
+  const ids: string[] = [];
+  for (const message of messages) {
+    if (message.role !== 'assistant') continue;
+    for (const part of message.parts ?? []) {
+      if (part.name === COMPUTER_TOOL_NAME && part.result) ids.push(part.id);
+    }
+  }
+  return new Set(ids.slice(-limit));
+}
+
+/** Same, but over a single in-flight part list (used on resume / continue passes). */
+function recentComputerResultIdsFromParts(parts: ToolCallPart[], limit: number): Set<string> {
+  const ids = parts.filter((p) => p.name === COMPUTER_TOOL_NAME && p.result).map((p) => p.id);
+  return new Set(ids.slice(-limit));
+}
+
+/** The `computer` tool-result screenshot as an image content part, or null. */
+function computerScreenshotOutput(part: ToolCallPart, ctx: ScreenshotCtx) {
+  if (part.name !== COMPUTER_TOOL_NAME || !part.result || !ctx.inlineIds.has(part.id)) return null;
+  let parsed: {
+    screenshotFile?: string;
+    summary?: string;
+    cursor?: { x: number; y: number } | null;
+    screenSize?: { width: number; height: number };
+  };
+  try {
+    parsed = JSON.parse(part.result);
+  } catch {
+    return null;
+  }
+  if (!parsed.screenshotFile) return null;
+  const png = readScreenshotSync(ctx.dataRoot, parsed.screenshotFile);
+  if (!png) return null;
+  const caption = `${parsed.summary ?? 'computer action'}. cursor=${
+    parsed.cursor ? `(${parsed.cursor.x},${parsed.cursor.y})` : 'unknown'
+  } screen=${parsed.screenSize ? `${parsed.screenSize.width}x${parsed.screenSize.height}` : '?'}`;
+  return screenshotContentOutput(caption, png);
+}
+
 /**
  * One assistant turn (text + tool calls) as the `[assistant, tool]` message
- * pair the model needs to see completed tool work on the next pass.
+ * pair the model needs to see completed tool work on the next pass. When
+ * `screenshotCtx` is supplied, recent `computer` results carry their screenshot
+ * back as an actual image.
  */
-function assistantTurnToModelMessages(text: string, parts: ToolCallPart[]): ModelMessage[] {
+function assistantTurnToModelMessages(
+  text: string,
+  parts: ToolCallPart[],
+  screenshotCtx?: ScreenshotCtx,
+): ModelMessage[] {
   const assistantContent: Array<Record<string, unknown>> = [];
   if (text) assistantContent.push({ type: 'text', text });
   for (const part of parts) {
@@ -458,7 +569,9 @@ function assistantTurnToModelMessages(text: string, parts: ToolCallPart[]): Mode
         type: 'tool-result',
         toolCallId: part.id,
         toolName: part.name,
-        output: parseToolOutput(part.result ?? part.error ?? ''),
+        output:
+          (screenshotCtx && computerScreenshotOutput(part, screenshotCtx)) ||
+          parseToolOutput(part.result ?? part.error ?? ''),
       })),
     } as ModelMessage,
   ];

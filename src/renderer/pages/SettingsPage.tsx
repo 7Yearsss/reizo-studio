@@ -139,6 +139,38 @@ function GeneralSection() {
         })}
       </div>
 
+      <h2 className="mb-3 text-sm font-medium">电脑操作 (Computer Use)</h2>
+      <p className="mb-3 text-xs text-ink-muted">
+        允许 Agent 截屏并控制这台电脑的鼠标、键盘。仅在需要操作图形界面时使用；每个会话首次操作前会向你确认一次。
+      </p>
+      <div className="mb-8 flex flex-wrap gap-2">
+        {([
+          [false, '关闭'],
+          [true, '开启'],
+        ] as [boolean, string][]).map(([value, label]) => {
+          const active = settings.computerUse === value;
+          return (
+            <button
+              key={String(value)}
+              onClick={() => void settingsStore.patchSettings({ computerUse: value })}
+              className={cn(
+                'relative rounded-full px-4 py-1.5 text-sm transition-colors duration-150',
+                active ? 'font-medium text-paper-raised' : 'text-ink hover:bg-paper-inset/80',
+              )}
+            >
+              {active && (
+                <motion.span
+                  layoutId="computer-use-active"
+                  className="absolute inset-0 rounded-full bg-ink"
+                  transition={{ type: 'spring', stiffness: 450, damping: 35 }}
+                />
+              )}
+              <span className="relative z-10">{label}</span>
+            </button>
+          );
+        })}
+      </div>
+
       <h2 className="mb-3 text-sm font-medium">工作区</h2>
       <div className="flex items-center gap-2">
         <div className="flex min-w-0 flex-1 items-center gap-2 rounded-full bg-paper px-3 py-2.5">
