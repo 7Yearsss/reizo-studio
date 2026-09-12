@@ -269,7 +269,7 @@ export async function runImageNode(options: {
     }
 
     if (!rawPrompt) {
-      fail('生图节点缺少提示词，请在卡片中填写或连入上游便签/Agent');
+      fail('图片节点缺少提示词，请在卡片中填写或连入上游便签/Agent');
       return;
     }
 

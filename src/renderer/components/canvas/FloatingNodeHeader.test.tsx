@@ -17,7 +17,7 @@ describe('FloatingNodeHeader', () => {
         sessionId="session-1"
         nodeId="node-1"
         title="我的生成节点"
-        fallback="生图"
+        fallback="图片"
         icon={<span data-testid="icon">ICON</span>}
         badge={<span data-testid="badge">变体 1/4</span>}
         status={<span data-testid="status">就绪</span>}
@@ -39,7 +39,7 @@ describe('FloatingNodeHeader', () => {
         sessionId="session-1"
         nodeId="node-2"
         title="全景图节点"
-        fallback="生图"
+        fallback="图片"
         icon={<span data-testid="icon">ICON</span>}
         badge={<span data-testid="badge">变体 1/4</span>}
         status={<span data-testid="status">就绪</span>}
@@ -64,7 +64,7 @@ describe('FloatingNodeHeader', () => {
         sessionId="session-1"
         nodeId="node-3"
         title="特写镜头"
-        fallback="生图"
+        fallback="图片"
         icon={<span data-testid="icon">ICON</span>}
         badge={<span data-testid="badge">变体 1/4</span>}
         status={<span data-testid="status">就绪</span>}

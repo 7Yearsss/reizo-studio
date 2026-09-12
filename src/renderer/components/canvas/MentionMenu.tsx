@@ -239,7 +239,7 @@ export default function MentionMenu({
           const title =
             node.title ||
             (node.type === 'image'
-              ? '生图'
+              ? '图片'
               : node.type === 'video'
                 ? '运镜视频'
                 : node.type === 'note'

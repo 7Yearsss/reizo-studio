@@ -356,6 +356,10 @@ async function _setPosition(sessionId: string, nodeId: string, x: number, y: num
   if (id) await api.patchCanvasNode(id, nodeId, { x: Math.round(x), y: Math.round(y) }).catch((): void => undefined);
 }
 
+export async function resizeNode(sessionId: string, nodeId: string, w: number, h: number): Promise<void> {
+  return _setSize(sessionId, nodeId, w, h);
+}
+
 async function _setSize(sessionId: string, nodeId: string, w: number, h: number): Promise<void> {
   const nodes = state.nodesBySession[sessionId] ?? [];
   setNodes(sessionId, nodes.map((n) => (n.id === nodeId ? { ...n, w, h } : n)));

@@ -53,21 +53,22 @@ function NodeCornerResizer({
   keepAspectRatio = false,
   corners = ['top-right', 'bottom-right', 'bottom-left', 'top-left'],
 }: NodeCornerResizerProps) {
-  const [isResizing, setIsResizing] = useState(false);
+  const [activeResizingCorner, setActiveResizingCorner] = useState<CornerPosition | null>(null);
   const resizeStart = useRef<{ w: number; h: number; x?: number; y?: number } | null>(null);
 
+  const isResizing = activeResizingCorner !== null;
   const isVisible = hovered || isResizing;
   if (!isVisible) return null;
 
   const activeCorners = ALL_CORNERS.filter((c) => corners.includes(c.position));
 
-  const handleResizeStart = (_: unknown, p: ResizeParams) => {
-    setIsResizing(true);
+  const handleResizeStart = (position: CornerPosition, _: unknown, p: ResizeParams) => {
+    setActiveResizingCorner(position);
     resizeStart.current = { w: p.width, h: p.height, x: p.x, y: p.y };
   };
 
   const handleResizeEnd = (_: unknown, p: ResizeParams) => {
-    setIsResizing(false);
+    setActiveResizingCorner(null);
     const from = resizeStart.current;
     resizeStart.current = null;
     if (
@@ -88,38 +89,45 @@ function NodeCornerResizer({
 
   return (
     <>
-      {activeCorners.map(({ position, cursor, path }) => (
-        <NodeResizeControl
-          key={position}
-          nodeId={nodeId}
-          position={position}
-          minWidth={minWidth}
-          minHeight={minHeight}
-          keepAspectRatio={keepAspectRatio}
-          onResizeStart={handleResizeStart}
-          onResizeEnd={handleResizeEnd}
-          className={cn(
-            '!w-[18px] !h-[18px] !bg-transparent !border-0 !p-0 !rounded-none flex items-center justify-center group/handle transition-transform hover:scale-105 active:scale-100 z-30 select-none',
-            cursor,
-          )}
-        >
-          <svg
-            width="18"
-            height="18"
-            viewBox="0 0 18 18"
-            fill="none"
-            className="overflow-visible pointer-events-none drop-shadow-[0_1px_1px_rgba(0,0,0,0.45)]"
+      {activeCorners.map(({ position, cursor, path }) => {
+        const isCurrentCornerResizing = activeResizingCorner === position;
+        return (
+          <NodeResizeControl
+            key={position}
+            nodeId={nodeId}
+            position={position}
+            minWidth={minWidth}
+            minHeight={minHeight}
+            keepAspectRatio={keepAspectRatio}
+            onResizeStart={(e, p) => handleResizeStart(position, e, p)}
+            onResizeEnd={handleResizeEnd}
+            className={cn(
+              '!w-[22px] !h-[22px] !bg-transparent !border-0 !p-0 !rounded-none flex items-center justify-center group/handle z-30 select-none cursor-pointer',
+              cursor,
+            )}
           >
-            <path
-              d={path}
-              stroke="white"
-              strokeWidth="1.75"
-              strokeLinecap="round"
-              className="opacity-80 transition-opacity group-hover/handle:opacity-100"
-            />
-          </svg>
-        </NodeResizeControl>
-      ))}
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 18 18"
+              fill="none"
+              className={cn(
+                'overflow-visible pointer-events-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)] transition-all duration-200 ease-out',
+                isCurrentCornerResizing
+                  ? 'opacity-100 scale-100'
+                  : 'opacity-0 scale-75 group-hover/handle:opacity-100 group-hover/handle:scale-100',
+              )}
+            >
+              <path
+                d={path}
+                stroke="white"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
+            </svg>
+          </NodeResizeControl>
+        );
+      })}
     </>
   );
 }

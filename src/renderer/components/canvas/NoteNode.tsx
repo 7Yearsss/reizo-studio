@@ -1,16 +1,19 @@
-import { useEffect, useState, memo, useRef } from 'react';
+import { useEffect, useState, useMemo, memo, useRef } from 'react';
 import { Position, type NodeProps } from '@xyflow/react';
-import { AlignLeft, Bot, Type } from 'lucide-react';
+import { Type } from 'lucide-react';
 import type { CanvasNoteParams } from '../../../shared/canvas';
 import * as canvasStore from '../../state/canvasStore';
+import { useCanvasStore } from '../../state/useCanvasStore';
 import * as chatStore from '../../state/chatStore';
 import { cn } from '../../lib/cn';
 import FloatingNodeHeader from './FloatingNodeHeader';
 import type { CanvasNodeData } from './ImageNode';
 import { useHoverIntent } from './NodeActionBar';
+import { useIsSoloSelected } from './useSelectionCount';
 import MagneticHandle from './MagneticHandle';
 import AgentMark from './AgentMark';
 import NodeCornerResizer from './NodeCornerResizer';
+import NodeFloatingPanel, { type UpstreamSourceItem } from './NodeFloatingPanel';
 
 function NoteNode({ id, data, selected }: NodeProps) {
   const { sessionId, node, highlighted, agentMark, isProposal } = data as CanvasNodeData;
@@ -19,6 +22,7 @@ function NoteNode({ id, data, selected }: NodeProps) {
   const [isEditing, setIsEditing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { hovered, hoverProps } = useHoverIntent();
+  const solo = useIsSoloSelected(selected);
 
   useEffect(() => {
     setContent(params.content || '');
@@ -36,7 +40,6 @@ function NoteNode({ id, data, selected }: NodeProps) {
   // Auto-focus textarea when entering edit mode
   useEffect(() => {
     if (isEditing) {
-      // Small delay so React Flow doesn't immediately cancel focus
       const t = setTimeout(() => textareaRef.current?.focus(), 30);
       return () => clearTimeout(t);
     }
@@ -64,12 +67,43 @@ function NoteNode({ id, data, selected }: NodeProps) {
     );
   };
 
+  const edges = useCanvasStore((s) => s.edgesBySession[sessionId] ?? canvasStore.EMPTY_EDGES);
+  const allNodes = useCanvasStore((s) => s.nodesBySession[sessionId] ?? canvasStore.EMPTY_NODES);
+
+  const upstreamSources = useMemo<UpstreamSourceItem[]>(() => {
+    const inEdges = edges.filter((e) => e.targetId === node.id);
+    return inEdges.map((e) => {
+      const srcNode = allNodes.find((n) => n.id === e.sourceId);
+      return {
+        edgeId: e.id,
+        sourceNodeId: e.sourceId,
+        sourceType: srcNode?.type || 'node',
+        sourceTitle:
+          srcNode?.title ||
+          (srcNode?.type === 'note'
+            ? '提示词'
+            : srcNode?.type === 'image'
+              ? '参考图'
+              : '节点'),
+        handleId: e.targetHandle,
+      };
+    });
+  }, [edges, allNodes, node.id]);
+
+  const candidates = useMemo(() => {
+    if (!solo) return [];
+    const snapshot = canvasStore.getSnapshot().nodesBySession[sessionId] ?? [];
+    return snapshot.filter((n) => n.id !== node.id && n.type !== 'anchor');
+  }, [solo, sessionId, node.id]);
+
   return (
     <div
       {...hoverProps}
       className={cn(
-        'relative flex h-full w-full flex-col rounded-xl border bg-paper-raised p-2.5 text-xs shadow-sm transition-shadow',
-        selected ? 'border-accent ring-1 ring-accent/20' : 'border-line',
+        'group relative flex h-full w-full flex-col rounded-2xl p-0 transition-all cursor-default select-none overflow-visible bg-paper-raised/95 dark:bg-[#18181b]/95 backdrop-blur-md shadow-sm',
+        selected
+          ? 'border-2 border-[#edd7a3] shadow-[0_0_12px_rgba(237,215,163,0.35)]'
+          : 'border border-white/15 hover:border-white/30',
         highlighted && 'canvas-node-highlight',
         isProposal && 'border-dashed !border-2 !border-accent shadow-[0_0_15px_rgba(99,102,241,0.35)] animate-pulse-subtle',
       )}
@@ -122,50 +156,55 @@ function NoteNode({ id, data, selected }: NodeProps) {
         }
       />
 
-      {/* Body: read-only drag view OR editable textarea */}
-      <div className="relative flex-1 min-h-0 flex flex-col">
+      {/* Pure & Clean Text Body (Single click to drag, double click to edit) */}
+      <div className="relative flex-1 min-h-0 flex flex-col h-full w-full">
         {isEditing ? (
-          /* Edit mode: real textarea, nodrag so RF doesn't fight with text selection */
           <textarea
             ref={textareaRef}
             value={content}
             onChange={(e) => setContent(e.target.value)}
             onBlur={handleBlur}
-            placeholder={'输入提示词、分镜剧本、旁白台词或灵感文本…\n可拉出右侧端口连入下游生图、视频或音频节点。'}
-            className="nodrag h-full w-full resize-none rounded-lg border border-accent/60 bg-paper-inset/70 p-2.5 text-xs text-ink placeholder:text-ink-muted/50 focus:outline-none leading-relaxed transition-colors selection:bg-accent/20 font-sans cursor-text"
+            placeholder="输入提示词、分镜剧本、旁白台词或灵感文本…"
+            className="nodrag h-full w-full resize-none rounded-2xl bg-transparent p-3.5 text-xs text-ink placeholder:text-ink-muted/40 focus:outline-none leading-relaxed transition-colors selection:bg-accent/20 font-sans cursor-text"
           />
         ) : (
-          /* View mode: draggable, double-click to edit */
           <div
             onDoubleClick={(e) => {
               e.stopPropagation();
               setIsEditing(true);
             }}
-            title="双击编辑 · 按住可拖动节点"
+            title="双击编辑文本 · 拖拽移动节点"
             className={cn(
-              'h-full w-full rounded-lg border border-line/70 bg-paper-inset/40 p-2.5 text-xs leading-relaxed font-sans cursor-grab active:cursor-grabbing select-none overflow-auto',
-              content ? 'text-ink' : 'text-ink-muted/50',
+              'h-full w-full rounded-2xl bg-transparent p-3.5 text-xs leading-relaxed font-sans overflow-auto select-none break-words whitespace-pre-wrap cursor-grab active:cursor-grabbing',
+              content ? 'text-ink' : 'text-ink-muted/40',
             )}
           >
-            {content || '输入提示词、分镜剧本、旁白台词或灵感文本…\n可拉出右侧端口连入下游生图、视频或音频节点。'}
+            {content || '输入提示词、分镜剧本、旁白台词或灵感文本…'}
           </div>
         )}
       </div>
 
-      {/* Footer hint */}
-      <div className="mt-1.5 flex items-center justify-between text-[10px] text-ink-muted/70 px-0.5">
-        <span className="truncate max-w-[65%] select-none">
-          {isEditing ? '点击外部完成编辑' : '双击编辑 · 拉出右侧端点连入画面/视频 ➔'}
-        </span>
-        <button
-          type="button"
-          onClick={askAgentToExpand}
-          className="nodrag flex items-center gap-1 text-accent hover:underline font-medium shrink-0"
-        >
-          <Bot size={11} />
-          Agent 扩写
-        </button>
-      </div>
+      {/* TapNow floating generation panel for Note (AI expansion & mention helper) */}
+      <NodeFloatingPanel
+        sessionId={sessionId}
+        node={node}
+        visible={solo}
+        nodeType="note"
+        prompt={content}
+        onPromptChange={(nextText) => {
+          setContent(nextText);
+          void canvasStore.updateNodeParams(sessionId, node.id, {
+            ...params,
+            content: nextText,
+          });
+        }}
+        onPromptCommit={commitContent}
+        candidates={candidates}
+        upstreamSources={upstreamSources}
+        running={false}
+        onRun={askAgentToExpand}
+        onAgentExpand={askAgentToExpand}
+      />
     </div>
   );
 }

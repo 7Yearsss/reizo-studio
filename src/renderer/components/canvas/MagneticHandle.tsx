@@ -142,7 +142,7 @@ function MagneticHandle({
   }, []);
 
   const handleButtonPointerDown = useCallback(
-    (e: React.PointerEvent<HTMLButtonElement>) => {
+    (e: React.PointerEvent<HTMLElement>) => {
       if (disabled) return;
       pointerStartRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
       hasDraggedRef.current = false;
@@ -306,8 +306,10 @@ function MagneticHandle({
             data-handle-id={id ?? ''}
             onPointerMove={handlePointerMove}
             onPointerLeave={handlePointerLeave}
+            onPointerDown={handleButtonPointerDown}
+            onClick={handleClick}
             className={cn(
-              'relative flex h-10 w-10 items-center justify-center cursor-pointer',
+              'relative flex h-12 w-12 items-center justify-center cursor-pointer',
               disabled && 'opacity-40',
             )}
           >
@@ -327,6 +329,7 @@ function MagneticHandle({
               }}
               className={cn(
                 'group relative flex h-5 w-5 items-center justify-center rounded-full border bg-paper-raised text-ink active:scale-90 shadow-xs',
+                'before:absolute before:-inset-3 before:content-[\'\'] before:rounded-full before:cursor-pointer',
                 isHovered ? 'scale-125 bg-paper' : 'hover:scale-110',
               )}
             >

@@ -43,8 +43,17 @@ export interface NodeFloatingPanelProps {
   upstreamSources: UpstreamSourceItem[];
   running: boolean;
   onRun: () => void;
-  nodeType?: 'image' | 'video';
+  nodeType?: 'image' | 'video' | 'audio' | 'note';
   autoFocus?: boolean;
+  // Audio specific controls
+  audioProvider?: string;
+  onAudioProviderChange?: (provider: string) => void;
+  audioProviders?: Array<{ id: string; name: string; isDefault?: boolean }>;
+  audioVoice?: string;
+  onAudioVoiceChange?: (voice: string) => void;
+  audioVoices?: Array<{ id: string; name: string; tag?: string }>;
+  // Note specific controls
+  onAgentExpand?: () => void;
   // Image specific controls
   size?: '1024x1024' | '1024x1536' | '1536x1024';
   onSizeChange?: (size: '1024x1024' | '1024x1536' | '1536x1024') => void;
@@ -82,6 +91,13 @@ function NodeFloatingPanel({
   onRun,
   nodeType = 'image',
   autoFocus = false,
+  audioProvider,
+  onAudioProviderChange,
+  audioProviders,
+  audioVoice,
+  onAudioVoiceChange,
+  audioVoices,
+  onAgentExpand,
   size = '1024x1024',
   onSizeChange,
   model,
@@ -169,7 +185,11 @@ function NodeFloatingPanel({
 
   // ── Non-hook computations (safe after the early return) ──────────────────
   const isVideo = nodeType === 'video';
-  const defaultModel = isVideo ? 'kling-1.5' : 'flux-schnell';
+  const isAudio = nodeType === 'audio';
+  const isNote = nodeType === 'note';
+  const isImage = !isVideo && !isAudio && !isNote;
+
+  const defaultModel = isVideo ? 'kling-1.5' : isAudio ? (audioProviders?.[0]?.id || 'suno-v3') : 'flux-schnell';
   const currentModel = model || defaultModel;
   const modelList = isVideo ? CANVAS_VIDEO_MODELS : CANVAS_IMAGE_MODELS;
 
@@ -179,9 +199,9 @@ function NodeFloatingPanel({
   const hasUpstreamStartFrame = upstreamSources.some(
     (s) => s.handleId === 'start_frame' || (s.sourceType === 'image' && isVideo),
   );
-  const canGenerate = Boolean(
-    prompt.trim() || hasUpstreamPrompt || (isVideo && hasUpstreamStartFrame),
-  );
+  const canGenerate = isNote
+    ? Boolean(prompt.trim() || hasUpstreamPrompt)
+    : Boolean(prompt.trim() || hasUpstreamPrompt || (isVideo && hasUpstreamStartFrame));
 
   const getSourceIcon = (source: UpstreamSourceItem) => {
     if (source.handleId === 'audio_in') return <Volume2 size={11} className="text-amber-400" />;
@@ -213,8 +233,6 @@ function NodeFloatingPanel({
     return null;
   };
 
-
-
   const handleInsertSource = (source: UpstreamSourceItem) => {
     const targetNode = candidates.find((c) => c.id === source.sourceNodeId);
     if (targetNode && mentionAreaRef.current) {
@@ -232,9 +250,15 @@ function NodeFloatingPanel({
       : hasUpstreamStartFrame
         ? '已接入首帧，描述画面的动态变化与运镜走向…'
         : '描述画面动态、主体动作与运镜轨迹（可输入 @ 引用其他节点画面）…'
-    : hasUpstreamPrompt
-      ? '已接入上游提示词，可在此输入补充修饰词或风格细节…'
-      : '描述画面的主体、光影与艺术质感（可输入 @ 引用其他节点画面）…';
+    : isAudio
+      ? hasUpstreamPrompt
+        ? '已接入上游文本，输入音效风格、配乐情绪或旁白提示…'
+        : '描述所需配乐情绪、音效风格或旁白台词（可输入 @ 引用节点）…'
+      : isNote
+        ? '输入分镜剧本、提示词、旁白台词或灵感（输入 @ 可引用画布节点）…'
+        : hasUpstreamPrompt
+          ? '已接入上游提示词，可在此输入补充修饰词或风格细节…'
+          : '描述画面的主体、光影与艺术质感（可输入 @ 引用其他节点画面）…';
 
 
   return (
@@ -340,147 +364,196 @@ function NodeFloatingPanel({
         {/* 3. Parameter Controls Bar (De-boxed, minimal inline segments) */}
         <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-line/25">
           <div className="flex items-center gap-1.5 flex-wrap">
-            {/* Model Selector (Flat trigger button) */}
-            {onModelChange ? (
-              <Select value={currentModel} onValueChange={onModelChange}>
-                <SelectTrigger className="h-7 w-auto px-2 text-[11px] font-medium bg-transparent hover:bg-paper-inset/70 border-0 shadow-none text-ink-muted hover:text-ink transition-colors gap-1 focus:ring-0 focus-visible:ring-0 focus:outline-none data-[size=default]:h-7">
-                  <SelectValue placeholder="选择模型" />
-                </SelectTrigger>
-                <SelectContent className="z-[150] text-xs">
-                  {modelList.map((m) => (
-                    <SelectItem key={m.id} value={m.id} className="text-xs">
-                      <div className="flex items-center justify-between gap-1.5 w-full">
-                        <span>{m.name}</span>
-                        {'badge' in m && m.badge ? (
-                          <span className="rounded bg-accent/20 px-1 py-0.2 text-[9px] text-accent">
-                            {m.badge}
-                          </span>
-                        ) : null}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : null}
+            {/* Audio Mode: Provider & Voice Selectors */}
+            {isAudio ? (
+              <>
+                {audioProviders && audioProviders.length > 0 && onAudioProviderChange ? (
+                  <Select value={audioProvider || audioProviders.find((p) => p.isDefault)?.id || audioProviders[0]?.id} onValueChange={onAudioProviderChange}>
+                    <SelectTrigger className="h-7 w-auto px-2 text-[11px] font-medium bg-transparent hover:bg-paper-inset/70 border-0 shadow-none text-ink-muted hover:text-ink transition-colors gap-1 focus:ring-0 focus-visible:ring-0 focus:outline-none data-[size=default]:h-7">
+                      <SelectValue placeholder="选择服务商" />
+                    </SelectTrigger>
+                    <SelectContent className="z-[150] text-xs">
+                      {audioProviders.map((p) => (
+                        <SelectItem key={p.id} value={p.id} className="text-xs">
+                          {p.name} {p.isDefault ? '★' : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : null}
 
-            {/* Subtle separator */}
-            <div className="w-px h-3 bg-line/40 mx-0.5" />
-
-            {/* Video Ratio vs Image Size (Borderless segment controls) */}
-            {isVideo && onRatioChange ? (
-              <div className="flex items-center gap-0.5 text-[10px]">
-                {(['16:9', '9:16', '1:1'] as const).map((r) => {
-                  const active = ratio === r;
-                  return (
-                    <button
-                      key={r}
-                      type="button"
-                      onClick={() => onRatioChange(r)}
-                      className={cn(
-                        'rounded-md px-1.5 py-0.5 font-medium transition-colors',
-                        active
-                          ? 'bg-paper-inset text-ink font-semibold shadow-2xs'
-                          : 'text-ink-muted hover:text-ink hover:bg-paper-inset/40',
-                      )}
-                      title={`画幅比例: ${r}`}
-                    >
-                      {r}
-                    </button>
-                  );
-                })}
+                {audioVoices && audioVoices.length > 0 ? (
+                  <div className="flex items-center gap-1 max-w-[220px] overflow-x-auto no-scrollbar">
+                    {audioVoices.slice(0, 4).map((v) => (
+                      <button
+                        key={v.id}
+                        type="button"
+                        onClick={() => onAudioVoiceChange?.(v.id)}
+                        className={cn(
+                          'rounded-md px-1.5 py-0.5 font-medium transition-colors shrink-0 text-[9px]',
+                          audioVoice === v.id
+                            ? 'bg-accent/15 text-accent font-semibold'
+                            : 'text-ink-muted hover:text-ink hover:bg-paper-inset/40',
+                        )}
+                        title={v.tag ? `${v.name} (${v.tag})` : v.name}
+                      >
+                        {v.name}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </>
+            ) : isNote ? (
+              /* Note Mode: Text tag */
+              <div className="flex items-center gap-1 text-[10px] text-ink-muted/80">
+                <Type size={11} className="text-emerald-400 shrink-0" />
+                <span className="font-medium text-ink-muted">剧本与提示词编辑器</span>
               </div>
-            ) : !isVideo && onSizeChange ? (
-              <div className="flex items-center gap-0.5 text-[10px]">
-                {(['1024x1024', '1024x1536', '1536x1024'] as const).map((sz) => {
-                  const label = sz === '1024x1024' ? '1:1' : sz === '1024x1536' ? '9:16' : '16:9';
-                  const active = size === sz;
-                  return (
-                    <button
-                      key={sz}
-                      type="button"
-                      onClick={() => onSizeChange(sz)}
-                      className={cn(
-                        'rounded-md px-1.5 py-0.5 font-medium transition-colors',
-                        active
-                          ? 'bg-paper-inset text-ink font-semibold shadow-2xs'
-                          : 'text-ink-muted hover:text-ink hover:bg-paper-inset/40',
-                      )}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
+            ) : (
+              /* Image / Video Model Selector (Flat trigger button) */
+              <>
+                {onModelChange ? (
+                  <Select value={currentModel} onValueChange={onModelChange}>
+                    <SelectTrigger className="h-7 w-auto px-2 text-[11px] font-medium bg-transparent hover:bg-paper-inset/70 border-0 shadow-none text-ink-muted hover:text-ink transition-colors gap-1 focus:ring-0 focus-visible:ring-0 focus:outline-none data-[size=default]:h-7">
+                      <SelectValue placeholder="选择模型" />
+                    </SelectTrigger>
+                    <SelectContent className="z-[150] text-xs">
+                      {modelList.map((m) => (
+                        <SelectItem key={m.id} value={m.id} className="text-xs">
+                          <div className="flex items-center justify-between gap-1.5 w-full">
+                            <span>{m.name}</span>
+                            {'badge' in m && m.badge ? (
+                              <span className="rounded bg-accent/20 px-1 py-0.2 text-[9px] text-accent">
+                                {m.badge}
+                              </span>
+                            ) : null}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : null}
 
-            {/* Subtle separator */}
-            <div className="w-px h-3 bg-line/40 mx-0.5" />
+                {/* Subtle separator */}
+                <div className="w-px h-3 bg-line/40 mx-0.5" />
 
-            {/* Video Duration (5s, 10s) */}
-            {isVideo && onDurationChange ? (
-              <div className="flex items-center gap-0.5 text-[10px]">
-                {(['5s', '10s'] as const).map((d) => {
-                  const active = duration === d;
-                  return (
-                    <button
-                      key={d}
-                      type="button"
-                      onClick={() => onDurationChange(d)}
-                      className={cn(
-                        'rounded-md px-1.5 py-0.5 font-medium transition-colors',
-                        active
-                          ? 'bg-paper-inset text-ink font-semibold shadow-2xs'
-                          : 'text-ink-muted hover:text-ink hover:bg-paper-inset/40',
-                      )}
-                      title={`视频时长: ${d}`}
-                    >
-                      {d}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
+                {/* Video Ratio vs Image Size (Borderless segment controls) */}
+                {isVideo && onRatioChange ? (
+                  <div className="flex items-center gap-0.5 text-[10px]">
+                    {(['16:9', '9:16', '1:1'] as const).map((r) => {
+                      const active = ratio === r;
+                      return (
+                        <button
+                          key={r}
+                          type="button"
+                          onClick={() => onRatioChange(r)}
+                          className={cn(
+                            'rounded-md px-1.5 py-0.5 font-medium transition-colors',
+                            active
+                              ? 'bg-paper-inset text-ink font-semibold shadow-2xs'
+                              : 'text-ink-muted hover:text-ink hover:bg-paper-inset/40',
+                          )}
+                          title={`画幅比例: ${r}`}
+                        >
+                          {r}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : !isVideo && onSizeChange ? (
+                  <div className="flex items-center gap-0.5 text-[10px]">
+                    {(['1024x1024', '1024x1536', '1536x1024'] as const).map((sz) => {
+                      const label = sz === '1024x1024' ? '1:1' : sz === '1024x1536' ? '9:16' : '16:9';
+                      const active = size === sz;
+                      return (
+                        <button
+                          key={sz}
+                          type="button"
+                          onClick={() => onSizeChange(sz)}
+                          className={cn(
+                            'rounded-md px-1.5 py-0.5 font-medium transition-colors',
+                            active
+                              ? 'bg-paper-inset text-ink font-semibold shadow-2xs'
+                              : 'text-ink-muted hover:text-ink hover:bg-paper-inset/40',
+                          )}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
 
-            {/* Cinema Lab Multi-Axis Camera Motion Dial */}
-            {isVideo && onCameraChange ? (
-              <CameraDial value={camera} onChange={onCameraChange} />
-            ) : null}
+                {/* Subtle separator */}
+                <div className="w-px h-3 bg-line/40 mx-0.5" />
 
-            {/* Variations Count Pills for Image (1x, 2x, 4x) */}
-            {!isVideo && onVariationsCountChange ? (
-              <div className="flex items-center gap-0.5 text-[10px]">
-                {([1, 2, 4] as const).map((c) => {
-                  const active = variationsCount === c;
-                  return (
-                    <button
-                      key={c}
-                      type="button"
-                      onClick={() => onVariationsCountChange(c)}
-                      className={cn(
-                        'rounded-md px-1.5 py-0.5 font-medium transition-colors',
-                        active
-                          ? 'bg-accent/15 text-accent font-semibold'
-                          : 'text-ink-muted hover:text-ink hover:bg-paper-inset/40',
-                      )}
-                      title={`并发生成 ${c} 张变体`}
-                    >
-                      {c}×
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
+                {/* Video Duration (5s, 10s) */}
+                {isVideo && onDurationChange ? (
+                  <div className="flex items-center gap-0.5 text-[10px]">
+                    {(['5s', '10s'] as const).map((d) => {
+                      const active = duration === d;
+                      return (
+                        <button
+                          key={d}
+                          type="button"
+                          onClick={() => onDurationChange(d)}
+                          className={cn(
+                            'rounded-md px-1.5 py-0.5 font-medium transition-colors',
+                            active
+                              ? 'bg-paper-inset text-ink font-semibold shadow-2xs'
+                              : 'text-ink-muted hover:text-ink hover:bg-paper-inset/40',
+                          )}
+                          title={`视频时长: ${d}`}
+                        >
+                          {d}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+
+                {/* Cinema Lab Multi-Axis Camera Motion Dial */}
+                {isVideo && onCameraChange ? (
+                  <CameraDial value={camera} onChange={onCameraChange} />
+                ) : null}
+
+                {/* Variations Count Pills for Image (1x, 2x, 4x) */}
+                {!isVideo && onVariationsCountChange ? (
+                  <div className="flex items-center gap-0.5 text-[10px]">
+                    {([1, 2, 4] as const).map((c) => {
+                      const active = variationsCount === c;
+                      return (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => onVariationsCountChange(c)}
+                          className={cn(
+                            'rounded-md px-1.5 py-0.5 font-medium transition-colors',
+                            active
+                              ? 'bg-accent/15 text-accent font-semibold'
+                              : 'text-ink-muted hover:text-ink hover:bg-paper-inset/40',
+                          )}
+                          title={`并发生成 ${c} 张变体`}
+                        >
+                          {c}×
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </>
+            )}
           </div>
 
-          {/* Right: Price & Generate CTA Button (Single bold highlight) */}
+          {/* Right: Price & Generate / Action CTA Button */}
           <div className="flex items-center gap-2 shrink-0">
             <span className="text-[10px] text-ink-muted/70 tabular-nums">
-              ~{estimatedCost * (isVideo ? 1 : variationsCount)} 点
+              {isNote ? 'Agent 协作' : `~${(isAudio ? 3 : estimatedCost) * (isVideo || isAudio ? 1 : variationsCount)} 点`}
             </span>
 
             <button
               type="button"
-              onClick={onRun}
+              onClick={isNote && onAgentExpand ? onAgentExpand : onRun}
               disabled={running || !canGenerate}
               className={cn(
                 'inline-flex items-center gap-1.5 rounded-xl bg-accent px-3.5 py-1.5 text-xs font-semibold text-accent-ink shadow-md transition-all',
@@ -492,17 +565,29 @@ function NodeFloatingPanel({
               {running ? (
                 <>
                   <Loader2 size={12} className="animate-spin" />
-                  <span>生成中…</span>
+                  <span>{isNote ? '扩写中…' : '生成中…'}</span>
                 </>
               ) : (
                 <>
-                  {isVideo ? <Video size={11} className="fill-current" /> : <Play size={11} className="fill-current" />}
+                  {isNote ? (
+                    <Bot size={11} className="shrink-0" />
+                  ) : isAudio ? (
+                    <Volume2 size={11} className="fill-current shrink-0" />
+                  ) : isVideo ? (
+                    <Video size={11} className="fill-current shrink-0" />
+                  ) : (
+                    <Play size={11} className="fill-current shrink-0" />
+                  )}
                   <span>
-                    {isVideo
-                      ? '生成视频'
-                      : variationsCount > 1
-                        ? `生成 ${variationsCount} 张变体`
-                        : '生成图片'}
+                    {isNote
+                      ? 'Agent 扩写'
+                      : isAudio
+                        ? '生成音频'
+                        : isVideo
+                          ? '生成视频'
+                          : variationsCount > 1
+                            ? `生成 ${variationsCount} 张变体`
+                            : '生成图片'}
                   </span>
                 </>
               )}

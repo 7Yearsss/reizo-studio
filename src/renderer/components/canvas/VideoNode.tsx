@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, memo } from 'react';
 import { Position, type NodeProps, useStore } from '@xyflow/react';
-import { Download, FolderPlus, Loader2, Play, Video, Camera, Sparkles, RotateCw, X, Bot } from 'lucide-react';
+import { Download, FolderPlus, Loader2, Play, Video, Camera, Sparkles, RotateCw, X, Bot, Upload } from 'lucide-react';
 import type { CanvasVideoParams } from '../../../shared/canvas';
 import { getVideoModelCapabilities } from '../../../shared/canvas';
 import { estimateNodeCost } from '../../../shared/canvasPricing';
@@ -46,6 +46,8 @@ function VideoNode({ id, data, selected }: NodeProps) {
   const progress = node.output?.progress ?? 0;
 
   const videoElRef = useRef<HTMLVideoElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const [framePick, setFramePick] = useState<'start' | 'end' | 'current' | null>(null);
   const [frameError, setFrameError] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -53,6 +55,25 @@ function VideoNode({ id, data, selected }: NodeProps) {
   const solo = useIsSoloSelected(selected);
   const expanded = solo || hovered;
   const showVideo = (expanded || isPlaying) && !isLowLOD;
+
+  const handleUpload = async (file: File) => {
+    if (!file.type.startsWith('video/') && !/\.(mp4|webm|mov|mkv)$/i.test(file.name)) {
+      return;
+    }
+    try {
+      await canvasStore.uploadAssetToNode(sessionId, node.id, file);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) void handleUpload(file);
+  };
 
   // Multi-select collapses per-node chrome; drop any manually-opened config too.
   useEffect(() => {
@@ -150,8 +171,10 @@ function VideoNode({ id, data, selected }: NodeProps) {
     <div
       {...hoverProps}
       className={cn(
-        'relative flex h-full w-full flex-col rounded-xl border bg-paper-raised p-2.5 text-xs shadow-sm transition-shadow',
-        selected ? 'border-accent ring-1 ring-accent/20' : 'border-line',
+        'group relative flex h-full w-full flex-col rounded-2xl p-0 transition-all cursor-default select-none overflow-visible',
+        selected
+          ? 'border-2 border-[#edd7a3] shadow-[0_0_12px_rgba(237,215,163,0.35)]'
+          : 'border border-white/15 hover:border-white/30',
         running && 'canvas-node-running',
         highlighted && 'canvas-node-highlight',
         isProposal && 'border-dashed !border-2 !border-accent shadow-[0_0_15px_rgba(99,102,241,0.35)] animate-pulse-subtle',
@@ -180,6 +203,24 @@ function VideoNode({ id, data, selected }: NodeProps) {
         top="50%"
         nodeHovered={hovered || selected}
       />
+
+      {/* Floating State 1 Header Upload Button */}
+      {!hasVideo && (selected || hovered) ? (
+        <div className="absolute left-0 -top-11 z-30 flex items-center">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              fileInputRef.current?.click();
+            }}
+            className="flex items-center gap-1.5 rounded-full bg-[#18181b]/95 px-3 py-1 text-xs font-medium text-white/90 shadow-md border border-white/10 hover:bg-[#27272a] hover:text-white active:scale-95 transition-all cursor-pointer whitespace-nowrap"
+            title="上传本地视频"
+          >
+            <Upload size={12} className="stroke-[2.2]" />
+            <span>上传</span>
+          </button>
+        </div>
+      ) : null}
 
       {/* Floating anti-zoom header outside the card boundary (TapNow design) */}
       <FloatingNodeHeader
@@ -267,24 +308,8 @@ function VideoNode({ id, data, selected }: NodeProps) {
 
       {/* Hero Video view (when media exists) */}
       {hasVideo ? (
-        <div className="relative min-h-0 flex-1 flex flex-col">
-          {/* Stacked card deck layers when multiple video results exist */}
-          {assets.length > 1 ? (
-            <>
-              {assets.length > 2 ? (
-                <div
-                  className="pointer-events-none absolute inset-0 -top-1.5 -right-1.5 rounded-lg border border-line/40 bg-black/25 shadow-xs"
-                  style={{ zIndex: 0 }}
-                />
-              ) : null}
-              <div
-                className="pointer-events-none absolute inset-0 -top-1 -right-1 rounded-lg border border-line/60 bg-black/35 shadow-xs"
-                style={{ zIndex: 1 }}
-              />
-            </>
-          ) : null}
-
-          <div className="group/video relative z-10 min-h-0 flex-1 overflow-hidden rounded-lg border border-line bg-black/40 flex items-center justify-center">
+        <div className="relative min-h-0 flex-1 flex flex-col h-full w-full">
+          <div className="group/video relative z-10 min-h-0 flex-1 overflow-hidden rounded-2xl bg-black/40 flex items-center justify-center h-full w-full">
             {showVideo ? (
               <video
                 ref={videoElRef}
@@ -459,39 +484,45 @@ function VideoNode({ id, data, selected }: NodeProps) {
         </div>
       ) : null}
 
-      {/* Upstream Connected Ready State (when no video yet and upstream prompt or start frame exists) */}
-      {!hasVideo && (hasUpstreamPrompt || hasUpstreamStartFrame) ? (
-        <div className="mt-1 flex min-h-0 flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-accent/40 bg-accent/5 p-4 text-center select-none">
-          <Sparkles size={20} className="text-accent mb-1.5 animate-pulse-subtle pointer-events-none" />
-          <span className="text-xs font-semibold text-ink pointer-events-none">
-            已接入上游{hasUpstreamPrompt && hasUpstreamStartFrame ? '提示词与首帧' : hasUpstreamStartFrame ? '首帧' : '提示词'}
-          </span>
-          <p className="mt-1 text-[10px] text-ink-muted leading-relaxed pointer-events-none">
-            {hasUpstreamStartFrame ? '将基于上游图像生成连贯动态' : '由上游便签或 Agent 节点提供分镜描述'}
-          </p>
-          <button
-            type="button"
-            onClick={run}
-            disabled={running}
-            className="nodrag mt-3 inline-flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-xs font-semibold text-accent-ink shadow-md hover:opacity-95 active:scale-98 transition-all disabled:opacity-40"
-          >
-            {running ? <Loader2 size={12} className="animate-spin" /> : <Play size={11} className="fill-current" />}
-            生成视频
-            <span className="text-[9px] opacity-75 font-normal ml-0.5">(~{estimateNodeCost(node)}点)</span>
-          </button>
-        </div>
-      ) : null}
-
-      {/* Clean Cover Placeholder (when standalone and no video yet) */}
-      {!hasVideo && !hasUpstreamPrompt && !hasUpstreamStartFrame ? (
+      {/* Clean & Pure Empty Video Placeholder / Dropzone */}
+      {!hasVideo ? (
         <div
-          className="group/placeholder relative flex min-h-0 flex-1 flex-col items-center justify-center rounded-lg border border-dashed border-line hover:border-accent/60 bg-black/20 hover:bg-black/30 p-4 text-center transition-all select-none"
-          title="点击卡片配置参数"
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setIsDragging(true);
+          }}
+          onDragLeave={() => setIsDragging(false)}
+          onDrop={handleDrop}
+          className={cn(
+            'group/placeholder relative flex h-full w-full flex-col items-center justify-center rounded-2xl transition-all select-none',
+            isDragging ? 'bg-white/[0.08]' : 'bg-[#18181b]/80',
+          )}
+          title="支持拖入视频文件或点击上方上传"
         >
-          <div className="rounded-full bg-paper-inset/70 p-3 mb-2 text-ink-muted group-hover/placeholder:text-accent group-hover/placeholder:bg-accent/15 group-hover/placeholder:scale-110 transition-all shadow-xs pointer-events-none">
-            <Video size={22} />
-          </div>
-          <span className="text-xs font-medium text-ink-muted group-hover/placeholder:text-ink pointer-events-none transition-colors">待配置视频分镜</span>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="video/*"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void handleUpload(f);
+              e.target.value = '';
+            }}
+          />
+          {running ? (
+            <div className="flex flex-col items-center justify-center gap-2">
+              <Loader2 size={26} className="animate-spin text-[#edd7a3]" />
+              <span className="text-[11px] font-medium text-white/60">
+                {progress > 0 ? `生成视频中 ${progress}%` : '生成视频中…'}
+              </span>
+            </div>
+          ) : (
+            <div className="rounded-2xl bg-white/[0.03] p-4 text-white/30 group-hover/placeholder:text-white/60 group-hover/placeholder:scale-105 transition-all pointer-events-none">
+              <Video size={32} strokeWidth={1.4} />
+            </div>
+          )}
         </div>
       ) : null}
 
@@ -499,7 +530,7 @@ function VideoNode({ id, data, selected }: NodeProps) {
       <NodeFloatingPanel
         sessionId={sessionId}
         node={node}
-        visible={Boolean(solo || showConfig)}
+        visible={Boolean((solo || showConfig) && !hasVideo)}
         nodeType="video"
         prompt={prompt}
         onPromptChange={setPrompt}

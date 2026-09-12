@@ -1058,7 +1058,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
                 type: 'image',
                 x: srcNode.x + srcNode.w + 60,
                 y: srcNode.y,
-                title: srcNode.title ? `${srcNode.title} · 衍生` : '生图',
+                title: srcNode.title ? `${srcNode.title} · 衍生` : '图片',
               },
               srcNode.id,
               null,
@@ -2415,7 +2415,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
                           {
                             type: 'image',
                             ...getSpawnPos('image'),
-                            title: '生图',
+                            title: '图片',
                           },
                           dropConnectMenu.nodeId,
                           dropConnectMenu.handleId,
@@ -2429,8 +2429,8 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
                       <ImageIcon size={14} />
                     </div>
                     <div className="flex flex-col min-w-0">
-                      <span className="text-xs font-medium text-ink group-hover:text-white">Image Generation</span>
-                      <span className="text-[10px] text-ink-muted truncate">基于上游画面或提示词生图</span>
+                      <span className="text-xs font-medium text-ink group-hover:text-white">图片</span>
+                      <span className="text-[10px] text-ink-muted truncate">基于上游画面或提示词生成图片</span>
                     </div>
                   </button>
 

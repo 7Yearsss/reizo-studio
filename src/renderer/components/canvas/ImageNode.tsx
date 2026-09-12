@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, memo } from 'react';
-import { Position, type NodeProps } from '@xyflow/react';
-import { Download, FolderPlus, Loader2, Play, Sparkles, ImageIcon, RotateCw, X, FileUp, Maximize2, Bot } from 'lucide-react';
+import { Position, type NodeProps, useStore } from '@xyflow/react';
+import { Loader2, Play, Sparkles, ImageIcon, X, FileUp, Bot, Upload } from 'lucide-react';
 import type { CanvasImageParams, CanvasNode } from '../../../shared/canvas';
 import { editNodeTitle, type ImageEditKind } from '../../../shared/canvasImageEdit';
 import { estimateNodeCost } from '../../../shared/canvasPricing';
@@ -15,7 +15,6 @@ import MagneticHandle from './MagneticHandle';
 import NodeFloatingPanel from './NodeFloatingPanel';
 import { useIsSoloSelected } from './useSelectionCount';
 import AgentMark from './AgentMark';
-import NodeCornerResizer from './NodeCornerResizer';
 import MissingInputWarning from './MissingInputWarning';
 import { useAssetUrl } from './useAssetUrl';
 import ImageNodeEditToolbar from './imageEdit/ImageNodeEditToolbar';
@@ -239,6 +238,8 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
   }, [edges, allNodes, node.id]);
 
   const solo = useIsSoloSelected(selected);
+  const canvasZoom = useStore((s) => s.transform[2]) || 1;
+  const headerScale = Math.min(8, Math.max(1, 1 / canvasZoom));
   const expanded = solo || hovered;
   const candidates = useMemo(() => {
     if (!expanded) return [];
@@ -325,24 +326,50 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
       .then(() => canvasStore.runNode(sessionId, node.id));
   };
 
+  const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const img = e.currentTarget;
+    const nw = img.naturalWidth;
+    const nh = img.naturalHeight;
+    if (!nw || !nh) return;
+    const ratio = nw / nh;
+    let targetW = 240;
+    let targetH = Math.round(targetW / ratio);
+    if (targetH > 380) {
+      targetH = 380;
+      targetW = Math.round(targetH * ratio);
+    } else if (targetH < 140) {
+      targetH = 140;
+      targetW = Math.round(targetH * ratio);
+    }
+    if (Math.abs(node.w - targetW) > 4 || Math.abs(node.h - targetH) > 4) {
+      void canvasStore.resizeNode(sessionId, node.id, targetW, targetH);
+    }
+  };
+
   return (
     <div
       {...hoverProps}
       className={cn(
-        'relative flex h-full w-full flex-col rounded-xl border bg-paper-raised p-2.5 text-xs shadow-sm transition-shadow',
-        selected ? 'border-accent ring-1 ring-accent/20' : 'border-line',
+        'relative flex h-full w-full flex-col text-xs transition-all rounded-2xl p-0',
+        selected
+          ? 'border-2 border-[#edd7a3] shadow-[0_0_12px_rgba(237,215,163,0.35)]'
+          : 'border border-white/15 hover:border-white/35',
         running && 'canvas-node-running',
         highlighted && 'canvas-node-highlight',
         isProposal && 'border-dashed !border-2 !border-accent shadow-[0_0_15px_rgba(99,102,241,0.35)] animate-pulse-subtle',
       )}
     >
       <AgentMark show={agentMark} />
-      <NodeCornerResizer
-        nodeId={node.id}
-        sessionId={sessionId}
-        hovered={hovered}
-        minWidth={240}
-        minHeight={180}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) void handleUpload(f);
+          e.target.value = '';
+        }}
       />
       {/* TapNow magnetic handles with elastic follow and click-to-create */}
       <MagneticHandle
@@ -378,12 +405,33 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
         nodeHovered={hovered || selected}
       />
 
+      {/* Floating Upload button above empty image node (Morphology 1) */}
+      {!hasImage && !edit ? (
+        <div
+          className="nodrag cursor-default absolute bottom-[calc(100%+8px)] left-1/2 z-30 -translate-x-1/2"
+          style={{ transform: `translateX(-50%) scale(${headerScale})`, transformOrigin: 'bottom center' }}
+        >
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              fileInputRef.current?.click();
+            }}
+            className="flex items-center gap-1.5 rounded-full bg-[#18181b]/95 px-3 py-1 text-xs font-medium text-white/90 shadow-md border border-white/10 hover:bg-[#27272a] hover:text-white active:scale-95 transition-all cursor-pointer whitespace-nowrap"
+            title="上传本地图片"
+          >
+            <Upload size={12} className="stroke-[2.2]" />
+            <span>上传</span>
+          </button>
+        </div>
+      ) : null}
+
       {/* Floating anti-zoom header outside the card boundary (TapNow design) */}
       <FloatingNodeHeader
         sessionId={sessionId}
         nodeId={node.id}
         title={node.title}
-        fallback={edit ? editNodeTitle(edit.kind) : '生图'}
+        fallback={edit ? editNodeTitle(edit.kind) : '图片'}
         icon={
           edit ? (
             <EditKindIcon kind={edit.kind} size={13} />
@@ -459,7 +507,12 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
 
       {/* Hero Image view (when media exists) */}
       {hasImage ? (
-        <div className="relative min-h-0 flex-1 flex flex-col">
+        <div
+          className={cn(
+            'relative h-full w-full rounded-2xl overflow-hidden',
+            edit?.kind === 'matting' || current?.endsWith('.png') ? 'canvas-checker' : 'bg-black/80',
+          )}
+        >
           {/* Stacked card deck layers when multiple variants exist (TapNow 4x result set visual) */}
           {assets.length > 1 ? (
             <>
@@ -476,20 +529,16 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
             </>
           ) : null}
 
-          <div
-            className={cn(
-              'group/image relative z-10 min-h-0 flex-1 overflow-hidden rounded-lg border border-line select-none',
-              edit?.kind === 'matting' ? 'canvas-checker' : 'bg-black/40',
-            )}
-          >
+          <div className="group/image relative z-10 h-full w-full select-none">
             <img
               src={assetUrl!}
               alt=""
               loading="lazy"
               decoding="async"
               draggable={false}
+              onLoad={handleImageLoad}
               onDoubleClick={() => setZoom(assetUrl)}
-              className="h-full w-full object-contain pointer-events-auto"
+              className="h-full w-full object-cover pointer-events-auto"
               title="双击全屏放大，拖拽移动节点"
             />
 
@@ -518,68 +567,19 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
               </div>
             ) : null}
 
-            {/* Hover Bottom Bar with Prompt Peek & Quick Rerun (only when no bottom thumbnails or positioned slightly higher) */}
-            <div
-              className={cn(
-                'pointer-events-none absolute inset-x-0 flex items-center justify-between p-1.5 bg-gradient-to-t from-black/80 via-black/40 to-transparent opacity-0 transition-opacity group-hover/image:opacity-100 z-10',
-                assets.length > 1 ? 'bottom-10' : 'bottom-0',
-              )}
+            {/* Top Right Replace button (Matching pure reference design) */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                fileInputRef.current?.click();
+              }}
+              className="nodrag absolute right-2.5 top-2.5 z-20 flex items-center gap-1.5 rounded-lg bg-black/65 px-2.5 py-1 text-[11px] font-medium text-white/90 backdrop-blur-md border border-white/10 hover:bg-black/85 hover:text-white transition-all shadow-xs cursor-pointer"
+              title="替换图片"
             >
-              <span
-                className="truncate max-w-[70%] rounded bg-black/60 px-1.5 py-0.5 text-[9px] text-white/90 select-none backdrop-blur-xs"
-                title={prompt || (hasUpstreamPrompt ? '上游节点提示词驱动' : '')}
-              >
-                {prompt ? `“${prompt}”` : hasUpstreamPrompt ? '✦ 上游提示词驱动' : '无提示词'}
-              </span>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  run();
-                }}
-                disabled={running}
-                className="pointer-events-auto nodrag flex items-center gap-1 rounded-md bg-accent px-2 py-0.5 text-[9px] font-medium text-accent-ink shadow-md hover:opacity-90 active:scale-95"
-                title="重新生成"
-              >
-                {running ? <Loader2 size={10} className="animate-spin" /> : <RotateCw size={9} />}
-                重跑
-              </button>
-            </div>
-
-            {/* Hover Top Right Action Buttons */}
-            <div className="absolute right-1.5 top-1.5 flex items-center gap-1 opacity-0 transition-opacity group-hover/image:opacity-100 z-20">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setZoom(assetUrl);
-                }}
-                className="nodrag rounded-md bg-black/60 p-1 text-white hover:bg-black/80 transition-colors"
-                title="全屏放大查看 (双击图片也可放大)"
-              >
-                <Maximize2 size={11} />
-              </button>
-              <a
-                href={assetUrl!}
-                download
-                onClick={(e) => e.stopPropagation()}
-                className="nodrag rounded-md bg-black/60 p-1 text-white hover:bg-black/80 transition-colors"
-                title="下载图片"
-              >
-                <Download size={11} />
-              </a>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void canvasStore.saveAsset(sessionId, node.id, assetIdx);
-                }}
-                className="nodrag rounded-md bg-black/60 p-1 text-white hover:bg-black/80 transition-colors"
-                title="存入作品库"
-              >
-                <FolderPlus size={11} />
-              </button>
-            </div>
+              <Upload size={11} className="stroke-[2.2]" />
+              <span>替换</span>
+            </button>
           </div>
         </div>
       ) : null}
@@ -589,50 +589,22 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
       ) : null}
 
       {edit && !hasImage ? (
-        <div className="mt-1 flex min-h-0 flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-line bg-black/20 p-4 text-center select-none">
-          {running ? <Loader2 size={18} className="mb-2 animate-spin text-accent" /> : <Sparkles size={18} className="mb-2 text-ink-muted" />}
-          <span className="text-xs font-medium text-ink">
-            {running ? '正在编辑生成' : '等待编辑生成'}
-          </span>
-          <p className="mt-1 text-[10px] text-ink-muted">
-            来源：{allNodes.find((n) => n.id === edit.sourceNodeId)?.title || '源图'}
-          </p>
-          {!running ? (
-            <button
-              type="button"
-              onClick={() => void canvasStore.runNode(sessionId, node.id)}
-              className="nodrag mt-3 inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-ink"
-            >
-              <Play size={11} className="fill-current" />
-              运行
-            </button>
-          ) : null}
+        <div className="relative flex h-full w-full flex-col items-center justify-center rounded-2xl bg-[#18181b]/80 p-4 text-center select-none">
+          {running ? (
+            <div className="flex flex-col items-center justify-center gap-2">
+              <Loader2 size={24} className="animate-spin text-[#edd7a3]" />
+              <span className="text-[11px] font-medium text-white/60">正在编辑…</span>
+            </div>
+          ) : (
+            <div className="rounded-2xl bg-white/[0.04] p-3 text-white/30">
+              <Sparkles size={24} />
+            </div>
+          )}
         </div>
       ) : null}
 
-      {/* Upstream Connected Ready State (when no image yet and upstream prompt exists) */}
-      {!hasImage && !edit && hasUpstreamPrompt ? (
-        <div className="mt-1 flex min-h-0 flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-accent/40 bg-accent/5 p-4 text-center select-none">
-          <Sparkles size={20} className="text-accent mb-1.5 animate-pulse-subtle pointer-events-none" />
-          <span className="text-xs font-semibold text-ink pointer-events-none">已接入上游提示词</span>
-          <p className="mt-1 text-[10px] text-ink-muted leading-relaxed pointer-events-none">
-            由上游便签或 Agent 节点提供画面描述
-          </p>
-          <button
-            type="button"
-            onClick={run}
-            disabled={running}
-            className="nodrag mt-3 inline-flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-xs font-semibold text-accent-ink shadow-md hover:opacity-95 active:scale-98 transition-all disabled:opacity-40"
-          >
-            {running ? <Loader2 size={12} className="animate-spin" /> : <Play size={11} className="fill-current" />}
-            生成画面
-            <span className="text-[9px] opacity-75 font-normal ml-0.5">(~{estimateNodeCost(node)}点)</span>
-          </button>
-        </div>
-      ) : null}
-
-      {/* Clean Cover Placeholder / Dropzone (when standalone and no image yet) */}
-      {!hasImage && !edit && !hasUpstreamPrompt ? (
+      {/* Clean & Pure Empty Image Placeholder / Dropzone */}
+      {!hasImage && !edit ? (
         <div
           onDragOver={(e) => {
             e.preventDefault();
@@ -642,46 +614,25 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
           onDragLeave={() => setIsDragging(false)}
           onDrop={handleDrop}
           className={cn(
-            'group/placeholder relative flex min-h-0 flex-1 flex-col items-center justify-center rounded-lg border border-dashed p-4 text-center transition-all select-none',
-            isDragging
-              ? 'border-accent bg-accent/10 scale-[0.99]'
-              : 'border-line hover:border-accent/60 bg-black/20 hover:bg-black/30',
+            'group/placeholder relative flex h-full w-full flex-col items-center justify-center rounded-2xl transition-all select-none',
+            isDragging ? 'bg-white/[0.08]' : 'bg-[#18181b]/80',
           )}
-          title="点击卡片配置参数，支持拖入图片"
+          title="支持拖入图片或点击上方上传"
         >
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void handleUpload(f);
-              e.target.value = '';
-            }}
-          />
-          <div className="rounded-full bg-paper-inset/70 p-3 mb-2 text-ink-muted group-hover/placeholder:text-accent group-hover/placeholder:bg-accent/15 group-hover/placeholder:scale-110 transition-all shadow-xs pointer-events-none">
-            <ImageIcon size={22} />
-          </div>
-          <span className="text-xs font-medium text-ink-muted group-hover/placeholder:text-ink pointer-events-none transition-colors">待生成图片卡片</span>
-          <div className="mt-2 flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                fileInputRef.current?.click();
-              }}
-              className="nodrag rounded-md bg-paper-raised border border-line px-2 py-0.5 text-[9px] text-ink-muted hover:text-ink hover:border-accent transition-colors flex items-center gap-1"
-              title="上传本地图片作为当前节点画面"
-            >
-              <FileUp size={10} />
-              上传图片
-            </button>
-          </div>
+          {running ? (
+            <div className="flex flex-col items-center justify-center gap-2">
+              <Loader2 size={26} className="animate-spin text-[#edd7a3]" />
+              <span className="text-[11px] font-medium text-white/60">生成中…</span>
+            </div>
+          ) : (
+            <div className="rounded-2xl bg-white/[0.03] p-4 text-white/30 group-hover/placeholder:text-white/60 group-hover/placeholder:scale-105 transition-all pointer-events-none">
+              <ImageIcon size={32} strokeWidth={1.4} />
+            </div>
+          )}
         </div>
       ) : null}
 
-      {/* TapNow floating generation panel with inverse-scale compensation */}
+      {/* TapNow floating generation panel with inverse-scale compensation (Only visible on empty node, State 1) */}
       {edit ? (
         <EditParamsPanel
           sessionId={sessionId}
@@ -696,7 +647,7 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
       <NodeFloatingPanel
         sessionId={sessionId}
         node={node}
-        visible={Boolean(solo || showConfig)}
+        visible={Boolean((solo || showConfig) && !hasImage)}
         prompt={prompt}
         onPromptChange={setPrompt}
         onPromptCommit={commitPrompt}

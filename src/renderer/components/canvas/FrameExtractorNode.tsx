@@ -55,8 +55,10 @@ function FrameExtractorNode({ id, data, selected }: NodeProps) {
     <div
       {...hoverProps}
       className={cn(
-        'relative flex h-full w-full flex-col rounded-xl border bg-paper-raised p-2.5 text-xs shadow-sm transition-shadow',
-        selected ? 'border-accent ring-1 ring-accent/20' : 'border-line',
+        'relative flex h-full w-full flex-col rounded-2xl border bg-paper-raised/95 p-2.5 text-xs shadow-sm transition-all',
+        selected
+          ? 'border-2 border-[#edd7a3] shadow-[0_0_12px_rgba(237,215,163,0.35)]'
+          : 'border border-white/12 hover:border-white/25',
         extracting && 'canvas-node-running',
         isProposal && 'border-dashed !border-2 !border-accent shadow-[0_0_15px_rgba(99,102,241,0.35)] animate-pulse-subtle',
       )}

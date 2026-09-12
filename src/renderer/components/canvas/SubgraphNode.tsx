@@ -70,7 +70,7 @@ function SubgraphNode({ id, data, selected }: NodeProps) {
   }, [sessionId, node.id, params, descDraft]);
 
   const typeLabels: Partial<Record<CanvasNodeType, string>> = {
-    image: '生图',
+    image: '图片',
     video: '视频',
     audio: '音频',
     agent: 'Agent',
