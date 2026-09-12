@@ -66,6 +66,47 @@ export default function ToolCard({ part, collapsed = false }: { part: ToolCallPa
     );
   }
 
+  if (part.name === 'computer') {
+    let shot = '';
+    let summary = typeof part.args?.action === 'string' ? (part.args.action as string) : '操作电脑';
+    if (part.result) {
+      try {
+        const parsed = JSON.parse(part.result) as Record<string, unknown>;
+        if (typeof parsed.screenshotUrl === 'string') shot = parsed.screenshotUrl;
+        if (typeof parsed.summary === 'string') summary = parsed.summary;
+      } catch {
+        /* raw */
+      }
+    }
+    if (shot && !shot.startsWith('http') && !shot.startsWith('data:')) {
+      const origin = getResolvedApiOrigin() || 'http://127.0.0.1:47100';
+      shot = shot.startsWith('/') ? `${origin}${shot}` : `${origin}/${shot}`;
+    }
+    return (
+      <ToolResult
+        tool={summary}
+        title={toolLabel('computer')}
+        status={running ? 'running' : part.error ? 'error' : 'success'}
+        kind="request"
+        defaultOpen={!collapsed}
+        collapseOnComplete={false}
+        copyText={part.error || part.result || undefined}
+      >
+        {part.error ? (
+          <ToolResultOutput language="json">{part.error}</ToolResultOutput>
+        ) : shot ? (
+          <img
+            src={shot}
+            alt={summary}
+            className="max-h-[420px] w-full rounded-md border border-line object-contain"
+          />
+        ) : (
+          '（无截图）'
+        )}
+      </ToolResult>
+    );
+  }
+
   const detail = toolDetail(part);
   const target = toolTarget(part);
   const diffPreview = part.error ? null : toolDiffPreview(part);

@@ -16,6 +16,7 @@ import { createProjectsRouter } from './routes/projects';
 import { createArtifactsRouter, createSessionArtifactsRouter } from './routes/artifacts';
 import { createRefsRouter } from './routes/refs';
 import { createCanvasRouter } from './routes/canvas';
+import { createComputerUseRouter } from './routes/computerUse';
 import { createCanvasStore } from './storage/canvasStore';
 import { openDb, type DbHandle } from './db/client';
 import { createProviderStore, type ProviderStore } from './storage/providerStore';
@@ -158,6 +159,7 @@ export function createApp(options: CreateAppOptions) {
   app.route('/api/admin/providers', createAdminProvidersRouter(providerStore));
   app.route('/api/providers', createPublicProvidersRouter(providerStore));
   app.route('/api/skills', createSkillsRouter(skillsDirs));
+  app.route('/api/computer-use', createComputerUseRouter(options.dataRoot, settingsStore));
   app.route('/api/schedules', createSchedulesRouter(scheduleStore, thoughtStore));
 
   if (canvasStore) {

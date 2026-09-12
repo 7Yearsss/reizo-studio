@@ -4,6 +4,7 @@ import { safeStorage } from 'electron';
 import { PROVIDER_PRESETS } from '../../../shared/providers';
 import {
   DEFAULT_APPEARANCE,
+  DEFAULT_COMPUTER_USE,
   DEFAULT_PERMISSION_MODE,
   DEFAULT_PROVIDER_ID,
   type Appearance,
@@ -18,6 +19,7 @@ import {
 interface DiskSettings {
   appearance?: Appearance;
   permissionMode?: PermissionMode;
+  computerUse?: boolean;
   activeProviderId?: string;
   workspacePath?: string | null;
   providers?: Record<string, { apiKey?: string; model?: string; baseUrl?: string }>;
@@ -87,6 +89,7 @@ export function createSettingsStore(root: string) {
     const settings: LocalSettings = {
       appearance: disk.appearance ?? DEFAULT_APPEARANCE,
       permissionMode: disk.permissionMode ?? DEFAULT_PERMISSION_MODE,
+      computerUse: disk.computerUse ?? DEFAULT_COMPUTER_USE,
       activeProviderId: disk.activeProviderId ?? DEFAULT_PROVIDER_ID,
       workspacePath: disk.workspacePath ?? null,
       providers,
@@ -111,6 +114,7 @@ export function createSettingsStore(root: string) {
     return {
       appearance: settings.appearance,
       permissionMode: settings.permissionMode,
+      computerUse: settings.computerUse,
       activeProviderId: settings.activeProviderId,
       workspacePath: settings.workspacePath,
       providers,
@@ -143,6 +147,7 @@ export function createSettingsStore(root: string) {
     return {
       appearance: settings.appearance,
       permissionMode: settings.permissionMode,
+      computerUse: settings.computerUse,
       activeProviderId: settings.activeProviderId,
       workspacePath: settings.workspacePath,
       providers,
@@ -154,6 +159,7 @@ export function createSettingsStore(root: string) {
 
     if (patch.appearance) settings.appearance = patch.appearance;
     if (patch.permissionMode) settings.permissionMode = patch.permissionMode;
+    if (patch.computerUse !== undefined) settings.computerUse = patch.computerUse;
     if (patch.activeProviderId) {
       if (!PROVIDER_PRESETS.some((p) => p.id === patch.activeProviderId)) {
         throw new Error('Unknown provider');

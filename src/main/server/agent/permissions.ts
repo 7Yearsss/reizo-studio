@@ -5,12 +5,19 @@ export type PermissionDecision = 'allow' | 'deny' | 'allow-session';
 
 const WRITE_TOOLS = new Set(['write_file', 'edit_file']);
 const SHELL_TOOLS = new Set(['run_command']);
+/**
+ * Tools that drive the user's real machine (mouse / keyboard / screen). Always
+ * gated on first use regardless of `permissionMode` — even `full` prompts once,
+ * then `allow-session` lets the agent run the rest of the turn uninterrupted.
+ */
+const CONTROL_TOOLS = new Set(['computer']);
 
 /** Git subcommands that only inspect the repo. Mirrors Claude Code's read-only git set, kept tight. */
 const READ_ONLY_GIT = /^(git\s+)(status|diff|log|show|rev-parse|describe|ls-files)(\s|$)/;
 const READ_ONLY_GIT_REMOTE = /^git\s+remote(\s+(-v|--verbose))?\s*$/;
 
 export function needsApproval(mode: PermissionMode, toolName: string): boolean {
+  if (CONTROL_TOOLS.has(toolName)) return true;
   if (mode === 'full') return false;
   if (WRITE_TOOLS.has(toolName)) return mode === 'ask';
   if (SHELL_TOOLS.has(toolName)) return true;

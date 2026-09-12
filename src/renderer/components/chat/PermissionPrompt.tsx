@@ -40,9 +40,15 @@ export default function PermissionPrompt({
       value: typeof value === 'string' ? value : JSON.stringify(value),
     }));
 
+  const isComputer = permission.name === 'computer';
   const title = preview
     ? `允许写入 ${preview.path}？`
-    : '允许运行这个工具？';
+    : isComputer
+      ? '允许 Agent 操作这台电脑？'
+      : '允许运行这个工具？';
+  const description = isComputer
+    ? '同意后，本次会话中 Agent 可以截屏并控制鼠标、键盘，直到会话结束。不要让它输入密码等敏感信息。'
+    : '高风险动作会先问你，再动文件或命令。';
 
   return (
     <div className="rise-in space-y-2">
@@ -50,7 +56,7 @@ export default function PermissionPrompt({
       <ToolApproval
         tool={permission.name}
         title={title}
-        description="高风险动作会先问你，再动文件或命令。"
+        description={description}
         parameters={parameters}
         status="pending"
         defaultOpen={!preview}

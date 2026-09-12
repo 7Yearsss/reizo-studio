@@ -1,6 +1,11 @@
 import * as api from '../api';
 import type { PublicSettings, SettingsPatch } from '../../shared/settings';
-import { DEFAULT_APPEARANCE, DEFAULT_PERMISSION_MODE, DEFAULT_PROVIDER_ID } from '../../shared/settings';
+import {
+  DEFAULT_APPEARANCE,
+  DEFAULT_COMPUTER_USE,
+  DEFAULT_PERMISSION_MODE,
+  DEFAULT_PROVIDER_ID,
+} from '../../shared/settings';
 
 export interface SettingsState {
   loaded: boolean;
@@ -12,6 +17,7 @@ let state: SettingsState = {
   settings: {
     appearance: DEFAULT_APPEARANCE,
     permissionMode: DEFAULT_PERMISSION_MODE,
+    computerUse: DEFAULT_COMPUTER_USE,
     activeProviderId: DEFAULT_PROVIDER_ID,
     workspacePath: null,
     providers: [],
