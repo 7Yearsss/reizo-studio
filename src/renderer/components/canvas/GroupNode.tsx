@@ -60,21 +60,21 @@ function GroupNode({ id, data, selected }: NodeProps) {
     <div
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      className="group relative h-full w-full rounded-[20px] transition-[border-color,box-shadow] duration-150 backdrop-blur-xs"
+      className="group relative h-full w-full rounded-2xl transition-[border-color,box-shadow] duration-150"
       style={{
-        borderWidth: '1.5px',
+        borderWidth: '1px',
         borderStyle: 'solid',
         borderColor: selected
-          ? 'rgba(255, 255, 255, 0.4)'
+          ? 'rgba(255, 255, 255, 0.35)'
           : 'var(--group-container-border, rgba(255, 255, 255, 0.12))',
-        backgroundColor: 'var(--group-container-bg, rgba(30, 30, 35, 0.75))',
+        backgroundColor: 'var(--group-container-bg, #191b1b)',
         boxShadow: selected
           ? '0 0 0 1px rgba(255, 255, 255, 0.15), 0 8px 32px rgba(0, 0, 0, 0.45)'
           : '0 4px 20px rgba(0, 0, 0, 0.25)',
       }}
     >
       {/* Drag surface for moving the entire group and its members */}
-      <div className="absolute inset-0 cursor-grab active:cursor-grabbing rounded-[20px]" />
+      <div className="absolute inset-0 cursor-grab active:cursor-grabbing rounded-2xl" />
 
       {/* Title positioned above the top-left edge with anti-zoom LOD scaling (matching FloatingNodeHeader) */}
       <div

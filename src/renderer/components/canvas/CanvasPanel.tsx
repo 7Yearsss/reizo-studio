@@ -233,6 +233,29 @@ export function computeNodeZIndexes(
   return zIndexMap;
 }
 
+/**
+ * Compute layered z-index for canvas edges:
+ * 1. An edge connected to one or more group members (or an elevated node with zIndex >= 20):
+ *    Must be rendered strictly ABOVE the group container background plate (groupZ: 10~15),
+ *    and just BELOW the member node card (memberZ: 20~25+).
+ *    Formula: Math.max(sourceZ, targetZ) - 1.
+ *    - Internal group edge (memberZ 20, memberZ 20) -> edgeZ = 19 (19 > groupZ 10, 19 < memberZ 20).
+ *    - Inbound edge (outsideZ 1, memberZ 20) -> edgeZ = 19 (19 > groupZ 10, 19 < memberZ 20).
+ *    - Outbound edge (memberZ 20, outsideZ 1) -> edgeZ = 19 (19 > groupZ 10, 19 < memberZ 20).
+ * 2. An edge between two standalone outside nodes:
+ *    - Both endpoints at zIndex 1 -> edgeZ = 0.
+ *    - If an outside node is selected (zIndex 30) -> edgeZ = 29.
+ */
+export function computeEdgeZIndex(
+  edge: { sourceId: string; targetId: string },
+  nodeZMap: Map<string, number>,
+): number {
+  const sourceZ = nodeZMap.get(edge.sourceId) ?? 1;
+  const targetZ = nodeZMap.get(edge.targetId) ?? 1;
+  const maxZ = Math.max(sourceZ, targetZ);
+  return maxZ > 1 ? Math.max(0, maxZ - 1) : 0;
+}
+
 function CanvasInner({ sessionId }: { sessionId: string }) {
   const storeNodes = useCanvasStore((s) => s.nodesBySession[sessionId] ?? canvasStore.EMPTY_NODES);
   const storeEdges = useCanvasStore((s) => s.edgesBySession[sessionId] ?? canvasStore.EMPTY_EDGES);
@@ -293,10 +316,6 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const confirmTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const dragStart = useRef<Record<string, { x: number; y: number }>>({});
-  // Live position of each group being dragged, so onNodeDrag can shift its
-  // members by the per-frame delta (rf.getNode already reflects the new
-  // position by the time onNodesChange runs, so a delta there is always 0).
-  const groupDragPrev = useRef<Record<string, { x: number; y: number }>>({});
   const workflowFileRef = useRef<HTMLInputElement>(null);
 
   const flash = useCallback((msg: string) => {
@@ -625,38 +644,39 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     [rf, sessionId],
   );
 
-  const edges: Edge[] = useMemo(
-    () =>
-      storeEdges.map((edge) => {
-        const sourceMeta = nodeMetaMap.get(edge.sourceId);
-        const targetMeta = nodeMetaMap.get(edge.targetId);
-        const isRunning = Boolean(targetMeta?.isRunning || sourceMeta?.isRunning);
-        const isRevealed =
-          wiresVisible ||
-          hoveredNodeId === edge.sourceId ||
-          hoveredNodeId === edge.targetId ||
-          selectedNodeIds.includes(edge.sourceId) ||
-          selectedNodeIds.includes(edge.targetId);
-        return {
-          id: edge.id,
-          type: 'cuttable',
-          source: edge.sourceId,
-          sourceHandle: edge.sourceHandle,
-          target: edge.targetId,
-          targetHandle: edge.targetHandle,
-          animated: isRunning,
-          data: {
-            sourceType: sourceMeta?.type,
-            targetType: targetMeta?.type,
-            isRunning,
-            isRevealed,
-            onCutEdge: handleCutEdge,
-            onRerouteEdge: handleRerouteEdge,
-          },
-        };
-      }),
-    [storeEdges, nodeMetaMap, wiresVisible, hoveredNodeId, selectedNodeIds, handleCutEdge, handleRerouteEdge],
-  );
+  const edges: Edge[] = useMemo(() => {
+    const zIndexes = computeNodeZIndexes(storeNodes, (id) => selectedNodeIds.includes(id));
+    return storeEdges.map((edge) => {
+      const sourceMeta = nodeMetaMap.get(edge.sourceId);
+      const targetMeta = nodeMetaMap.get(edge.targetId);
+      const isRunning = Boolean(targetMeta?.isRunning || sourceMeta?.isRunning);
+      const isRevealed =
+        wiresVisible ||
+        hoveredNodeId === edge.sourceId ||
+        hoveredNodeId === edge.targetId ||
+        selectedNodeIds.includes(edge.sourceId) ||
+        selectedNodeIds.includes(edge.targetId);
+      const edgeZ = computeEdgeZIndex(edge, zIndexes);
+      return {
+        id: edge.id,
+        type: 'cuttable',
+        source: edge.sourceId,
+        sourceHandle: edge.sourceHandle,
+        target: edge.targetId,
+        targetHandle: edge.targetHandle,
+        animated: isRunning,
+        zIndex: edgeZ,
+        data: {
+          sourceType: sourceMeta?.type,
+          targetType: targetMeta?.type,
+          isRunning,
+          isRevealed,
+          onCutEdge: handleCutEdge,
+          onRerouteEdge: handleRerouteEdge,
+        },
+      };
+    });
+  }, [storeEdges, storeNodes, nodeMetaMap, wiresVisible, hoveredNodeId, selectedNodeIds, handleCutEdge, handleRerouteEdge]);
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
@@ -1502,6 +1522,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         nodeTypes={NODE_TYPES}
         edgeTypes={EDGE_TYPES}
         elevateNodesOnSelect={false}
+        elevateEdgesOnSelect={true}
         connectionMode={ConnectionMode.Loose}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
@@ -1538,11 +1559,15 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           for (const n of dragged) {
             dragStart.current[n.id] = { x: n.position.x, y: n.position.y };
             if (n.type === 'group') {
-              groupDragPrev.current[n.id] = { x: n.position.x, y: n.position.y };
               for (const memberId of canvasStore.groupMemberIds(sessionId, n.id)) {
                 allMemberIds.add(memberId);
                 const member = rf.getNode(memberId);
-                if (member) dragStart.current[memberId] = { x: member.position.x, y: member.position.y };
+                if (member) {
+                  dragStart.current[memberId] = { x: member.position.x, y: member.position.y };
+                } else {
+                  const storeNode = canvasStore.nodeById(sessionId, memberId);
+                  if (storeNode) dragStart.current[memberId] = { x: storeNode.x, y: storeNode.y };
+                }
               }
             }
           }
@@ -1558,28 +1583,35 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         }}
         onNodeDrag={(_, node) => {
           if (node.type !== 'group') return;
-          const prev = groupDragPrev.current[node.id];
-          if (!prev) return;
-          const dx = node.position.x - prev.x;
-          const dy = node.position.y - prev.y;
-          if (dx === 0 && dy === 0) return;
-          groupDragPrev.current[node.id] = { x: node.position.x, y: node.position.y };
+          const origin = dragStart.current[node.id];
+          if (!origin) return;
+          const totalDx = node.position.x - origin.x;
+          const totalDy = node.position.y - origin.y;
           const memberIds = new Set(canvasStore.groupMemberIds(sessionId, node.id));
           if (memberIds.size === 0) return;
-          // Shift both React Flow (smooth visual follow) and the canvas store
-          // (so commitMoveBatch persists real deltas and no reconcile after
-          // drop snaps a member back — the "flash").
+
+          // Shift React Flow members synchronously using absolute base offset to eliminate cumulative float drift
           rf.setNodes((nds) =>
-            nds.map((n) =>
-              memberIds.has(n.id)
-                ? { ...n, position: { x: n.position.x + dx, y: n.position.y + dy }, zIndex: Math.max(n.zIndex ?? 20, 25) }
-                : n,
-            ),
+            nds.map((n) => {
+              if (!memberIds.has(n.id)) return n;
+              const mOrigin = dragStart.current[n.id];
+              if (!mOrigin) return n;
+              return {
+                ...n,
+                position: { x: mOrigin.x + totalDx, y: mOrigin.y + totalDy },
+                zIndex: Math.max(n.zIndex ?? 20, 25),
+              };
+            }),
           );
-          const storeNodesNow = canvasStore.getSnapshot().nodesBySession[sessionId] ?? [];
+
+          // Synchronize canvas store live positions using the same absolute displacement
           const liveMoves = new Map<string, { x: number; y: number }>();
-          for (const n of storeNodesNow) {
-            if (memberIds.has(n.id)) liveMoves.set(n.id, { x: n.x + dx, y: n.y + dy });
+          liveMoves.set(node.id, { x: node.position.x, y: node.position.y });
+          for (const mId of memberIds) {
+            const mOrigin = dragStart.current[mId];
+            if (mOrigin) {
+              liveMoves.set(mId, { x: mOrigin.x + totalDx, y: mOrigin.y + totalDy });
+            }
           }
           canvasStore.moveNodesBatchLive(sessionId, liveMoves);
         }}
@@ -1595,7 +1627,6 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           };
           for (const n of dragged) {
             collect(n.id);
-            delete groupDragPrev.current[n.id];
             for (const memberId of canvasStore.groupMemberIds(sessionId, n.id)) collect(memberId);
           }
           canvasStore.commitMoveBatch(sessionId, moves);

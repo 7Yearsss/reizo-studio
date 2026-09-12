@@ -803,7 +803,27 @@ export function commitMoveBatch(
     return;
   }
   const apply = (pick: 'from' | 'to') => async () => {
-    for (const m of real) await _setPosition(sessionId, m.id, m[pick].x, m[pick].y);
+    // 1. Synchronously update all moved nodes in memory state in one atomic pass
+    const targetMap = new Map(real.map((m) => [m.id, m[pick]]));
+    const nodes = state.nodesBySession[sessionId] ?? [];
+    setNodes(
+      sessionId,
+      nodes.map((n) => {
+        const target = targetMap.get(n.id);
+        return target ? { ...n, x: target.x, y: target.y } : n;
+      }),
+    );
+    // 2. Persist to backend concurrently without sequential delays
+    const id = canvasId(sessionId);
+    if (id) {
+      await Promise.all(
+        real.map((m) =>
+          api
+            .patchCanvasNode(id, m.id, { x: Math.round(m[pick].x), y: Math.round(m[pick].y) })
+            .catch((): void => undefined),
+        ),
+      );
+    }
   };
   void apply('to')();
   record(sessionId, { undo: apply('from'), redo: apply('to') });

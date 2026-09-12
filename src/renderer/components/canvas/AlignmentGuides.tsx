@@ -8,6 +8,7 @@ import {
   type Node,
 } from '@xyflow/react';
 import { calculateSmartGuides, type GuideLine, type NodeRect } from './smartGuides';
+import * as canvasStore from '../../state/canvasStore';
 
 export interface AlignmentGuidesProps {
   sessionId: string;
@@ -37,7 +38,7 @@ function isPositionStopChange(c: NodeChange<Node>): boolean {
   return c.type === 'position' && (c as { dragging?: unknown }).dragging === false;
 }
 
-export function AlignmentGuides({ enabled = true }: AlignmentGuidesProps) {
+export function AlignmentGuides({ sessionId, enabled = true }: AlignmentGuidesProps) {
   const rf = useReactFlow();
   const zoom = useStore((s) => s.transform[2]) || 1;
 
@@ -98,10 +99,39 @@ export function AlignmentGuides({ enabled = true }: AlignmentGuidesProps) {
       const allNodes = rf.getNodes();
       const draggedIds = new Set(dragChanges.map((c) => c.id));
 
-      // Build target rectangles from nodes that are NOT being dragged
+      // Build exclusion set:
+      // 1. Any node being dragged
+      // 2. All member nodes of any dragged group or section (since they move together)
+      // 3. Any parent group of a dragged member node (prevent snapping to enclosing container)
+      const excludedTargetIds = new Set<string>(draggedIds);
+      for (const change of dragChanges) {
+        const node = rf.getNode(change.id);
+        const nodeType = node?.type;
+        const nodeDataParams = (node?.data?.node as any)?.params;
+
+        if (nodeType === 'group' || nodeType === 'section') {
+          if (sessionId) {
+            for (const mId of canvasStore.groupMemberIds(sessionId, change.id)) {
+              excludedTargetIds.add(mId);
+            }
+          }
+          if (Array.isArray(nodeDataParams?.memberIds)) {
+            for (const mId of nodeDataParams.memberIds) {
+              excludedTargetIds.add(mId);
+            }
+          }
+        } else if (sessionId) {
+          const parentGroup = canvasStore.groupOf(sessionId, change.id);
+          if (parentGroup) {
+            excludedTargetIds.add(parentGroup.id);
+          }
+        }
+      }
+
+      // Build target rectangles from nodes that are NOT being dragged or moving with containers
       const others: NodeRect[] = [];
       for (const n of allNodes) {
-        if (draggedIds.has(n.id)) continue;
+        if (excludedTargetIds.has(n.id)) continue;
         if (n.type === 'section') continue;
         const w = n.measured?.width ?? n.width ?? (n.data?.node as any)?.w ?? 320;
         const h = n.measured?.height ?? n.height ?? (n.data?.node as any)?.h ?? 200;
@@ -145,7 +175,9 @@ export function AlignmentGuides({ enabled = true }: AlignmentGuidesProps) {
         type: primaryNode.type,
       };
 
-      const result = calculateSmartGuides(draggedRect, others, zoom);
+      const result = calculateSmartGuides(draggedRect, others, zoom, {
+        excludeIds: excludedTargetIds,
+      });
 
       const deltaX = result.snappedPosition.x - primaryChange.position.x;
       const deltaY = result.snappedPosition.y - primaryChange.position.y;
@@ -179,7 +211,7 @@ export function AlignmentGuides({ enabled = true }: AlignmentGuidesProps) {
 
       return changes;
     },
-    [rf, zoom, clearGuides],
+    [rf, zoom, sessionId, clearGuides],
   );
 
   experimental_useOnNodesChangeMiddleware(middleware);

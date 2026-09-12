@@ -29,6 +29,7 @@ TapNow 的界面之所以呈现专业调色台（如 DaVinci Resolve）的电影
 | `canvas-bg` | `#0d0e12` (HSL 225, 17%, 6%) | `bg-neutral-950` / 自定义 | 主画布无限视口背景色 |
 | `canvas-grid-dot` | `rgba(255, 255, 255, 0.05)` | - | 画布 16px/24px 极淡点阵参考网格 |
 | `surface-raised` | `#16171d` (HSL 230, 14%, 10%) | `bg-paper-raised` | 普通节点卡片默认底色 |
+| `group-container-bg` | `#191b1b` (HSL 180, 4%, 10%) | - | 打组（Group）容器底板色（纯色不透底） |
 | `surface-overlay` | `#1e2029` (HSL 230, 15%, 14%) | `bg-neutral-900` | 悬浮工具栏、右键菜单、下拉列表 |
 | `surface-subtle` | `#232530` (HSL 230, 15%, 16%) | `bg-neutral-800/80` | 输入框背景、滑块轨道背景 |
 | `border-subtle` | `rgba(255, 255, 255, 0.08)` | `border-white/10` | 节点默认边框（1px 内敛线） |

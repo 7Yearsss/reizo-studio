@@ -50,7 +50,7 @@
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
   --duration-fast: 140ms;
   --duration-base: 200ms;
-  --group-container-bg: rgba(236, 236, 240, 0.75);
+  --group-container-bg: #ececf0;
   --group-container-border: rgba(0, 0, 0, 0.12);
 }
 
@@ -71,7 +71,7 @@
   --danger: #fb7185;
 
   --paper-a0: rgb(13 13 13 / 0);
-  --group-container-bg: rgba(30, 30, 35, 0.75);
+  --group-container-bg: #191b1b;
   --group-container-border: rgba(255, 255, 255, 0.12);
 
   --background: var(--paper);

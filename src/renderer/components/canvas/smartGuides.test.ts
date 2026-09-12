@@ -148,4 +148,27 @@ describe('calculateSmartGuides', () => {
     expect(resultZoomedOut.vertical).not.toBeNull(); // 12 <= 16, snapped!
     expect(resultZoomedOut.snappedPosition.x).toBe(100);
   });
+
+  it('ignores nodes specified in excludeIds (e.g. member nodes of dragged group)', () => {
+    // dragged node would normally snap to targetA
+    const dragged: NodeRect = {
+      id: 'group-1',
+      x: 102,
+      y: 400,
+      width: 300,
+      height: 200,
+    };
+
+    // Without excludeIds: targetA triggers snap
+    const resultWithoutExclude = calculateSmartGuides(dragged, [targetA], 1);
+    expect(resultWithoutExclude.vertical).not.toBeNull();
+    expect(resultWithoutExclude.snappedPosition.x).toBe(100);
+
+    // With excludeIds: targetA is excluded (e.g. member node of group-1), so no snap
+    const resultWithExclude = calculateSmartGuides(dragged, [targetA], 1, {
+      excludeIds: new Set(['target-a']),
+    });
+    expect(resultWithExclude.vertical).toBeNull();
+    expect(resultWithExclude.snappedPosition.x).toBe(102);
+  });
 });

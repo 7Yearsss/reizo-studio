@@ -33,6 +33,8 @@ export interface SmartGuidesOptions {
   thresholdPx?: number;
   /** Center alignment priority multiplier (defaults to 0.8 for subtle preferential bias) */
   centerBias?: number;
+  /** Set or list of node IDs to explicitly exclude from snapping candidates (e.g. group members) */
+  excludeIds?: Set<string> | string[];
 }
 
 /**
@@ -47,14 +49,19 @@ export function calculateSmartGuides(
 ): SmartGuidesResult {
   const thresholdPx = options.thresholdPx ?? 8;
   const centerBias = options.centerBias ?? 0.8;
+  const excludeSet = options.excludeIds
+    ? options.excludeIds instanceof Set
+      ? options.excludeIds
+      : new Set(options.excludeIds)
+    : null;
 
   // Convert screen pixel threshold to canvas coordinate units, safe-clamped
   const safeZoom = Math.max(0.01, zoom);
   const threshold = Math.min(24, Math.max(4, thresholdPx / safeZoom));
 
-  // Exclude section nodes and self
+  // Exclude section nodes, self, and explicitly excluded nodes (e.g. group members)
   const targetNodes = others.filter(
-    (n) => n.id !== dragged.id && n.type !== 'section',
+    (n) => n.id !== dragged.id && n.type !== 'section' && (!excludeSet || !excludeSet.has(n.id)),
   );
 
   let snappedX = dragged.x;
