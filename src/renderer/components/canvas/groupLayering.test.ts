@@ -73,6 +73,30 @@ describe('computeNodeZIndexes (Canvas Occlusion & Layering)', () => {
     expect(groupZ).toBeGreaterThan(outsideZ);
     expect(memberZ).toBeGreaterThan(groupZ);
   });
+
+  it('elevates selected content node to zIndex 1000 so Composer / NodeFloatingPanel is top-most and unoccluded', () => {
+    const videoNode = makeNode('video_1', 'video');
+    const audioNode = makeNode('audio_1', 'audio');
+    const nodes = [videoNode, audioNode];
+
+    const zMap = computeNodeZIndexes(nodes, (id) => id === 'video_1');
+
+    expect(zMap.get('video_1')).toBe(1000);
+    expect(zMap.get('audio_1')).toBe(1);
+    expect(zMap.get('video_1')!).toBeGreaterThan(zMap.get('audio_1')!);
+  });
+
+  it('elevates selected group member to zIndex 1000 above group container and outside nodes', () => {
+    const member = makeNode('img_in', 'image');
+    const group = makeNode('g1', 'group', { memberIds: ['img_in'] });
+    const nodes = [member, group];
+
+    const zMap = computeNodeZIndexes(nodes, (id) => id === 'img_in');
+
+    expect(zMap.get('img_in')).toBe(1000);
+    expect(zMap.get('g1')).toBe(10);
+    expect(zMap.get('img_in')!).toBeGreaterThan(zMap.get('g1')!);
+  });
 });
 
 describe('computeEdgeZIndex (Edge Visibility & Group Occlusion)', () => {

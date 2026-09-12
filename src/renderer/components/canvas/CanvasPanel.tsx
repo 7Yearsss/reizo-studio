@@ -218,15 +218,22 @@ export function computeNodeZIndexes(
       continue; // already set above
     }
 
+    const isSelected = isSelectedFn ? isSelectedFn(n.id) : false;
+
+    // Any actively selected content node (standalone or group member) is elevated to top layer (1000)
+    // so that its Composer / NodeFloatingPanel and controls are NEVER occluded by any other node or group!
+    if (isSelected) {
+      zIndexMap.set(n.id, 1000);
+      continue;
+    }
+
     const groupInfo = memberToGroup.get(n.id);
     if (groupInfo) {
       const baseGroupZ = groupZMap.get(groupInfo.group.id) ?? 10;
-      const isMemberSelected = isSelectedFn ? isSelectedFn(n.id) : false;
       // Member nodes are always strictly above group container (base 20+)
-      zIndexMap.set(n.id, isMemberSelected ? baseGroupZ + 15 : baseGroupZ + 10);
+      zIndexMap.set(n.id, baseGroupZ + 10);
     } else {
-      const isSelected = isSelectedFn ? isSelectedFn(n.id) : false;
-      zIndexMap.set(n.id, isSelected ? 30 : 1);
+      zIndexMap.set(n.id, 1);
     }
   }
 
@@ -354,17 +361,38 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     const handleClear = (e: Event) => {
       const detail = (e as CustomEvent<{ sessionId?: string }>).detail;
       if (!detail?.sessionId || detail.sessionId === sessionId) {
-        rf.setNodes((nds) => nds.map((n) => (n.selected ? { ...n, selected: false } : n)));
         setSelectedNodeIds([]);
+        rf.setNodes((nds) => {
+          const zIndexes = computeNodeZIndexes(storeNodes, () => false);
+          return nds.map((n) => ({
+            ...n,
+            selected: false,
+            zIndex: zIndexes.get(n.id) ?? 1,
+          }));
+        });
       }
     };
     const handleDeselect = (e: Event) => {
       const detail = (e as CustomEvent<{ sessionId?: string; nodeId?: string }>).detail;
       if (detail?.nodeId && (!detail.sessionId || detail.sessionId === sessionId)) {
-        rf.setNodes((nds) =>
-          nds.map((n) => (n.id === detail.nodeId && n.selected ? { ...n, selected: false } : n)),
-        );
-        setSelectedNodeIds((prev) => prev.filter((id) => id !== detail.nodeId));
+        setSelectedNodeIds((prev) => {
+          const next = prev.filter((id) => id !== detail.nodeId);
+          const nextSet = new Set(next);
+          rf.setNodes((nds) => {
+            const zIndexes = computeNodeZIndexes(storeNodes, (id) => nextSet.has(id));
+            return nds.map((n) => {
+              const isSelected = nextSet.has(n.id);
+              const nextZ = zIndexes.get(n.id) ?? 1;
+              if (n.selected === isSelected && n.zIndex === nextZ) return n;
+              return {
+                ...n,
+                selected: isSelected,
+                zIndex: nextZ,
+              };
+            });
+          });
+          return next;
+        });
       }
     };
     window.addEventListener('reizo:clear-canvas-selection', handleClear);
@@ -373,7 +401,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       window.removeEventListener('reizo:clear-canvas-selection', handleClear);
       window.removeEventListener('reizo:deselect-canvas-node', handleDeselect);
     };
-  }, [sessionId, rf]);
+  }, [sessionId, rf, storeNodes]);
 
   const toggleWires = useCallback(() => {
     setWiresVisible((prev) => {
@@ -542,7 +570,8 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         else edgesByTarget.set(e.targetId, [e]);
       }
 
-      const zIndexes = computeNodeZIndexes(storeNodes, (id) => prevMap.get(id)?.selected ?? false);
+      const selectedSet = new Set(selectedNodeIds);
+      const zIndexes = computeNodeZIndexes(storeNodes, (id) => selectedSet.has(id) || (prevMap.get(id)?.selected ?? false));
 
       const nextNodes: Node<CanvasNodeData>[] = [];
       for (const node of storeNodes) {
@@ -613,7 +642,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       }
       return nextNodes;
     });
-  }, [storeNodes, storeEdges, sessionId, highlightIds, lockedMembers, agentMarkedIds, proposals, rf]);
+  }, [storeNodes, storeEdges, sessionId, highlightIds, lockedMembers, agentMarkedIds, proposals, selectedNodeIds, rf]);
 
   const nodeMetaKey = useMemo(
     () => storeNodes.map((n) => `${n.id}:${n.type}:${n.runState}`).join('|'),
@@ -740,16 +769,24 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
 
   const selectNode = useCallback(
     (nodeId: string) => {
-      rf.setNodes((nds) =>
-        nds.map((n) => ({
-          ...n,
-          selected: n.id === nodeId,
-        })),
-      );
       setSelectedNodeIds([nodeId]);
       canvasStore.setSelection(sessionId, [nodeId]);
+      rf.setNodes((nds) => {
+        const selectedSet = new Set([nodeId]);
+        const zIndexes = computeNodeZIndexes(storeNodes, (id) => selectedSet.has(id));
+        return nds.map((n) => {
+          const isSelected = n.id === nodeId;
+          const nextZ = zIndexes.get(n.id) ?? (isSelected ? 1000 : 1);
+          if (n.selected === isSelected && n.zIndex === nextZ) return n;
+          return {
+            ...n,
+            selected: isSelected,
+            zIndex: nextZ,
+          };
+        });
+      });
     },
-    [rf, sessionId],
+    [rf, sessionId, storeNodes],
   );
 
   const handleCreateAndSelect = useCallback(
@@ -1309,8 +1346,17 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       const ids = sel.map((n) => n.id);
       setSelectedNodeIds(ids);
       canvasStore.setSelection(sessionId, ids);
+      rf.setNodes((prevNodes) => {
+        const selectedSet = new Set(ids);
+        const zIndexes = computeNodeZIndexes(storeNodes, (id) => selectedSet.has(id));
+        return prevNodes.map((n) => {
+          const nextZ = zIndexes.get(n.id) ?? (selectedSet.has(n.id) ? 1000 : 1);
+          if (n.zIndex === nextZ) return n;
+          return { ...n, zIndex: nextZ };
+        });
+      });
     },
-    [sessionId],
+    [sessionId, storeNodes, rf],
   );
 
   const addNode = (type: CanvasNodeType, at?: { x: number; y: number }) => {

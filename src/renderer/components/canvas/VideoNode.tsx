@@ -30,7 +30,9 @@ function VideoNode({ id, data, selected }: NodeProps) {
     hasUpstreamPrompt = false,
     hasUpstreamStartFrame = false,
   } = data as CanvasNodeData;
-  const isLowLOD = useStore((s) => s.transform[2] < 0.35);
+  const canvasZoom = useStore((s) => s.transform[2]) || 1;
+  const headerScale = Math.min(8, Math.max(1, 1 / canvasZoom));
+  const isLowLOD = canvasZoom < 0.35;
   const hideControls = isLowLOD;
 
   const params = (node.params as CanvasVideoParams) || { prompt: '' };
@@ -204,19 +206,25 @@ function VideoNode({ id, data, selected }: NodeProps) {
         nodeHovered={hovered || selected}
       />
 
-      {/* Floating State 1 Header Upload Button */}
+      {/* Floating State 1 Header Upload Button (pops up on hover or select) */}
       {!hasVideo && (selected || hovered) ? (
-        <div className="absolute left-0 -top-11 z-30 flex items-center">
+        <div
+          className="nodrag cursor-default absolute bottom-[calc(100%+8px)] left-1/2 z-30 -translate-x-1/2 animate-in fade-in zoom-in-95 duration-200"
+          style={{
+            transform: `translateX(-50%) scale(${headerScale}) translateY(-28px)`,
+            transformOrigin: 'bottom center',
+          }}
+        >
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
               fileInputRef.current?.click();
             }}
-            className="flex items-center gap-1.5 rounded-full bg-[#18181b]/95 px-3 py-1 text-xs font-medium text-white/90 shadow-md border border-white/10 hover:bg-[#27272a] hover:text-white active:scale-95 transition-all cursor-pointer whitespace-nowrap"
+            className="flex items-center gap-1.5 rounded-full bg-[#18181b]/95 px-3 py-1.5 text-xs font-semibold text-white shadow-[0_4px_12px_rgba(0,0,0,0.4)] border border-white/20 hover:bg-[#27272a] hover:border-white/35 active:scale-95 transition-all cursor-pointer whitespace-nowrap backdrop-blur-md"
             title="上传本地视频"
           >
-            <Upload size={12} className="stroke-[2.2]" />
+            <Upload size={13} className="stroke-[2.2] text-white/90" />
             <span>上传</span>
           </button>
         </div>
@@ -519,9 +527,11 @@ function VideoNode({ id, data, selected }: NodeProps) {
               </span>
             </div>
           ) : (
-            <div className="rounded-2xl bg-white/[0.03] p-4 text-white/30 group-hover/placeholder:text-white/60 group-hover/placeholder:scale-105 transition-all pointer-events-none">
-              <Video size={32} strokeWidth={1.4} />
-            </div>
+            <Video
+              size={36}
+              strokeWidth={1.3}
+              className="text-white/20 group-hover/placeholder:text-white/40 group-hover/placeholder:scale-105 transition-all pointer-events-none"
+            />
           )}
         </div>
       ) : null}
