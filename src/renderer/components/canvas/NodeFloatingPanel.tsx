@@ -3,17 +3,16 @@ import { useStore } from '@xyflow/react';
 import {
   Play,
   Loader2,
-  Sparkles,
   Type,
-  ImageIcon,
   Video,
   Bot,
   X,
   Volume2,
+  Plus,
 } from 'lucide-react';
 import { cn } from '../../lib/cn';
 import MentionTextArea, { type MentionTextAreaHandle } from './MentionTextArea';
-import { parseMentionTokens, serializeMention } from '../../../shared/resolveMentions';
+import { useAssetUrl } from './useAssetUrl';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import {
   CANVAS_IMAGE_MODELS,
@@ -148,36 +147,33 @@ function NodeFloatingPanel({
 
   const mentionAreaRef = useRef<MentionTextAreaHandle>(null);
 
-  // 1. Deduplicate upstream sources by sourceNodeId to eliminate redundant badges
-  const uniqueUpstreamSources = useMemo(() => {
-    const seen = new Set<string>();
-    const out: UpstreamSourceItem[] = [];
-    for (const s of upstreamSources) {
-      if (!seen.has(s.sourceNodeId)) {
-        seen.add(s.sourceNodeId);
-        out.push(s);
-      }
-    }
-    return out;
-  }, [upstreamSources]);
+  // Register the insert callback while this panel is showing. Do not clear the
+  // composer on hide/remount — a mention pick updates node params, RF rebuilds
+  // the node, and a 100ms shouldRender dip would otherwise wipe the prompt.
+  useEffect(() => {
+    if (!shouldRender) return;
+    canvasStore.setMentionComposer(sessionId, node.id, (src) => {
+      mentionAreaRef.current?.insertMentionNode(src);
+    });
+  }, [shouldRender, sessionId, node.id]);
 
-  // 2. Identify which upstream nodes are already explicitly referenced in the prompt text
-  const mentionedNodeIds = useMemo(() => {
-    const set = new Set<string>();
-    for (const tok of parseMentionTokens(prompt)) {
-      if (tok.type === 'mention') set.add(tok.id);
-    }
-    return set;
-  }, [prompt]);
+  // Keep inbound reference/prompt wires in lockstep with inline @ chips.
+  // The thumbnail strip is only a palette — it must not leave orphan edges.
+  useEffect(() => {
+    if (!shouldRender) return;
+    void canvasStore.syncMentionWires(sessionId, node.id, prompt);
+  }, [shouldRender, prompt, sessionId, node.id]);
 
-  // 3. Only display quick insertion buttons for connected upstream sources that are NOT yet mentioned inline
-  const unmentionedSources = useMemo(() => {
-    return uniqueUpstreamSources.filter((s) => !mentionedNodeIds.has(s.sourceNodeId));
-  }, [uniqueUpstreamSources, mentionedNodeIds]);
+  const visualRefs = useMemo(() => {
+    const ids = canvasStore.composerRefIds(node);
+    return ids
+      .map((id) => candidates.find((c) => c.id === id))
+      .filter((n): n is CanvasNode => Boolean(n));
+  }, [node, candidates]);
 
   const pinnedNodeIds = useMemo(
-    () => uniqueUpstreamSources.map((s) => s.sourceNodeId),
-    [uniqueUpstreamSources],
+    () => visualRefs.map((n) => n.id),
+    [visualRefs],
   );
 
   // ── Early return after all hooks ─────────────────────────────────────────
@@ -203,47 +199,6 @@ function NodeFloatingPanel({
     ? Boolean(prompt.trim() || hasUpstreamPrompt)
     : Boolean(prompt.trim() || hasUpstreamPrompt || (isVideo && hasUpstreamStartFrame));
 
-  const getSourceIcon = (source: UpstreamSourceItem) => {
-    if (source.handleId === 'audio_in') return <Volume2 size={11} className="text-amber-400" />;
-    switch (source.sourceType) {
-      case 'note':
-        return <Type size={11} className="text-emerald-400" />;
-      case 'image':
-        return <ImageIcon size={11} className="text-indigo-400" />;
-      case 'video':
-        return <Video size={11} className="text-rose-400" />;
-      case 'audio':
-        return <Volume2 size={11} className="text-amber-400" />;
-      case 'agent':
-        return <Bot size={11} className="text-sky-400" />;
-      default:
-        return <Sparkles size={11} className="text-accent" />;
-    }
-  };
-
-  const getSourceRoleBadge = (source: UpstreamSourceItem) => {
-    if (source.handleId === 'start_frame') return '首帧';
-    if (source.handleId === 'end_frame') return '尾帧';
-    if (source.handleId === 'reference' || source.handleId?.startsWith('ref_')) return '参考';
-    if (source.handleId === 'audio_in') return '配乐';
-    if (source.sourceType === 'image') return isVideo ? '首帧' : '参考';
-    if (source.sourceType === 'video') return '前序视频';
-    if (source.sourceType === 'audio') return '配乐';
-    if (source.sourceType === 'note' || source.sourceType === 'agent') return '提示词';
-    return null;
-  };
-
-  const handleInsertSource = (source: UpstreamSourceItem) => {
-    const targetNode = candidates.find((c) => c.id === source.sourceNodeId);
-    if (targetNode && mentionAreaRef.current) {
-      mentionAreaRef.current.insertMentionNode(targetNode);
-    } else {
-      const token = `${serializeMention(source.sourceTitle, source.sourceNodeId)} `;
-      const next = prompt.trim() ? `${prompt.trim()} ${token}` : token;
-      onPromptChange(next);
-    }
-  };
-
   const placeholder = isVideo
     ? hasUpstreamPrompt
       ? '已接入上游提示词，可在此输入镜头运镜与动作细节…'
@@ -263,8 +218,11 @@ function NodeFloatingPanel({
 
   return (
     <div
-      className="nodrag nopan nowheel absolute top-full left-1/2 -translate-x-1/2 mt-2.5 z-40 pointer-events-auto cursor-default"
+      data-mention-composer={node.id}
+      className="nodrag nopan nowheel absolute top-full left-1/2 mt-2.5 z-40 pointer-events-auto cursor-default"
       style={{
+        // Don't also use Tailwind -translate-x-1/2: v4's `translate` property
+        // would stack with this `transform` and shove the panel left.
         transform: `translateX(-50%) scale(${floatScale})`,
         transformOrigin: 'top center',
         width: 680,
@@ -274,65 +232,30 @@ function NodeFloatingPanel({
       onWheel={(e) => e.stopPropagation()}
     >
       <div className="flex flex-col gap-2 rounded-2xl border border-line/50 bg-[#161618]/95 dark:bg-[#161618]/95 p-3 text-xs shadow-2xl backdrop-blur-xl transition-all cursor-default">
-        {/* 1. Context Sources Bar: Clean, deduplicated, unmentioned-only helper */}
-        {unmentionedSources.length > 0 ? (
-          <div className="flex items-center gap-1.5 flex-wrap pb-0.5 text-[11px]">
-            <span className="text-[10px] font-medium text-ink-muted/70 shrink-0 flex items-center gap-1 mr-0.5">
-              <Sparkles size={11} className="text-accent" />
-              快捷插入引用:
-            </span>
-            {unmentionedSources.map((source) => {
-              const roleBadge = getSourceRoleBadge(source);
-              let typeStyle = 'border-line/60 bg-paper-inset/40 text-ink-muted hover:text-accent hover:border-accent/40 hover:bg-accent/10';
-              if (source.sourceType === 'note') {
-                typeStyle = 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-500/50';
-              } else if (source.sourceType === 'image') {
-                typeStyle = 'border-indigo-500/30 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 hover:border-indigo-500/50';
-              } else if (source.sourceType === 'video') {
-                typeStyle = 'border-rose-500/30 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 hover:border-rose-500/50';
-              } else if (source.sourceType === 'audio') {
-                typeStyle = 'border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 hover:border-amber-500/50';
-              } else if (source.sourceType === 'agent') {
-                typeStyle = 'border-sky-500/30 bg-sky-500/10 text-sky-400 hover:bg-sky-500/20 hover:border-sky-500/50';
-              }
-
-              return (
-                <button
-                  key={source.sourceNodeId}
-                  type="button"
-                  onClick={() => handleInsertSource(source)}
-                  className={cn(
-                    'group inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] transition-all cursor-pointer shadow-xs',
-                    typeStyle,
-                  )}
-                  title={`点击将「${source.sourceTitle}」作为行内 @ 胶囊插入提示词`}
-                >
-                  {getSourceIcon(source)}
-                  {roleBadge ? (
-                    <span className="text-[9px] opacity-80 font-medium">
-                      {roleBadge}
-                    </span>
-                  ) : null}
-                  <span className="max-w-[120px] truncate font-normal">
-                    + @{source.sourceTitle}
-                  </span>
-                  <span
-                    role="button"
-                    tabIndex={-1}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void canvasStore.removeEdge(sessionId, source.edgeId);
-                    }}
-                    title="移除此上游连线"
-                    className="ml-0.5 opacity-40 hover:opacity-100 hover:text-danger p-0.5 rounded transition-colors"
-                  >
-                    <X size={9} />
-                  </span>
-                </button>
-              );
-            })}
+        <div className="flex items-center gap-2 px-0.5">
+          <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-x-auto no-scrollbar">
+            {visualRefs.map((srcNode) => (
+                <RefChip
+                  key={srcNode.id}
+                  node={srcNode}
+                  title={srcNode.title || '节点'}
+                  onInsert={() => mentionAreaRef.current?.insertMentionNode(srcNode)}
+                  onRemove={() => void canvasStore.removeComposerRef(sessionId, node.id, srcNode.id)}
+                />
+            ))}
+            <button
+              type="button"
+              onClick={() => canvasStore.startPickingCanvasRefs(sessionId, node.id)}
+              className="inline-flex h-9 shrink-0 items-center gap-1 rounded-xl border border-dashed border-line/70 px-2 text-[11px] text-ink-muted hover:text-ink hover:border-ink-muted/50 cursor-pointer"
+            >
+              <Plus size={13} />
+              参考
+            </button>
+            {visualRefs.length > 0 ? (
+              <span className="shrink-0 text-[11px] text-amber-200/80">参考图 {visualRefs.length} 张</span>
+            ) : null}
           </div>
-        ) : null}
+        </div>
 
         {/* 2. MentionTextArea Prompt Input (Rich inline chips, flat, borderless) */}
         <div className="relative px-1 pt-0.5 cursor-text">
@@ -349,14 +272,16 @@ function NodeFloatingPanel({
             minRows={2}
             autoFocus={autoFocus}
             className="text-[13px] text-ink placeholder:text-ink-muted/40 leading-relaxed font-normal"
+            onComposerActive={() =>
+              canvasStore.setMentionComposer(sessionId, node.id, (src) => {
+                mentionAreaRef.current?.insertMentionNode(src);
+              })
+            }
             onMentionSelect={(refNode) => {
-              void canvasStore.connectNodes(
-                sessionId,
-                refNode.id,
-                node.id,
-                'result',
-                'prompt',
-              );
+              void canvasStore.connectMention(sessionId, node.id, refNode);
+            }}
+            onMentionRemove={(sourceId) => {
+              void canvasStore.disconnectMention(sessionId, node.id, sourceId);
             }}
           />
         </div>
@@ -596,6 +521,50 @@ function NodeFloatingPanel({
         </div>
       </div>
     </div>
+  );
+}
+
+function RefChip({
+  node,
+  title,
+  onInsert,
+  onRemove,
+}: {
+  node?: CanvasNode;
+  title: string;
+  onInsert: () => void;
+  onRemove: () => void;
+}) {
+  const rel =
+    node?.output?.assets?.[node.output.activeAssetIndex ?? 0] ??
+    node?.output?.assets?.[0];
+  const url = useAssetUrl(rel);
+  return (
+    <button
+      type="button"
+      onClick={onInsert}
+      title={`插入 @${title}`}
+      className="group relative h-9 w-9 shrink-0 overflow-hidden rounded-lg border border-line/50 bg-paper-inset/60"
+    >
+      {url ? (
+        <img src={url} alt="" className="h-full w-full object-cover" />
+      ) : (
+        <span className="flex h-full w-full items-center justify-center text-[9px] text-ink-muted">
+          {title.slice(0, 2)}
+        </span>
+      )}
+      <span
+        role="button"
+        tabIndex={-1}
+        onClick={(e) => {
+          e.stopPropagation();
+          onRemove();
+        }}
+        className="absolute right-0 top-0 hidden h-3.5 w-3.5 items-center justify-center rounded-bl bg-black/70 text-white group-hover:flex"
+      >
+        <X size={8} />
+      </span>
+    </button>
   );
 }
 

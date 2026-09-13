@@ -230,7 +230,7 @@ export default function Composer({
                 const p = (node.params as Record<string, unknown>) ?? {};
                 const label = (node.title || p.prompt || p.instruction || p.content || node.type).toString().slice(0, 24);
                 const thumbnail = (node as { assets?: { url: string }[] }).assets?.[0]?.url || (p.imageUrl as string | undefined) || (p.videoUrl as string | undefined);
-                chatStore.addNodeRef(sessionId, { id: node.id, label, type: node.type, thumbnail });
+                chatStore.addNodeRef(sessionId, { id: node.id, label, type: node.type, thumbnail }); // context only — never wires the canvas
               }
             }}
             onPick={(path) => {

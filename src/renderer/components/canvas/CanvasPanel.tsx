@@ -103,6 +103,7 @@ import CanvasEmptyPrompt from './CanvasEmptyPrompt';
 import ReturnToNodesToast from './ReturnToNodesToast';
 import MultiSelectToolbar from './MultiSelectToolbar';
 import InsertFromCanvasBanner from './InsertFromCanvasBanner';
+import CanvasRefPickBanner from './CanvasRefPickBanner';
 import { getCanvasNodeThumbnail } from './canvasThumbnail';
 import ErrorBoundary from '../ErrorBoundary';
 import Tooltip from '../ui/Tooltip';
@@ -356,6 +357,10 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const isPickingReference = useChatStore((s) => (sessionId ? s.pickingReferenceBySession[sessionId] : false)) ?? false;
+  const pickingCanvasRefs = useCanvasStore((s) =>
+    sessionId ? s.pickingCanvasRefsBySession[sessionId] : undefined,
+  );
+
 
   useEffect(() => {
     const handleClear = (e: Event) => {
@@ -625,6 +630,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
             height: node.h,
             zIndex,
             draggable,
+            selected: selectedSet.has(node.id) || prev?.selected === true,
             data: {
               sessionId,
               node,
@@ -788,6 +794,40 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     },
     [rf, sessionId, storeNodes],
   );
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (e.button !== 0) return;
+      if (isPickingReference) return;
+      const snap = canvasStore.getSnapshot();
+      const pickingId = snap.pickingCanvasRefsBySession[sessionId];
+      const el = e.target as HTMLElement | null;
+      if (!el?.closest) return;
+      if (el.closest('[data-mention-composer], .mention-input, .mention-chip')) return;
+      if (el.closest('.react-flow__handle, [data-magnetic-handle]')) return;
+      const nodeEl = el.closest('.react-flow__node');
+      const id = nodeEl?.getAttribute('data-id');
+
+      if (!pickingId) return;
+      if (!id || id === pickingId) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      const source = canvasStore.nodeById(sessionId, id);
+      if (source) {
+        void canvasStore.addComposerRef(sessionId, pickingId, source.id);
+        flash(`已加入参考「${source.title || '节点'}」`);
+      }
+      selectNode(pickingId);
+      requestAnimationFrame(() => selectNode(pickingId));
+    };
+    window.addEventListener('pointerdown', handler, true);
+    window.addEventListener('mousedown', handler, true);
+    return () => {
+      window.removeEventListener('pointerdown', handler, true);
+      window.removeEventListener('mousedown', handler, true);
+    };
+  }, [sessionId, isPickingReference, flash, selectNode]);
 
   const handleCreateAndSelect = useCallback(
     async (promise: Promise<string | null>) => {
@@ -1343,7 +1383,11 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
 
   const onSelectionChange = useCallback(
     ({ nodes: sel }: { nodes: { id: string }[] }) => {
-      const ids = sel.map((n) => n.id);
+      const pickingId = canvasStore.getSnapshot().pickingCanvasRefsBySession[sessionId];
+      let ids = sel.map((n) => n.id);
+      if (pickingId) {
+        ids = [pickingId];
+      }
       setSelectedNodeIds(ids);
       canvasStore.setSelection(sessionId, ids);
       rf.setNodes((prevNodes) => {
@@ -1351,8 +1395,9 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         const zIndexes = computeNodeZIndexes(storeNodes, (id) => selectedSet.has(id));
         return prevNodes.map((n) => {
           const nextZ = zIndexes.get(n.id) ?? (selectedSet.has(n.id) ? 1000 : 1);
-          if (n.zIndex === nextZ) return n;
-          return { ...n, zIndex: nextZ };
+          const isSelected = selectedSet.has(n.id);
+          if (n.zIndex === nextZ && n.selected === isSelected) return n;
+          return { ...n, selected: isSelected, zIndex: nextZ };
         });
       });
     },
@@ -1473,6 +1518,11 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      if (e.key === 'Escape' && canvasStore.getSnapshot().pickingCanvasRefsBySession[sessionId]) {
+        e.preventDefault();
+        canvasStore.stopPickingCanvasRefs(sessionId);
+        return;
+      }
       const activeEl = document.activeElement;
       const isInput =
         activeEl &&
@@ -1548,7 +1598,12 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     <div
       data-dragging={isInteracting ? 'true' : undefined}
       data-lowzoom={isLowZoom ? 'true' : undefined}
-      className={cn("h-full w-full outline-none", isPickingReference && "!cursor-crosshair")}
+      className={cn(
+        "h-full w-full outline-none",
+        isPickingReference && "!cursor-crosshair",
+        Boolean(pickingCanvasRefs) && "!cursor-crosshair",
+        Boolean(pickingCanvasRefs) && "canvas-mention-pick",
+      )}
       tabIndex={0}
       onKeyDown={onKeyDown}
       onDragOver={(e) => e.preventDefault()}
@@ -1576,6 +1631,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         onConnectStart={onConnectStart}
         onConnectEnd={onConnectEnd}
         onNodeClick={(_, rfNode) => {
+          // Chat composer pick: attach context to the turn. Never wires the graph.
           if (isPickingReference) {
             const node = storeNodes.find((n) => n.id === rfNode.id);
             if (node) {
@@ -1587,9 +1643,12 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
             }
           }
         }}
-        onPaneClick={() => {
+        onPaneClick={(e) => {
+          const t = e.target as HTMLElement | null;
+          if (t?.closest?.('[data-mention-composer], .mention-input')) return;
           if (Date.now() - dropConnectMenuOpenedAt.current < 350) return;
           if (Date.now() - addNodesModalOpenedAt.current < 350) return;
+          canvasStore.clearMentionComposer(sessionId);
           if (menu) setMenu(null);
           if (dropConnectMenu) setDropConnectMenu(null);
           if (addNodesModal) setAddNodesModal(null);
@@ -1717,6 +1776,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         }}
         proOptions={{ hideAttribution: true }}
         deleteKeyCode={['Backspace', 'Delete']}
+        multiSelectionKeyCode={pickingCanvasRefs ? null : undefined}
         panActivationKeyCode="Space"
         panOnDrag={mode === 'pan' ? true : [1]}
         selectionOnDrag={mode === 'select'}
@@ -1749,6 +1809,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         <AlignmentGuides sessionId={sessionId} enabled={snapEnabled} />
         <ReturnToNodesToast sessionId={sessionId} />
         <InsertFromCanvasBanner sessionId={sessionId} />
+        <CanvasRefPickBanner sessionId={sessionId} />
         <MultiSelectToolbar
           sessionId={sessionId}
           selectedNodes={selectedNodes}

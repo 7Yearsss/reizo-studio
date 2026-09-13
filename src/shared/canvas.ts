@@ -31,6 +31,8 @@ export interface CanvasImageParams {
   size: '1024x1024' | '1024x1536' | '1536x1024';
   model?: string;
   count?: 1 | 2 | 4;
+  /** Palette of canvas nodes available to @ from this composer. Wires follow inline @, not this list. */
+  refNodeIds?: string[];
   /** 存在时，本节点是一次「编辑派生」节点，由 runImageNode 的 edit 分支处理。 */
   edit?: ImageEditSpec;
 }
@@ -41,6 +43,8 @@ export interface CanvasAgentParams {
 
 export interface CanvasVideoParams {
   prompt: string;
+  /** Palette of canvas nodes available to @ from this composer. */
+  refNodeIds?: string[];
   duration?: '5s' | '10s';
   ratio?: '16:9' | '9:16' | '1:1';
   /**
@@ -57,6 +61,7 @@ export interface CanvasVideoParams {
 
 export interface CanvasAudioParams {
   prompt?: string;
+  refNodeIds?: string[];
   durationSec?: number;
   model?: string;
   format?: 'mp3' | 'wav';
@@ -64,6 +69,7 @@ export interface CanvasAudioParams {
 
 export interface CanvasNoteParams {
   content: string;
+  refNodeIds?: string[];
   color?: 'amber' | 'slate' | 'rose' | 'emerald' | 'violet';
 }
 

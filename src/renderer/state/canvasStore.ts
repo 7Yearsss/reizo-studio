@@ -26,6 +26,13 @@ import type { AgentTrailEntry } from '../../shared/agentTrail';
 import { grabVideoFrameBlob, type FramePick } from '../lib/videoFrame';
 import { notifyJobDone, primeNotifications } from '../lib/notify';
 import type { CanvasEvent } from '../../shared/canvasStream';
+import {
+  isStructuralTargetHandle,
+  mentionPromptKey,
+  planMentionWire,
+  shouldSyncMentionOnEdge,
+} from '../../shared/canvasMentionWire';
+import { parseMentionTokens, serializeMention, stripMentionToken } from '../../shared/resolveMentions';
 
 export interface GraphRun {
   running: boolean;
@@ -50,6 +57,10 @@ export interface CanvasState {
   proposalsBySession: Record<string, string[]>;
   /** Selected node IDs per session on the canvas. */
   selectedNodeIdsBySession: Record<string, string[]>;
+  /** Node whose prompt composer currently owns @ pick (Ctrl+click). Chat composer never sets this. */
+  mentionComposerBySession: Record<string, string | undefined>;
+  /** Composer node id while the user is multi-picking canvas references. */
+  pickingCanvasRefsBySession: Record<string, string | undefined>;
 }
 
 export const EMPTY_NODES: CanvasNode[] = [];
@@ -72,7 +83,11 @@ let state: CanvasState = {
   moodboardBySession: {},
   proposalsBySession: {},
   selectedNodeIdsBySession: {},
+  mentionComposerBySession: {},
+  pickingCanvasRefsBySession: {},
 };
+
+const mentionInsertBySession = new Map<string, (node: CanvasNode) => void>();
 
 const listeners = new Set<() => void>();
 const streamAborts = new Map<string, AbortController>();
@@ -298,6 +313,166 @@ export function spotlight(sessionId: string, ids: string[]): void {
 /** Back-compat thin wrapper — existing callers pass one id. */
 export function focusNode(sessionId: string, nodeId: string): void {
   spotlight(sessionId, [nodeId]);
+}
+
+export function setMentionComposer(
+  sessionId: string,
+  nodeId: string,
+  insert: (node: CanvasNode) => void,
+): void {
+  mentionInsertBySession.set(sessionId, insert);
+  if (state.mentionComposerBySession[sessionId] === nodeId) return;
+  setState({
+    mentionComposerBySession: { ...state.mentionComposerBySession, [sessionId]: nodeId },
+  });
+}
+
+export function clearMentionComposer(sessionId: string, nodeId?: string): void {
+  const current = state.mentionComposerBySession[sessionId];
+  if (nodeId && current && current !== nodeId) return;
+  mentionInsertBySession.delete(sessionId);
+  if (!current && !state.pickingCanvasRefsBySession[sessionId]) return;
+  setState({
+    mentionComposerBySession: { ...state.mentionComposerBySession, [sessionId]: undefined },
+    pickingCanvasRefsBySession: { ...state.pickingCanvasRefsBySession, [sessionId]: undefined },
+  });
+}
+
+export function startPickingCanvasRefs(sessionId: string, composerNodeId: string): void {
+  if (state.pickingCanvasRefsBySession[sessionId] === composerNodeId) return;
+  setState({
+    pickingCanvasRefsBySession: { ...state.pickingCanvasRefsBySession, [sessionId]: composerNodeId },
+  });
+}
+
+export function stopPickingCanvasRefs(sessionId: string): void {
+  if (!state.pickingCanvasRefsBySession[sessionId]) return;
+  setState({
+    pickingCanvasRefsBySession: { ...state.pickingCanvasRefsBySession, [sessionId]: undefined },
+  });
+}
+
+export function composerRefIds(node: CanvasNode | undefined): string[] {
+  const ids = (node?.params as { refNodeIds?: unknown } | undefined)?.refNodeIds;
+  return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : [];
+}
+
+export async function addComposerRef(sessionId: string, composerId: string, sourceId: string): Promise<void> {
+  if (composerId === sourceId) return;
+  const node = nodeById(sessionId, composerId);
+  if (!node) return;
+  const ids = composerRefIds(node);
+  if (ids.includes(sourceId)) return;
+  const p = (node.params as Record<string, unknown>) ?? {};
+  await updateNodeParams(sessionId, composerId, { ...p, refNodeIds: [...ids, sourceId] });
+}
+
+export async function removeComposerRef(sessionId: string, composerId: string, sourceId: string): Promise<void> {
+  const node = nodeById(sessionId, composerId);
+  if (!node) return;
+  const ids = composerRefIds(node);
+  if (!ids.includes(sourceId)) return;
+  const p = (node.params as Record<string, unknown>) ?? {};
+  await updateNodeParams(sessionId, composerId, { ...p, refNodeIds: ids.filter((id) => id !== sourceId) });
+}
+
+export async function connectMention(
+  sessionId: string,
+  targetId: string,
+  source: CanvasNode,
+  opts?: { preserveSelection?: boolean },
+): Promise<void> {
+  const target = nodeById(sessionId, targetId);
+  if (!target) return;
+  await addComposerRef(sessionId, targetId, source.id);
+  if (!opts?.preserveSelection) setSelection(sessionId, [targetId]);
+  const edges = state.edgesBySession[sessionId] ?? [];
+  if (edges.some((e) => e.sourceId === source.id && e.targetId === targetId)) {
+    return;
+  }
+  const plan = planMentionWire(source, target);
+  if (!plan) return;
+  try {
+    await connectNodes(sessionId, source.id, targetId, plan.sourceHandle, plan.targetHandle);
+  } catch {
+    try {
+      await connectNodes(sessionId, source.id, targetId, plan.sourceHandle, 'prompt');
+    } catch {
+      /* mention chip is already in the prompt; graph can stay unwired */
+    }
+  }
+  if (!opts?.preserveSelection) setSelection(sessionId, [targetId]);
+}
+
+export async function disconnectMention(sessionId: string, targetId: string, sourceId: string): Promise<void> {
+  const all = state.edgesBySession[sessionId] ?? [];
+  const edgeIds = new Set<string>();
+  const extractors: string[] = [];
+
+  for (const e of all) {
+    if (e.sourceId === sourceId && e.targetId === targetId && !isStructuralTargetHandle(e.targetHandle)) {
+      edgeIds.add(e.id);
+    }
+  }
+
+  // @video onto an image/video inserts a frame-extractor in between.
+  for (const inbound of all) {
+    if (inbound.sourceId !== sourceId) continue;
+    const mid = nodeById(sessionId, inbound.targetId);
+    if (mid?.type !== 'frameExtractor') continue;
+    const outbound = all.find((e) => e.sourceId === mid.id && e.targetId === targetId);
+    if (!outbound) continue;
+    edgeIds.add(inbound.id);
+    edgeIds.add(outbound.id);
+    const leftover = all.some(
+      (e) => e.id !== inbound.id && e.id !== outbound.id && (e.sourceId === mid.id || e.targetId === mid.id),
+    );
+    if (!leftover) extractors.push(mid.id);
+  }
+
+  for (const id of edgeIds) {
+    await removeEdge(sessionId, id);
+  }
+  for (const id of extractors) {
+    await removeNode(sessionId, id);
+  }
+}
+
+/** Graph twins of inline @ chips. Reference-strip items without @ are not wired. */
+export async function syncMentionWires(sessionId: string, nodeId: string, livePrompt?: string): Promise<void> {
+  const node = nodeById(sessionId, nodeId);
+  if (!node) return;
+  const key = mentionPromptKey(node.type);
+  const raw = key ? (node.params as Record<string, unknown>)[key] : '';
+  const text = livePrompt !== undefined ? livePrompt : typeof raw === 'string' ? raw : '';
+  const mentioned = new Set(
+    parseMentionTokens(text)
+      .filter((t): t is { type: 'mention'; id: string; label: string } => t.type === 'mention')
+      .map((t) => t.id),
+  );
+
+  const all = state.edgesBySession[sessionId] ?? [];
+  const wiredSources = new Set<string>();
+  for (const e of all) {
+    if (e.targetId !== nodeId || isStructuralTargetHandle(e.targetHandle)) continue;
+    const src = nodeById(sessionId, e.sourceId);
+    if (src?.type === 'frameExtractor') {
+      const inbound = all.find((x) => x.targetId === src.id);
+      if (inbound) wiredSources.add(inbound.sourceId);
+    }
+    wiredSources.add(e.sourceId);
+  }
+
+  for (const sourceId of wiredSources) {
+    if (!mentioned.has(sourceId)) {
+      await disconnectMention(sessionId, nodeId, sourceId);
+    }
+  }
+
+  for (const id of mentioned) {
+    const src = nodeById(sessionId, id);
+    if (src) await connectMention(sessionId, nodeId, src, { preserveSelection: true });
+  }
 }
 
 /**
@@ -1144,21 +1319,21 @@ export async function connectNodes(
   const edgeId = await _addEdge(sessionId, sourceId, targetId, sourceHandle, targetHandle);
   if (!edgeId) return;
 
-  // Mention sync: if connecting into an image/video prompt node via reference/image,
-  // ensure the prompt includes the mention token so graph and prompt remain in sync!
+  // Mention sync: reference-class edges get a prompt chip. First/last frame do not.
   if (
     targetNode &&
-    (targetNode.type === 'image' || targetNode.type === 'video') &&
-    (targetHandle === 'reference' || targetHandle === 'image' || !targetHandle) &&
     sourceNode &&
-    (sourceNode.type === 'image' || sourceNode.type === 'anchor' || sourceNode.type === 'video')
+    shouldSyncMentionOnEdge(targetHandle, sourceNode.type)
   ) {
-    const p = (targetNode.params as { prompt?: string }) ?? {};
-    const currPrompt = p.prompt ?? '';
-    const mentionToken = `@[${sourceNode.title || '节点'}](canvas:${sourceNode.id})`;
-    if (!currPrompt.includes(sourceNode.id)) {
-      const nextPrompt = currPrompt.trim() ? `${currPrompt} ${mentionToken}` : mentionToken;
-      void updateNodeParams(sessionId, targetId, { ...p, prompt: nextPrompt });
+    const key = mentionPromptKey(targetNode.type);
+    if (key) {
+      const p = (targetNode.params as Record<string, unknown>) ?? {};
+      const currPrompt = typeof p[key] === 'string' ? (p[key] as string) : '';
+      if (!currPrompt.includes(sourceNode.id)) {
+        const mentionToken = serializeMention(sourceNode.title || '节点', sourceNode.id);
+        const nextPrompt = currPrompt.trim() ? `${currPrompt} ${mentionToken}` : mentionToken;
+        void updateNodeParams(sessionId, targetId, { ...p, [key]: nextPrompt });
+      }
     }
   }
 
@@ -1227,16 +1402,35 @@ export async function addNodeAndConnectToTarget(
 export async function removeEdge(sessionId: string, edgeId: string): Promise<void> {
   const edge = (state.edgesBySession[sessionId] ?? []).find((e) => e.id === edgeId);
   if (!edge) return;
+  const target = nodeById(sessionId, edge.targetId);
+  const source = nodeById(sessionId, edge.sourceId);
+  const key = target ? mentionPromptKey(target.type) : null;
+  const shouldStrip = Boolean(target && source && key && shouldSyncMentionOnEdge(edge.targetHandle, source.type));
+  const prevParams = target?.params;
+  const prevText = key && prevParams && typeof (prevParams as Record<string, unknown>)[key] === 'string'
+    ? ((prevParams as Record<string, unknown>)[key] as string)
+    : '';
+  const nextText = shouldStrip && prevText ? stripMentionToken(prevText, edge.sourceId) : prevText;
+
   await _deleteEdge(sessionId, edgeId);
+  if (shouldStrip && target && key && nextText !== prevText) {
+    await _setNode(sessionId, target.id, { params: { ...(prevParams as object), [key]: nextText } });
+  }
+
   record(sessionId, {
     undo: async () => {
       await _addEdge(sessionId, edge.sourceId, edge.targetId, edge.sourceHandle, edge.targetHandle).catch((): null => null);
+      if (shouldStrip && target && prevParams) await _setNode(sessionId, target.id, { params: prevParams });
     },
     redo: async () => {
       const again = (state.edgesBySession[sessionId] ?? []).find(
         (e) => e.sourceId === edge.sourceId && e.targetId === edge.targetId,
       );
       if (again) await _deleteEdge(sessionId, again.id);
+      if (shouldStrip && target && key && nextText !== prevText) {
+        const curr = nodeById(sessionId, target.id)?.params;
+        if (curr) await _setNode(sessionId, target.id, { params: { ...curr, [key]: nextText } });
+      }
     },
   });
 }

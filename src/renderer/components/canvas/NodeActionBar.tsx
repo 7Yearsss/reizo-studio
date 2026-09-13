@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useStore } from '@xyflow/react';
 import { cn } from '../../lib/cn';
+import Tooltip from '../ui/Tooltip';
 
 /**
  * One entry on a node's floating action bar. The ordering the caller passes is
@@ -62,22 +63,23 @@ export default function NodeActionBar({
       {actions.map((action, i) => (
         <Fragment key={action.id}>
           {i > 0 ? <span className="h-3 w-px bg-line" /> : null}
-          <button
-            type="button"
-            disabled={action.disabled}
-            title={action.title ?? action.label}
-            onClick={(e) => {
-              e.stopPropagation();
-              action.onClick();
-            }}
-            className={cn(
-              'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium hover:bg-paper-inset disabled:opacity-40 disabled:hover:bg-transparent cursor-pointer disabled:cursor-not-allowed',
-              action.tone === 'accent' ? 'text-accent' : 'text-ink',
-            )}
-          >
-            {action.icon}
-            {action.label}
-          </button>
+          <Tooltip content={action.title ?? action.label} side="top" wrapperClassName="inline-flex">
+            <button
+              type="button"
+              disabled={action.disabled}
+              onClick={(e) => {
+                e.stopPropagation();
+                action.onClick();
+              }}
+              className={cn(
+                'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium hover:bg-paper-inset disabled:opacity-40 disabled:hover:bg-transparent cursor-pointer disabled:cursor-not-allowed',
+                action.tone === 'accent' ? 'text-accent' : 'text-ink',
+              )}
+            >
+              {action.icon}
+              {action.label}
+            </button>
+          </Tooltip>
         </Fragment>
       ))}
     </div>

@@ -11,6 +11,7 @@ import type { CanvasNode } from '../../../shared/canvas';
 import { parseMentionTokens, serializeMention } from '../../../shared/resolveMentions';
 import { cn } from '../../lib/cn';
 import MentionMenu from './MentionMenu';
+import { getCanvasNodeThumbnail } from './canvasThumbnail';
 
 export interface MentionTextAreaHandle {
   insertMentionNode: (node: CanvasNode) => void;
@@ -30,6 +31,11 @@ export interface MentionTextAreaProps {
   minRows?: number;
   /** Fired when user picks a node to mention — use to auto-wire canvas edge. */
   onMentionSelect?: (node: CanvasNode) => void;
+  /** Fired when a chip is removed — use to drop the matching reference edge. */
+  onMentionRemove?: (nodeId: string) => void;
+  /** Canvas composer is focused — enables Ctrl+click pick on other nodes. */
+  onComposerActive?: () => void;
+  onComposerInactive?: () => void;
   /** Fired when user clicks an inline chip in the prompt — e.g. spotlight/focus on canvas */
   onChipClick?: (nodeId: string) => void;
   /** Pinned upstream source node IDs to prioritize at top of mention menu */
@@ -58,6 +64,9 @@ const MentionTextArea = forwardRef<MentionTextAreaHandle, MentionTextAreaProps>(
       className,
       minRows = 2,
       onMentionSelect,
+      onMentionRemove,
+      onComposerActive,
+      onComposerInactive,
       onChipClick,
       pinnedNodeIds,
       autoFocus = false,
@@ -123,10 +132,11 @@ const MentionTextArea = forwardRef<MentionTextAreaHandle, MentionTextAreaProps>(
           const chip = makeChip(
             tok.id,
             labelOf(tok.id, tok.label),
-            nodeObj?.type,
+            nodeObj,
             () => {
               chip.remove();
               emit();
+              onMentionRemove?.(tok.id);
             },
             onChipClick ? () => onChipClick(tok.id) : undefined,
           );
@@ -138,7 +148,7 @@ const MentionTextArea = forwardRef<MentionTextAreaHandle, MentionTextAreaProps>(
         el.appendChild(document.createTextNode(''));
       }
     },
-    [candidates, emit, labelOf, onChipClick],
+    [candidates, emit, labelOf, onChipClick, onMentionRemove],
   );
 
   // Repaint only when `value` changed outside this component.
@@ -224,10 +234,11 @@ const MentionTextArea = forwardRef<MentionTextAreaHandle, MentionTextAreaProps>(
       const chip = makeChip(
         node.id,
         node.title || node.id.slice(0, 6),
-        nodeObj.type,
+        nodeObj,
         () => {
           chip.remove();
           emit();
+          onMentionRemove?.(node.id);
         },
         onChipClick ? () => onChipClick(node.id) : undefined,
       );
@@ -253,7 +264,7 @@ const MentionTextArea = forwardRef<MentionTextAreaHandle, MentionTextAreaProps>(
       emit();
       onMentionSelect?.(node);
     },
-    [candidates, emit, onChipClick, onMentionSelect],
+    [candidates, emit, onChipClick, onMentionSelect, onMentionRemove],
   );
 
   /** Expose imperative insertion for external buttons (e.g. quick-add suggestion pills) */
@@ -284,10 +295,11 @@ const MentionTextArea = forwardRef<MentionTextAreaHandle, MentionTextAreaProps>(
         const chip = makeChip(
           node.id,
           node.title || node.id.slice(0, 6),
-          nodeObj.type,
+          nodeObj,
           () => {
             chip.remove();
             emit();
+            onMentionRemove?.(node.id);
           },
           onChipClick ? () => onChipClick(node.id) : undefined,
         );
@@ -317,10 +329,12 @@ const MentionTextArea = forwardRef<MentionTextAreaHandle, MentionTextAreaProps>(
       const currentVal = serialize().trim();
       const next = currentVal ? `${currentVal} ${serialized} ` : `${serialized} `;
       lastValue.current = next;
+      paint(next);
       onChange(next);
       onMentionSelect?.(node);
+      el.focus();
     },
-    [candidates, emit, onChange, onChipClick, onMentionSelect, serialize],
+    [candidates, emit, onChange, onChipClick, onMentionSelect, onMentionRemove, paint, serialize],
   );
 
   useImperativeHandle(refHandle, () => ({
@@ -354,12 +368,14 @@ const MentionTextArea = forwardRef<MentionTextAreaHandle, MentionTextAreaProps>(
         }
         if (chip) {
           e.preventDefault();
+          const removedId = chip.getAttribute(CHIP_ATTR);
           chip.remove();
           emit();
+          if (removedId) onMentionRemove?.(removedId);
         }
       }
     },
-    [menu, emit],
+    [menu, emit, onMentionRemove],
   );
 
   const onPaste = useCallback((e: React.ClipboardEvent<HTMLDivElement>) => {
@@ -380,12 +396,18 @@ const MentionTextArea = forwardRef<MentionTextAreaHandle, MentionTextAreaProps>(
         onInput={onInput}
         onKeyDown={onKeyDown}
         onPaste={onPaste}
+        onFocus={() => onComposerActive?.()}
         onBlur={() => {
           // Delay so a menu click lands before we tear the trigger down.
           setTimeout(() => {
             setMenu(null);
             onCommit?.();
           }, 120);
+          // Keep Ctrl+click pick armed through the mousedown that caused this blur.
+          setTimeout(() => {
+            if (ref.current && document.activeElement === ref.current) return;
+            onComposerInactive?.();
+          }, 280);
         }}
         onCompositionStart={() => {
           composing.current = true;
@@ -422,7 +444,7 @@ export default MentionTextArea;
 function makeChip(
   id: string,
   label: string,
-  type?: string,
+  node?: CanvasNode,
   onRemove?: () => void,
   onClick?: () => void,
 ): HTMLSpanElement {
@@ -430,6 +452,7 @@ function makeChip(
   span.setAttribute(CHIP_ATTR, id);
   span.dataset.mentionLabel = label;
   span.contentEditable = 'false';
+  const type = node?.type;
 
   let chipColors = 'border-accent/35 bg-accent/15 text-accent hover:border-accent/60 hover:bg-accent/25';
   let closeColors = 'text-accent/60 hover:bg-accent/25 hover:text-accent';
@@ -437,12 +460,12 @@ function makeChip(
   if (type === 'note') {
     chipColors = 'border-emerald-500/30 bg-emerald-500/12 text-emerald-400 hover:border-emerald-500/50 hover:bg-emerald-500/20';
     closeColors = 'text-emerald-400/60 hover:bg-emerald-500/20 hover:text-emerald-400';
-  } else if (type === 'image') {
-    chipColors = 'border-indigo-500/30 bg-indigo-500/12 text-indigo-400 hover:border-indigo-500/50 hover:bg-indigo-500/20';
-    closeColors = 'text-indigo-400/60 hover:bg-indigo-500/20 hover:text-indigo-400';
+  } else if (type === 'image' || type === 'anchor' || type === 'frameExtractor') {
+    chipColors = 'border-white/10 bg-white/5 text-ink hover:border-white/20 hover:bg-white/8';
+    closeColors = 'text-ink-muted hover:bg-white/15 hover:text-ink';
   } else if (type === 'video') {
-    chipColors = 'border-rose-500/30 bg-rose-500/12 text-rose-400 hover:border-rose-500/50 hover:bg-rose-500/20';
-    closeColors = 'text-rose-400/60 hover:bg-rose-500/20 hover:text-rose-400';
+    chipColors = 'border-rose-500/30 bg-rose-500/12 text-rose-300 hover:border-rose-500/50 hover:bg-rose-500/20';
+    closeColors = 'text-rose-300/60 hover:bg-rose-500/20 hover:text-rose-300';
   } else if (type === 'audio') {
     chipColors = 'border-amber-500/30 bg-amber-500/12 text-amber-400 hover:border-amber-500/50 hover:bg-amber-500/20';
     closeColors = 'text-amber-400/60 hover:bg-amber-500/20 hover:text-amber-400';
@@ -452,19 +475,9 @@ function makeChip(
   }
 
   span.className =
-    `mention-chip group mx-1 inline-flex select-none items-center gap-1 rounded-md border px-1.5 py-0.5 align-baseline text-[11px] font-medium transition-all cursor-pointer shadow-xs ${chipColors}`;
+    `mention-chip group mx-0.5 inline-flex select-none items-center gap-1.5 rounded-lg border pl-0.5 pr-1.5 py-0.5 align-middle text-[11px] font-medium transition-all cursor-pointer shadow-xs ${chipColors}`;
 
-  // 1. Icon badge
-  const iconSpan = document.createElement('span');
-  iconSpan.className = 'mention-chip-icon flex items-center text-[10px] select-none opacity-85';
-  let iconText = '✨';
-  if (type === 'note') iconText = '📝';
-  else if (type === 'image') iconText = '🖼️';
-  else if (type === 'video') iconText = '🎬';
-  else if (type === 'audio') iconText = '🎵';
-  else if (type === 'agent') iconText = '🤖';
-  iconSpan.textContent = iconText;
-  span.appendChild(iconSpan);
+  appendChipCover(span, node, type);
 
   // 2. Text label
   const textSpan = document.createElement('span');
@@ -497,4 +510,39 @@ function makeChip(
   }
 
   return span;
+}
+
+function appendChipCover(parent: HTMLElement, node?: CanvasNode, type?: string): void {
+  const url = node ? getCanvasNodeThumbnail(node) : undefined;
+  const canThumb =
+    Boolean(url) &&
+    (type === 'image' || type === 'video' || type === 'anchor' || type === 'frameExtractor');
+  if (url && canThumb && type === 'video') {
+    const video = document.createElement('video');
+    video.src = `${url}#t=0.001`;
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = 'metadata';
+    video.className = 'mention-chip-thumb pointer-events-none h-5 w-5 shrink-0 rounded-[5px] object-cover';
+    parent.appendChild(video);
+    return;
+  }
+  if (url && canThumb) {
+    const img = document.createElement('img');
+    img.src = url;
+    img.alt = '';
+    img.className = 'mention-chip-thumb pointer-events-none h-5 w-5 shrink-0 rounded-[5px] object-cover';
+    parent.appendChild(img);
+    return;
+  }
+  const iconSpan = document.createElement('span');
+  iconSpan.className = 'mention-chip-icon flex h-5 w-5 items-center justify-center text-[10px] select-none opacity-85';
+  let iconText = '✨';
+  if (type === 'note') iconText = '📝';
+  else if (type === 'image') iconText = '🖼️';
+  else if (type === 'video') iconText = '🎬';
+  else if (type === 'audio') iconText = '🎵';
+  else if (type === 'agent') iconText = '🤖';
+  iconSpan.textContent = iconText;
+  parent.appendChild(iconSpan);
 }

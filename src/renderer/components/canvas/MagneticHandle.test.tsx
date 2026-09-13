@@ -15,6 +15,10 @@ let mockStoreState: {
   edges: [],
 };
 
+vi.mock('../ui/Tooltip', () => ({
+  default: ({ children }: { children: React.ReactNode }) => children,
+}));
+
 vi.mock('@xyflow/react', () => ({
   Position: {
     Left: 'left',
@@ -141,8 +145,60 @@ describe('MagneticHandle', () => {
       />,
     );
 
-    // Plus button is visible and translated outward by constant popDistance (16px)
-    expect(html).toContain('translate3d(16px, 0px, 0)');
     expect(html).toContain('scale(1)');
+    expect(html).toContain('translate3d(0px, 0px, 0)');
+    expect(html).toContain('data-handle-approach="true"');
+  });
+
+  it('tucks the plus onto the node border while idle so it can spring outward', () => {
+    mockStoreState = {
+      transform: [0, 0, 1.0],
+      nodes: [{ id: 'node-1', dragging: false }],
+      edges: [],
+    };
+
+    const rightHtml = renderToString(
+      <MagneticHandle
+        type="source"
+        position={Position.Right}
+        id="out"
+        nodeId="node-1"
+        nodeHovered={false}
+      />,
+    );
+    expect(rightHtml).toContain('translate3d(-24px, 0px, 0) scale(0.3)');
+
+    const leftHtml = renderToString(
+      <MagneticHandle
+        type="target"
+        position={Position.Left}
+        id="in"
+        nodeId="node-1"
+        nodeHovered={false}
+      />,
+    );
+    expect(leftHtml).toContain('translate3d(24px, 0px, 0) scale(0.3)');
+  });
+
+  it('keeps a side approach rail hittable while the plus is still hidden', () => {
+    mockStoreState = {
+      transform: [0, 0, 1.0],
+      nodes: [{ id: 'node-1', dragging: false }],
+      edges: [],
+    };
+
+    const html = renderToString(
+      <MagneticHandle
+        type="source"
+        position={Position.Right}
+        id="out"
+        nodeId="node-1"
+        nodeHovered={false}
+      />,
+    );
+
+    expect(html).toContain('data-handle-approach="true"');
+    expect(html).toContain('pointer-events:auto');
+    expect(html).toContain('scale(0.3)');
   });
 });

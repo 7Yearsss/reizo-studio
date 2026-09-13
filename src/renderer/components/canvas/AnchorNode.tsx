@@ -14,6 +14,7 @@ import NodeHandle from './NodeHandle';
 import AgentMark from './AgentMark';
 import { useAssetUrl } from './useAssetUrl';
 import { useHoverIntent } from './NodeActionBar';
+import Tooltip from '../ui/Tooltip';
 
 /**
  * A reference pin: one image + a role (character / style / content) + a
@@ -68,18 +69,18 @@ function AnchorNode({ data, selected }: NodeProps) {
 
       <div className="mt-1.5 flex items-center rounded-lg border border-line/60 bg-paper-inset/50 p-0.5">
         {ANCHOR_ROLES.map((r) => (
+          <Tooltip key={r.id} content={r.hint} side="top" wrapperClassName="flex-1 inline-flex">
           <button
-            key={r.id}
             type="button"
             onClick={() => set({ role: r.id })}
-            title={r.hint}
             className={cn(
-              'nodrag flex-1 rounded-md px-1 py-0.5 text-[10px] font-medium transition-all',
+              'nodrag w-full rounded-md px-1 py-0.5 text-[10px] font-medium transition-all',
               role === r.id ? 'bg-paper-raised text-ink shadow-xs font-semibold' : 'text-ink-muted hover:text-ink',
             )}
           >
             {r.label}
           </button>
+          </Tooltip>
         ))}
       </div>
 

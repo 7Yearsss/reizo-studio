@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveMentions, parseMentionTokens, serializeMention } from './resolveMentions';
+import { resolveMentions, parseMentionTokens, serializeMention, stripMentionToken } from './resolveMentions';
 
 describe('resolveMentions', () => {
   const candidates = [
@@ -130,5 +130,11 @@ describe('parseMentionTokens / serializeMention', () => {
 
   it('serializeMention strips brackets from the label', () => {
     expect(serializeMention('a[b](c)', 'n1')).toBe('@[abc](canvas:n1)');
+  });
+
+  it('stripMentionToken removes only the matching chip', () => {
+    const text = '让 @[女主](canvas:n1) 站在 @[街](canvas:n2)';
+    expect(stripMentionToken(text, 'n1')).toBe('让 站在 @[街](canvas:n2)');
+    expect(stripMentionToken(text, 'gone')).toBe(text);
   });
 });

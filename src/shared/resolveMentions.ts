@@ -47,6 +47,19 @@ export function parseMentionTokens(text: string): MentionToken[] {
   return tokens;
 }
 
+export function serializeMentionTokens(tokens: MentionToken[]): string {
+  return tokens
+    .map((t) => (t.type === 'text' ? t.value : serializeMention(t.label, t.id)))
+    .join('')
+    .replace(/[ \t]{2,}/g, ' ');
+}
+
+/** Drop every canonical `@[label](canvas:id)` token for `nodeId`. */
+export function stripMentionToken(prompt: string, nodeId: string): string {
+  if (!prompt.includes(nodeId)) return prompt;
+  return serializeMentionTokens(parseMentionTokens(prompt).filter((t) => !(t.type === 'mention' && t.id === nodeId)));
+}
+
 /**
  * Parses @node mentions in a prompt, replaces them with model placeholder tokens
  * (<<<image 1>>>, <<<image 2>>>, ...), and reorders the referenced image assets

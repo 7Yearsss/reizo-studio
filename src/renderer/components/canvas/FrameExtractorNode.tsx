@@ -9,6 +9,7 @@ import { useAssetUrl } from './useAssetUrl';
 import { useHoverIntent } from './NodeActionBar';
 import { useIsSoloSelected } from './useSelectionCount';
 import { cn } from '../../lib/cn';
+import Tooltip from '../ui/Tooltip';
 
 function FrameExtractorNode({ id, data, selected }: NodeProps) {
   const { sessionId, node, isProposal, hasUpstreamAsset = false } = data as CanvasNodeData;
@@ -154,16 +155,21 @@ function FrameExtractorNode({ id, data, selected }: NodeProps) {
             </div>
 
             {/* Extract Trigger Button */}
+            <Tooltip
+              content={hasUpstreamAsset ? '从上游视频提取指定画面' : '请先确保上游视频已生成产物'}
+              side="top"
+              wrapperClassName="inline-flex"
+            >
             <button
               type="button"
               onClick={handleExtract}
               disabled={extracting || !hasUpstreamAsset}
               className="nodrag inline-flex items-center gap-1 rounded-md bg-accent px-2 py-0.5 text-[10px] font-medium text-accent-ink shadow-xs hover:opacity-90 disabled:opacity-40 transition-all active:scale-95"
-              title={hasUpstreamAsset ? '从上游视频提取指定画面' : '请先确保上游视频已生成产物'}
             >
               <RefreshCw size={10} className={cn(extracting && 'animate-spin')} />
               {assetRel ? '重抽' : '提取'}
             </button>
+            </Tooltip>
           </div>
         </div>
       )}

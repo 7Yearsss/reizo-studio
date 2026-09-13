@@ -2,6 +2,7 @@ import React, { useState, useRef, useCallback, useEffect, memo } from 'react';
 import { Handle, Position, type HandleType, useReactFlow, useStore, useUpdateNodeInternals } from '@xyflow/react';
 import { Plus } from 'lucide-react';
 import { cn } from '../../lib/cn';
+import Tooltip from '../ui/Tooltip';
 import { colorForKind, type EdgeKind } from './edges/edgeStyles';
 
 export const OPEN_HANDLE_MENU_EVENT = 'reizo:open-handle-menu';
@@ -37,12 +38,17 @@ export interface MagneticHandleProps {
 /**
  * TapNow-style magnetic handle:
  * - Separates the invisible/tiny React Flow Handle (~3px) from the visible springy plus button (~14px).
- * - Outer hit area (~64px) detects cursor proximity and pulls the plus button towards the pointer
- *   with an elastic cubic-bezier transition (~250ms).
- * - Leaves with a smooth rebound (~400ms).
- * - Clicking the plus button dispatches `reizo:open-handle-menu` to open downstream creation or upstream context menu.
+ * - A persistent approach rail hangs off the left/right edge so the plus appears
+ *   when the cursor *nears* the node — no need to cover the node first, then
+ *   move back out to click.
+ * - Hovering the rail pulls the plus toward the pointer with an elastic cubic-bezier.
+ * - Clicking the plus dispatches `reizo:open-handle-menu`.
  * - Dragging starts native React Flow wire connection.
  */
+
+/** Screen-space size of the left/right approach rail (local px, then inverse-zoomed). */
+const APPROACH_W = 48;
+const APPROACH_H = 84;
 function MagneticHandle({
   type,
   id,
@@ -56,6 +62,7 @@ function MagneticHandle({
 }: MagneticHandleProps) {
   const [offset, setOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isHovered, setIsHovered] = useState(false);
+  const [approachHover, setApproachHover] = useState(false);
   const hitRef = useRef<HTMLDivElement>(null);
   const handleRef = useRef<HTMLDivElement>(null);
   const pointerStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
@@ -98,8 +105,9 @@ function MagneticHandle({
     ),
   );
 
-  // The button is only visible when the parent node is hovered/selected AND not being dragged.
-  const visible = nodeHovered && !isDragging;
+  // Visible when the node is hovered/selected, OR the cursor is already on the
+  // side rail — that's the "approach from outside" path.
+  const visible = (nodeHovered || approachHover) && !isDragging;
 
   // Immediately notify React Flow to measure this handle geometry on mount and on connection changes
   useEffect(() => {
@@ -139,6 +147,7 @@ function MagneticHandle({
   const handlePointerLeave = useCallback(() => {
     setOffset({ x: 0, y: 0 });
     setIsHovered(false);
+    setApproachHover(false);
   }, []);
 
   const handleButtonPointerDown = useCallback(
@@ -224,12 +233,6 @@ function MagneticHandle({
       ? '继续生成 / 引用该节点'
       : '添加上下文输入';
 
-  // Distance from node border to button center when popped out (in handle local space).
-  // The outer container is already scaled by `scale`, so popDistance here must NOT multiply by `scale` again!
-  const baseRadius = 10;
-  const gap = 6;
-  const popDistance = baseRadius + gap;
-
   return (
     <>
       {/* 1. Precision Border Socket / React Flow Handle */}
@@ -266,93 +269,89 @@ function MagneticHandle({
         )}
       />
 
-      {/* 3. Floating Action Pop-out (+ button for branching / dragging new connection) */}
+      {/* Approach rail: hangs off the node edge even while the plus is hidden, so
+          nearing the node from the side is enough to pop the button. */}
       <div
         data-magnetic-handle="true"
+        data-handle-approach="true"
         data-node-id={nodeId}
         data-handle-type={type}
         data-handle-id={id ?? ''}
         style={{
           top,
           left: isLeft ? 0 : '100%',
-          transform: `translate(-50%, -50%) scale(${scale})`,
-          transformOrigin: 'center center',
-          pointerEvents: 'none',
+          width: APPROACH_W,
+          height: APPROACH_H,
+          transform: isLeft
+            ? `translate(-100%, -50%) scale(${scale})`
+            : `translate(0, -50%) scale(${scale})`,
+          transformOrigin: isLeft ? 'right center' : 'left center',
+          pointerEvents: disabled || isDragging ? 'none' : 'auto',
         }}
         className="nodrag nopan absolute z-30 flex items-center justify-center select-none magnetic-handle-wrapper"
       >
-        {/* Animated pop-out container: launches from the border socket outwards */}
-        <div
-          style={{
-            opacity: visible ? 1 : 0,
-            transform: visible
-              ? `translate3d(${isLeft ? -popDistance + offset.x : popDistance + offset.x}px, ${offset.y}px, 0) scale(1)`
-              : `translate3d(0px, 0, 0) scale(0.3)`,
-            transition: visible
-              ? isHovered
-                ? 'transform 240ms cubic-bezier(0.34, 1.9, 0.64, 1), opacity 160ms ease'
-                : 'transform 280ms cubic-bezier(0.34, 1.7, 0.64, 1), opacity 180ms ease'
-              : 'transform 180ms cubic-bezier(0.55, 0, 1, 0.45), opacity 140ms ease',
-            transformOrigin: 'center center',
-            pointerEvents: visible && !disabled ? 'auto' : 'none',
-          }}
+        <Tooltip
+          content={tooltipText}
+          side={isLeft ? 'left' : 'right'}
+          wrapperClassName="flex h-full w-full items-center justify-center"
         >
-          {/* Magnetic Hit Box */}
           <div
             ref={hitRef}
             data-magnetic-handle="true"
             data-node-id={nodeId}
             data-handle-type={type}
             data-handle-id={id ?? ''}
+            onPointerEnter={() => setApproachHover(true)}
             onPointerMove={handlePointerMove}
             onPointerLeave={handlePointerLeave}
             onPointerDown={handleButtonPointerDown}
             onClick={handleClick}
             className={cn(
-              'relative flex h-12 w-12 items-center justify-center cursor-pointer',
+              'relative flex h-full w-full items-center justify-center cursor-pointer',
               disabled && 'opacity-40',
             )}
           >
-            <button
-              type="button"
-              data-magnetic-handle="true"
-              data-node-id={nodeId}
-              data-handle-type={type}
-              data-handle-id={id ?? ''}
-              onPointerDown={handleButtonPointerDown}
-              onClick={handleClick}
-              title={tooltipText}
+            <div
               style={{
-                borderColor: isHovered ? activeColor : 'var(--line-strong, #52525b)',
-                boxShadow: isHovered ? `0 0 10px ${activeColor}55` : '0 2px 8px rgba(0,0,0,0.4)',
-                transition: 'background-color 150ms, border-color 150ms, box-shadow 150ms',
+                opacity: visible ? 1 : 0,
+                transform: visible
+                  ? `translate3d(${offset.x}px, ${offset.y}px, 0) scale(1)`
+                  : `translate3d(${isLeft ? APPROACH_W / 2 : -APPROACH_W / 2}px, 0px, 0) scale(0.3)`,
+                transition: visible
+                  ? isHovered
+                    ? 'transform 240ms cubic-bezier(0.34, 1.9, 0.64, 1), opacity 160ms ease'
+                    : 'transform 280ms cubic-bezier(0.34, 1.7, 0.64, 1), opacity 180ms ease'
+                  : 'transform 180ms cubic-bezier(0.55, 0, 1, 0.45), opacity 140ms ease',
+                transformOrigin: isLeft ? 'right center' : 'left center',
+                pointerEvents: 'none',
               }}
-              className={cn(
-                'group relative flex h-5 w-5 items-center justify-center rounded-full border bg-paper-raised text-ink active:scale-90 shadow-xs',
-                'before:absolute before:-inset-3 before:content-[\'\'] before:rounded-full before:cursor-pointer',
-                isHovered ? 'scale-125 bg-paper' : 'hover:scale-110',
-              )}
             >
-              <Plus
-                size={11}
-                style={{ color: isHovered ? activeColor : undefined }}
-                className="shrink-0 transition-colors group-hover:scale-110 stroke-[2.5]"
-              />
-
-              {/* Micro label capsule on hover */}
-              {isHovered && label ? (
-                <span
-                  className={cn(
-                    'pointer-events-none absolute z-40 whitespace-nowrap rounded-md border border-line bg-paper-raised px-1.5 py-0.5 text-[9px] font-medium text-ink shadow-md select-none',
-                    isLeft ? 'right-full mr-2' : 'left-full ml-2',
-                  )}
-                >
-                  {label}
-                </span>
-              ) : null}
-            </button>
+              <button
+                type="button"
+                tabIndex={-1}
+                data-magnetic-handle="true"
+                data-node-id={nodeId}
+                data-handle-type={type}
+                data-handle-id={id ?? ''}
+                style={{
+                  borderColor: isHovered ? activeColor : 'var(--line-strong, #52525b)',
+                  boxShadow: isHovered ? `0 0 10px ${activeColor}55` : '0 2px 8px rgba(0,0,0,0.4)',
+                  transition: 'background-color 150ms, border-color 150ms, box-shadow 150ms',
+                }}
+                className={cn(
+                  'group relative flex h-5 w-5 items-center justify-center rounded-full border bg-paper-raised text-ink active:scale-90 shadow-xs',
+                  isHovered ? 'scale-125 bg-paper' : 'hover:scale-110',
+                )}
+              >
+                <Plus
+                  size={11}
+                  style={{ color: isHovered ? activeColor : undefined }}
+                  className="shrink-0 transition-colors group-hover:scale-110 stroke-[2.5]"
+                />
+              </button>
+            </div>
           </div>
-        </div>
+        </Tooltip>
       </div>
     </>
   );

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState, memo } from 'react';
-import { Position, type NodeProps, useStore } from '@xyflow/react';
+import { Handle, Position, type NodeProps, useStore } from '@xyflow/react';
 import { Download, FolderPlus, Loader2, Play, Video, Camera, Sparkles, RotateCw, X, Bot, Upload } from 'lucide-react';
 import type { CanvasVideoParams } from '../../../shared/canvas';
 import { getVideoModelCapabilities } from '../../../shared/canvas';
 import { estimateNodeCost } from '../../../shared/canvasPricing';
-import { serializeMention } from '../../../shared/resolveMentions';
+
 import * as canvasStore from '../../state/canvasStore';
 import { useCanvasStore } from '../../state/useCanvasStore';
 import * as chatStore from '../../state/chatStore';
@@ -18,6 +18,7 @@ import { useIsSoloSelected } from './useSelectionCount';
 import AgentMark from './AgentMark';
 import MissingInputWarning from './MissingInputWarning';
 import { useAssetUrl } from './useAssetUrl';
+import Tooltip from '../ui/Tooltip';
 
 function VideoNode({ id, data, selected }: NodeProps) {
   const {
@@ -55,7 +56,8 @@ function VideoNode({ id, data, selected }: NodeProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const { hovered, hoverProps } = useHoverIntent();
   const solo = useIsSoloSelected(selected);
-  const expanded = solo || hovered;
+  const composing = useCanvasStore((s) => s.mentionComposerBySession[sessionId] === node.id);
+  const expanded = solo || hovered || composing;
   const showVideo = (expanded || isPlaying) && !isLowLOD;
 
   const handleUpload = async (file: File) => {
@@ -110,19 +112,6 @@ function VideoNode({ id, data, selected }: NodeProps) {
       };
     });
   }, [edges, allNodes, node.id]);
-
-  const autoSeededRef = useRef(false);
-  useEffect(() => {
-    if (!autoSeededRef.current && !params.prompt && upstreamSources.length > 0) {
-      const firstNote = upstreamSources.find((s) => s.sourceType === 'note');
-      if (firstNote) {
-        autoSeededRef.current = true;
-        const initial = `${serializeMention(firstNote.sourceTitle, firstNote.sourceNodeId)} `;
-        setPrompt(initial);
-        void canvasStore.updateNodeParams(sessionId, node.id, { ...params, prompt: initial });
-      }
-    }
-  }, [upstreamSources, params.prompt, sessionId, node.id, params]);
 
   useEffect(() => {
     setPrompt((params.prompt as string) ?? '');
@@ -195,6 +184,14 @@ function VideoNode({ id, data, selected }: NodeProps) {
         top="50%"
         nodeHovered={hovered || selected}
       />
+      <Handle
+        type="target"
+        id="reference"
+        position={Position.Left}
+        isConnectable
+        className="!h-2 !w-2 !opacity-0 !border-0 !bg-transparent pointer-events-none"
+        style={{ top: '50%', left: 0 }}
+      />
       <MagneticHandle
         type="source"
         position={Position.Right}
@@ -215,6 +212,7 @@ function VideoNode({ id, data, selected }: NodeProps) {
             transformOrigin: 'bottom center',
           }}
         >
+          <Tooltip content="上传本地视频" side="top" wrapperClassName="inline-flex">
           <button
             type="button"
             onClick={(e) => {
@@ -222,11 +220,11 @@ function VideoNode({ id, data, selected }: NodeProps) {
               fileInputRef.current?.click();
             }}
             className="flex items-center gap-1.5 rounded-full bg-[#18181b]/95 px-3 py-1.5 text-xs font-semibold text-white shadow-[0_4px_12px_rgba(0,0,0,0.4)] border border-white/20 hover:bg-[#27272a] hover:border-white/35 active:scale-95 transition-all cursor-pointer whitespace-nowrap backdrop-blur-md"
-            title="上传本地视频"
           >
             <Upload size={13} className="stroke-[2.2] text-white/90" />
             <span>上传</span>
           </button>
+          </Tooltip>
         </div>
       ) : null}
 
@@ -350,17 +348,18 @@ function VideoNode({ id, data, selected }: NodeProps) {
                   </div>
                 )}
                 <div className="absolute inset-0 flex items-center justify-center bg-black/15 group-hover/poster:bg-black/30 transition-colors pointer-events-none">
+                  <Tooltip content="播放视频" side="top" wrapperClassName="inline-flex pointer-events-auto">
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       setIsPlaying(true);
                     }}
-                    className="nodrag pointer-events-auto rounded-full bg-black/70 p-2 text-white shadow-lg backdrop-blur-xs transition-transform group-hover/poster:scale-110 hover:bg-black/90 active:scale-95"
-                    title="播放视频"
+                    className="nodrag rounded-full bg-black/70 p-2 text-white shadow-lg backdrop-blur-xs transition-transform group-hover/poster:scale-110 hover:bg-black/90 active:scale-95"
                   >
                     <Play size={16} className="fill-current translate-x-0.5" />
                   </button>
+                  </Tooltip>
                 </div>
               </div>
             )}
@@ -368,30 +367,35 @@ function VideoNode({ id, data, selected }: NodeProps) {
             {/* Hover Frame Extraction Buttons */}
             <div className="nodrag absolute left-1.5 top-1.5 flex flex-col items-start gap-1 opacity-0 transition-opacity group-hover/video:opacity-100 z-10">
               {(['start', 'end', 'current'] as const).map((pick) => (
-                <button
+                <Tooltip
                   key={pick}
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    extractFrame(pick);
-                  }}
-                  disabled={framePick !== null}
-                  className="inline-flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-1 text-[10px] font-medium text-white hover:bg-black/80 backdrop-blur-xs disabled:opacity-50 transition-colors"
-                  title={
+                  content={
                     pick === 'start'
                       ? '抽取首帧为图片节点，用作下一镜的起始帧'
                       : pick === 'end'
                         ? '抽取尾帧为图片节点，用作下一镜的起始帧'
                         : '抽取当前播放帧为图片节点'
                   }
+                  side="right"
+                  wrapperClassName="inline-flex"
                 >
-                  {framePick === pick ? (
-                    <Loader2 size={11} className="animate-spin" />
-                  ) : (
-                    <Camera size={11} />
-                  )}
-                  {pick === 'start' ? '抽首帧' : pick === 'end' ? '抽尾帧' : '抽当前帧'}
-                </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      extractFrame(pick);
+                    }}
+                    disabled={framePick !== null}
+                    className="inline-flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-1 text-[10px] font-medium text-white hover:bg-black/80 backdrop-blur-xs disabled:opacity-50 transition-colors"
+                  >
+                    {framePick === pick ? (
+                      <Loader2 size={11} className="animate-spin" />
+                    ) : (
+                      <Camera size={11} />
+                    )}
+                    {pick === 'start' ? '抽首帧' : pick === 'end' ? '抽尾帧' : '抽当前帧'}
+                  </button>
+                </Tooltip>
               ))}
             </div>
 
@@ -406,6 +410,7 @@ function VideoNode({ id, data, selected }: NodeProps) {
               <div className="absolute inset-x-0 bottom-7 flex items-center justify-center gap-1.5 bg-black/60 py-1 px-2 backdrop-blur-[2px] z-20">
                 {assets.map((_, i) => (
                   <div key={i} className="group/thumb relative flex items-center">
+                    <Tooltip content={`变体 ${i + 1} / ${assets.length}（点击切换）`} side="top" wrapperClassName="inline-flex">
                     <button
                       type="button"
                       onClick={(e) => {
@@ -422,21 +427,22 @@ function VideoNode({ id, data, selected }: NodeProps) {
                           ? 'bg-accent text-accent-ink font-semibold shadow-sm'
                           : 'bg-black/60 text-white/80 hover:bg-black/80',
                       )}
-                      title={`变体 ${i + 1} / ${assets.length} (点击切换当前视频)`}
                     >
                       v{i + 1}
                     </button>
+                    </Tooltip>
+                    <Tooltip content="删除该变体" side="top" wrapperClassName="absolute -top-1.5 -right-1.5 z-30 hidden group-hover/thumb:flex">
                     <button
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
                         void canvasStore.removeNodeAsset(sessionId, node.id, i);
                       }}
-                      className="nodrag absolute -top-1.5 -right-1.5 hidden h-3.5 w-3.5 items-center justify-center rounded-full bg-danger text-white shadow-xs group-hover/thumb:flex hover:scale-110 transition-transform z-30"
-                      title="删除该变体"
+                      className="nodrag flex h-3.5 w-3.5 items-center justify-center rounded-full bg-danger text-white shadow-xs hover:scale-110 transition-transform"
                     >
                       <X size={8} />
                     </button>
+                    </Tooltip>
                   </div>
                 ))}
               </div>
@@ -450,6 +456,7 @@ function VideoNode({ id, data, selected }: NodeProps) {
               >
                 {prompt ? `“${prompt}”` : hasUpstreamPrompt ? '✦ 上游提示词驱动' : '无提示词'}
               </span>
+              <Tooltip content="按当前提示词重新生成" side="top" wrapperClassName="pointer-events-auto inline-flex">
               <button
                 type="button"
                 onClick={(e) => {
@@ -457,25 +464,27 @@ function VideoNode({ id, data, selected }: NodeProps) {
                   run();
                 }}
                 disabled={running}
-                className="pointer-events-auto nodrag flex items-center gap-1 rounded-md bg-accent px-2 py-0.5 text-[9px] font-medium text-accent-ink shadow-md hover:opacity-90 active:scale-95"
-                title="重新生成"
+                className="nodrag flex items-center gap-1 rounded-md bg-accent px-2 py-0.5 text-[9px] font-medium text-accent-ink shadow-md hover:opacity-90 active:scale-95"
               >
                 {running ? <Loader2 size={10} className="animate-spin" /> : <RotateCw size={9} />}
                 重跑
               </button>
+              </Tooltip>
             </div>
 
             {/* Hover Top Right Action Buttons */}
             <div className="absolute right-1.5 top-1.5 flex items-center gap-1 opacity-0 transition-opacity group-hover/video:opacity-100 z-10">
+              <Tooltip content="下载视频" side="bottom" wrapperClassName="inline-flex">
               <a
                 href={assetUrl!}
                 download
                 onClick={(e) => e.stopPropagation()}
                 className="nodrag rounded-md bg-black/60 p-1 text-white hover:bg-black/80 transition-colors backdrop-blur-xs"
-                title="下载视频"
               >
                 <Download size={12} />
               </a>
+              </Tooltip>
+              <Tooltip content="存到作品库" side="bottom" wrapperClassName="inline-flex">
               <button
                 type="button"
                 onClick={(e) => {
@@ -483,10 +492,10 @@ function VideoNode({ id, data, selected }: NodeProps) {
                   void canvasStore.saveAsset(sessionId, node.id, assetIdx);
                 }}
                 className="nodrag rounded-md bg-black/60 p-1 text-white hover:bg-black/80 transition-colors backdrop-blur-xs"
-                title="存到作品库"
               >
                 <FolderPlus size={12} />
               </button>
+              </Tooltip>
             </div>
           </div>
         </div>
@@ -504,7 +513,7 @@ function VideoNode({ id, data, selected }: NodeProps) {
           onDrop={handleDrop}
           className={cn(
             'group/placeholder relative flex h-full w-full flex-col items-center justify-center rounded-2xl transition-all select-none',
-            isDragging ? 'bg-white/[0.08]' : 'bg-[#18181b]/80',
+            isDragging ? 'bg-white/[0.12]' : 'canvas-node-empty',
           )}
           title="支持拖入视频文件或点击上方上传"
         >
@@ -540,10 +549,13 @@ function VideoNode({ id, data, selected }: NodeProps) {
       <NodeFloatingPanel
         sessionId={sessionId}
         node={node}
-        visible={Boolean((solo || showConfig) && !hasVideo)}
+        visible={Boolean((solo || showConfig || composing) && !hasVideo)}
         nodeType="video"
         prompt={prompt}
-        onPromptChange={setPrompt}
+        onPromptChange={(p) => {
+          setPrompt(p);
+          void canvasStore.updateNodeParams(sessionId, node.id, { ...params, prompt: p });
+        }}
         onPromptCommit={commitPrompt}
         candidates={candidates}
         upstreamSources={upstreamSources}

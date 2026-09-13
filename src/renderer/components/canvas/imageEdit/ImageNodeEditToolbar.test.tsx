@@ -35,10 +35,10 @@ describe('ImageNodeEditToolbar', () => {
     const html = renderToString(
       <ImageNodeEditToolbar sessionId="s1" node={node} visible />,
     );
-    expect(html).toContain('裁剪');
-    expect(html).toContain('多角度');
-    expect(html).toContain('重绘');
-    expect(html).toContain('打光');
-    expect(html).toContain('更多');
+    expect(html).toContain('lucide-crop');
+    expect(html).toContain('lucide-box');
+    expect(html).toContain('lucide-brush');
+    expect(html).toContain('lucide-lightbulb');
+    expect(html).toContain('lucide-ellipsis');
   });
 });

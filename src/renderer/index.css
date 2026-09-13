@@ -411,6 +411,14 @@ pre,
   border-color: var(--accent);
 }
 
+/* Composer focused + Ctrl/Cmd: hover another node to @ it. */
+.canvas-mention-pick .react-flow__node:hover {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+.canvas-mention-pick {
+  cursor: copy;
+}
+
 .canvas-checker {
   background-color: #1c1c1c;
   background-image:
@@ -501,6 +509,13 @@ pre,
    constant compositing overhead instead of removing it. */
 .react-flow__node {
   contain: layout style;
+  overflow: visible;
+}
+
+/* Empty media cards: slightly lifted off the dark canvas so they read as objects. */
+.canvas-node-empty {
+  background: rgb(255 255 255 / 0.07);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.14);
 }
 
 /* Reset React Flow's default opinionated styling for 'group' nodes.
@@ -745,7 +760,11 @@ button,
   pointer-events: none;
 }
 .mention-input .mention-chip {
-  line-height: 1.4;
+  line-height: 1.2;
+  vertical-align: middle;
+}
+.mention-input .mention-chip-thumb {
+  display: block;
 }
 .mention-input .mention-chip::selection {
   background: transparent;

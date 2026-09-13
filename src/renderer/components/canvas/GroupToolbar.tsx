@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useStore } from '@xyflow/react';
 import { Play, Crosshair, Frame, Lock, Unlock, Unlink, Trash2, LayoutGrid } from 'lucide-react';
 import type { CanvasNode } from '../../../shared/canvas';
+import Tooltip from '../ui/Tooltip';
 
 export const GROUP_COLORS = [
   '#3b82f6', // Blue
@@ -75,13 +76,14 @@ export default function GroupToolbar({
     >
       {/* Color picker toggle dot */}
       <div className="relative flex items-center pl-0.5 pr-1.5">
-        <button
-          type="button"
-          onClick={() => setColorPickerOpen((v) => !v)}
-          className="h-3.5 w-3.5 rounded-full transition-transform hover:scale-125 cursor-pointer ring-2 ring-white/20 hover:ring-white/50"
-          style={{ backgroundColor: color }}
-          title="切换组主题色"
-        />
+        <Tooltip content="切换组主题色" side="top" wrapperClassName="inline-flex">
+          <button
+            type="button"
+            onClick={() => setColorPickerOpen((v) => !v)}
+            className="h-3.5 w-3.5 rounded-full transition-transform hover:scale-125 cursor-pointer ring-2 ring-white/20 hover:ring-white/50"
+            style={{ backgroundColor: color }}
+          />
+        </Tooltip>
 
         {/* Color palette popover */}
         {colorPickerOpen && (
@@ -113,40 +115,43 @@ export default function GroupToolbar({
 
       <div className="h-3.5 w-px bg-white/15 mx-0.5" />
 
+      <Tooltip content="按连线依赖顺序执行组内所有待跑节点" side="top" wrapperClassName="inline-flex">
       <button
         type="button"
         onClick={onRun}
         className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold text-white hover:bg-white/15 transition-colors cursor-pointer"
-        title="按连线依赖顺序执行组内所有待跑节点"
       >
         <Play size={12} className="fill-emerald-400 text-emerald-400" />
         <span>整组执行</span>
       </button>
+      </Tooltip>
 
+      <Tooltip content="收拢边框贴合当前成员" side="top" wrapperClassName="inline-flex">
       <button
         type="button"
         onClick={onFit}
         className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-        title="收拢边框贴合当前成员"
       >
         <Frame size={12} className="text-white/60" />
         <span>整理</span>
       </button>
+      </Tooltip>
 
+      <Tooltip content="居中聚焦到本组" side="top" wrapperClassName="inline-flex">
       <button
         type="button"
         onClick={onFocus}
         className="inline-flex items-center justify-center rounded-full p-1.5 text-xs font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-        title="居中聚焦到本组"
       >
         <Crosshair size={13} className="text-sky-400/90" />
       </button>
+      </Tooltip>
 
+      <Tooltip content={locked ? '解锁组 (允许单独移动成员)' : '锁定组 (固定成员相对位置)'} side="top" wrapperClassName="inline-flex">
       <button
         type="button"
         onClick={onToggleLock}
         className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-        title={locked ? '解锁组 (允许单独移动成员)' : '锁定组 (固定成员相对位置)'}
       >
         {locked ? (
           <Lock size={12} className="text-amber-400" />
@@ -155,27 +160,30 @@ export default function GroupToolbar({
         )}
         <span>{locked ? '已锁定' : '锁定'}</span>
       </button>
+      </Tooltip>
 
+      <Tooltip content="解散组 (保留成员节点)" side="top" wrapperClassName="inline-flex">
       <button
         type="button"
         onClick={onUngroup}
         className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-        title="解散组 (保留成员节点)"
       >
         <Unlink size={12} className="text-white/60" />
         <span>解组</span>
       </button>
+      </Tooltip>
 
       <div className="h-3.5 w-px bg-white/15 mx-0.5" />
 
+      <Tooltip content="删除组容器 (保留成员节点)" side="top" wrapperClassName="inline-flex">
       <button
         type="button"
         onClick={onDelete}
         className="inline-flex items-center justify-center rounded-full p-1 text-white/60 hover:text-rose-400 hover:bg-rose-500/15 transition-colors cursor-pointer"
-        title="删除组容器 (保留成员节点)"
       >
         <Trash2 size={13} />
       </button>
+      </Tooltip>
     </div>
   );
 }

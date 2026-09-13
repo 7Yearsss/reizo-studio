@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useRef, useState, memo } from 'react';
-import { Position, type NodeProps, useStore } from '@xyflow/react';
+import { Handle, Position, type NodeProps, useStore } from '@xyflow/react';
 import { Loader2, Play, Sparkles, ImageIcon, X, FileUp, Bot, Upload } from 'lucide-react';
 import type { CanvasImageParams, CanvasNode } from '../../../shared/canvas';
 import { editNodeTitle, type ImageEditKind } from '../../../shared/canvasImageEdit';
 import { estimateNodeCost } from '../../../shared/canvasPricing';
-import { serializeMention } from '../../../shared/resolveMentions';
 import * as canvasStore from '../../state/canvasStore';
 import * as chatStore from '../../state/chatStore';
 import { useCanvasStore } from '../../state/useCanvasStore';
@@ -18,6 +17,7 @@ import AgentMark from './AgentMark';
 import MissingInputWarning from './MissingInputWarning';
 import { useAssetUrl } from './useAssetUrl';
 import ImageNodeEditToolbar from './imageEdit/ImageNodeEditToolbar';
+import Tooltip from '../ui/Tooltip';
 import { EditKindIcon } from './imageEdit/editIcons';
 import CropOverlay from './imageEdit/CropOverlay';
 import AnnotateOverlay from './imageEdit/AnnotateOverlay';
@@ -143,6 +143,7 @@ function VariantThumbnail({
   const url = useAssetUrl(asset);
   return (
     <div className="group/thumb relative flex items-center shrink-0">
+      <Tooltip content={`变体 ${index + 1} / ${total}（点击切换）`} side="top" wrapperClassName="inline-flex">
       <button
         type="button"
         onClick={(e) => {
@@ -156,7 +157,6 @@ function VariantThumbnail({
             : 'border-white/30 opacity-75 hover:opacity-100 hover:border-white/70',
         )}
         style={{ width: 28, height: 28 }}
-        title={`变体 ${index + 1} / ${total} (点击切换)`}
       >
         {url ? (
           <img src={url} alt="" className="h-full w-full object-cover" />
@@ -169,18 +169,20 @@ function VariantThumbnail({
           {index + 1}
         </span>
       </button>
+      </Tooltip>
       {total > 1 ? (
+        <Tooltip content="删除该变体" side="top" wrapperClassName="absolute -top-1 -right-1 z-20 hidden group-hover/thumb:flex">
         <button
           type="button"
           onClick={(e) => {
             e.stopPropagation();
             onRemove();
           }}
-          className="nodrag absolute -top-1 -right-1 hidden h-3.5 w-3.5 items-center justify-center rounded-full bg-danger text-white shadow-xs group-hover/thumb:flex hover:scale-110 transition-transform z-20"
-          title="删除该变体"
+          className="nodrag flex h-3.5 w-3.5 items-center justify-center rounded-full bg-danger text-white shadow-xs hover:scale-110 transition-transform"
         >
           <X size={8} />
         </button>
+        </Tooltip>
       ) : null}
     </div>
   );
@@ -238,9 +240,10 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
   }, [edges, allNodes, node.id]);
 
   const solo = useIsSoloSelected(selected);
+  const composing = useCanvasStore((s) => s.mentionComposerBySession[sessionId] === node.id);
   const canvasZoom = useStore((s) => s.transform[2]) || 1;
   const headerScale = Math.min(8, Math.max(1, 1 / canvasZoom));
-  const expanded = solo || hovered;
+  const expanded = solo || hovered || composing;
   const candidates = useMemo(() => {
     if (!expanded) return [];
     const snapshot = canvasStore.getSnapshot().nodesBySession[sessionId] ?? [];
@@ -252,7 +255,6 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
     if (!solo) setShowConfig(false);
   }, [solo]);
 
-  const autoSeededRef = useRef(false);
   useEffect(() => {
     const onOpen = (e: Event) => {
       const detail = (e as CustomEvent<OpenImageEditDetail>).detail;
@@ -267,18 +269,6 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
     window.addEventListener(OPEN_IMAGE_EDIT_EVENT, onOpen);
     return () => window.removeEventListener(OPEN_IMAGE_EDIT_EVENT, onOpen);
   }, [sessionId, node.id]);
-
-  useEffect(() => {
-    if (!autoSeededRef.current && !params.prompt && upstreamSources.length > 0) {
-      const firstNote = upstreamSources.find((s) => s.sourceType === 'note');
-      if (firstNote) {
-        autoSeededRef.current = true;
-        const initial = `${serializeMention(firstNote.sourceTitle, firstNote.sourceNodeId)} `;
-        setPrompt(initial);
-        void canvasStore.updateNodeParams(sessionId, node.id, { ...params, prompt: initial });
-      }
-    }
-  }, [upstreamSources, params.prompt, sessionId, node.id, params]);
 
   useEffect(() => {
     setPrompt((params.prompt as string) ?? '');
@@ -350,7 +340,7 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
     <div
       {...hoverProps}
       className={cn(
-        'relative flex h-full w-full flex-col text-xs transition-all rounded-2xl p-0',
+        'relative flex h-full w-full flex-col text-xs transition-all rounded-2xl p-0 overflow-visible',
         selected
           ? 'border-2 border-[#edd7a3] shadow-[0_0_12px_rgba(237,215,163,0.35)]'
           : 'border border-white/15 hover:border-white/35',
@@ -381,6 +371,15 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
         label="添加上下文"
         top="50%"
         nodeHovered={hovered || selected}
+      />
+      {/* Silent socket so @-mention edges (`targetHandle: reference`) actually render. */}
+      <Handle
+        type="target"
+        id="reference"
+        position={Position.Left}
+        isConnectable
+        className="!h-2 !w-2 !opacity-0 !border-0 !bg-transparent pointer-events-none"
+        style={{ top: '50%', left: 0 }}
       />
       {edit ? (
         <MagneticHandle
@@ -414,6 +413,7 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
             transformOrigin: 'bottom center',
           }}
         >
+          <Tooltip content="上传本地图片" side="top" wrapperClassName="inline-flex">
           <button
             type="button"
             onClick={(e) => {
@@ -421,11 +421,11 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
               fileInputRef.current?.click();
             }}
             className="flex items-center gap-1.5 rounded-full bg-[#18181b]/95 px-3 py-1.5 text-xs font-semibold text-white shadow-[0_4px_12px_rgba(0,0,0,0.4)] border border-white/20 hover:bg-[#27272a] hover:border-white/35 active:scale-95 transition-all cursor-pointer whitespace-nowrap backdrop-blur-md"
-            title="上传本地图片"
           >
             <Upload size={13} className="stroke-[2.2] text-white/90" />
             <span>上传</span>
           </button>
+          </Tooltip>
         </div>
       ) : null}
 
@@ -571,18 +571,19 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
             ) : null}
 
             {/* Top Right Replace button (Matching pure reference design) */}
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                fileInputRef.current?.click();
-              }}
-              className="nodrag absolute right-2.5 top-2.5 z-20 flex items-center gap-1.5 rounded-lg bg-black/65 px-2.5 py-1 text-[11px] font-medium text-white/90 backdrop-blur-md border border-white/10 hover:bg-black/85 hover:text-white transition-all shadow-xs cursor-pointer"
-              title="替换图片"
-            >
-              <Upload size={11} className="stroke-[2.2]" />
-              <span>替换</span>
-            </button>
+            <Tooltip content="替换图片" side="bottom" wrapperClassName="absolute right-2.5 top-2.5 z-20 inline-flex">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  fileInputRef.current?.click();
+                }}
+                className="nodrag flex items-center gap-1.5 rounded-lg bg-black/65 px-2.5 py-1 text-[11px] font-medium text-white/90 backdrop-blur-md border border-white/10 hover:bg-black/85 hover:text-white transition-all shadow-xs cursor-pointer"
+              >
+                <Upload size={11} className="stroke-[2.2]" />
+                <span>替换</span>
+              </button>
+            </Tooltip>
           </div>
         </div>
       ) : null}
@@ -620,7 +621,7 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
           onDrop={handleDrop}
           className={cn(
             'group/placeholder relative flex h-full w-full flex-col items-center justify-center rounded-2xl transition-all select-none',
-            isDragging ? 'bg-white/[0.08]' : 'bg-[#18181b]/80',
+            isDragging ? 'bg-white/[0.12]' : 'canvas-node-empty',
           )}
           title="支持拖入图片或点击上方上传"
         >
@@ -633,7 +634,7 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
             <ImageIcon
               size={36}
               strokeWidth={1.3}
-              className="text-white/20 group-hover/placeholder:text-white/40 group-hover/placeholder:scale-105 transition-all pointer-events-none"
+              className="text-white/35 group-hover/placeholder:text-white/55 group-hover/placeholder:scale-105 transition-all pointer-events-none"
             />
           )}
         </div>
@@ -654,9 +655,12 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
       <NodeFloatingPanel
         sessionId={sessionId}
         node={node}
-        visible={Boolean((solo || showConfig) && !hasImage)}
+        visible={Boolean((solo || showConfig || composing) && !hasImage)}
         prompt={prompt}
-        onPromptChange={setPrompt}
+        onPromptChange={(p) => {
+          setPrompt(p);
+          void canvasStore.updateNodeParams(sessionId, node.id, { ...params, prompt: p });
+        }}
         onPromptCommit={commitPrompt}
         candidates={candidates}
         upstreamSources={upstreamSources}

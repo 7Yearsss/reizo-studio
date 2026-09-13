@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { ViewportPortal, useStore } from '@xyflow/react';
 import { CheckSquare, MessageSquarePlus, FolderPlus, Play, Trash2 } from 'lucide-react';
 import type { CanvasNode } from '../../../shared/canvas';
+import Tooltip from '../ui/Tooltip';
 
 export interface MultiSelectToolbarProps {
   sessionId: string;
@@ -77,42 +78,46 @@ export default function MultiSelectToolbar({
           <CheckSquare size={12} className="text-accent" />
           已选 {bounds.count} 个节点
         </span>
-        <button
-          type="button"
-          onClick={onAddToChat}
-          className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium hover:bg-white/10 text-ink cursor-pointer transition-colors"
-          title="将选中节点作为多模态上下文引用加入对话输入框"
-        >
-          <MessageSquarePlus size={13} className="text-accent" />
-          <span>加入对话</span>
-        </button>
-        <button
-          type="button"
-          onClick={onGroup}
-          className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium hover:bg-white/10 text-ink cursor-pointer transition-colors"
-          title="将选中节点打包为一个组 (Ctrl+G)"
-        >
-          <FolderPlus size={13} className="text-sky-400" />
-          <span>打组</span>
-        </button>
-        <button
-          type="button"
-          onClick={onRunSelected}
-          className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium hover:bg-white/10 text-ink cursor-pointer transition-colors"
-          title="按连线依赖顺序执行选区内的待跑节点"
-        >
-          <Play size={12} className="text-emerald-400" />
-          <span>运行选区</span>
-        </button>
-        <button
-          type="button"
-          onClick={onDelete}
-          className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium hover:bg-danger/20 text-danger cursor-pointer transition-colors"
-          title="删除选中节点 (Delete / Backspace)"
-        >
-          <Trash2 size={13} />
-          <span>删除</span>
-        </button>
+        <Tooltip content="将选中节点作为多模态上下文引用加入对话输入框" side="top" wrapperClassName="inline-flex">
+          <button
+            type="button"
+            onClick={onAddToChat}
+            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium hover:bg-white/10 text-ink cursor-pointer transition-colors"
+          >
+            <MessageSquarePlus size={13} className="text-accent" />
+            <span>加入对话</span>
+          </button>
+        </Tooltip>
+        <Tooltip content="将选中节点打包为一个组 (Ctrl+G)" side="top" wrapperClassName="inline-flex">
+          <button
+            type="button"
+            onClick={onGroup}
+            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium hover:bg-white/10 text-ink cursor-pointer transition-colors"
+          >
+            <FolderPlus size={13} className="text-sky-400" />
+            <span>打组</span>
+          </button>
+        </Tooltip>
+        <Tooltip content="按连线依赖顺序执行选区内的待跑节点" side="top" wrapperClassName="inline-flex">
+          <button
+            type="button"
+            onClick={onRunSelected}
+            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium hover:bg-white/10 text-ink cursor-pointer transition-colors"
+          >
+            <Play size={12} className="text-emerald-400" />
+            <span>运行选区</span>
+          </button>
+        </Tooltip>
+        <Tooltip content="删除选中节点 (Delete / Backspace)" side="top" wrapperClassName="inline-flex">
+          <button
+            type="button"
+            onClick={onDelete}
+            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium hover:bg-danger/20 text-danger cursor-pointer transition-colors"
+          >
+            <Trash2 size={13} />
+            <span>删除</span>
+          </button>
+        </Tooltip>
       </div>
     </ViewportPortal>
   );

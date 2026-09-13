@@ -259,36 +259,34 @@ export function Tooltip({
       >
         {trigger}
       </span>
-      {typeof document !== "undefined"
+      {open && coords && typeof document !== "undefined"
         ? createPortal(
             <AnimatePresence>
-              {open && coords ? (
-                <span
-                  aria-hidden
-                  className="pointer-events-none fixed z-[9999]"
-                  style={{
-                    top: coords.top,
-                    left: coords.left,
-                    transform: anchorTransform[side],
-                  }}
+              <span
+                aria-hidden
+                className="pointer-events-none fixed z-[9999]"
+                style={{
+                  top: coords.top,
+                  left: coords.left,
+                  transform: anchorTransform[side],
+                }}
+              >
+                <motion.span
+                  id={id}
+                  role="tooltip"
+                  variants={variants}
+                  initial="initial"
+                  animate="animate"
+                  exit="exit"
+                  style={{ transformOrigin: transformOrigin[side] }}
+                  className={cn(
+                    "block whitespace-nowrap rounded-lg border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground shadow-lg",
+                    className,
+                  )}
                 >
-                  <motion.span
-                    id={id}
-                    role="tooltip"
-                    variants={variants}
-                    initial="initial"
-                    animate="animate"
-                    exit="exit"
-                    style={{ transformOrigin: transformOrigin[side] }}
-                    className={cn(
-                      "block whitespace-nowrap rounded-lg border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground shadow-lg",
-                      className,
-                    )}
-                  >
-                    {content}
-                  </motion.span>
-                </span>
-              ) : null}
+                  {content}
+                </motion.span>
+              </span>
             </AnimatePresence>,
             document.body,
           )

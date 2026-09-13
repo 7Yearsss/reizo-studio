@@ -5,6 +5,7 @@ import type { CanvasNode } from '../../../../shared/canvas';
 import { EDIT_META, IMAGE_EDIT_KINDS, type ImageEditKind } from '../../../../shared/canvasImageEdit';
 import { estimateNodeCost } from '../../../../shared/canvasPricing';
 import { cn } from '../../../lib/cn';
+import Tooltip from '../../ui/Tooltip';
 import * as canvasStore from '../../../state/canvasStore';
 import { EditKindIcon } from './editIcons';
 import { openImageEdit } from './openImageEdit';
@@ -80,14 +81,15 @@ export default function ImageNodeEditToolbar({
       ))}
       <span className="mx-0.5 h-3.5 w-px bg-line" />
       <div ref={moreRef} className="relative">
-        <button
-          type="button"
-          title="更多"
-          onClick={() => setMoreOpen((v) => !v)}
-          className="inline-flex h-7 w-7 items-center justify-center rounded-full text-ink hover:bg-paper-inset"
-        >
-          <Ellipsis size={14} />
-        </button>
+        <Tooltip content="更多编辑" side="top" wrapperClassName="inline-flex">
+          <button
+            type="button"
+            onClick={() => setMoreOpen((v) => !v)}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-full text-ink hover:bg-paper-inset"
+          >
+            <Ellipsis size={14} />
+          </button>
+        </Tooltip>
         {moreOpen ? (
           <div className="absolute bottom-[calc(100%+10px)] left-1/2 z-50 min-w-[168px] -translate-x-1/2 rounded-xl border border-line bg-paper-raised py-1 shadow-xl">
             {MORE.map((kind) => (
@@ -111,13 +113,14 @@ export default function ImageNodeEditToolbar({
 
 function ToolbarBtn({ kind, title, onClick }: { kind: ImageEditKind; title: string; onClick: () => void }) {
   return (
-    <button
-      type="button"
-      title={title}
-      onClick={onClick}
-      className="inline-flex h-7 w-7 items-center justify-center rounded-full text-ink hover:bg-paper-inset"
-    >
-      <EditKindIcon kind={kind} size={14} />
-    </button>
+    <Tooltip content={title} side="top" wrapperClassName="inline-flex">
+      <button
+        type="button"
+        onClick={onClick}
+        className="inline-flex h-7 w-7 items-center justify-center rounded-full text-ink hover:bg-paper-inset"
+      >
+        <EditKindIcon kind={kind} size={14} />
+      </button>
+    </Tooltip>
   );
 }

@@ -23,6 +23,7 @@ function NoteNode({ id, data, selected }: NodeProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { hovered, hoverProps } = useHoverIntent();
   const solo = useIsSoloSelected(selected);
+  const composing = useCanvasStore((s) => s.mentionComposerBySession[sessionId] === node.id);
 
   useEffect(() => {
     setContent(params.content || '');
@@ -91,10 +92,10 @@ function NoteNode({ id, data, selected }: NodeProps) {
   }, [edges, allNodes, node.id]);
 
   const candidates = useMemo(() => {
-    if (!solo) return [];
+    if (!solo && !composing) return [];
     const snapshot = canvasStore.getSnapshot().nodesBySession[sessionId] ?? [];
     return snapshot.filter((n) => n.id !== node.id && n.type !== 'anchor');
-  }, [solo, sessionId, node.id]);
+  }, [solo, composing, sessionId, node.id]);
 
   return (
     <div
@@ -188,7 +189,7 @@ function NoteNode({ id, data, selected }: NodeProps) {
       <NodeFloatingPanel
         sessionId={sessionId}
         node={node}
-        visible={solo}
+        visible={solo || composing}
         nodeType="note"
         prompt={content}
         onPromptChange={(nextText) => {

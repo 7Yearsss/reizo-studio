@@ -28,9 +28,10 @@ import { useIsSoloSelected } from './useSelectionCount';
 import MagneticHandle from './MagneticHandle';
 import AgentMark from './AgentMark';
 import MissingInputWarning from './MissingInputWarning';
+import Tooltip from '../ui/Tooltip';
 import { useAssetUrl } from './useAssetUrl';
 import NodeFloatingPanel, { type UpstreamSourceItem } from './NodeFloatingPanel';
-import { serializeMention } from '../../../shared/resolveMentions';
+
 
 function formatTime(sec: number): string {
   if (!Number.isFinite(sec) || sec < 0) return '00:00';
@@ -62,9 +63,10 @@ function AudioNode({ id, data, selected }: NodeProps) {
   const [assetIdx, setAssetIdx] = useState(0);
   const { hovered, hoverProps } = useHoverIntent();
   const solo = useIsSoloSelected(selected);
+  const composing = useCanvasStore((s) => s.mentionComposerBySession[sessionId] === node.id);
   const canvasZoom = useStore((s) => s.transform[2]) || 1;
   const headerScale = Math.min(8, Math.max(1, 1 / canvasZoom));
-  const expanded = solo || hovered;
+  const expanded = solo || hovered || composing;
 
   // Multi-select collapses per-node chrome; drop any manually-opened config too.
   useEffect(() => {
@@ -152,19 +154,6 @@ function AudioNode({ id, data, selected }: NodeProps) {
       };
     });
   }, [edges, allNodes, node.id]);
-
-  const autoSeededRef = useRef(false);
-  useEffect(() => {
-    if (!autoSeededRef.current && !params.prompt && upstreamSources.length > 0) {
-      const firstNote = upstreamSources.find((s) => s.sourceType === 'note');
-      if (firstNote) {
-        autoSeededRef.current = true;
-        const initial = `${serializeMention(firstNote.sourceTitle, firstNote.sourceNodeId)} `;
-        setPrompt(initial);
-        void canvasStore.updateNodeParams(sessionId, node.id, { ...params, prompt: initial });
-      }
-    }
-  }, [upstreamSources, params.prompt, sessionId, node.id, params]);
 
   useEffect(() => {
     setPrompt((params.prompt as string) ?? '');
@@ -306,6 +295,7 @@ function AudioNode({ id, data, selected }: NodeProps) {
             transformOrigin: 'bottom center',
           }}
         >
+          <Tooltip content="上传本地音频" side="top" wrapperClassName="inline-flex">
           <button
             type="button"
             onClick={(e) => {
@@ -313,11 +303,11 @@ function AudioNode({ id, data, selected }: NodeProps) {
               fileInputRef.current?.click();
             }}
             className="flex items-center gap-1.5 rounded-full bg-[#18181b]/95 px-3 py-1.5 text-xs font-semibold text-white shadow-[0_4px_12px_rgba(0,0,0,0.4)] border border-white/20 hover:bg-[#27272a] hover:border-white/35 active:scale-95 transition-all cursor-pointer whitespace-nowrap backdrop-blur-md"
-            title="上传本地音频"
           >
             <Upload size={13} className="stroke-[2.2] text-white/90" />
             <span>上传</span>
           </button>
+          </Tooltip>
         </div>
       ) : null}
 
@@ -362,7 +352,7 @@ function AudioNode({ id, data, selected }: NodeProps) {
           onDrop={handleDrop}
           className={cn(
             'group/placeholder relative flex h-full w-full flex-col items-center justify-center rounded-2xl transition-all select-none',
-            isDraggingFile ? 'bg-white/[0.08]' : 'bg-[#18181b]/80',
+            isDraggingFile ? 'bg-white/[0.12]' : 'canvas-node-empty',
           )}
           title="支持拖入音频文件或点击上方上传"
         >
@@ -441,11 +431,11 @@ function AudioNode({ id, data, selected }: NodeProps) {
           {/* Player controls row */}
           <div className="flex items-center justify-between pt-0.5">
             <div className="flex items-center gap-1.5">
+              <Tooltip content={isPlaying ? '暂停' : '播放'} side="top" wrapperClassName="inline-flex">
               <button
                 type="button"
                 onClick={togglePlay}
                 className="nodrag flex size-7 items-center justify-center rounded-full bg-accent text-accent-ink shadow-sm hover:opacity-95 active:scale-95 transition-all"
-                title={isPlaying ? '暂停' : '播放'}
               >
                 {isPlaying ? (
                   <Pause size={12} className="fill-current" />
@@ -453,16 +443,19 @@ function AudioNode({ id, data, selected }: NodeProps) {
                   <Play size={12} className="fill-current translate-x-0.5" />
                 )}
               </button>
+              </Tooltip>
 
+              <Tooltip content="快退 5 秒" side="top" wrapperClassName="inline-flex">
               <button
                 type="button"
                 onClick={() => seekDelta(-5)}
                 className="nodrag rounded p-1 text-ink-muted hover:bg-paper-inset hover:text-ink transition-colors"
-                title="快退 5 秒"
               >
                 <RotateCcw size={11} />
               </button>
+              </Tooltip>
 
+              <Tooltip content={isLoop ? '循环播放：开' : '循环播放：关'} side="top" wrapperClassName="inline-flex">
               <button
                 type="button"
                 onClick={toggleLoop}
@@ -470,11 +463,12 @@ function AudioNode({ id, data, selected }: NodeProps) {
                   'nodrag rounded p-1 transition-colors',
                   isLoop ? 'bg-accent/15 text-accent' : 'text-ink-muted hover:bg-paper-inset hover:text-ink',
                 )}
-                title={isLoop ? '循环播放: 开' : '循环播放: 关'}
               >
                 <Repeat size={11} />
               </button>
+              </Tooltip>
 
+              <Tooltip content={isMuted ? '解除静音' : '静音'} side="top" wrapperClassName="inline-flex">
               <button
                 type="button"
                 onClick={toggleMute}
@@ -482,13 +476,14 @@ function AudioNode({ id, data, selected }: NodeProps) {
                   'nodrag rounded p-1 transition-colors',
                   isMuted ? 'text-danger' : 'text-ink-muted hover:bg-paper-inset hover:text-ink',
                 )}
-                title={isMuted ? '解除静音' : '静音'}
               >
                 {isMuted ? <VolumeX size={11} /> : <Volume2 size={11} />}
               </button>
+              </Tooltip>
             </div>
 
             <div className="flex items-center gap-1">
+              <Tooltip content="按当前配置重新生成音频" side="top" wrapperClassName="inline-flex">
               <button
                 type="button"
                 onClick={(e) => {
@@ -497,27 +492,29 @@ function AudioNode({ id, data, selected }: NodeProps) {
                 }}
                 disabled={running}
                 className="nodrag rounded p-1 text-ink-muted hover:bg-paper-inset hover:text-ink transition-colors"
-                title="按当前配置重新生成音频"
               >
                 {running ? <Loader2 size={11} className="animate-spin" /> : <RotateCw size={11} />}
               </button>
+              </Tooltip>
+              <Tooltip content="下载音频" side="top" wrapperClassName="inline-flex">
               <a
                 href={assetUrl}
                 download
                 onClick={(e) => e.stopPropagation()}
                 className="nodrag rounded p-1 text-ink-muted hover:bg-paper-inset hover:text-ink transition-colors"
-                title="下载音频"
               >
                 <Download size={11} />
               </a>
+              </Tooltip>
+              <Tooltip content="替换当前音频文件" side="top" wrapperClassName="inline-flex">
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 className="nodrag rounded p-1 text-ink-muted hover:bg-paper-inset hover:text-ink transition-colors"
-                title="替换当前音频文件"
               >
                 <Upload size={11} />
               </button>
+              </Tooltip>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -538,10 +535,13 @@ function AudioNode({ id, data, selected }: NodeProps) {
       <NodeFloatingPanel
         sessionId={sessionId}
         node={node}
-        visible={Boolean((solo || showConfig) && !hasAudio)}
+        visible={Boolean((solo || showConfig || composing) && !hasAudio)}
         nodeType="audio"
         prompt={prompt}
-        onPromptChange={setPrompt}
+        onPromptChange={(p) => {
+          setPrompt(p);
+          void canvasStore.updateNodeParams(sessionId, node.id, { ...params, prompt: p });
+        }}
         onPromptCommit={commitPrompt}
         candidates={candidates}
         upstreamSources={upstreamSources}
