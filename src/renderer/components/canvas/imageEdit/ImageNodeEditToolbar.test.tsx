@@ -36,6 +36,7 @@ describe('ImageNodeEditToolbar', () => {
       <ImageNodeEditToolbar sessionId="s1" node={node} visible />,
     );
     expect(html).toContain('lucide-crop');
+    expect(html).toContain('lucide-grid-3x3');
     expect(html).toContain('lucide-box');
     expect(html).toContain('lucide-brush');
     expect(html).toContain('lucide-lightbulb');

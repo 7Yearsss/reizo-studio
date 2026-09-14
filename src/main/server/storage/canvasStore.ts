@@ -12,6 +12,7 @@ import type {
 } from '../../../shared/canvas';
 import type { DbHandle } from '../db/client';
 import { descendants, inputHash, wouldCycle } from '../canvas/graph';
+import { cancelVideoJob } from '../canvas/asyncJobManager';
 import { isPortCompatible } from '../../../shared/canvasGraph';
 
 interface CanvasRowRaw {
@@ -310,6 +311,7 @@ export function createCanvasStore(handle: DbHandle) {
       return tx(() => {
         const current = readNode(canvasId, id);
         if (!current) return null;
+        cancelVideoJob(canvasId, id);
         raw.prepare('DELETE FROM canvas_edges WHERE canvas_id = ? AND (source_id = ? OR target_id = ?)').run(
           canvasId,
           id,

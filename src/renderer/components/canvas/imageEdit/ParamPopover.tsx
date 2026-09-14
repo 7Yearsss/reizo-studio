@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { CanvasNode } from '../../../../shared/canvas';
 import * as canvasStore from '../../../state/canvasStore';
-import { loadHtmlImage, resizeImageBlob, splitImageBlobs } from './pixelOps';
+import { loadHtmlImage, resizeImageBlob } from './pixelOps';
 import { commitImageEdit, type EditCommitMode } from './commitEdit';
 import EditOverlayShell from './EditOverlayShell';
 import EditPanelCard from './EditPanelCard';
@@ -19,7 +19,7 @@ export default function ParamPopover({
   sessionId: string;
   node: CanvasNode;
   imageUrl: string;
-  kind: 'resize' | 'enhance' | 'split';
+  kind: 'resize' | 'enhance';
   commitMode?: EditCommitMode;
   onClose: () => void;
 }) {
@@ -34,8 +34,7 @@ export default function ParamPopover({
       />
     );
   }
-  if (kind === 'enhance') return <EnhancePanel sessionId={sessionId} node={node} imageUrl={imageUrl} onClose={onClose} />;
-  return <SplitPanel sessionId={sessionId} node={node} imageUrl={imageUrl} onClose={onClose} />;
+  return <EnhancePanel sessionId={sessionId} node={node} imageUrl={imageUrl} onClose={onClose} />;
 }
 
 function ResizePanel({
@@ -181,53 +180,6 @@ function EnhancePanel({
           <EditSlider label="强度" value={strength} display={`${strength}`} min={0} max={100} onChange={setStrength} />
         </EditPanelCard>
       )}
-    </EditOverlayShell>
-  );
-}
-
-function SplitPanel({
-  sessionId,
-  node,
-  imageUrl,
-  onClose,
-}: {
-  sessionId: string;
-  node: CanvasNode;
-  imageUrl: string;
-  onClose: () => void;
-}) {
-  const [grid, setGrid] = useState<'2x2' | '3x3' | '4x4'>('2x2');
-  const [busy, setBusy] = useState(false);
-
-  const confirm = async () => {
-    setBusy(true);
-    try {
-      const tiles = await splitImageBlobs(imageUrl, grid);
-      await canvasStore.deriveImageSplit(sessionId, node.id, grid, tiles);
-      onClose();
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <EditOverlayShell title="快速切分" confirmLabel="切分" onClose={onClose} onConfirm={() => void confirm()} confirming={busy}>
-      <EditPanelCard className="w-72 gap-2">
-        {(['2x2', '3x3', '4x4'] as const).map((g) => (
-          <button
-            key={g}
-            type="button"
-            onClick={() => setGrid(g)}
-            className={
-              grid === g
-                ? 'flex-1 rounded-lg bg-accent/20 py-2 text-accent'
-                : 'flex-1 rounded-lg bg-paper-inset py-2 text-ink-muted'
-            }
-          >
-            {g.replace('x', '×')}
-          </button>
-        ))}
-      </EditPanelCard>
     </EditOverlayShell>
   );
 }

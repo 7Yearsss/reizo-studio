@@ -110,4 +110,81 @@ describe('videoExecutor & asyncJobManager', () => {
     cancelVideoJob(canvasId, node.id);
     await expect(promise).resolves.toBeUndefined();
   });
+
+  it('automatically cancels video job when video node is deleted from canvasStore', async () => {
+    const { canvas, canvasId } = await freshCanvas();
+    const node = canvas.addNode(canvasId, {
+      type: 'video',
+      x: 0,
+      y: 0,
+      w: 100,
+      h: 100,
+      params: { prompt: 'A running horse in cinematic sunlight' },
+    }).node;
+
+    await runVideoNode({
+      canvasStore: canvas,
+      settingsStore,
+      dataRoot: '/tmp/test',
+      canvasId,
+      node,
+      providerId: 'mock',
+      waitForCompletion: false,
+    });
+
+    expect(getActiveJob(canvasId, node.id)).toBeTruthy();
+
+    // Now delete the node
+    canvas.deleteNode(canvasId, node.id);
+
+    // Assert that active job was automatically cleaned up
+    expect(getActiveJob(canvasId, node.id)).toBeUndefined();
+  });
+
+  it('avoids submitting duplicate driver jobs when same operationId is re-sent', async () => {
+    const { canvas, canvasId } = await freshCanvas();
+    const node = canvas.addNode(canvasId, {
+      type: 'video',
+      x: 0,
+      y: 0,
+      w: 100,
+      h: 100,
+      params: { prompt: 'A soaring eagle over mountains' },
+    }).node;
+
+    const submitSpy = vi.spyOn(mockDriver, 'submit');
+    submitSpy.mockClear();
+
+    const opId = 'op-unique-123';
+    await runVideoNode({
+      canvasStore: canvas,
+      settingsStore,
+      dataRoot: '/tmp/test',
+      canvasId,
+      node,
+      providerId: 'mock',
+      waitForCompletion: false,
+      operationId: opId,
+    });
+
+    expect(submitSpy).toHaveBeenCalledTimes(1);
+
+    // Call again with exact same operationId
+    await runVideoNode({
+      canvasStore: canvas,
+      settingsStore,
+      dataRoot: '/tmp/test',
+      canvasId,
+      node,
+      providerId: 'mock',
+      waitForCompletion: false,
+      operationId: opId,
+    });
+
+    // Should NOT have called driver.submit again
+    expect(submitSpy).toHaveBeenCalledTimes(1);
+
+    // Clean up
+    cancelVideoJob(canvasId, node.id);
+  });
 });

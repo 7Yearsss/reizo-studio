@@ -13,6 +13,7 @@ interface ActiveJob {
   canvasId: string;
   nodeId: string;
   startedAt: number;
+  operationId?: string;
   timer: ReturnType<typeof setInterval>;
   deferred?: {
     resolve: () => void;
@@ -69,10 +70,16 @@ export async function submitVideoJob(options: {
   driverId?: string;
   params: VideoGenerateParams;
   providerId?: string;
+  operationId?: string;
 }): Promise<void> {
-  const { canvasStore, settingsStore, dataRoot, canvasId, nodeId, params } = options;
+  const { canvasStore, settingsStore, dataRoot, canvasId, nodeId, params, operationId } = options;
   const channel = getCanvasChannel(canvasId);
   const key = `${canvasId}:${nodeId}`;
+
+  const existingJob = getActiveJob(canvasId, nodeId);
+  if (existingJob && operationId && existingJob.operationId === operationId) {
+    return;
+  }
 
   cancelVideoJob(canvasId, nodeId);
 
@@ -125,6 +132,7 @@ export async function submitVideoJob(options: {
       canvasId,
       nodeId,
       startedAt: Date.now(),
+      operationId,
       timer: null as unknown as ReturnType<typeof setInterval>,
     };
 

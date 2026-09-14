@@ -25,6 +25,7 @@ import MaskOverlay from './imageEdit/MaskOverlay';
 import MultiAnglePanel from './imageEdit/MultiAnglePanel';
 import RelightPanel from './imageEdit/RelightPanel';
 import OutpaintOverlay from './imageEdit/OutpaintOverlay';
+import SplitOverlay from './imageEdit/SplitOverlay';
 import ParamPopover from './imageEdit/ParamPopover';
 import EditParamsPanel from './imageEdit/EditParamsPanel';
 import type { EditCommitMode } from './imageEdit/commitEdit';
@@ -110,7 +111,17 @@ function ImageEditOverlay({
       />
     );
   }
-  if (kind === 'resize' || kind === 'enhance' || kind === 'split') {
+  if (kind === 'split') {
+    return (
+      <SplitOverlay
+        sessionId={sessionId}
+        node={node}
+        imageUrl={imageUrl}
+        onClose={onClose}
+      />
+    );
+  }
+  if (kind === 'resize' || kind === 'enhance') {
     return (
       <ParamPopover
         sessionId={sessionId}

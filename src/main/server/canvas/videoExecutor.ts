@@ -20,8 +20,9 @@ export async function runVideoNode(options: {
   node: CanvasNode;
   providerId?: string;
   waitForCompletion?: boolean;
+  operationId?: string;
 }): Promise<void> {
-  const { canvasStore, settingsStore, dataRoot, canvasId, node, providerId } = options;
+  const { canvasStore, settingsStore, dataRoot, canvasId, node, providerId, operationId } = options;
 
   const params = (node.params || {}) as CanvasVideoParams;
   let promptText = (typeof params.prompt === 'string' ? params.prompt : '').trim();
@@ -158,6 +159,7 @@ export async function runVideoNode(options: {
     driverId,
     params: generateParams,
     providerId,
+    operationId,
   });
 
   if (options.waitForCompletion !== false) {

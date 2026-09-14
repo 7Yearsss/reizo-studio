@@ -87,7 +87,7 @@ export const EDIT_META: Record<
   enhance: { label: '增强', icon: 'Sparkles', local: false, needsMask: false, needsCrop: false, primary: false },
   resize: { label: '调整像素', icon: 'Ruler', local: true, needsMask: false, needsCrop: false, primary: false },
   matting: { label: '抠图', icon: 'Scissors', local: false, needsMask: false, needsCrop: false, primary: false },
-  split: { label: '快速切分', icon: 'Grid3x3', local: true, needsMask: false, needsCrop: false, primary: false },
+  split: { label: '切图', icon: 'Grid3x3', local: true, needsMask: false, needsCrop: false, primary: true },
 };
 
 export const IMAGE_EDIT_KINDS = Object.keys(EDIT_META) as ImageEditKind[];

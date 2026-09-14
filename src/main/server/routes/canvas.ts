@@ -212,6 +212,7 @@ export function createCanvasRouter(
         canvasId,
         node,
         providerId: typeof body.providerId === 'string' ? body.providerId : undefined,
+        operationId: typeof body.operationId === 'string' ? body.operationId : undefined,
       });
       return c.json({ ok: true }, 202);
     }
