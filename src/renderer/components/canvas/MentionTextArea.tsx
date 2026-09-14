@@ -78,6 +78,7 @@ const MentionTextArea = forwardRef<MentionTextAreaHandle, MentionTextAreaProps>(
   const composing = useRef(false);
   /** Last string we emitted, to skip repainting the DOM on our own edits. */
   const lastValue = useRef<string | null>(null);
+  const lastLocalEditAt = useRef<number>(0);
   const [menu, setMenu] = useState<{ query: string } | null>(null);
   const savedRange = useRef<Range | null>(null);
 
@@ -115,6 +116,7 @@ const MentionTextArea = forwardRef<MentionTextAreaHandle, MentionTextAreaProps>(
   const emit = useCallback(() => {
     const next = serialize();
     lastValue.current = next;
+    lastLocalEditAt.current = Date.now();
     onChange(next);
   }, [onChange, serialize]);
 
@@ -154,6 +156,19 @@ const MentionTextArea = forwardRef<MentionTextAreaHandle, MentionTextAreaProps>(
   // Repaint only when `value` changed outside this component.
   useLayoutEffect(() => {
     if (value === lastValue.current) return;
+
+    const isFocused = Boolean(
+      ref.current &&
+        (document.activeElement === ref.current || ref.current.contains(document.activeElement)),
+    );
+    const recentlyEdited = Date.now() - lastLocalEditAt.current < 600;
+
+    // Skip repainting if user is actively interacting with the contentEditable
+    // to prevent asynchronous store echo from blowing away the live DOM and resurrecting deleted chips.
+    if (lastValue.current !== null && (isFocused || recentlyEdited)) {
+      return;
+    }
+
     lastValue.current = value;
     paint(value);
   }, [value, paint]);
@@ -368,8 +383,38 @@ const MentionTextArea = forwardRef<MentionTextAreaHandle, MentionTextAreaProps>(
         }
         if (chip) {
           e.preventDefault();
+          setMenu(null);
+          const prevSibling = chip.previousSibling;
+          const nextSibling = chip.nextSibling;
           const removedId = chip.getAttribute(CHIP_ATTR);
           chip.remove();
+
+          // Ensure caret is cleanly placed at the removal point
+          const selAfter = window.getSelection();
+          if (selAfter) {
+            const range = document.createRange();
+            if (nextSibling) {
+              if (nextSibling.nodeType === Node.TEXT_NODE) {
+                range.setStart(nextSibling, 0);
+              } else {
+                range.setStartBefore(nextSibling);
+              }
+            } else if (prevSibling) {
+              if (prevSibling.nodeType === Node.TEXT_NODE) {
+                range.setStart(prevSibling, prevSibling.textContent?.length ?? 0);
+              } else {
+                range.setStartAfter(prevSibling);
+              }
+            } else if (ref.current) {
+              const textNode = document.createTextNode('');
+              ref.current.appendChild(textNode);
+              range.setStart(textNode, 0);
+            }
+            range.collapse(true);
+            selAfter.removeAllRanges();
+            selAfter.addRange(range);
+          }
+
           emit();
           if (removedId) onMentionRemove?.(removedId);
         }

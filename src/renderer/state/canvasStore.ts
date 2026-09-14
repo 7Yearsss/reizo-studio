@@ -363,7 +363,8 @@ export async function addComposerRef(sessionId: string, composerId: string, sour
   if (!node) return;
   const ids = composerRefIds(node);
   if (ids.includes(sourceId)) return;
-  const p = (node.params as Record<string, unknown>) ?? {};
+  const latest = nodeById(sessionId, composerId) ?? node;
+  const p = (latest.params as Record<string, unknown>) ?? {};
   await updateNodeParams(sessionId, composerId, { ...p, refNodeIds: [...ids, sourceId] });
 }
 
@@ -372,7 +373,8 @@ export async function removeComposerRef(sessionId: string, composerId: string, s
   if (!node) return;
   const ids = composerRefIds(node);
   if (!ids.includes(sourceId)) return;
-  const p = (node.params as Record<string, unknown>) ?? {};
+  const latest = nodeById(sessionId, composerId) ?? node;
+  const p = (latest.params as Record<string, unknown>) ?? {};
   await updateNodeParams(sessionId, composerId, { ...p, refNodeIds: ids.filter((id) => id !== sourceId) });
 }
 

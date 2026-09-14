@@ -9,11 +9,17 @@ import {
   X,
   Volume2,
   Plus,
+  ArrowUp,
+  Sparkles,
+  BarChart2,
+  Scan,
+  SlidersHorizontal,
+  Mic,
+  Check,
 } from 'lucide-react';
 import { cn } from '../../lib/cn';
 import MentionTextArea, { type MentionTextAreaHandle } from './MentionTextArea';
 import { useAssetUrl } from './useAssetUrl';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import {
   CANVAS_IMAGE_MODELS,
   CANVAS_VIDEO_MODELS,
@@ -131,6 +137,27 @@ function NodeFloatingPanel({
   //   - When drag ends (isDragging→false, visible still true), the 100ms runs again
   //     and the panel appears after the node has settled at its new position.
   const [shouldRender, setShouldRender] = useState(false);
+  const [paramsOpen, setParamsOpen] = useState(false);
+  const [modelOpen, setModelOpen] = useState(false);
+  const [sizeOpen, setSizeOpen] = useState(false);
+  const [audioProviderOpen, setAudioProviderOpen] = useState(false);
+
+  // Click outside to close dropdowns without blocking clicks to other elements
+  useEffect(() => {
+    if (!modelOpen && !sizeOpen && !audioProviderOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('[data-floating-dropdown]')) return;
+      setModelOpen(false);
+      setSizeOpen(false);
+      setAudioProviderOpen(false);
+      if (document.body.style.pointerEvents === 'none') {
+        document.body.style.pointerEvents = '';
+      }
+    };
+    window.addEventListener('mousedown', handleClickOutside);
+    return () => window.removeEventListener('mousedown', handleClickOutside);
+  }, [modelOpen, sizeOpen, audioProviderOpen]);
 
   useEffect(() => {
     // Immediately hide whenever the caller hides it or the node is being dragged
@@ -161,7 +188,10 @@ function NodeFloatingPanel({
   // The thumbnail strip is only a palette — it must not leave orphan edges.
   useEffect(() => {
     if (!shouldRender) return;
-    void canvasStore.syncMentionWires(sessionId, node.id, prompt);
+    const timer = setTimeout(() => {
+      void canvasStore.syncMentionWires(sessionId, node.id, prompt);
+    }, 150);
+    return () => clearTimeout(timer);
   }, [shouldRender, prompt, sessionId, node.id]);
 
   const visualRefs = useMemo(() => {
@@ -216,10 +246,38 @@ function NodeFloatingPanel({
           : '描述画面的主体、光影与艺术质感（可输入 @ 引用其他节点画面）…';
 
 
+  const currentModelName = isAudio
+    ? audioProviders?.find((p) => p.id === audioProvider)?.name || audioProvider || 'Suno Music'
+    : modelList.find((m) => m.id === currentModel)?.name || currentModel;
+
+  const displayModelName = currentModelName.replace(/\s*\([^)]*\)/, '');
+
+  const sizeLabel = isVideo
+    ? ratio === '16:9'
+      ? '横屏(16:9)'
+      : ratio === '9:16'
+        ? '竖屏(9:16)'
+        : '方形(1:1)'
+    : size === '1024x1536'
+      ? '竖屏(9:16)'
+      : size === '1536x1024'
+        ? '横屏(16:9)'
+        : '自适应(4K)';
+
+  const cost = isNote
+    ? 'Agent'
+    : (isAudio ? 3 : estimatedCost) * (isVideo || isAudio ? 1 : variationsCount);
+
+  const cycleVariations = () => {
+    if (!onVariationsCountChange) return;
+    const next = variationsCount === 1 ? 2 : variationsCount === 2 ? 4 : 1;
+    onVariationsCountChange(next);
+  };
+
   return (
     <div
       data-mention-composer={node.id}
-      className="nodrag nopan nowheel absolute top-full left-1/2 mt-2.5 z-40 pointer-events-auto cursor-default"
+      className="nodrag nopan nowheel absolute top-full left-1/2 mt-2.5 z-40 pointer-events-auto cursor-default select-none"
       style={{
         // Don't also use Tailwind -translate-x-1/2: v4's `translate` property
         // would stack with this `transform` and shove the panel left.
@@ -231,35 +289,40 @@ function NodeFloatingPanel({
       onPointerDown={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
     >
-      <div className="flex flex-col gap-2 rounded-2xl border border-line/50 bg-[#161618]/95 dark:bg-[#161618]/95 p-3 text-xs shadow-2xl backdrop-blur-xl transition-all cursor-default">
+      <div className="flex flex-col gap-2 rounded-[24px] border border-white/[0.08] bg-[#18181a] p-3.5 text-xs shadow-[0_20px_48px_-10px_rgba(0,0,0,0.7)] backdrop-blur-2xl transition-all cursor-default">
+        {/* 1. References row */}
         <div className="flex items-center gap-2 px-0.5">
-          <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-x-auto no-scrollbar">
+          <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-x-auto no-scrollbar py-0.5">
             {visualRefs.map((srcNode) => (
-                <RefChip
-                  key={srcNode.id}
-                  node={srcNode}
-                  title={srcNode.title || '节点'}
-                  onInsert={() => mentionAreaRef.current?.insertMentionNode(srcNode)}
-                  onRemove={() => void canvasStore.removeComposerRef(sessionId, node.id, srcNode.id)}
-                />
+              <RefChip
+                key={srcNode.id}
+                node={srcNode}
+                title={srcNode.title || '节点'}
+                onInsert={() => mentionAreaRef.current?.insertMentionNode(srcNode)}
+                onRemove={() => void canvasStore.removeComposerRef(sessionId, node.id, srcNode.id)}
+              />
             ))}
             <button
               type="button"
               onClick={() => canvasStore.startPickingCanvasRefs(sessionId, node.id)}
-              className="inline-flex h-9 shrink-0 items-center gap-1 rounded-xl border border-dashed border-line/70 px-2 text-[11px] text-ink-muted hover:text-ink hover:border-ink-muted/50 cursor-pointer"
+              className="inline-flex h-9 shrink-0 items-center gap-1 rounded-xl px-2.5 text-[11px] text-white/50 hover:text-white hover:bg-white/[0.06] transition-colors cursor-pointer"
             >
               <Plus size={13} />
-              参考
+              <span>参考</span>
             </button>
             {visualRefs.length > 0 ? (
-              <span className="shrink-0 text-[11px] text-amber-200/80">参考图 {visualRefs.length} 张</span>
+              <span className="shrink-0 text-[11px] text-white/40">参考图 {visualRefs.length} 张</span>
             ) : null}
           </div>
         </div>
 
-        {/* 2. MentionTextArea Prompt Input (Rich inline chips, flat, borderless) */}
-        <div className="relative px-1 pt-0.5 cursor-text">
+        {/* 2. MentionTextArea Prompt Input (Pure typography, flat) */}
+        <div
+          className="relative px-1 pt-0.5 pb-1 cursor-text min-h-[50px] select-text"
+          onClick={() => mentionAreaRef.current?.focus()}
+        >
           <MentionTextArea
+            key={node.id}
             ref={mentionAreaRef}
             variant="flat"
             value={prompt}
@@ -271,7 +334,7 @@ function NodeFloatingPanel({
             placeholder={placeholder}
             minRows={2}
             autoFocus={autoFocus}
-            className="text-[13px] text-ink placeholder:text-ink-muted/40 leading-relaxed font-normal"
+            className="text-[14px] text-white/90 placeholder:text-white/30 leading-relaxed font-normal select-text"
             onComposerActive={() =>
               canvasStore.setMentionComposer(sessionId, node.id, (src) => {
                 mentionAreaRef.current?.insertMentionNode(src);
@@ -286,236 +349,393 @@ function NodeFloatingPanel({
           />
         </div>
 
-        {/* 3. Parameter Controls Bar (De-boxed, minimal inline segments) */}
-        <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-line/25">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {/* Audio Mode: Provider & Voice Selectors */}
-            {isAudio ? (
+        {/* Optional Expandable Parameters Drawer */}
+        {paramsOpen && (
+          <div className="flex items-center gap-3 px-2 py-2 border-t border-white/[0.06] bg-white/[0.02] rounded-xl">
+            {isVideo && (
               <>
-                {audioProviders && audioProviders.length > 0 && onAudioProviderChange ? (
-                  <Select value={audioProvider || audioProviders.find((p) => p.isDefault)?.id || audioProviders[0]?.id} onValueChange={onAudioProviderChange}>
-                    <SelectTrigger className="h-7 w-auto px-2 text-[11px] font-medium bg-transparent hover:bg-paper-inset/70 border-0 shadow-none text-ink-muted hover:text-ink transition-colors gap-1 focus:ring-0 focus-visible:ring-0 focus:outline-none data-[size=default]:h-7">
-                      <SelectValue placeholder="选择服务商" />
-                    </SelectTrigger>
-                    <SelectContent className="z-[150] text-xs">
-                      {audioProviders.map((p) => (
-                        <SelectItem key={p.id} value={p.id} className="text-xs">
-                          {p.name} {p.isDefault ? '★' : ''}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : null}
-
-                {audioVoices && audioVoices.length > 0 ? (
-                  <div className="flex items-center gap-1 max-w-[220px] overflow-x-auto no-scrollbar">
-                    {audioVoices.slice(0, 4).map((v) => (
+                {onDurationChange && (
+                  <div className="flex items-center gap-1">
+                    <span className="text-[11px] text-white/40 mr-1">时长:</span>
+                    {(['5s', '10s'] as const).map((d) => (
                       <button
-                        key={v.id}
+                        key={d}
                         type="button"
-                        onClick={() => onAudioVoiceChange?.(v.id)}
+                        onClick={() => onDurationChange(d)}
                         className={cn(
-                          'rounded-md px-1.5 py-0.5 font-medium transition-colors shrink-0 text-[9px]',
-                          audioVoice === v.id
-                            ? 'bg-accent/15 text-accent font-semibold'
-                            : 'text-ink-muted hover:text-ink hover:bg-paper-inset/40',
+                          'rounded-lg px-2 py-1 text-xs font-medium transition-colors cursor-pointer',
+                          duration === d
+                            ? 'bg-white/15 text-white font-semibold'
+                            : 'text-white/50 hover:text-white hover:bg-white/[0.06]',
                         )}
-                        title={v.tag ? `${v.name} (${v.tag})` : v.name}
                       >
-                        {v.name}
+                        {d}
                       </button>
                     ))}
                   </div>
-                ) : null}
-              </>
-            ) : isNote ? (
-              /* Note Mode: Text tag */
-              <div className="flex items-center gap-1 text-[10px] text-ink-muted/80">
-                <Type size={11} className="text-emerald-400 shrink-0" />
-                <span className="font-medium text-ink-muted">剧本与提示词编辑器</span>
-              </div>
-            ) : (
-              /* Image / Video Model Selector (Flat trigger button) */
-              <>
-                {onModelChange ? (
-                  <Select value={currentModel} onValueChange={onModelChange}>
-                    <SelectTrigger className="h-7 w-auto px-2 text-[11px] font-medium bg-transparent hover:bg-paper-inset/70 border-0 shadow-none text-ink-muted hover:text-ink transition-colors gap-1 focus:ring-0 focus-visible:ring-0 focus:outline-none data-[size=default]:h-7">
-                      <SelectValue placeholder="选择模型" />
-                    </SelectTrigger>
-                    <SelectContent className="z-[150] text-xs">
-                      {modelList.map((m) => (
-                        <SelectItem key={m.id} value={m.id} className="text-xs">
-                          <div className="flex items-center justify-between gap-1.5 w-full">
-                            <span>{m.name}</span>
-                            {'badge' in m && m.badge ? (
-                              <span className="rounded bg-accent/20 px-1 py-0.2 text-[9px] text-accent">
-                                {m.badge}
-                              </span>
-                            ) : null}
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : null}
-
-                {/* Subtle separator */}
-                <div className="w-px h-3 bg-line/40 mx-0.5" />
-
-                {/* Video Ratio vs Image Size (Borderless segment controls) */}
-                {isVideo && onRatioChange ? (
-                  <div className="flex items-center gap-0.5 text-[10px]">
-                    {(['16:9', '9:16', '1:1'] as const).map((r) => {
-                      const active = ratio === r;
-                      return (
-                        <button
-                          key={r}
-                          type="button"
-                          onClick={() => onRatioChange(r)}
-                          className={cn(
-                            'rounded-md px-1.5 py-0.5 font-medium transition-colors',
-                            active
-                              ? 'bg-paper-inset text-ink font-semibold shadow-2xs'
-                              : 'text-ink-muted hover:text-ink hover:bg-paper-inset/40',
-                          )}
-                          title={`画幅比例: ${r}`}
-                        >
-                          {r}
-                        </button>
-                      );
-                    })}
+                )}
+                {onCameraChange && (
+                  <div className="flex items-center gap-1.5 ml-2 border-l border-white/[0.08] pl-3">
+                    <span className="text-[11px] text-white/40">运镜:</span>
+                    <CameraDial value={camera} onChange={onCameraChange} />
                   </div>
-                ) : !isVideo && onSizeChange ? (
-                  <div className="flex items-center gap-0.5 text-[10px]">
-                    {(['1024x1024', '1024x1536', '1536x1024'] as const).map((sz) => {
-                      const label = sz === '1024x1024' ? '1:1' : sz === '1024x1536' ? '9:16' : '16:9';
-                      const active = size === sz;
-                      return (
-                        <button
-                          key={sz}
-                          type="button"
-                          onClick={() => onSizeChange(sz)}
-                          className={cn(
-                            'rounded-md px-1.5 py-0.5 font-medium transition-colors',
-                            active
-                              ? 'bg-paper-inset text-ink font-semibold shadow-2xs'
-                              : 'text-ink-muted hover:text-ink hover:bg-paper-inset/40',
-                          )}
-                        >
-                          {label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : null}
-
-                {/* Subtle separator */}
-                <div className="w-px h-3 bg-line/40 mx-0.5" />
-
-                {/* Video Duration (5s, 10s) */}
-                {isVideo && onDurationChange ? (
-                  <div className="flex items-center gap-0.5 text-[10px]">
-                    {(['5s', '10s'] as const).map((d) => {
-                      const active = duration === d;
-                      return (
-                        <button
-                          key={d}
-                          type="button"
-                          onClick={() => onDurationChange(d)}
-                          className={cn(
-                            'rounded-md px-1.5 py-0.5 font-medium transition-colors',
-                            active
-                              ? 'bg-paper-inset text-ink font-semibold shadow-2xs'
-                              : 'text-ink-muted hover:text-ink hover:bg-paper-inset/40',
-                          )}
-                          title={`视频时长: ${d}`}
-                        >
-                          {d}
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : null}
-
-                {/* Cinema Lab Multi-Axis Camera Motion Dial */}
-                {isVideo && onCameraChange ? (
-                  <CameraDial value={camera} onChange={onCameraChange} />
-                ) : null}
-
-                {/* Variations Count Pills for Image (1x, 2x, 4x) */}
-                {!isVideo && onVariationsCountChange ? (
-                  <div className="flex items-center gap-0.5 text-[10px]">
-                    {([1, 2, 4] as const).map((c) => {
-                      const active = variationsCount === c;
-                      return (
-                        <button
-                          key={c}
-                          type="button"
-                          onClick={() => onVariationsCountChange(c)}
-                          className={cn(
-                            'rounded-md px-1.5 py-0.5 font-medium transition-colors',
-                            active
-                              ? 'bg-accent/15 text-accent font-semibold'
-                              : 'text-ink-muted hover:text-ink hover:bg-paper-inset/40',
-                          )}
-                          title={`并发生成 ${c} 张变体`}
-                        >
-                          {c}×
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : null}
+                )}
               </>
             )}
+            {isAudio && audioVoices && audioVoices.length > 0 && (
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+                <span className="text-[11px] text-white/40 mr-1 shrink-0">音色:</span>
+                {audioVoices.map((v) => (
+                  <button
+                    key={v.id}
+                    type="button"
+                    onClick={() => onAudioVoiceChange?.(v.id)}
+                    className={cn(
+                      'rounded-lg px-2 py-1 text-xs font-medium transition-colors shrink-0 cursor-pointer',
+                      audioVoice === v.id
+                        ? 'bg-accent/20 text-accent font-semibold'
+                        : 'text-white/50 hover:text-white hover:bg-white/[0.06]',
+                    )}
+                    title={v.tag ? `${v.name} (${v.tag})` : v.name}
+                  >
+                    {v.name}
+                  </button>
+                ))}
+              </div>
+            )}
+            {!isVideo && !isAudio && !isNote && onVariationsCountChange && (
+              <div className="flex items-center gap-1">
+                <span className="text-[11px] text-white/40 mr-1">变体数量:</span>
+                {([1, 2, 4] as const).map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => onVariationsCountChange(c)}
+                    className={cn(
+                      'rounded-lg px-2 py-1 text-xs font-medium transition-colors cursor-pointer',
+                      variationsCount === c
+                        ? 'bg-accent/20 text-accent font-semibold'
+                        : 'text-white/50 hover:text-white hover:bg-white/[0.06]',
+                    )}
+                  >
+                    {c}x
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 3. Bottom Controls Bar */}
+        <div className="flex items-center justify-between gap-2 pt-1 border-t border-white/[0.04]">
+          {/* Left Controls */}
+          <div className="flex items-center gap-1 min-w-0">
+            {isAudio ? (
+              /* Audio Provider Selector */
+              audioProviders && audioProviders.length > 0 && onAudioProviderChange ? (
+                <div className="relative" data-floating-dropdown>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setModelOpen(false);
+                      setSizeOpen(false);
+                      setAudioProviderOpen((prev) => !prev);
+                    }}
+                    className={cn(
+                      "h-9 w-auto px-2.5 text-[13px] font-medium transition-colors gap-2 rounded-xl cursor-pointer flex items-center select-none",
+                      audioProviderOpen
+                        ? "bg-white/15 text-white"
+                        : "text-white/90 hover:text-white hover:bg-white/[0.06]"
+                    )}
+                  >
+                    <BarChart2 size={16} className="text-white/70 shrink-0" />
+                    <span className="font-semibold">{displayModelName}</span>
+                  </button>
+
+                  {audioProviderOpen && (
+                    <div
+                      className="absolute left-0 top-[calc(100%+6px)] z-50 min-w-[160px] rounded-2xl border border-white/10 bg-[#1e1e22] p-1.5 shadow-[0_16px_40px_rgba(0,0,0,0.7)] backdrop-blur-2xl animate-in fade-in zoom-in-95 duration-150"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {audioProviders.map((p) => {
+                        const isSelected = (audioProvider || audioProviders[0]?.id) === p.id;
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => {
+                              onAudioProviderChange?.(p.id);
+                              setAudioProviderOpen(false);
+                              mentionAreaRef.current?.focus();
+                            }}
+                            className={cn(
+                              "flex w-full items-center justify-between gap-2 rounded-xl px-2.5 py-1.5 text-xs text-left transition-colors cursor-pointer",
+                              isSelected
+                                ? "bg-white/15 text-white font-medium"
+                                : "text-white/70 hover:bg-white/10 hover:text-white"
+                            )}
+                          >
+                            <span>{p.name} {p.isDefault ? '★' : ''}</span>
+                            {isSelected ? <Check size={14} className="text-accent shrink-0" /> : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : null
+            ) : isNote ? (
+              /* Note Tag */
+              <div className="flex items-center gap-2 h-9 px-2 text-[13px] font-medium text-emerald-400">
+                <Type size={15} className="shrink-0" />
+                <span>剧本与提示词编辑器</span>
+              </div>
+            ) : (
+              /* Model Selector */
+              onModelChange ? (
+                <div className="relative" data-floating-dropdown>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSizeOpen(false);
+                      setAudioProviderOpen(false);
+                      setModelOpen((prev) => !prev);
+                    }}
+                    className={cn(
+                      "h-9 w-auto px-2.5 text-[13px] font-medium transition-colors gap-2 rounded-xl cursor-pointer flex items-center select-none",
+                      modelOpen
+                        ? "bg-white/15 text-white"
+                        : "text-white/90 hover:text-white hover:bg-white/[0.06]"
+                    )}
+                  >
+                    <BarChart2 size={16} className="text-white/70 shrink-0" />
+                    <span className="font-semibold">{displayModelName}</span>
+                  </button>
+
+                  {modelOpen && (
+                    <div
+                      className="absolute left-0 top-[calc(100%+6px)] z-50 min-w-[200px] max-h-60 overflow-y-auto rounded-2xl border border-white/10 bg-[#1e1e22] p-1.5 shadow-[0_16px_40px_rgba(0,0,0,0.7)] backdrop-blur-2xl animate-in fade-in zoom-in-95 duration-150"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {modelList.map((m) => {
+                        const isSelected = currentModel === m.id;
+                        return (
+                          <button
+                            key={m.id}
+                            type="button"
+                            onClick={() => {
+                              onModelChange?.(m.id);
+                              setModelOpen(false);
+                              mentionAreaRef.current?.focus();
+                            }}
+                            className={cn(
+                              "flex w-full items-center justify-between gap-2 rounded-xl px-2.5 py-1.5 text-xs text-left transition-colors cursor-pointer",
+                              isSelected
+                                ? "bg-white/15 text-white font-medium"
+                                : "text-white/70 hover:bg-white/10 hover:text-white"
+                            )}
+                          >
+                            <div className="flex items-center gap-1.5 truncate">
+                              <span>{m.name}</span>
+                              {'badge' in m && m.badge ? (
+                                <span className="rounded bg-accent/20 px-1 py-0.5 text-[9px] text-accent">
+                                  {m.badge}
+                                </span>
+                              ) : null}
+                            </div>
+                            {isSelected ? <Check size={14} className="text-accent shrink-0" /> : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 h-9 px-2.5 text-[13px] font-semibold text-white/90">
+                  <BarChart2 size={16} className="text-white/70 shrink-0" />
+                  <span>{displayModelName}</span>
+                </div>
+              )
+            )}
+
+            {/* Size / Ratio Selector */}
+            {((isVideo && onRatioChange) || (!isVideo && !isAudio && !isNote && onSizeChange)) && (
+              <div className="relative" data-floating-dropdown>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setModelOpen(false);
+                    setAudioProviderOpen(false);
+                    setSizeOpen((prev) => !prev);
+                  }}
+                  className={cn(
+                    "h-9 w-auto px-2.5 text-[13px] font-medium transition-colors gap-2 rounded-xl cursor-pointer flex items-center select-none",
+                    sizeOpen
+                      ? "bg-white/15 text-white"
+                      : "text-white/90 hover:text-white hover:bg-white/[0.06]"
+                  )}
+                >
+                  <Scan size={16} className="text-white/70 shrink-0" />
+                  <span>{sizeLabel}</span>
+                </button>
+
+                {sizeOpen && (
+                  <div
+                    className="absolute left-0 top-[calc(100%+6px)] z-50 min-w-[130px] rounded-2xl border border-white/10 bg-[#1e1e22] p-1.5 shadow-[0_16px_40px_rgba(0,0,0,0.7)] backdrop-blur-2xl animate-in fade-in zoom-in-95 duration-150"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {isVideo
+                      ? (['16:9', '9:16', '1:1'] as const).map((r) => {
+                          const label = r === '16:9' ? '横屏(16:9)' : r === '9:16' ? '竖屏(9:16)' : '方形(1:1)';
+                          const isSelected = ratio === r;
+                          return (
+                            <button
+                              key={r}
+                              type="button"
+                              onClick={() => {
+                                onRatioChange?.(r);
+                                setSizeOpen(false);
+                                mentionAreaRef.current?.focus();
+                              }}
+                              className={cn(
+                                "flex w-full items-center justify-between gap-2 rounded-xl px-2.5 py-1.5 text-xs text-left transition-colors cursor-pointer",
+                                isSelected
+                                  ? "bg-white/15 text-white font-medium"
+                                  : "text-white/70 hover:bg-white/10 hover:text-white"
+                              )}
+                            >
+                              <span>{label}</span>
+                              {isSelected ? <Check size={14} className="text-accent shrink-0" /> : null}
+                            </button>
+                          );
+                        })
+                      : ([
+                          { id: '1024x1024', label: '自适应(4K)' },
+                          { id: '1024x1536', label: '竖屏(9:16)' },
+                          { id: '1536x1024', label: '横屏(16:9)' },
+                        ] as const).map((s) => {
+                          const isSelected = size === s.id;
+                          return (
+                            <button
+                              key={s.id}
+                              type="button"
+                              onClick={() => {
+                                onSizeChange?.(s.id);
+                                setSizeOpen(false);
+                                mentionAreaRef.current?.focus();
+                              }}
+                              className={cn(
+                                "flex w-full items-center justify-between gap-2 rounded-xl px-2.5 py-1.5 text-xs text-left transition-colors cursor-pointer",
+                                isSelected
+                                  ? "bg-white/15 text-white font-medium"
+                                  : "text-white/70 hover:bg-white/10 hover:text-white"
+                              )}
+                            >
+                              <span>{s.label}</span>
+                              {isSelected ? <Check size={14} className="text-accent shrink-0" /> : null}
+                            </button>
+                          );
+                        })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Tuning / Advanced Parameters Button */}
+            <button
+              type="button"
+              onClick={() => {
+                setModelOpen(false);
+                setSizeOpen(false);
+                setAudioProviderOpen(false);
+                setParamsOpen((prev) => !prev);
+              }}
+              title="高级参数设置"
+              className={cn(
+                'h-9 w-9 rounded-xl flex items-center justify-center transition-colors cursor-pointer',
+                paramsOpen
+                  ? 'bg-white/15 text-white'
+                  : 'text-white/70 hover:text-white hover:bg-white/[0.06]',
+              )}
+            >
+              <SlidersHorizontal size={15} />
+            </button>
           </div>
 
-          {/* Right: Price & Generate / Action CTA Button */}
+          {/* Right Controls */}
           <div className="flex items-center gap-2 shrink-0">
-            <span className="text-[10px] text-ink-muted/70 tabular-nums">
-              {isNote ? 'Agent 协作' : `~${(isAudio ? 3 : estimatedCost) * (isVideo || isAudio ? 1 : variationsCount)} 点`}
-            </span>
+            <button
+              type="button"
+              title="语音输入"
+              className="h-9 w-9 rounded-xl flex items-center justify-center text-white/70 hover:text-white hover:bg-white/[0.06] transition-colors cursor-pointer"
+            >
+              <Mic size={16} />
+            </button>
 
+            {/* Variations count for image / duration for video */}
+            {!isVideo && !isAudio && !isNote && onVariationsCountChange ? (
+              <button
+                type="button"
+                onClick={cycleVariations}
+                title={`变体数量: ${variationsCount}x (点击切换)`}
+                className="h-9 px-2.5 rounded-xl flex items-center justify-center text-[13px] font-medium text-white/80 hover:text-white hover:bg-white/[0.06] transition-colors cursor-pointer select-none"
+              >
+                {variationsCount}x
+              </button>
+            ) : isVideo && onDurationChange ? (
+              <button
+                type="button"
+                onClick={() => onDurationChange(duration === '5s' ? '10s' : '5s')}
+                title={`视频时长: ${duration} (点击切换)`}
+                className="h-9 px-2.5 rounded-xl flex items-center justify-center text-[13px] font-medium text-white/80 hover:text-white hover:bg-white/[0.06] transition-colors cursor-pointer select-none"
+              >
+                {duration}
+              </button>
+            ) : null}
+
+            {/* Capsule Action Button */}
             <button
               type="button"
               onClick={isNote && onAgentExpand ? onAgentExpand : onRun}
               disabled={running || !canGenerate}
               className={cn(
-                'inline-flex items-center gap-1.5 rounded-xl bg-accent px-3.5 py-1.5 text-xs font-semibold text-accent-ink shadow-md transition-all',
+                'inline-flex items-center gap-2.5 h-10 pl-3.5 pr-1.5 rounded-full transition-all cursor-pointer select-none',
                 running || !canGenerate
-                  ? 'opacity-40 cursor-not-allowed'
-                  : 'hover:opacity-95 active:scale-95 hover:shadow-lg',
+                  ? 'bg-[#222225] opacity-40 cursor-not-allowed text-white/50 border border-white/[0.04]'
+                  : 'bg-[#27272a] hover:bg-[#323238] active:scale-[0.98] text-white border border-white/[0.08] shadow-md hover:shadow-lg',
               )}
+              title={
+                isNote
+                  ? 'AI 扩写剧本与提示词'
+                  : isAudio
+                    ? '生成音频'
+                    : isVideo
+                      ? '生成视频'
+                      : variationsCount > 1
+                        ? `生成 ${variationsCount} 张变体`
+                        : '生成图片'
+              }
             >
-              {running ? (
-                <>
-                  <Loader2 size={12} className="animate-spin" />
-                  <span>{isNote ? '扩写中…' : '生成中…'}</span>
-                </>
-              ) : (
-                <>
-                  {isNote ? (
-                    <Bot size={11} className="shrink-0" />
-                  ) : isAudio ? (
-                    <Volume2 size={11} className="fill-current shrink-0" />
-                  ) : isVideo ? (
-                    <Video size={11} className="fill-current shrink-0" />
-                  ) : (
-                    <Play size={11} className="fill-current shrink-0" />
-                  )}
-                  <span>
-                    {isNote
-                      ? 'Agent 扩写'
-                      : isAudio
-                        ? '生成音频'
-                        : isVideo
-                          ? '生成视频'
-                          : variationsCount > 1
-                            ? `生成 ${variationsCount} 张变体`
-                            : '生成图片'}
-                  </span>
-                </>
-              )}
+              <div className="flex items-center gap-1.5">
+                {isNote ? (
+                  <Bot size={15} className="text-white/80 shrink-0" />
+                ) : (
+                  <Sparkles size={15} className="text-white/80 shrink-0" />
+                )}
+                <span className="text-[13px] font-semibold text-white/90 tabular-nums">
+                  {cost}
+                </span>
+              </div>
+              <div className="w-7 h-7 rounded-full bg-white/[0.12] hover:bg-white/[0.2] flex items-center justify-center text-white transition-colors shrink-0">
+                {running ? (
+                  <Loader2 size={13} className="animate-spin" />
+                ) : (
+                  <ArrowUp size={13} strokeWidth={2.5} />
+                )}
+              </div>
             </button>
           </div>
         </div>
@@ -544,12 +764,12 @@ function RefChip({
       type="button"
       onClick={onInsert}
       title={`插入 @${title}`}
-      className="group relative h-9 w-9 shrink-0 overflow-hidden rounded-lg border border-line/50 bg-paper-inset/60"
+      className="group relative h-9 w-9 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-white/[0.04] transition-all hover:border-white/30 cursor-pointer"
     >
       {url ? (
         <img src={url} alt="" className="h-full w-full object-cover" />
       ) : (
-        <span className="flex h-full w-full items-center justify-center text-[9px] text-ink-muted">
+        <span className="flex h-full w-full items-center justify-center text-[9px] text-white/50">
           {title.slice(0, 2)}
         </span>
       )}
@@ -560,7 +780,7 @@ function RefChip({
           e.stopPropagation();
           onRemove();
         }}
-        className="absolute right-0 top-0 hidden h-3.5 w-3.5 items-center justify-center rounded-bl bg-black/70 text-white group-hover:flex"
+        className="absolute right-0 top-0 hidden h-3.5 w-3.5 items-center justify-center rounded-bl bg-black/80 text-white/80 hover:text-white group-hover:flex"
       >
         <X size={8} />
       </span>

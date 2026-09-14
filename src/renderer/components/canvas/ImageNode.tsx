@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, memo } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback, memo } from 'react';
 import { Handle, Position, type NodeProps, useStore } from '@xyflow/react';
 import { Loader2, Play, Sparkles, ImageIcon, X, FileUp, Bot, Upload } from 'lucide-react';
 import type { CanvasImageParams, CanvasNode } from '../../../shared/canvas';
@@ -270,9 +270,23 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
     return () => window.removeEventListener(OPEN_IMAGE_EDIT_EVENT, onOpen);
   }, [sessionId, node.id]);
 
+  const promptDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestPromptRef = useRef(prompt);
+  latestPromptRef.current = prompt;
+
   useEffect(() => {
-    setPrompt((params.prompt as string) ?? '');
+    const storePrompt = (params.prompt as string) ?? '';
+    if (storePrompt === latestPromptRef.current || promptDebounceRef.current !== null) return;
+    setPrompt(storePrompt);
+    latestPromptRef.current = storePrompt;
   }, [params.prompt]);
+
+  useEffect(() => {
+    return () => {
+      if (promptDebounceRef.current) clearTimeout(promptDebounceRef.current);
+    };
+  }, []);
+
   useEffect(() => {
     if (typeof node.output?.activeAssetIndex === 'number') {
       setAssetIdx(node.output.activeAssetIndex);
@@ -282,10 +296,29 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
     if (assets.length > 0 && assetIdx >= assets.length) setAssetIdx(0);
   }, [assets.length, assetIdx]);
 
-  const commitPrompt = () => {
-    if (prompt === params.prompt) return;
-    void canvasStore.updateNodeParams(sessionId, node.id, { ...params, prompt });
-  };
+  const commitPrompt = useCallback(() => {
+    if (promptDebounceRef.current) {
+      clearTimeout(promptDebounceRef.current);
+      promptDebounceRef.current = null;
+    }
+    const freshNode = canvasStore.nodeById(sessionId, node.id);
+    const freshParams = (freshNode?.params as Record<string, unknown>) ?? {};
+    if (latestPromptRef.current === freshParams.prompt) return;
+    void canvasStore.updateNodeParams(sessionId, node.id, { ...freshParams, prompt: latestPromptRef.current });
+  }, [sessionId, node.id]);
+
+  const handlePromptChange = useCallback((p: string) => {
+    setPrompt(p);
+    latestPromptRef.current = p;
+    if (promptDebounceRef.current) clearTimeout(promptDebounceRef.current);
+    promptDebounceRef.current = setTimeout(() => {
+      promptDebounceRef.current = null;
+      const freshNode = canvasStore.nodeById(sessionId, node.id);
+      const freshParams = (freshNode?.params as Record<string, unknown>) ?? {};
+      if (p === freshParams.prompt) return;
+      void canvasStore.updateNodeParams(sessionId, node.id, { ...freshParams, prompt: p });
+    }, 400);
+  }, [sessionId, node.id]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -310,7 +343,13 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
   const run = () => {
     if (running) return;
     if (!prompt.trim() && !hasUpstreamPrompt) return;
-    const updatedParams = { ...params, prompt, count: variationsCount };
+    if (promptDebounceRef.current) {
+      clearTimeout(promptDebounceRef.current);
+      promptDebounceRef.current = null;
+    }
+    const freshNode = canvasStore.nodeById(sessionId, node.id);
+    const freshParams = (freshNode?.params as Record<string, unknown>) ?? {};
+    const updatedParams = { ...freshParams, prompt, count: variationsCount };
     void canvasStore
       .updateNodeParams(sessionId, node.id, updatedParams)
       .then(() => canvasStore.runNode(sessionId, node.id));
@@ -657,10 +696,7 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
         node={node}
         visible={Boolean((solo || showConfig || composing) && !hasImage)}
         prompt={prompt}
-        onPromptChange={(p) => {
-          setPrompt(p);
-          void canvasStore.updateNodeParams(sessionId, node.id, { ...params, prompt: p });
-        }}
+        onPromptChange={handlePromptChange}
         onPromptCommit={commitPrompt}
         candidates={candidates}
         upstreamSources={upstreamSources}

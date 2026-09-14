@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, memo } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback, memo } from 'react';
 import { Position, type NodeProps, useStore } from '@xyflow/react';
 import {
   Download,
@@ -155,9 +155,22 @@ function AudioNode({ id, data, selected }: NodeProps) {
     });
   }, [edges, allNodes, node.id]);
 
+  const promptDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestPromptRef = useRef(prompt);
+  latestPromptRef.current = prompt;
+
   useEffect(() => {
-    setPrompt((params.prompt as string) ?? '');
+    const storePrompt = (params.prompt as string) ?? '';
+    if (storePrompt === latestPromptRef.current || promptDebounceRef.current !== null) return;
+    setPrompt(storePrompt);
+    latestPromptRef.current = storePrompt;
   }, [params.prompt]);
+
+  useEffect(() => {
+    return () => {
+      if (promptDebounceRef.current) clearTimeout(promptDebounceRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (assetIdx >= assets.length) setAssetIdx(0);
@@ -169,10 +182,29 @@ function AudioNode({ id, data, selected }: NodeProps) {
     setCurrentTime(0);
   }, [assetUrl]);
 
-  const commitPrompt = () => {
-    if (prompt === params.prompt) return;
-    void canvasStore.updateNodeParams(sessionId, node.id, { ...params, prompt });
-  };
+  const commitPrompt = useCallback(() => {
+    if (promptDebounceRef.current) {
+      clearTimeout(promptDebounceRef.current);
+      promptDebounceRef.current = null;
+    }
+    const freshNode = canvasStore.nodeById(sessionId, node.id);
+    const freshParams = (freshNode?.params as Record<string, unknown>) ?? {};
+    if (latestPromptRef.current === freshParams.prompt) return;
+    void canvasStore.updateNodeParams(sessionId, node.id, { ...freshParams, prompt: latestPromptRef.current });
+  }, [sessionId, node.id]);
+
+  const handlePromptChange = useCallback((p: string) => {
+    setPrompt(p);
+    latestPromptRef.current = p;
+    if (promptDebounceRef.current) clearTimeout(promptDebounceRef.current);
+    promptDebounceRef.current = setTimeout(() => {
+      promptDebounceRef.current = null;
+      const freshNode = canvasStore.nodeById(sessionId, node.id);
+      const freshParams = (freshNode?.params as Record<string, unknown>) ?? {};
+      if (p === freshParams.prompt) return;
+      void canvasStore.updateNodeParams(sessionId, node.id, { ...freshParams, prompt: p });
+    }, 400);
+  }, [sessionId, node.id]);
 
   const togglePlay = () => {
     const el = audioRef.current;
@@ -538,10 +570,7 @@ function AudioNode({ id, data, selected }: NodeProps) {
         visible={Boolean((solo || showConfig || composing) && !hasAudio)}
         nodeType="audio"
         prompt={prompt}
-        onPromptChange={(p) => {
-          setPrompt(p);
-          void canvasStore.updateNodeParams(sessionId, node.id, { ...params, prompt: p });
-        }}
+        onPromptChange={handlePromptChange}
         onPromptCommit={commitPrompt}
         candidates={candidates}
         upstreamSources={upstreamSources}

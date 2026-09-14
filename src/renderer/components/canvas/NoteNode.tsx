@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, memo, useRef } from 'react';
+import { useEffect, useState, useMemo, useCallback, memo, useRef } from 'react';
 import { Position, type NodeProps } from '@xyflow/react';
 import { Type } from 'lucide-react';
 import type { CanvasNoteParams } from '../../../shared/canvas';
@@ -25,9 +25,22 @@ function NoteNode({ id, data, selected }: NodeProps) {
   const solo = useIsSoloSelected(selected);
   const composing = useCanvasStore((s) => s.mentionComposerBySession[sessionId] === node.id);
 
+  const contentDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestContentRef = useRef(content);
+  latestContentRef.current = content;
+
   useEffect(() => {
-    setContent(params.content || '');
+    const storeContent = params.content || '';
+    if (storeContent === latestContentRef.current || contentDebounceRef.current !== null) return;
+    setContent(storeContent);
+    latestContentRef.current = storeContent;
   }, [params.content]);
+
+  useEffect(() => {
+    return () => {
+      if (contentDebounceRef.current) clearTimeout(contentDebounceRef.current);
+    };
+  }, []);
 
   // Exit editing when the node is deselected externally
   useEffect(() => {
@@ -46,13 +59,35 @@ function NoteNode({ id, data, selected }: NodeProps) {
     }
   }, [isEditing]);
 
-  const commitContent = () => {
-    if (content === (params.content || '')) return;
+  const commitContent = useCallback(() => {
+    if (contentDebounceRef.current) {
+      clearTimeout(contentDebounceRef.current);
+      contentDebounceRef.current = null;
+    }
+    const freshNode = canvasStore.nodeById(sessionId, node.id);
+    const freshParams = (freshNode?.params as Record<string, unknown>) ?? {};
+    if (latestContentRef.current === (freshParams.content || '')) return;
     void canvasStore.updateNodeParams(sessionId, node.id, {
-      ...params,
-      content,
+      ...freshParams,
+      content: latestContentRef.current,
     });
-  };
+  }, [sessionId, node.id]);
+
+  const handleContentChange = useCallback((nextText: string) => {
+    setContent(nextText);
+    latestContentRef.current = nextText;
+    if (contentDebounceRef.current) clearTimeout(contentDebounceRef.current);
+    contentDebounceRef.current = setTimeout(() => {
+      contentDebounceRef.current = null;
+      const freshNode = canvasStore.nodeById(sessionId, node.id);
+      const freshParams = (freshNode?.params as Record<string, unknown>) ?? {};
+      if (nextText === (freshParams.content || '')) return;
+      void canvasStore.updateNodeParams(sessionId, node.id, {
+        ...freshParams,
+        content: nextText,
+      });
+    }, 400);
+  }, [sessionId, node.id]);
 
   const handleBlur = () => {
     commitContent();
@@ -192,13 +227,7 @@ function NoteNode({ id, data, selected }: NodeProps) {
         visible={solo || composing}
         nodeType="note"
         prompt={content}
-        onPromptChange={(nextText) => {
-          setContent(nextText);
-          void canvasStore.updateNodeParams(sessionId, node.id, {
-            ...params,
-            content: nextText,
-          });
-        }}
+        onPromptChange={handleContentChange}
         onPromptCommit={commitContent}
         candidates={candidates}
         upstreamSources={upstreamSources}
