@@ -2081,6 +2081,13 @@ export async function stopGraph(sessionId: string): Promise<void> {
   if (id) await api.stopCanvasGraph(id).catch((): void => undefined);
 }
 
+export async function refinePrompt(
+  prompt: string,
+  mode: 'image' | 'video' = 'image',
+): Promise<string> {
+  return api.refineCanvasPrompt(prompt, mode);
+}
+
 export async function importImage(sessionId: string, file: File, at: { x: number; y: number }): Promise<void> {
   const id = canvasId(sessionId);
   if (!id) return;

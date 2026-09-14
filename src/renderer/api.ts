@@ -607,6 +607,22 @@ export async function stopCanvasGraph(canvasId: string): Promise<void> {
   await api(`/api/canvas/${canvasId}/run/stop`, { method: 'POST' });
 }
 
+export async function refineCanvasPrompt(
+  prompt: string,
+  mode: 'image' | 'video' = 'image',
+): Promise<string> {
+  const res = await api('/api/canvas/refine-prompt', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ prompt, mode }),
+  });
+  const data = (await res.json()) as { refined?: string; error?: string };
+  if (!res.ok || data.error) {
+    throw new Error(data.error || '提示词润色失败');
+  }
+  return data.refined || prompt;
+}
+
 export async function importCanvasImage(
   canvasId: string,
   input: {

@@ -17,6 +17,9 @@ import { runAudioNode } from '../canvas/audioExecutor';
 import { setCanvasSelection } from '../canvas/selection';
 import { exportWorkflowZip } from '../canvas/exportWorkflow';
 import { importWorkflowZip } from '../canvas/importWorkflow';
+import { generateText } from 'ai';
+import { createOpenAiModel } from '../agent/provider/openai';
+import { getProviderPreset } from '../../../shared/providers';
 
 const NODE_TYPES = new Set<CanvasNodeType>([
   'image',
@@ -34,6 +37,21 @@ const NODE_TYPES = new Set<CanvasNodeType>([
 const IMPORT_MAX_BYTES = 12 * 1024 * 1024;
 const WORKFLOW_MAX_BYTES = 256 * 1024 * 1024;
 
+const REFINEMENT_PROMPTS: Record<'image' | 'video', string> = {
+  image:
+    '你是专业的 AI 图像提示词专家。请对用户提供的提示词草稿进行润色与丰富。' +
+    '必须保留用户明确指定的主体、核心意图、画幅风格与场景元素。' +
+    '补充画面主体细节、构图视角、光影氛围、色彩搭配与材质质感。' +
+    '严禁无端编造用户未提及的文字、人名、商标或品牌。' +
+    '只输出一段可直接提交给生图模型的最终提示词文本，严禁包含任何解释、前缀、列表、引号或 Markdown 标记。',
+  video:
+    '你是专业的 AI 视频提示词专家。请对用户提供的提示词草稿进行润色与丰富。' +
+    '必须保留用户明确指定的主体、核心动作与风格意图。' +
+    '补充主体动态轨迹、镜头运动（如缓慢推近、跟随运镜）、运镜节奏、光影色彩与场景空间感，确保动作连续可信。' +
+    '严禁无端编造用户未提及的文字、人名、商标或品牌。' +
+    '只输出一段可直接提交给视频生成模型的最终提示词文本，严禁包含任何解释、前缀、列表、引号或 Markdown 标记。',
+};
+
 export function createCanvasRouter(
   canvasStore: CanvasStore,
   settingsStore: SettingsStore,
@@ -43,6 +61,57 @@ export function createCanvasRouter(
   providerStore?: ProviderStore,
 ) {
   const router = new Hono();
+
+  /** 轻量级 Prompt 润色（不走完整 Agent Turn 与消息历史） */
+  router.post('/refine-prompt', async (c) => {
+    const body = await c.req.json().catch((): null => null);
+    const rawPrompt = typeof body?.prompt === 'string' ? body.prompt.trim() : '';
+    if (!rawPrompt) {
+      return c.json({ error: '提示词内容不能为空' }, 400);
+    }
+    const mode: 'image' | 'video' = body?.mode === 'video' ? 'video' : 'image';
+
+    const settings = await settingsStore.get();
+    const providerId = settings.activeProviderId;
+    const preset = getProviderPreset(providerId);
+    const stored = settings.providers[providerId];
+    const apiKey = stored?.apiKey;
+    if (!apiKey) {
+      return c.json(
+        { error: `未配置 ${preset?.name || providerId} 的 API Key，请先在设置中配置。` },
+        400,
+      );
+    }
+
+    const modelId = stored?.model || preset?.defaultModel;
+    const baseUrl = stored?.baseUrl || preset?.baseUrl;
+    if (!baseUrl || !modelId) {
+      return c.json({ error: '当前 Provider 缺少有效的 Base URL 或模型 ID。' }, 400);
+    }
+
+    try {
+      const model = createOpenAiModel({ apiKey, modelId, baseUrl });
+      const { text } = await generateText({
+        model,
+        system: REFINEMENT_PROMPTS[mode],
+        prompt: rawPrompt,
+        abortSignal: c.req.raw.signal,
+      });
+
+      const refined = text
+        .trim()
+        .replace(/^```[^\n]*\n?/, '')
+        .replace(/\n?```$/, '')
+        .replace(/^["'“”]/, '')
+        .replace(/["'“”]$/, '')
+        .trim();
+
+      return c.json({ refined: refined || rawPrompt });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return c.json({ error: `提示词润色失败: ${msg}` }, 500);
+    }
+  });
 
   /** Snapshot (creates the canvas row lazily on first read). */
   router.get('/:sessionId', async (c) => {

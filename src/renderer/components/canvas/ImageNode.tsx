@@ -26,6 +26,7 @@ import MultiAnglePanel from './imageEdit/MultiAnglePanel';
 import RelightPanel from './imageEdit/RelightPanel';
 import OutpaintOverlay from './imageEdit/OutpaintOverlay';
 import SplitOverlay from './imageEdit/SplitOverlay';
+import ImageGenerationPending from './imageEdit/ImageGenerationPending';
 import ParamPopover from './imageEdit/ParamPopover';
 import EditParamsPanel from './imageEdit/EditParamsPanel';
 import type { EditCommitMode } from './imageEdit/commitEdit';
@@ -634,6 +635,16 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
                 <span>替换</span>
               </button>
             </Tooltip>
+            {/* Running Overlay when regenerating/editing an existing image */}
+            {running ? (
+              <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/65 backdrop-blur-[2px] p-4">
+                <ImageGenerationPending
+                  mode={edit ? 'edit' : 'generate'}
+                  compact
+                  className="w-full h-full bg-black/40 border-white/10"
+                />
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -643,18 +654,17 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
       ) : null}
 
       {edit && !hasImage ? (
-        <div className="relative flex h-full w-full flex-col items-center justify-center rounded-2xl bg-[#18181b]/80 p-4 text-center select-none">
+        <div className="relative flex h-full w-full flex-col items-center justify-center rounded-2xl bg-[#18181b]/80 text-center select-none overflow-hidden">
           {running ? (
-            <div className="flex flex-col items-center justify-center gap-2">
-              <Loader2 size={24} className="animate-spin text-[#edd7a3]" />
-              <span className="text-[11px] font-medium text-white/60">正在编辑…</span>
-            </div>
+            <ImageGenerationPending mode="edit" className="w-full h-full" />
           ) : (
-            <Sparkles
-              size={36}
-              strokeWidth={1.3}
-              className="text-white/20 pointer-events-none"
-            />
+            <div className="p-4 flex items-center justify-center">
+              <Sparkles
+                size={36}
+                strokeWidth={1.3}
+                className="text-white/20 pointer-events-none"
+              />
+            </div>
           )}
         </div>
       ) : null}
@@ -670,16 +680,13 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
           onDragLeave={() => setIsDragging(false)}
           onDrop={handleDrop}
           className={cn(
-            'group/placeholder relative flex h-full w-full flex-col items-center justify-center rounded-2xl transition-all select-none',
+            'group/placeholder relative flex h-full w-full flex-col items-center justify-center rounded-2xl transition-all select-none overflow-hidden',
             isDragging ? 'bg-white/[0.12]' : 'canvas-node-empty',
           )}
           title="支持拖入图片或点击上方上传"
         >
           {running ? (
-            <div className="flex flex-col items-center justify-center gap-2">
-              <Loader2 size={26} className="animate-spin text-[#edd7a3]" />
-              <span className="text-[11px] font-medium text-white/60">生成中…</span>
-            </div>
+            <ImageGenerationPending mode="generate" className="w-full h-full" />
           ) : (
             <ImageIcon
               size={36}

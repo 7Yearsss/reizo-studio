@@ -18,6 +18,7 @@ import {
   Check,
 } from 'lucide-react';
 import { cn } from '../../lib/cn';
+import { toast } from '../../lib/toast';
 import MentionTextArea, { type MentionTextAreaHandle } from './MentionTextArea';
 import { useAssetUrl } from './useAssetUrl';
 import {
@@ -173,6 +174,7 @@ function NodeFloatingPanel({
   // ── All hooks must be called before any early return (Rules of Hooks) ──────
 
   const mentionAreaRef = useRef<MentionTextAreaHandle>(null);
+  const [refining, setRefining] = useState(false);
 
   // Register the insert callback while this panel is showing. Do not clear the
   // composer on hide/remount — a mention pick updates node params, RF rebuilds
@@ -214,6 +216,23 @@ function NodeFloatingPanel({
   const isAudio = nodeType === 'audio';
   const isNote = nodeType === 'note';
   const isImage = !isVideo && !isAudio && !isNote;
+
+  const handleRefinePrompt = async () => {
+    const raw = prompt.trim();
+    if (!raw || refining) return;
+    setRefining(true);
+    try {
+      const mode = isVideo ? 'video' : 'image';
+      const refined = await canvasStore.refinePrompt(raw, mode);
+      onPromptChange(refined);
+      onPromptCommit();
+      toast.success('已完成提示词润色');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '提示词润色失败');
+    } finally {
+      setRefining(false);
+    }
+  };
 
   const defaultModel = isVideo ? 'kling-1.5' : isAudio ? (audioProviders?.[0]?.id || 'suno-v3') : 'flux-schnell';
   const currentModel = model || defaultModel;
@@ -667,6 +686,31 @@ function NodeFloatingPanel({
 
           {/* Right Controls */}
           <div className="flex items-center gap-2 shrink-0">
+            {/* AI Prompt Refinement Button */}
+            {(isImage || isVideo) && (
+              <button
+                type="button"
+                onClick={handleRefinePrompt}
+                disabled={refining || !prompt.trim()}
+                title={refining ? '正在润色提示词…' : 'AI 快速润色提示词 (基于当前配置模型)'}
+                className={cn(
+                  'h-9 px-2.5 rounded-xl flex items-center gap-1.5 text-[12px] font-medium transition-all cursor-pointer select-none',
+                  refining
+                    ? 'bg-[#edd7a3]/15 text-[#edd7a3] cursor-wait'
+                    : !prompt.trim()
+                      ? 'text-white/25 cursor-not-allowed hover:bg-transparent'
+                      : 'text-[#edd7a3] hover:text-[#edd7a3] hover:bg-[#edd7a3]/10 bg-[#edd7a3]/5 border border-[#edd7a3]/20 shadow-xs active:scale-95',
+                )}
+              >
+                {refining ? (
+                  <Loader2 size={13} className="animate-spin text-[#edd7a3]" />
+                ) : (
+                  <Sparkles size={13} className="text-[#edd7a3]" />
+                )}
+                <span>{refining ? '润色中…' : '润色'}</span>
+              </button>
+            )}
+
             <button
               type="button"
               title="语音输入"
