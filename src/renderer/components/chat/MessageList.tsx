@@ -146,6 +146,7 @@ export default function MessageList({
             {m.role === 'user' ? (
               <UserMessage
                 content={m.content}
+                sessionId={sessionId}
                 searchQuery={searchQuery}
                 currentMatch={currentMatchId === m.id}
                 canEdit={!sending && m.id === lastUserId}
