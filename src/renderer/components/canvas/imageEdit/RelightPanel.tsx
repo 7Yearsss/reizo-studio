@@ -3,6 +3,7 @@ import { RotateCcw } from 'lucide-react';
 import type { CanvasNode } from '../../../../shared/canvas';
 import type { ImageEditParams } from '../../../../shared/canvasImageEdit';
 import { commitImageEdit } from './commitEdit';
+import { Switch } from '../../motion/switch';
 import EditOverlayShell from './EditOverlayShell';
 import EditPanelCard from './EditPanelCard';
 import EditSlider from './EditSlider';
@@ -229,10 +230,15 @@ export default function RelightPanel({
             </div>
 
             <div className="flex items-center justify-between text-[12px] text-ink-muted">
-              <label className="flex items-center gap-2">
-                <input type="checkbox" checked={rimLight} onChange={(e) => setRimLight(e.target.checked)} />
+              <span className="flex items-center gap-2">
+                <Switch
+                  checked={rimLight}
+                  onCheckedChange={setRimLight}
+                  ariaLabel="轮廓光"
+                  className="scale-[0.72]"
+                />
                 轮廓光
-              </label>
+              </span>
               <button
                 type="button"
                 onClick={reset}

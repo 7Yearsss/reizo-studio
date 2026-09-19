@@ -19,6 +19,7 @@ import {
   Bot,
 } from 'lucide-react';
 import { cn } from '../../lib/cn';
+import { Switch } from '../../components/motion/switch';
 import { toast } from '../../lib/toast';
 import * as api from '../../api';
 import { loadProviderCatalog } from '../../state/providerCatalogStore';
@@ -543,30 +544,23 @@ export function AdminProvidersSection() {
                 />
               </div>
 
-              <div className="flex items-center gap-4 pt-2">
-                <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={editingProvider.isDefault ?? false}
-                    onChange={(e) =>
-                      setEditingProvider({ ...editingProvider, isDefault: e.target.checked })
-                    }
-                    className="rounded border-line text-accent focus:ring-0"
-                  />
-                  <span>设为该模态默认服务商</span>
-                </label>
-
-                <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={editingProvider.enabled ?? true}
-                    onChange={(e) =>
-                      setEditingProvider({ ...editingProvider, enabled: e.target.checked })
-                    }
-                    className="rounded border-line text-accent focus:ring-0"
-                  />
-                  <span>启用该服务商</span>
-                </label>
+              <div className="flex items-center gap-6 pt-2 text-xs text-ink">
+                <Switch
+                  checked={editingProvider.isDefault ?? false}
+                  onCheckedChange={(v) =>
+                    setEditingProvider({ ...editingProvider, isDefault: v })
+                  }
+                  label="设为该模态默认服务商"
+                  ariaLabel="设为该模态默认服务商"
+                />
+                <Switch
+                  checked={editingProvider.enabled ?? true}
+                  onCheckedChange={(v) =>
+                    setEditingProvider({ ...editingProvider, enabled: v })
+                  }
+                  label="启用该服务商"
+                  ariaLabel="启用该服务商"
+                />
               </div>
             </div>
 

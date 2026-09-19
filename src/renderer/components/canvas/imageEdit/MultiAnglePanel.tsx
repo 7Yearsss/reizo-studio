@@ -4,6 +4,7 @@ import type { CanvasNode } from '../../../../shared/canvas';
 import { commitImageEdit } from './commitEdit';
 import EditOverlayShell from './EditOverlayShell';
 import EditJobStage from './EditJobStage';
+import { Switch } from '../../motion/switch';
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
@@ -83,10 +84,15 @@ export default function MultiAnglePanel({
             <span>旋转 {rotateDeg}°</span>
             <span>倾斜 {tiltDeg}°</span>
             <span>缩放 {zoomLabel}</span>
-            <label className="flex items-center gap-1.5 text-ink">
-              <input type="checkbox" checked={wideAngle} onChange={(e) => setWideAngle(e.target.checked)} />
+            <span className="flex items-center gap-1.5 text-ink">
+              <Switch
+                checked={wideAngle}
+                onCheckedChange={setWideAngle}
+                ariaLabel="广角"
+                className="scale-[0.72]"
+              />
               广角
-            </label>
+            </span>
             <button
               type="button"
               onClick={reset}
