@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { PendingAsk } from '../../state/chatStore';
 import { ApprovalCard } from '../agents/approval-card';
 import DirectionCardChoice from './DirectionCard';
+import { cn } from '../../lib/cn';
 
 export default function AskUserPrompt({
   pending,
@@ -70,7 +71,12 @@ function DirectionAsk({
         <div key={q.id} className="flex flex-col gap-2">
           <span className="text-[12px] text-ink">{q.prompt}</span>
           {q.kind === 'direction' && q.directions ? (
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div
+              className={cn(
+                'grid grid-cols-1 gap-2',
+                q.directions.length >= 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-2',
+              )}
+            >
               {q.directions.map((d) => (
                 <DirectionCardChoice
                   key={d.id}

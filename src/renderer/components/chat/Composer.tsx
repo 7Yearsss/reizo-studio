@@ -6,8 +6,6 @@ import { PromptInput } from '../agents/prompt-input';
 import ModelPicker from './ModelPicker';
 import MentionMenu, { extractMentionQuery } from './MentionMenu';
 import SlashPalette, { buildSlashCommands, extractSlashQuery, type SlashCommand } from './SlashPalette';
-import PermissionPrompt from './PermissionPrompt';
-import AskUserPrompt from './AskUserPrompt';
 import QueuePanel from './QueuePanel';
 import TodoCard from './TodoCard';
 import NextStepStrip from './NextStepStrip';
@@ -86,8 +84,6 @@ export default function Composer({
   const permissionMode = useSettingsStore((s) => s.settings.permissionMode);
   const skills = useSkillStore().skills;
   const interaction = useChatStore((s) => (sessionId ? s.interactionBySession[sessionId] : null)) ?? null;
-  const permission = interaction?.kind === 'permission' ? interaction : null;
-  const ask = interaction?.kind === 'ask' ? interaction : null;
   const queue = useChatStore((s) => (sessionId ? s.queueBySession[sessionId] : undefined)) ?? [];
   const todos = useChatStore((s) => (sessionId ? s.todosBySession[sessionId] : undefined)) ?? [];
   const lastTextAt = useChatStore((s) => (sessionId ? s.lastTextAtBySession[sessionId] : undefined));
@@ -173,6 +169,7 @@ export default function Composer({
       recovering={Boolean(turnError?.includes('正在恢复'))}
       lastTextAt={lastTextAt}
       lastProgressAt={lastProgressAt}
+      onStop={interaction ? onStop : undefined}
     />
   ) : null;
 
@@ -243,29 +240,15 @@ export default function Composer({
         {slashQuery !== null && (
           <SlashPalette query={slashQuery} commands={slashCommands} onPick={pickSlash} />
         )}
-        {ask && sessionId ? (
-          <>
-            {liveStatus ? <div className="mb-2 px-1">{liveStatus}</div> : null}
-            <AskUserPrompt pending={ask} onAnswer={(answers) => void chatStore.answerAsk(sessionId, answers)} sessionId={sessionId} />
-          </>
-        ) : permission && sessionId ? (
-          <>
-            {liveStatus ? <div className="mb-2 px-1">{liveStatus}</div> : null}
-            <PermissionPrompt
-              permission={permission}
-              onRespond={(decision) => void chatStore.answerPermission(sessionId, decision)}
-            />
-          </>
-        ) : (
-          <div
-            onDragOver={(e) => {
-              e.preventDefault();
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              if (e.dataTransfer.files.length) void addDroppedFiles(e.dataTransfer.files);
-            }}
-          >
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            if (e.dataTransfer.files.length) void addDroppedFiles(e.dataTransfer.files);
+          }}
+        >
             {(activeSkill || attachments.length > 0 || nodeRefs.length > 0 || mentions.length > 0 || unpinnedSelectionNodes.length > 0) && (
               <div className={cn("mb-2 flex flex-wrap gap-1.5", compact && "max-h-24 overflow-y-auto pr-0.5")}>
                 {sessionId && unpinnedSelectionNodes.length > 0 && (
@@ -419,7 +402,7 @@ export default function Composer({
                 value={draft}
                 onValueChange={setDraft}
                 onSubmit={() => submit()}
-                loading={Boolean(sending)}
+                loading={Boolean(sending && !interaction)}
                 onStop={onStop}
                 disabled={disabled}
                 autoFocus={autoFocus}
@@ -485,8 +468,7 @@ export default function Composer({
                 className="border-0 bg-transparent p-0"
               />
             </div>
-          </div>
-        )}
+        </div>
       </div>
     </div>
   );

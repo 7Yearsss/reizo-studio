@@ -201,6 +201,7 @@ export default function ChatPage({
       )}
       <MessageList
         messages={messages}
+        sessionId={sessionId}
         compact={isCompact}
         streaming={streaming}
         streamingTools={streamingTools}

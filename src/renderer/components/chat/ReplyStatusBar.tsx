@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Square } from 'lucide-react';
 import type { TodoItem } from '../../../shared/stream';
 import type { ReplyPhase } from '../../../shared/stream';
 import type { ChatInteraction } from '../../state/chatStore';
@@ -24,6 +25,7 @@ export default function ReplyStatusBar({
   recovering = false,
   lastTextAt,
   lastProgressAt,
+  onStop,
 }: {
   startedAt?: number;
   toolCount: number;
@@ -33,6 +35,8 @@ export default function ReplyStatusBar({
   recovering?: boolean;
   lastTextAt?: number;
   lastProgressAt?: number;
+  /** When set, shows a small stop button (used while the composer is in send mode). */
+  onStop?: () => void;
 }) {
   const [now, setNow] = useState(() => Date.now());
 
@@ -81,6 +85,17 @@ export default function ReplyStatusBar({
         elapsedSeconds={elapsed / 1000}
         className="gap-2 text-[12px] text-ink-muted"
       />
+      {onStop && (
+        <button
+          type="button"
+          aria-label="停止"
+          title="停止当前回合"
+          onClick={onStop}
+          className="flex h-5 w-5 items-center justify-center rounded-full border border-line text-ink-muted transition-colors hover:bg-paper-inset hover:text-ink"
+        >
+          <Square size={9} className="fill-current" />
+        </button>
+      )}
     </div>
   );
 }
