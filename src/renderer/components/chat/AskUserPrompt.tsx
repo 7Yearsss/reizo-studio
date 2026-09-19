@@ -6,16 +6,18 @@ import DirectionCardChoice from './DirectionCard';
 export default function AskUserPrompt({
   pending,
   onAnswer,
+  sessionId,
 }: {
   pending: PendingAsk;
   onAnswer: (answers: Record<string, string>) => void;
+  sessionId?: string;
 }) {
   const hasDirections = pending.questions.some(
     (q) => q.kind === 'direction' && q.directions && q.directions.length > 0,
   );
 
   if (hasDirections) {
-    return <DirectionAsk pending={pending} onAnswer={onAnswer} />;
+    return <DirectionAsk pending={pending} onAnswer={onAnswer} sessionId={sessionId} />;
   }
 
   return (
@@ -47,9 +49,11 @@ export default function AskUserPrompt({
 function DirectionAsk({
   pending,
   onAnswer,
+  sessionId,
 }: {
   pending: PendingAsk;
   onAnswer: (answers: Record<string, string>) => void;
+  sessionId?: string;
 }) {
   const [picks, setPicks] = useState<Record<string, string>>({});
   const [freeText, setFreeText] = useState<Record<string, string>>({});
@@ -73,6 +77,7 @@ function DirectionAsk({
                   direction={d}
                   selected={picks[q.id] === d.id}
                   onPick={() => setPicks((p) => ({ ...p, [q.id]: d.id }))}
+                  sessionId={sessionId}
                 />
               ))}
             </div>

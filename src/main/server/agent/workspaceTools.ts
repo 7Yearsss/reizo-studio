@@ -294,54 +294,7 @@ function buildTools(options: {
         return { ...result, preview: buildFileDiffPreview('MEMORY.md', before, input.content) };
       },
     }),
-    ask_user: tool({
-      description:
-        'Ask the user a structured question with optional choices. Use this instead of guessing preferences. ' +
-        'For a visual-direction choice (mood / palette / typography for something you are about to design or generate), ' +
-        'set kind:"direction" and provide 2-4 `directions` cards — the user picks by looking. The answer is the chosen card id.',
-      inputSchema: z.object({
-        questions: z.array(
-          z.object({
-            id: z.string(),
-            prompt: z.string(),
-            options: z.array(z.string()).optional(),
-            multi: z.boolean().optional(),
-            kind: z.enum(['choice', 'text', 'direction']).optional(),
-            directions: z
-              .array(
-                z.object({
-                  id: z.string(),
-                  title: z.string(),
-                  palette: z.array(z.string()).optional(),
-                  displayFont: z.string().optional(),
-                  bodyFont: z.string().optional(),
-                  mood: z.string().optional(),
-                  references: z.array(z.string()).optional(),
-                }),
-              )
-              .optional(),
-          }),
-        ),
-      }),
-      // Never returns: it records the pending question and unwinds the step so
-      // the turn suspends. The resumed pass supplies `{ answers }` as this
-      // tool call's result. The annotation keeps the tool's output type real.
-      execute: async ({ questions }, toolOptions): Promise<{ answers: Record<string, string> }> => {
-        registerPendingAsk({
-          sessionId,
-          toolCallId: toolOptions.toolCallId,
-          name: 'ask_user',
-          questions: questions as AskQuestion[],
-        });
-        throw new ApprovalRequiredError({
-          toolCallId: toolOptions.toolCallId,
-          name: 'ask_user',
-          args: { questions },
-          kind: 'ask',
-          questions: questions as AskQuestion[],
-        });
-      },
-    }),
+    ask_user: createAskUserTool(sessionId),
     todo_write: tool({
       description: 'Replace the in-progress task list shown above the composer. Keep 2-8 concrete steps.',
       inputSchema: z.object({
@@ -360,4 +313,63 @@ function buildTools(options: {
       },
     }),
   };
+}
+
+/**
+ * ask_user is a chat-interaction tool, not a workspace tool — it must exist
+ * even when no workspace is configured, so it is built standalone and also
+ * included in the workspace toolset.
+ */
+export function createAskUserTool(sessionId: string) {
+  return tool({
+    description:
+      'Ask the user a structured question with optional choices. Use this instead of guessing preferences. ' +
+      'For a visual-direction choice (mood / palette / typography for something you are about to design or generate), ' +
+      'set kind:"direction" and provide 2-4 `directions` cards — the user picks by looking. The answer is the chosen card id. ' +
+      'When the options correspond to nodes already on the canvas (e.g. draft images you generated for the user to compare), ' +
+      'set each card\'s `nodeId` to that node id so the card shows the real thumbnail instead of a text mockup.',
+    inputSchema: z.object({
+      questions: z.array(
+        z.object({
+          id: z.string(),
+          prompt: z.string(),
+          options: z.array(z.string()).optional(),
+          multi: z.boolean().optional(),
+          kind: z.enum(['choice', 'text', 'direction']).optional(),
+          directions: z
+            .array(
+              z.object({
+                id: z.string(),
+                title: z.string(),
+                palette: z.array(z.string()).optional(),
+                displayFont: z.string().optional(),
+                bodyFont: z.string().optional(),
+                mood: z.string().optional(),
+                references: z.array(z.string()).optional(),
+                nodeId: z.string().optional().describe('Canvas node id to preview as this card\'s image.'),
+              }),
+            )
+            .optional(),
+        }),
+      ),
+    }),
+    // Never returns: it records the pending question and unwinds the step so
+    // the turn suspends. The resumed pass supplies `{ answers }` as this
+    // tool call's result. The annotation keeps the tool's output type real.
+    execute: async ({ questions }, toolOptions): Promise<{ answers: Record<string, string> }> => {
+      registerPendingAsk({
+        sessionId,
+        toolCallId: toolOptions.toolCallId,
+        name: 'ask_user',
+        questions: questions as AskQuestion[],
+      });
+      throw new ApprovalRequiredError({
+        toolCallId: toolOptions.toolCallId,
+        name: 'ask_user',
+        args: { questions },
+        kind: 'ask',
+        questions: questions as AskQuestion[],
+      });
+    },
+  });
 }

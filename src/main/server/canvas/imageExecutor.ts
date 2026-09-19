@@ -64,9 +64,18 @@ async function resolveImageProvider(
   params: CanvasImageParams,
 ): Promise<{ provider: ReturnType<typeof createOpenAiProvider>; modelId: string } | { error: string }> {
   const settings = await settingsStore.get();
-  const resolvedId = providerId || 'openai';
+  let resolvedId = providerId || settings.activeProviderId || 'openai';
+  let stored = settings.providers[resolvedId];
+  if (!stored?.apiKey) {
+    for (const alt of ['reizo', 'openai']) {
+      if (alt !== resolvedId && settings.providers[alt]?.apiKey) {
+        resolvedId = alt;
+        stored = settings.providers[alt];
+        break;
+      }
+    }
+  }
   const preset = getProviderPreset(resolvedId);
-  const stored = settings.providers[resolvedId];
   if (!preset || !stored?.apiKey) {
     return { error: `No API key configured for ${preset?.name ?? resolvedId}. Add one in Settings.` };
   }

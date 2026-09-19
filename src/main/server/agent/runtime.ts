@@ -3,7 +3,7 @@ import { nanoid } from 'nanoid';
 import { getProviderPreset } from '../../../shared/providers';
 import type { ChatStreamEvent, TodoItem } from '../../../shared/stream';
 import { createOpenAiModel } from './provider/openai';
-import { createWorkspaceTools } from './workspaceTools';
+import { createAskUserTool, createWorkspaceTools } from './workspaceTools';
 import { createCanvasTools } from './canvasTools';
 import { createArtifactTools } from './artifactTools';
 import { createImageTools } from './imageTools';
@@ -233,9 +233,10 @@ export async function runChatTurn(options: {
     '- When the user asks to generate, draw, or paint an image (e.g., "生图", "画一张...", "生成图片", "设计海报", "绘制插画"), ALWAYS call the `generate_image` tool directly within this chat conversation. The image will be generated and rendered inline for the user.\n' +
     '- The `generate_image` tool automatically uses the configured provider (such as Reizo key with gpt-image-2). Never refuse or tell the user that OpenAI API Key is missing. Just invoke `generate_image` directly.\n' +
     '- DO NOT touch the canvas or call `add_node(type: "image")` or `open_canvas` for standard image generation requests. Standard image generation belongs 100% in this chat conversation.\n' +
-    '- Canvas Rules: The canvas is for complex multi-step node graphs and workflows. Only call canvas tools (`add_node`, `run_node`, `open_canvas`, etc.) when the user explicitly asks to build or edit a canvas node workflow, wire nodes, or explicitly mentions "在画布上" / "工作流节点". Otherwise, leave the canvas alone so the user can open it manually without distraction.',
+    '- Canvas Rules: The canvas is for complex multi-step node graphs and workflows. Only call canvas tools (`add_node`, `run_node`, `open_canvas`, etc.) when the user explicitly asks to build or edit a canvas node workflow, wire nodes, or explicitly mentions "在画布上" / "工作流节点". Otherwise, leave the canvas alone so the user can open it manually without distraction.\n' +
+    '- Never expose internal identifiers in user-facing text — no node ids, `canvas:<id>` strings, or tool names. Refer to canvas items by their title/label (e.g. "水彩那张", "方向 B") so the conversation reads naturally.',
     canvasSummary,
-    'When a request needs a visual direction (mood, palette, typography) before you generate or design something, call ask_user with kind:"direction" and 2-4 `directions` cards (title, palette hex list, displayFont/bodyFont stacks, one-line mood, real-world references) so the user picks by looking.',
+    'When a request needs a visual direction (mood, palette, typography) before you generate or design something, call ask_user with kind:"direction" and 2-4 `directions` cards (title, palette hex list, displayFont/bodyFont stacks, one-line mood, real-world references) so the user picks by looking. If a direction maps to a node already on the canvas (e.g. a draft image the user can inspect), set the card\'s `nodeId` so the card shows that node\'s real thumbnail.',
     artifactStore
       ? 'When the user asks for a flowchart, sequence diagram, system architecture diagram, or mind map, call generate_diagram with Mermaid syntax to produce an interactive Excalidraw canvas artifact in the right panel. When the user asks for a spreadsheet, budget, financial report, or table calculation, call generate_sheet with rows, columns, and formulas to render a full-featured Excel sheet artifact in the right panel.'
       : '',
@@ -332,9 +333,14 @@ export async function runChatTurn(options: {
         })
       : undefined;
 
+  // ask_user is a chat-interaction tool, not a workspace one — include it even
+  // when no workspace is configured so the agent can always ask questions.
+  const askTool = createAskUserTool(sessionId);
+
   const tools =
-    toolset?.tools || canvasTools || artifactTools || imageTools || computerTools
+    toolset?.tools || canvasTools || artifactTools || imageTools || computerTools || askTool
       ? {
+          ask_user: askTool,
           ...(toolset?.tools ?? {}),
           ...(canvasTools ?? {}),
           ...(artifactTools ?? {}),
