@@ -298,7 +298,9 @@ function buildTools(options: {
       description:
         'Ask the user a structured question with optional choices. Use this instead of guessing preferences. ' +
         'For a visual-direction choice (mood / palette / typography for something you are about to design or generate), ' +
-        'set kind:"direction" and provide 2-4 `directions` cards — the user picks by looking. The answer is the chosen card id.',
+        'set kind:"direction" and provide 2-4 `directions` cards — the user picks by looking. The answer is the chosen card id. ' +
+        'When the options correspond to nodes already on the canvas (e.g. draft images you generated for the user to compare), ' +
+        'set each card\'s `nodeId` to that node id so the card shows the real thumbnail instead of a text mockup.',
       inputSchema: z.object({
         questions: z.array(
           z.object({
@@ -317,6 +319,7 @@ function buildTools(options: {
                   bodyFont: z.string().optional(),
                   mood: z.string().optional(),
                   references: z.array(z.string()).optional(),
+                  nodeId: z.string().optional().describe('Canvas node id to preview as this card\'s image.'),
                 }),
               )
               .optional(),

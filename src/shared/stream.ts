@@ -31,6 +31,8 @@ export interface DirectionCard {
   mood?: string;
   /** Real-world exemplars, e.g. ["Monocle", "FT Weekend"]. */
   references?: string[];
+  /** Canvas node whose latest output previews this option (e.g. a draft image on the canvas). */
+  nodeId?: string;
 }
 
 export type ReplyPhase = 'preparing' | 'thinking' | 'tools' | 'replying' | 'waiting';

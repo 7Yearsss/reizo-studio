@@ -246,7 +246,7 @@ export default function Composer({
         {ask && sessionId ? (
           <>
             {liveStatus ? <div className="mb-2 px-1">{liveStatus}</div> : null}
-            <AskUserPrompt pending={ask} onAnswer={(answers) => void chatStore.answerAsk(sessionId, answers)} />
+            <AskUserPrompt pending={ask} onAnswer={(answers) => void chatStore.answerAsk(sessionId, answers)} sessionId={sessionId} />
           </>
         ) : permission && sessionId ? (
           <>
