@@ -253,9 +253,87 @@ export async function requestPermission(options: {
   return false;
 }
 
-/** Prompt text normalized for duplicate-ask detection — ignores whitespace/case. */
+/** Prompt text normalized for duplicate-ask detection — letters/digits only,
+ * so whitespace, case and punctuation variants ("…气质？" vs "…气质！") key
+ * identically and don't dilute bigram similarity. */
 function promptKey(prompt: string): string {
-  return prompt.trim().toLowerCase().replace(/\s+/g, '');
+  return prompt.trim().toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+}
+
+/**
+ * Char-bigram Dice similarity between two normalized prompts. Catches the
+ * "same question rephrased" re-asks models emit ("…整体气质…" vs "…想传达
+ * 什么气质…") that exact matching misses. Length guard: bigram sets on tiny
+ * strings are noise.
+ */
+function promptSimilarity(a: string, b: string): number {
+  if (a === b) return 1;
+  if (a.length < 4 || b.length < 4) return 0;
+  const grams = (s: string) => {
+    const g = new Set<string>();
+    for (let i = 0; i < s.length - 1; i++) g.add(s.slice(i, i + 2));
+    return g;
+  };
+  const ga = grams(a);
+  const gb = grams(b);
+  let hit = 0;
+  for (const g of ga) if (gb.has(g)) hit++;
+  return (2 * hit) / (ga.size + gb.size);
+}
+
+/**
+ * Would `answer` be a legitimate response to `q` as phrased now? Guards the
+ * fuzzy fold so a rephrased ask only replays an answer that still makes sense:
+ * direction picks must resolve to one of the new direction ids/titles, choice
+ * answers must land inside the new option set. Free-text questions accept
+ * anything.
+ */
+function answerFits(q: AskQuestion, answer: string): boolean {
+  if (q.kind === 'direction') {
+    if (!q.directions?.length) return true;
+    return q.directions.some((d) => d.id === answer || d.title === answer);
+  }
+  const opts = q.options;
+  if (!opts?.length) return true;
+  // Multi-select answers arrive joined with ', '.
+  return answer.split(/[,，]\s*/).every((p) => opts.includes(p));
+}
+
+/** Two questions are "the same" if prompts match exactly or are close rephrases
+ * of the same (non-direction) kind. Direction asks fold only on exact prompts —
+ * their answer space is the direction set, which rephrasing can't preserve. */
+function promptsMatch(a: AskQuestion, b: AskQuestion): boolean {
+  if (promptKey(a.prompt) === promptKey(b.prompt)) return true;
+  if (a.kind === 'direction' || b.kind === 'direction') return false;
+  return promptSimilarity(promptKey(a.prompt), promptKey(b.prompt)) >= 0.75;
+}
+
+/**
+ * Look up a question's answer in this turn's history. Exact prompt matches
+ * replay unconditionally (still via answerFits — the option set may have
+ * changed under an identical prompt). Rephrased prompts replay only at a
+ * decent match (≥0.35 when the new question's options can validate the answer,
+ * ≥0.8 when free text gives nothing to check against).
+ */
+function lookupHistory(q: AskQuestion, history: Map<string, string>): string | undefined {
+  const want = promptKey(q.prompt);
+  const constrained =
+    q.kind === 'direction' ? (q.directions?.length ?? 0) > 0 : (q.options?.length ?? 0) > 0;
+  const minSim = constrained ? 0.35 : 0.8;
+  let best: string | undefined;
+  let bestSim = 0;
+  for (const [k, v] of history) {
+    const s = promptSimilarity(want, k);
+    if (s < minSim || s <= bestSim) continue;
+    // Rephrased asks only replay answers that still fit the new option set /
+    // direction ids. Identical wording replays whatever the user answered —
+    // choice cards always allow custom text — except direction asks, whose
+    // stored answer is a direction id that's meaningless under a new set.
+    if (!answerFits(q, v) && !(s === 1 && q.kind !== 'direction')) continue;
+    bestSim = s;
+    best = v;
+  }
+  return best;
 }
 
 /** Map the source ask's answers onto the mirror's own question ids, matched by prompt. */
@@ -271,8 +349,7 @@ function translateAnswers(
       translated[q.id] = direct;
       continue;
     }
-    const key = promptKey(q.prompt);
-    const source = sourceQuestions.find((s) => promptKey(s.prompt) === key);
+    const source = sourceQuestions.find((s) => promptsMatch(s, q));
     if (source && answers[source.id] !== undefined) translated[q.id] = answers[source.id];
   }
   return translated;
@@ -293,26 +370,35 @@ export function registerPendingAsk(options: {
   const unanswered = (pending.get(options.sessionId) ?? []).find((p) => {
     const qs = p.kind === 'ask' && p.answers === undefined ? p.questions : undefined;
     if (!qs || options.questions.length === 0) return false;
-    return options.questions.every((q) =>
-      qs.some((s) => promptKey(s.prompt) === promptKey(q.prompt)),
-    );
+    return options.questions.every((q) => qs.some((s) => promptsMatch(s, q)));
   });
 
   // Already answered once this turn? Answer the re-ask from history without
-  // surfacing a card at all.
+  // surfacing a card at all — including rephrased re-asks whose recorded
+  // answer is still a valid response to the new wording/options.
   const history = answeredAskHistory.get(options.sessionId);
   const fromHistory =
-    !unanswered &&
-    history &&
-    options.questions.length > 0 &&
-    options.questions.every((q) => history.has(promptKey(q.prompt)))
+    !unanswered && history && options.questions.length > 0
       ? Object.fromEntries(
           options.questions.flatMap((q) => {
-            const v = history.get(promptKey(q.prompt));
+            const v = lookupHistory(q, history);
             return v === undefined ? [] : [[q.id, v]];
           }),
         )
       : undefined;
+  if (fromHistory && Object.keys(fromHistory).length !== options.questions.length) {
+    // Only fold when EVERY question resolves — a partial replay would strand
+    // the model waiting on answers it never sees asked.
+    recordPending({
+      sessionId: options.sessionId,
+      toolCallId: options.toolCallId,
+      name: options.name,
+      args: {},
+      kind: 'ask',
+      questions: options.questions,
+    });
+    return;
+  }
 
   recordPending({
     sessionId: options.sessionId,

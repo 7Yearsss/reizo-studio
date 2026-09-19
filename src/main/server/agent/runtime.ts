@@ -260,7 +260,8 @@ export async function runChatTurn(options: {
     '- DO NOT touch the canvas or call `add_node(type: "image")` or `open_canvas` for standard image generation requests. Standard image generation belongs 100% in this chat conversation.\n' +
     '- Canvas Rules: The canvas is for complex multi-step node graphs and workflows. Only call canvas tools (`add_node`, `run_node`, `open_canvas`, etc.) when the user explicitly asks to build or edit a canvas node workflow, wire nodes, or explicitly mentions "在画布上" / "工作流节点". Otherwise, leave the canvas alone so the user can open it manually without distraction.\n' +
     '- Never expose internal identifiers in user-facing text — no node ids, `canvas:<id>` strings, or tool names. Refer to canvas items by their title/label (e.g. "水彩那张", "方向 B") so the conversation reads naturally.\n' +
-    '- Keep reply text concise — never narrate polling, retries, waiting, or tool mechanics ("我会再检查一次", "继续等待结果", "重新提交"). Live status is already shown by the UI; your reply carries only the outcome and facts the user needs.',
+    '- Keep reply text concise — never narrate polling, retries, waiting, or tool mechanics ("我会再检查一次", "继续等待结果", "重新提交"). Live status is already shown by the UI; your reply carries only the outcome and facts the user needs.\n' +
+    '- ask_user cards already render the question and every option to the user — never restate the question or enumerate the options in your reply, before or after they answer. Respond directly to what they picked (e.g. "好的，扩展画布边缘 —— 我来处理"). When a card collected several answers at once, a single short recap clause is enough.',
     canvasSummary,
     'When a request needs a visual direction (mood, palette, typography) before you generate or design something, call ask_user with kind:"direction" and 2-4 `directions` cards (title, palette hex list, displayFont/bodyFont stacks, one-line mood, real-world references) so the user picks by looking. If a direction maps to a node already on the canvas (e.g. a draft image the user can inspect), set the card\'s `nodeId` so the card shows that node\'s real thumbnail. To show real draft images on the cards: add the draft nodes directly (never asProposal — proposals need manual acceptance and stay idle), call run_node on each, and wait until their outputs land before sending the direction question. When a skill mentions preset sample images, set the card\'s `imageUrl` to the given `skill-asset:` URL instead.',
     artifactStore
@@ -456,7 +457,10 @@ export async function runChatTurn(options: {
             toolCallId: item.toolCallId,
             name: item.name,
             args: item.args,
-            result: JSON.stringify({ answers: item.answers ?? {} }),
+            result: JSON.stringify({
+              answers: item.answers ?? {},
+              note: 'The user answered on the card. Respond to their pick directly — do not restate the question or re-list the options.',
+            }),
           });
           continue;
         }

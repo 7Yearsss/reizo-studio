@@ -256,6 +256,158 @@ describe('interaction gate', () => {
     ]);
   });
 
+  it('answers a rephrased re-ask from history when the recorded answer fits the new options', async () => {
+    const events: ChatStreamEvent[] = [];
+    setPermissionSink('s1', (event) => events.push(event));
+    registerPendingAsk({
+      sessionId: 's1',
+      toolCallId: 'q1',
+      name: 'ask_user',
+      questions: [
+        {
+          id: 'vibe',
+          prompt: '请选择这张封面的整体气质，也可以直接输入你的方向。',
+          options: ['冷峻', '热烈'],
+        },
+      ],
+    });
+    expect(answerAsk('q1', { vibe: '冷峻' })).toBe(true);
+    consumeInteractions('s1');
+
+    // Same question, different wording and question id — no second card.
+    registerPendingAsk({
+      sessionId: 's1',
+      toolCallId: 'q2',
+      name: 'ask_user',
+      questions: [
+        {
+          id: 'vibe-again',
+          prompt: '这张封面想传达什么气质？也可以自由输入。',
+          options: ['冷峻', '热烈', '其他'],
+        },
+      ],
+    });
+    expect(ids(events, 'ask')).toEqual(['q1']);
+    await waitForInteractions('s1');
+    expect(consumeInteractions('s1')).toEqual([
+      { toolCallId: 'q2', name: 'ask_user', args: {}, kind: 'ask', decision: undefined, answers: { 'vibe-again': '冷峻' } },
+    ]);
+  });
+
+  it('surfaces a rephrased re-ask when the recorded answer is not a valid option', () => {
+    const events: ChatStreamEvent[] = [];
+    setPermissionSink('s1', (event) => events.push(event));
+    registerPendingAsk({
+      sessionId: 's1',
+      toolCallId: 'q1',
+      name: 'ask_user',
+      questions: [
+        { id: 'vibe', prompt: '请选择这张封面的整体气质，也可以直接输入你的方向。', options: ['冷峻', '热烈'] },
+      ],
+    });
+    expect(answerAsk('q1', { vibe: '冷峻' })).toBe(true);
+    consumeInteractions('s1');
+
+    // Similar wording but a disjoint option set — the old answer is no longer
+    // a valid response, so the user must see the card.
+    registerPendingAsk({
+      sessionId: 's1',
+      toolCallId: 'q2',
+      name: 'ask_user',
+      questions: [
+        { id: 'vibe-again', prompt: '这张封面想传达什么气质？也可以自由输入。', options: ['极简', '复古'] },
+      ],
+    });
+    expect(ids(events, 'ask')).toEqual(['q1', 'q2']);
+  });
+
+  it('does not fold a near-identical but different free-text question', () => {
+    const events: ChatStreamEvent[] = [];
+    setPermissionSink('s1', (event) => events.push(event));
+    registerPendingAsk({
+      sessionId: 's1',
+      toolCallId: 'q1',
+      name: 'ask_user',
+      questions: [{ id: 'dir', prompt: '你想选哪个方向' }],
+    });
+    expect(answerAsk('q1', { dir: '人物剪影' })).toBe(true);
+    consumeInteractions('s1');
+
+    registerPendingAsk({
+      sessionId: 's1',
+      toolCallId: 'q2',
+      name: 'ask_user',
+      questions: [{ id: 'style', prompt: '你想选哪个风格' }],
+    });
+    expect(ids(events, 'ask')).toEqual(['q1', 'q2']);
+  });
+
+  it('does not replay a direction pick when the direction set changed under the same prompt', () => {
+    const events: ChatStreamEvent[] = [];
+    setPermissionSink('s1', (event) => events.push(event));
+    registerPendingAsk({
+      sessionId: 's1',
+      toolCallId: 'q1',
+      name: 'ask_user',
+      questions: [
+        {
+          id: 'pick',
+          prompt: '选一个方向',
+          kind: 'direction',
+          directions: [
+            { id: 'dA', title: '几何' },
+            { id: 'dB', title: '剪影' },
+          ],
+        },
+      ],
+    });
+    expect(answerAsk('q1', { pick: 'dB' })).toBe(true);
+    consumeInteractions('s1');
+
+    // Same prompt, new drafts — 'dB' means nothing here, the card must surface.
+    registerPendingAsk({
+      sessionId: 's1',
+      toolCallId: 'q2',
+      name: 'ask_user',
+      questions: [
+        {
+          id: 'pick2',
+          prompt: '选一个方向',
+          kind: 'direction',
+          directions: [
+            { id: 'n1', title: '色块' },
+            { id: 'n2', title: '大字' },
+          ],
+        },
+      ],
+    });
+    expect(ids(events, 'ask')).toEqual(['q1', 'q2']);
+
+    // Rephrased prompt, original direction set — 'dB' is still a valid pick,
+    // so the re-ask resolves from history without surfacing.
+    registerPendingAsk({
+      sessionId: 's1',
+      toolCallId: 'q3',
+      name: 'ask_user',
+      questions: [
+        {
+          id: 'pick3',
+          prompt: '请选一个方向',
+          kind: 'direction',
+          directions: [
+            { id: 'dA', title: '几何' },
+            { id: 'dB', title: '剪影' },
+          ],
+        },
+      ],
+    });
+    expect(ids(events, 'ask')).toEqual(['q1', 'q2']);
+    expect(consumeInteractions('s1')).toEqual([
+      { toolCallId: 'q2', name: 'ask_user', args: {}, kind: 'ask', decision: undefined, answers: {} },
+      { toolCallId: 'q3', name: 'ask_user', args: {}, kind: 'ask', decision: undefined, answers: { pick3: 'dB' } },
+    ]);
+  });
+
   it('does not fold asks whose question payload differs', () => {
     const events: ChatStreamEvent[] = [];
     setPermissionSink('s1', (event) => events.push(event));
