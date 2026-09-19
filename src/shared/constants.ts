@@ -24,6 +24,8 @@ export const IPC = {
   WORKSPACE_GIT: 'reizo:workspace-git',
   SKILL_INSTALL: 'reizo:skill-install',
   SKILL_UNINSTALL: 'reizo:skill-uninstall',
+  SKILLHUB_SEARCH: 'reizo:skillhub-search',
+  SKILLHUB_INSTALL: 'reizo:skillhub-install',
   EXPORT_PDF: 'reizo:export-pdf',
 } as const;
 

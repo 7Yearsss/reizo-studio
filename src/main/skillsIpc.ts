@@ -3,6 +3,8 @@ import { cp, mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { IPC } from '../shared/constants';
 import { loadSkills } from './skills';
+import { installSkillHubPackage, searchSkillHub } from './skillHub';
+import type { SkillHubInstallRequest, SkillHubSearchQuery } from '../shared/skillhub';
 
 export function registerSkillIpc(userSkillsDir: string): void {
   ipcMain.handle(IPC.SKILL_INSTALL, async (event) => {
@@ -27,6 +29,19 @@ export function registerSkillIpc(userSkillsDir: string): void {
       throw new Error('Invalid skill id');
     }
     await rm(path.join(userSkillsDir, id), { recursive: true, force: true });
+  });
+
+  ipcMain.handle(IPC.SKILLHUB_SEARCH, async (_event, query: SkillHubSearchQuery) => {
+    return searchSkillHub(query ?? {});
+  });
+
+  ipcMain.handle(IPC.SKILLHUB_INSTALL, async (_event, request: SkillHubInstallRequest) => {
+    if (typeof request?.slug !== 'string' || !request.slug) throw new Error('Invalid skill slug');
+    return installSkillHubPackage(userSkillsDir, {
+      slug: request.slug,
+      namespace: typeof request.namespace === 'string' ? request.namespace : '',
+      version: typeof request.version === 'string' ? request.version : undefined,
+    });
   });
 }
 
