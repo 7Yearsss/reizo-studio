@@ -444,8 +444,10 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     const one = present.length === 1 ? currentNodes.find((n) => n.id === present[0]) : null;
     if (one) {
+      // Center AND lift the zoom floor — spotlighting at 30% zoom leaves the
+      // node a thumbnail, which defeats the point of focusing it.
       rf.setCenter(one.x + one.w / 2, one.y + one.h / 2, {
-        zoom: rf.getZoom(),
+        zoom: Math.min(1.25, Math.max(rf.getZoom(), 0.9)),
         duration: reduced ? 0 : 300,
       });
     } else {
@@ -460,6 +462,21 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     const t = setTimeout(() => setHighlightIds([]), 1800);
     return () => clearTimeout(t);
   }, [spot?.at, rf]);
+
+  // When a node's run lands (running -> done), spotlight it so the finished
+  // media gets a gentle focus/zoom-in instead of staying a thumbnail.
+  const prevRunStatesRef = useRef<Map<string, string>>(new Map());
+  useEffect(() => {
+    const prev = prevRunStatesRef.current;
+    const next = new Map<string, string>();
+    const justDone: string[] = [];
+    for (const n of storeNodes) {
+      next.set(n.id, n.runState ?? 'idle');
+      if (prev.get(n.id) === 'running' && n.runState === 'done') justDone.push(n.id);
+    }
+    prevRunStatesRef.current = next;
+    if (justDone.length > 0) canvasStore.spotlight(sessionId, justDone);
+  }, [storeNodes, sessionId]);
 
   const restoredRef = useRef(false);
   const restoreViewport = () => {
