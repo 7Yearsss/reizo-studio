@@ -115,6 +115,14 @@ function toActivityItems(input: {
   if (input.activities.length > 0) {
     for (const activity of input.activities) {
       if (activity.kind === 'thinking') {
+        const last = items[items.length - 1];
+        if (last?.type === 'trace' && last.kind === 'thinking') {
+          // Consecutive thinking beats merge into one row — '已思考' stacked
+          // back-to-back carries no extra information.
+          last.label = activity.status === 'running' ? '思考中' : '已思考';
+          if (activity.text) last.detail = activity.text.slice(0, 80);
+          continue;
+        }
         items.push({
           id: activity.id,
           type: 'trace',
@@ -124,7 +132,9 @@ function toActivityItems(input: {
         });
         continue;
       }
-      if (!activity.tool) continue;
+      // ask_user's real UI is the ask card under the message stream — a
+      // per-call row ('Read 等待你的回答') only echoes noise next to it.
+      if (!activity.tool || activity.tool.name === 'ask_user') continue;
       items.push({
         id: activity.id,
         type: 'tool',
@@ -143,6 +153,7 @@ function toActivityItems(input: {
       });
     }
     for (const part of input.parts) {
+      if (part.name === 'ask_user') continue;
       items.push({
         id: part.id,
         type: 'tool',
