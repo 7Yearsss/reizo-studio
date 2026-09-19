@@ -13,9 +13,14 @@ interface QaRow {
  * the full ask card collapses into this once the turn moves on, so the
  * question's context survives without taking over the stream.
  */
+function promptKey(prompt: string): string {
+  return prompt.trim().toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+}
+
 export default function AskAnswers({ parts }: { parts?: ToolCallPart[] }) {
   const rows = useMemo(() => {
     const out: QaRow[] = [];
+    const seen = new Set<string>();
     for (const part of parts ?? []) {
       if (part.name !== 'ask_user' || !part.result) continue;
       let answers: Record<string, string> = {};
@@ -33,8 +38,11 @@ export default function AskAnswers({ parts }: { parts?: ToolCallPart[] }) {
           q.kind === 'direction'
             ? (q.directions?.find((d) => d.id === raw)?.title ?? raw)
             : raw;
-        // Folded duplicate asks each get a result — show the row once.
-        if (out.some((r) => r.prompt === q.prompt && r.answer === answer)) continue;
+        // Mirrored/repackaged asks resolve with the same answers — don't show
+        // the same question row twice.
+        const key = promptKey(q.prompt);
+        if (seen.has(key)) continue;
+        seen.add(key);
         out.push({ key: `${part.id}:${q.id}`, prompt: q.prompt, answer });
       }
     }
