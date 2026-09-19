@@ -33,6 +33,8 @@ export default function AskAnswers({ parts }: { parts?: ToolCallPart[] }) {
           q.kind === 'direction'
             ? (q.directions?.find((d) => d.id === raw)?.title ?? raw)
             : raw;
+        // Folded duplicate asks each get a result — show the row once.
+        if (out.some((r) => r.prompt === q.prompt && r.answer === answer)) continue;
         out.push({ key: `${part.id}:${q.id}`, prompt: q.prompt, answer });
       }
     }
