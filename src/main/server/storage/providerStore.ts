@@ -27,7 +27,7 @@ interface StoredDiskConfig {
   deletedIds?: string[];
 }
 
-function safeEncrypt(value: string): string {
+export function safeEncrypt(value: string): string {
   try {
     if (typeof safeStorage !== 'undefined' && safeStorage.isEncryptionAvailable()) {
       return safeStorage.encryptString(value).toString('base64');
@@ -38,7 +38,7 @@ function safeEncrypt(value: string): string {
   return `b64:${Buffer.from(value, 'utf8').toString('base64')}`;
 }
 
-function safeDecrypt(encoded: string | undefined): string | null {
+export function safeDecrypt(encoded: string | undefined): string | null {
   if (!encoded) return null;
   if (encoded.startsWith('b64:')) {
     return Buffer.from(encoded.slice(4), 'base64').toString('utf8');

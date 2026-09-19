@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { safeStorage } from 'electron';
+import { safeDecrypt, safeEncrypt } from './providerStore';
 import { PROVIDER_PRESETS } from '../../../shared/providers';
 import {
   DEFAULT_APPEARANCE,
@@ -25,22 +25,6 @@ interface DiskSettings {
   providers?: Record<string, { apiKey?: string; model?: string; baseUrl?: string }>;
   /** Legacy single-key field; migrated into providers.openai on read. */
   openaiApiKey?: string;
-}
-
-function encrypt(value: string): string {
-  if (!safeStorage.isEncryptionAvailable()) {
-    throw new Error('OS-level encryption is unavailable; cannot store the API key securely.');
-  }
-  return safeStorage.encryptString(value).toString('base64');
-}
-
-function decrypt(encoded: string | undefined): string | null {
-  if (!encoded) return null;
-  try {
-    return safeStorage.decryptString(Buffer.from(encoded, 'base64'));
-  } catch {
-    return null;
-  }
 }
 
 function emptyStored(model: string, baseUrl?: string): StoredProvider {
@@ -72,7 +56,7 @@ export function createSettingsStore(root: string) {
     for (const preset of PROVIDER_PRESETS) {
       const saved = disk.providers?.[preset.id];
       providers[preset.id] = {
-        apiKey: decrypt(saved?.apiKey),
+        apiKey: safeDecrypt(saved?.apiKey),
         model: saved?.model || preset.defaultModel,
         baseUrl: saved?.baseUrl || undefined,
       };
@@ -81,7 +65,7 @@ export function createSettingsStore(root: string) {
     if (disk.openaiApiKey && !providers.openai?.apiKey) {
       providers.openai = {
         ...(providers.openai ?? emptyStored('gpt-4o-mini')),
-        apiKey: decrypt(disk.openaiApiKey),
+        apiKey: safeDecrypt(disk.openaiApiKey),
       };
       migrated = true;
     }
@@ -108,7 +92,7 @@ export function createSettingsStore(root: string) {
       providers[id] = {
         model: stored.model,
         baseUrl: stored.baseUrl,
-        apiKey: stored.apiKey ? encrypt(stored.apiKey) : undefined,
+        apiKey: stored.apiKey ? safeEncrypt(stored.apiKey) : undefined,
       };
     }
     return {
