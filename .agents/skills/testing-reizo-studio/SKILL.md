@@ -57,6 +57,22 @@ then click at `x * 1024/1600, y * 768/1156`. Single-choice ask cards auto-advanc
 option click (no submit needed); multi-page cards need an explicit 提交 click.
 Canvas fit-all shortcut is `F` (click canvas first to focus).
 
+## Window paints blank / CDP screenshot is solid color
+
+After vite HMR page-reloads (e.g. a `git pull` lands mid-run), the X11 window can go
+fully blank while the renderer stays alive (CDP `Runtime.evaluate` still works).
+Window manager tricks (minimize/maximize/resize) do NOT fix it — the compositor
+surface is dead. Fix: CDP `Page.reload` — the fresh navigation allocates a new
+surface and the window repaints. Verify by checking `Page.captureScreenshot`
+returns >1 color; a single-color PNG means still dead.
+
+## A presented ask card missing from the DOM
+
+A server `ask` event can be "presented" but never render (page shows "正在等待模型返回"
+with no card) — seen when vite reloaded the renderer mid-turn, which can drop the
+pending interaction. Check `/api/sessions/<SID>/stream/resume` for an unanswered ask
+id and POST `/api/sessions/<SID>/ask` directly to unblock.
+
 ## Settings appear stale → reload the renderer
 
 `settingsStore.loadSettings()` runs only at App mount. If settings were patched via

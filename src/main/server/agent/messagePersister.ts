@@ -61,6 +61,9 @@ export function createTurnPersister(deps: {
   let reasoningEndedAt = 0;
   const turnStartedAt = Date.now();
   const parts: ToolCallPart[] = [];
+  // Set when a tool finishes so the next text delta starts a new paragraph —
+  // multi-pass turns otherwise concatenate every pass's prose into one wall.
+  let paragraphBreak = false;
 
   function onToolPart(part: ToolCallPart): void {
     const existing = parts.find((p) => p.id === part.id);
@@ -72,6 +75,7 @@ export function createTurnPersister(deps: {
     } else {
       parts.push({ ...part });
     }
+    if (part.result !== undefined || part.error !== undefined) paragraphBreak = true;
   }
 
   function hasContent(): boolean {
@@ -111,6 +115,8 @@ export function createTurnPersister(deps: {
     clientId,
     snapshot: () => ({ text, parts: parts.map((p) => ({ ...p })) }),
     onText: (delta) => {
+      if (paragraphBreak && text.length > 0 && !text.endsWith('\n\n')) text += '\n\n';
+      paragraphBreak = false;
       text += delta;
     },
     onReasoning: (delta) => {
