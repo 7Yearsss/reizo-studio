@@ -69,7 +69,7 @@ describe('POST /api/canvas/refine-prompt', () => {
       get: async () => ({
         activeProviderId: 'openai',
         providers: {
-          openai: { apiKey: null },
+          openai: { apiKey: null as string | null },
         },
       }),
     } as unknown as SettingsStore;

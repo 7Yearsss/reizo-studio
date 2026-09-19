@@ -54,6 +54,8 @@ export interface NodeRef {
   label: string;
   type?: string;
   thumbnail?: string;
+  /** Normalized rect (0–1) the user marked on the node's image — a region reference. */
+  region?: { x: number; y: number; w: number; h: number };
 }
 
 export interface ChatState {
@@ -116,15 +118,33 @@ let state: ChatState = {
   interruptDismissedBySession: {},
 };
 
+function sameRef(a: NodeRef, b: NodeRef): boolean {
+  return (
+    a.id === b.id &&
+    JSON.stringify(a.region ?? null) === JSON.stringify(b.region ?? null)
+  );
+}
+
 export function addNodeRef(sessionId: string, ref: NodeRef): void {
   const current = state.nodeRefsBySession[sessionId] ?? [];
-  if (current.some((r) => r.id === ref.id)) return;
+  if (current.some((r) => sameRef(r, ref))) return;
   setState({ nodeRefsBySession: { ...state.nodeRefsBySession, [sessionId]: [...current, ref] } });
 }
 
-export function removeNodeRef(sessionId: string, id: string): void {
+export function removeNodeRef(
+  sessionId: string,
+  id: string,
+  region?: NodeRef['region'],
+): void {
   const current = state.nodeRefsBySession[sessionId] ?? [];
-  setState({ nodeRefsBySession: { ...state.nodeRefsBySession, [sessionId]: current.filter((r) => r.id !== id) } });
+  setState({
+    nodeRefsBySession: {
+      ...state.nodeRefsBySession,
+      [sessionId]: current.filter(
+        (r) => !(r.id === id && JSON.stringify(r.region ?? null) === JSON.stringify(region ?? null)),
+      ),
+    },
+  });
 }
 
 export function clearNodeRefs(sessionId: string): void {

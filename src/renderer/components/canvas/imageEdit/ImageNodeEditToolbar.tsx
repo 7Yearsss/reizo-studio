@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
-import { Ellipsis } from 'lucide-react';
+import { Ellipsis, ScanSearch } from 'lucide-react';
 import { useStore } from '@xyflow/react';
 import type { CanvasNode } from '../../../../shared/canvas';
 import { EDIT_META, IMAGE_EDIT_KINDS, type ImageEditKind } from '../../../../shared/canvasImageEdit';
@@ -9,6 +9,7 @@ import Tooltip from '../../ui/Tooltip';
 import * as canvasStore from '../../../state/canvasStore';
 import { EditKindIcon } from './editIcons';
 import { openImageEdit } from './openImageEdit';
+import { openRegionMark } from './openRegionMark';
 
 const PRIMARY = IMAGE_EDIT_KINDS.filter((k) => EDIT_META[k].primary);
 const MORE = IMAGE_EDIT_KINDS.filter((k) => !EDIT_META[k].primary);
@@ -79,6 +80,16 @@ export default function ImageNodeEditToolbar({
           <ToolbarBtn kind={kind} title={titleFor(kind)} onClick={() => activate(kind)} />
         </Fragment>
       ))}
+      <span className="mx-0.5 h-3.5 w-px bg-line" />
+      <Tooltip content="框选区域 → 引用到对话" side="top" wrapperClassName="inline-flex">
+        <button
+          type="button"
+          onClick={() => openRegionMark({ sessionId, nodeId: node.id })}
+          className="inline-flex h-7 w-7 items-center justify-center rounded-full text-ink hover:bg-paper-inset"
+        >
+          <ScanSearch size={14} />
+        </button>
+      </Tooltip>
       <span className="mx-0.5 h-3.5 w-px bg-line" />
       <div ref={moreRef} className="relative">
         <Tooltip content="更多编辑" side="top" wrapperClassName="inline-flex">

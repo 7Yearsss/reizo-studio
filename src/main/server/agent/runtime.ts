@@ -120,22 +120,47 @@ export async function runChatTurn(options: {
     session = await sessionStore.setMessages(sessionId, session.messages.slice(0, idx));
   }
 
-  const canvasRefIds = mentions.filter((m) => m.startsWith('canvas:')).map((m) => m.slice('canvas:'.length));
+  const canvasRefs = mentions
+    .filter((m) => m.startsWith('canvas:'))
+    .map((m) => {
+      const raw = m.slice('canvas:'.length);
+      const [id, regionStr] = raw.split('@r=');
+      const region = regionStr?.split(',').map(Number);
+      return {
+        id,
+        region:
+          region && region.length === 4 && region.every((v) => Number.isFinite(v))
+            ? { x: region[0], y: region[1], w: region[2], h: region[3] }
+            : undefined,
+      };
+    });
   const pathMentions = mentions.filter((m) => !m.startsWith('canvas:'));
 
   let canvasRefBlock = '';
-  if (canvasRefIds.length > 0 && canvasStore) {
+  if (canvasRefs.length > 0 && canvasStore) {
     const canvas = canvasStore.findCanvasBySession(sessionId);
     const lines: string[] = [];
-    for (const nodeId of canvasRefIds) {
-      const node = canvas ? canvasStore.getNode(canvas.id, nodeId) : null;
+    let hasRegion = false;
+    for (const ref of canvasRefs) {
+      const node = canvas ? canvasStore.getNode(canvas.id, ref.id) : null;
       if (!node) continue;
       const p = node.params as { prompt?: string; instruction?: string; size?: string };
-      lines.push(
-        `- ${node.id} [${node.type}, ${node.runState}] ${node.title || ''} ${p.prompt ? `prompt: "${p.prompt.slice(0, 120)}"` : p.instruction ? `task: "${p.instruction.slice(0, 120)}"` : ''}`.trim(),
-      );
+      let line =
+        `- ${node.id} [${node.type}, ${node.runState}] ${node.title || ''} ${p.prompt ? `prompt: "${p.prompt.slice(0, 120)}"` : p.instruction ? `task: "${p.instruction.slice(0, 120)}"` : ''}`.trim();
+      if (ref.region) {
+        hasRegion = true;
+        const r = ref.region;
+        line += ` — user marked region: x ${(r.x * 100).toFixed(0)}%–${((r.x + r.w) * 100).toFixed(0)}%, y ${(r.y * 100).toFixed(0)}%–${((r.y + r.h) * 100).toFixed(0)}%`;
+      }
+      lines.push(line);
     }
-    if (lines.length > 0) canvasRefBlock = `Referenced canvas nodes:\n${lines.join('\n')}`;
+    if (lines.length > 0) {
+      canvasRefBlock =
+        `Referenced canvas nodes:\n${lines.join('\n')}` +
+        (hasRegion
+          ? '\n(Marked regions are normalized rects the user drew on that node\'s image — they are pointing at that specific area, so treat it as the subject of the message.)'
+          : '');
+    }
   }
 
   const extraBlocks = [
