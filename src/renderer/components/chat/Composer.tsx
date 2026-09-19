@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AtSign, FolderTree, Paperclip, Image as ImageIcon, Video, Type, Volume2, Bot, Sparkles, BoxSelect, Layers, Wrench } from 'lucide-react';
+import { AtSign, FolderTree, Paperclip, Image as ImageIcon, Video, Type, Volume2, Bot, Sparkles, BoxSelect, Layers, Pin, Wrench } from 'lucide-react';
 import { isImeComposingEvent } from '../../lib/ime';
 import { cn } from '../../lib/cn';
 import { PromptInput } from '../agents/prompt-input';
@@ -330,6 +330,22 @@ export default function Composer({
                     <span className="text-[11px] font-medium text-sky-200">
                       选区 {unpinnedSelectionNodes.length}
                     </span>
+                    <button
+                      type="button"
+                      className="ml-0.5 flex h-4 w-4 items-center justify-center rounded-full text-sky-300 hover:bg-sky-400/20 hover:text-white transition-colors cursor-pointer"
+                      title="固定为引用 · 之后可继续点选其他节点逐个累积"
+                      onClick={() => {
+                        if (!sessionId) return;
+                        for (const node of unpinnedSelectionNodes) {
+                          const p = (node.params as Record<string, unknown>) ?? {};
+                          const label = (node.title || p.prompt || p.instruction || p.content || node.type).toString().slice(0, 24);
+                          const thumbnail = getCanvasNodeThumbnail(node) || (p.imageUrl as string | undefined) || (p.videoUrl as string | undefined);
+                          chatStore.addNodeRef(sessionId, { id: node.id, label, type: node.type, thumbnail });
+                        }
+                      }}
+                    >
+                      <Pin size={11} />
+                    </button>
                     <button
                       type="button"
                       className="ml-0.5 flex h-4 w-4 items-center justify-center rounded-full text-sky-300 hover:bg-sky-400/20 hover:text-white transition-colors cursor-pointer text-[12px] leading-none"
