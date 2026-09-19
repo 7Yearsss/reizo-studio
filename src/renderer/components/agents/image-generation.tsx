@@ -67,7 +67,7 @@ const OVERLAY_OPACITY: Record<ImageGenerationStatus, number> = {
 const DOT_GAP = 10;
 const TWO_PI = Math.PI * 2;
 
-function DitherMark({
+export function DitherMark({
   status,
   reduce,
 }: {
@@ -101,7 +101,7 @@ function DitherMark({
   );
 }
 
-function DitherField({
+export function DitherField({
   interactive,
   reduce,
   status,
