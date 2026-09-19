@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { AtSign, FolderTree, Paperclip, Image as ImageIcon, Video, Type, Volume2, Bot, Sparkles, BoxSelect, Layers } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AtSign, FolderTree, Paperclip, Image as ImageIcon, Video, Type, Volume2, Bot, Sparkles, BoxSelect, Layers, Wrench } from 'lucide-react';
 import { isImeComposingEvent } from '../../lib/ime';
 import { cn } from '../../lib/cn';
 import { PromptInput } from '../agents/prompt-input';
 import ModelPicker from './ModelPicker';
 import MentionMenu, { extractMentionQuery } from './MentionMenu';
-import SlashPalette, { buildSlashCommands, extractSlashQuery, type SlashCommand } from './SlashPalette';
+import SlashPalette, { applySlashArgs, buildSlashCommands, extractSlashQuery, type SlashCommand } from './SlashPalette';
 import QueuePanel from './QueuePanel';
 import TodoCard from './TodoCard';
 import NextStepStrip from './NextStepStrip';
@@ -76,7 +76,7 @@ export default function Composer({
 }) {
   const [draft, setDraft] = useState('');
   const [mentions, setMentions] = useState<string[]>([]);
-  const [skillId, setSkillId] = useState<string | undefined>();
+  const [localSkillId, setLocalSkillId] = useState<string | undefined>();
   const [attachments, setAttachments] = useState<{ name: string; content: string }[]>([]);
   const replaceFromIdRef = useRef<string | undefined>(undefined);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -93,6 +93,17 @@ export default function Composer({
     (part) => part.result === undefined && part.error === undefined,
   ).length ?? 0;
   const seed = useChatStore((s) => (sessionId ? s.composerSeedBySession[sessionId] : undefined));
+  const storeSkillId = useChatStore((s) => (sessionId ? s.skillBySession[sessionId] : undefined));
+  // Pinned skills are session-scoped: once picked (via /, @, or the plugins page)
+  // they stay on every message until the chip is removed.
+  const skillId = sessionId ? storeSkillId : localSkillId;
+  const setSkillId = useCallback(
+    (id?: string) => {
+      if (sessionId) chatStore.setSessionSkill(sessionId, id);
+      else setLocalSkillId(id);
+    },
+    [sessionId],
+  );
   const nodeRefs = useChatStore((s) => (sessionId ? s.nodeRefsBySession[sessionId] : undefined)) ?? [];
   const selectedNodeIds = useCanvasStore((s) => (sessionId ? s.selectedNodeIdsBySession[sessionId] : undefined)) ?? canvasStore.EMPTY_SELECTED_IDS;
   const canvasNodes = useCanvasStore((s) => (sessionId ? s.nodesBySession[sessionId] : undefined)) ?? canvasStore.EMPTY_NODES;
@@ -107,7 +118,7 @@ export default function Composer({
   }, [activeSelectedNodes, nodeRefs]);
 
   const mentionQuery = extractMentionQuery(draft);
-  const slashQuery = extractSlashQuery(draft);
+  const slash = extractSlashQuery(draft);
   const slashCommands = buildSlashCommands(skills);
   const activeSkill = skills.find((s) => s.id === skillId);
 
@@ -129,7 +140,7 @@ export default function Composer({
     onSend(draft, allMentions, { skillId, attachments, replaceFromId: replaceFromIdRef.current });
     setDraft('');
     setMentions([]);
-    setSkillId(undefined);
+    // skillId intentionally NOT cleared — a pinned skill applies to the whole session
     setAttachments([]);
     replaceFromIdRef.current = undefined;
     if (sessionId) {
@@ -159,9 +170,9 @@ export default function Composer({
     setAttachments(next);
   }
 
-  function pickSlash(command: SlashCommand) {
+  function pickSlash(command: SlashCommand, args: string) {
     setSkillId(command.id);
-    setDraft(command.prompt ?? '');
+    setDraft(applySlashArgs(command.prompt, args));
   }
 
   const liveStatus = sessionId && sending ? (
@@ -175,6 +186,7 @@ export default function Composer({
       lastTextAt={lastTextAt}
       lastProgressAt={lastProgressAt}
       onStop={interaction ? onStop : undefined}
+      skillName={activeSkill?.name}
     />
   ) : null;
 
@@ -240,10 +252,14 @@ export default function Composer({
               setDraft(replaced);
               setMentions((m) => (m.includes(path) ? m : [...m, path]));
             }}
+            onPickSkill={(skill) => {
+              setDraft(draft.replace(/@([^\s@]*)$/, ''));
+              setSkillId(skill.id);
+            }}
           />
         )}
-        {slashQuery !== null && (
-          <SlashPalette query={slashQuery} commands={slashCommands} onPick={pickSlash} />
+        {slash !== null && (
+          <SlashPalette query={slash.query} args={slash.args} commands={slashCommands} onPick={pickSlash} />
         )}
         <div
           onDragOver={(e) => {
@@ -370,9 +386,18 @@ export default function Composer({
                     </span>
                   ))}
                 {activeSkill && (
-                  <span className="rounded-full bg-paper-inset px-2 py-0.5 text-[11px] text-ink">
-                    /{activeSkill.id}
-                    <button type="button" className="ml-1 text-ink-muted" onClick={() => setSkillId(undefined)}>
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-[11px] text-ink"
+                    title={`技能已钉住：本会话每条消息都带此技能 · ${activeSkill.description || activeSkill.id}`}
+                  >
+                    <Wrench size={10} className="text-accent" />
+                    /{activeSkill.id} · {activeSkill.name}
+                    <button
+                      type="button"
+                      className="ml-0.5 text-ink-muted hover:text-ink"
+                      onClick={() => setSkillId(undefined)}
+                      title="取消技能"
+                    >
                       ×
                     </button>
                   </span>
@@ -415,7 +440,7 @@ export default function Composer({
                 placeholder="输入消息，/ 调用技能，@ 引用文件…"
                 onKeyDown={(e) => {
                   if (isImeComposingEvent(e)) return;
-                  if ((mentionQuery !== null || slashQuery !== null) && e.key === 'Enter' && !e.shiftKey) {
+                  if ((mentionQuery !== null || slash !== null) && e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
                   }
                 }}

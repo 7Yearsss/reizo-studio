@@ -39,3 +39,25 @@ export async function loadSkills(): Promise<SkillSummary[]> {
   notify();
   return next;
 }
+
+const RECENT_KEY = 'reizo:recentSkills';
+const RECENT_MAX = 8;
+
+export function getRecentSkillIds(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+export function recordRecentSkill(id: string): void {
+  try {
+    const next = [id, ...getRecentSkillIds().filter((item) => item !== id)].slice(0, RECENT_MAX);
+    localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+  } catch {
+    /* localStorage unavailable — recents are best-effort */
+  }
+}

@@ -11,6 +11,9 @@ import * as settingsStore from '../state/settingsStore';
 import * as uiStore from '../state/uiStore';
 import * as api from '../api';
 import { useSettingsStore } from '../state/useSettingsStore';
+import { useSkillStore } from '../state/useSkillStore';
+import { getRecentSkillIds } from '../state/skillStore';
+import type { SkillSummary } from '../state/skillStore';
 
 export default function HomePage({ active = true }: { active?: boolean }) {
   const [draft, setDraft] = useState('');
@@ -42,12 +45,33 @@ export default function HomePage({ active = true }: { active?: boolean }) {
     }
   }
 
-  const pills = [
-    { label: '审查代码', skillId: 'review-code', text: '请审查当前工作区里最值得修的问题。' },
-    { label: '解释代码', skillId: 'explain', text: '解释当前工作区的核心流程。' },
-    { label: '写 commit', skillId: 'commit-message', text: '根据 git diff 写一条 commit message。' },
-    { label: '修 bug', skillId: 'fix-bug', text: '找出并修复当前工作区里最明确的一个 bug。' },
-  ];
+  const skills = useSkillStore().skills;
+  const pills: SkillSummary[] = (() => {
+    const recent = getRecentSkillIds();
+    const byId = new Map(skills.map((s) => [s.id, s]));
+    const ordered = [
+      ...recent.map((id) => byId.get(id)).filter((s): s is SkillSummary => Boolean(s)),
+      ...skills.filter((s) => !recent.includes(s.id)),
+    ];
+    return ordered.slice(0, 6);
+  })();
+
+  async function handlePickSkill(skill: SkillSummary) {
+    if (creating) return;
+    setCreating(true);
+    setError(null);
+    try {
+      const session = await chatStore.createSession(`/${skill.id}`);
+      uiStore.setMode('chat');
+      tabStore.openChatTab(session.id, session.title, true);
+      chatStore.setSessionSkill(session.id, skill.id);
+      chatStore.seedComposer(session.id, skill.prompt ?? '');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCreating(false);
+    }
+  }
 
   async function handlePickWorkspace() {
     const path = await api.pickFolder();
@@ -113,13 +137,14 @@ export default function HomePage({ active = true }: { active?: boolean }) {
           <div className="mt-4 flex flex-wrap justify-center gap-2">
             {pills.map((pill) => (
               <button
-                key={pill.skillId}
+                key={pill.id}
                 type="button"
                 disabled={creating}
-                onClick={() => void handleSubmit(pill.text, { skillId: pill.skillId })}
+                title={pill.description || `/${pill.id}`}
+                onClick={() => void handlePickSkill(pill)}
                 className="rounded-full bg-paper-inset px-3 py-1 text-xs text-ink hover:bg-paper-inset/80"
               >
-                {pill.label}
+                /{pill.name}
               </button>
             ))}
           </div>

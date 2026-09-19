@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
-import { File, Folder, ImageIcon, Video, Bot } from 'lucide-react';
+import { File, Folder, ImageIcon, Video, Bot, Wrench } from 'lucide-react';
 import * as api from '../../api';
 import type { DirEntry } from '../../../shared/workspace';
 import type { CanvasNode } from '../../../shared/canvas';
 import { useCanvasStore } from '../../state/useCanvasStore';
+import { useSkillStore } from '../../state/useSkillStore';
+import type { SkillSummary } from '../../state/skillStore';
 import * as canvasStore from '../../state/canvasStore';
 
 export function extractMentionQuery(text: string): string | null {
@@ -16,13 +18,17 @@ export default function MentionMenu({
   sessionId,
   onPick,
   onPickNode,
+  onPickSkill,
 }: {
   query: string;
   sessionId?: string;
   onPick: (relativePath: string) => void;
   onPickNode?: (node: CanvasNode) => void;
+  /** Pick a skill by @-mention — pins it to the session (not a file mention). */
+  onPickSkill?: (skill: SkillSummary) => void;
 }) {
   const [entries, setEntries] = useState<DirEntry[]>([]);
+  const skills = useSkillStore().skills;
   const storeNodes = useCanvasStore((s) => (sessionId ? s.nodesBySession[sessionId] : undefined) ?? canvasStore.EMPTY_NODES);
 
   const matchedNodes = sessionId
@@ -53,10 +59,35 @@ export default function MentionMenu({
     };
   }, [query]);
 
-  if (entries.length === 0 && matchedNodes.length === 0) return null;
+  const matchedSkills = skills
+    .filter((s) => {
+      const q = query.toLowerCase();
+      return s.id.toLowerCase().includes(q) || s.name.toLowerCase().includes(q) || s.description.includes(query);
+    })
+    .slice(0, 4);
+
+  if (entries.length === 0 && matchedNodes.length === 0 && matchedSkills.length === 0) return null;
 
   return (
     <div className="pop-in absolute right-0 bottom-full left-0 mb-2 overflow-hidden rounded-2xl border border-line bg-paper-raised shadow-[0_8px_30px_rgba(28,22,18,0.08)] z-50">
+      {matchedSkills.length > 0 ? (
+        <div className="border-b border-line bg-paper-inset/30 py-1">
+          <div className="px-3 py-0.5 text-[10px] font-semibold text-ink-muted">技能</div>
+          {matchedSkills.map((skill) => (
+            <button
+              key={skill.id}
+              type="button"
+              onClick={() => onPickSkill?.(skill)}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-ink hover:bg-paper-inset"
+            >
+              <Wrench size={13} className="shrink-0 text-accent" />
+              <span className="shrink-0 font-medium text-ink">/{skill.id}</span>
+              <span className="truncate text-ink-muted text-[11px]">{skill.description || skill.name}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       {matchedNodes.length > 0 ? (
         <div className="border-b border-line bg-paper-inset/30 py-1">
           <div className="px-3 py-0.5 text-[10px] font-semibold text-ink-muted">画布节点引用</div>

@@ -34,6 +34,8 @@ export interface ReizoBridge {
   uninstallSkill(id: string): Promise<void>;
   searchSkillHub(query: SkillHubSearchQuery): Promise<SkillHubSearchResult>;
   installSkillHubSkill(request: SkillHubInstallRequest): Promise<SkillHubInstallResult>;
+  /** Fetch the SKILL.md text of a marketplace entry for preview. */
+  previewSkillHubSkill(request: SkillHubInstallRequest): Promise<string>;
   /** Render an HTML document to PDF; resolves to base64 bytes. */
   exportPdf(html: string): Promise<string>;
 }

@@ -293,6 +293,13 @@ export async function listSkills(): Promise<{ id: string; name: string; descript
   return body.skills ?? [];
 }
 
+export async function getSkill(id: string): Promise<{ id: string; name: string; description: string; prompt?: string; body: string; source: 'bundled' | 'user' } | null> {
+  const res = await api(`/api/skills/${encodeURIComponent(id)}`);
+  if (res.status === 404) return null;
+  const body = await res.json();
+  return body.skill ?? null;
+}
+
 export async function listSchedules(): Promise<{ schedules: Schedule[]; presets: typeof SCHEDULE_PRESETS }> {
   const res = await api('/api/schedules');
   return res.json();

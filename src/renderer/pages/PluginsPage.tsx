@@ -13,6 +13,9 @@ import {
 } from 'lucide-react';
 import { useSkillStore } from '../state/useSkillStore';
 import * as skillStore from '../state/skillStore';
+import type { SkillSummary } from '../state/skillStore';
+import * as api from '../api';
+import SkillDetailModal from '../components/skills/SkillDetailModal';
 import * as tabStore from '../state/tabStore';
 import * as chatStore from '../state/chatStore';
 import * as uiStore from '../state/uiStore';
@@ -71,6 +74,9 @@ export default function PluginsPage() {
   const [marketLoading, setMarketLoading] = useState(false);
   const [marketError, setMarketError] = useState<string | null>(null);
   const [installing, setInstalling] = useState<string | null>(null);
+  const [detail, setDetail] = useState<
+    { kind: 'installed'; skill: SkillSummary } | { kind: 'market'; entry: SkillHubEntry } | null
+  >(null);
   const requestSeq = useRef(0);
 
   const installedIds = useMemo(() => new Set(skills.map((s) => s.id)), [skills]);
@@ -123,11 +129,14 @@ export default function PluginsPage() {
     }
   }
 
-  async function handleUse(skill: { id: string; name: string }) {
+  async function handleUse(skill: SkillSummary) {
+    // Open a new chat with the skill pinned for the whole session and its
+    // prompt template pre-filled, so the user can edit before sending.
     const session = await chatStore.createSession(`/${skill.id}`);
     uiStore.setMode('chat');
     tabStore.openChatTab(session.id, session.title);
-    void chatStore.sendMessage(session.id, `请按技能 ${skill.name} 开始工作。`, [], { skillId: skill.id });
+    chatStore.setSessionSkill(session.id, skill.id);
+    chatStore.seedComposer(session.id, skill.prompt ?? '');
   }
 
   const hasMore = entries.length < total;
@@ -169,7 +178,11 @@ export default function PluginsPage() {
             {skills.map((skill) => (
               <div
                 key={skill.id}
-                className="rounded-2xl border border-line bg-paper-raised p-5 transition-shadow hover:shadow-md"
+                role="button"
+                tabIndex={0}
+                onClick={() => setDetail({ kind: 'installed', skill })}
+                onKeyDown={(e) => e.key === 'Enter' && setDetail({ kind: 'installed', skill })}
+                className="cursor-pointer rounded-2xl border border-line bg-paper-raised p-5 transition-shadow hover:shadow-md"
               >
                 <div className="mb-2 flex items-center gap-2">
                   <Plug size={16} className="text-ink-muted" />
@@ -185,7 +198,10 @@ export default function PluginsPage() {
                   <button
                     type="button"
                     className="text-xs text-accent hover:underline"
-                    onClick={() => void handleUse(skill)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleUse(skill);
+                    }}
                   >
                     使用
                   </button>
@@ -193,7 +209,8 @@ export default function PluginsPage() {
                     <button
                       type="button"
                       className="text-xs text-danger hover:underline"
-                      onClick={async () => {
+                      onClick={async (e) => {
+                        e.stopPropagation();
                         await window.reizo.uninstallSkill(skill.id);
                         await skillStore.loadSkills();
                       }}
@@ -285,7 +302,11 @@ export default function PluginsPage() {
                 return (
                   <div
                     key={entry.canonicalName}
-                    className="flex flex-col rounded-2xl border border-line bg-paper-raised p-5 transition-shadow hover:shadow-md"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setDetail({ kind: 'market', entry })}
+                    onKeyDown={(e) => e.key === 'Enter' && setDetail({ kind: 'market', entry })}
+                    className="flex cursor-pointer flex-col rounded-2xl border border-line bg-paper-raised p-5 transition-shadow hover:shadow-md"
                   >
                     <div className="mb-3 flex items-start gap-3">
                       <SkillIcon entry={entry} />
@@ -313,7 +334,10 @@ export default function PluginsPage() {
                       <button
                         type="button"
                         disabled={busy || installed}
-                        onClick={() => void handleInstall(entry)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleInstall(entry);
+                        }}
                         className={`ml-auto inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs transition-opacity ${
                           installed
                             ? 'cursor-default bg-paper-inset text-ink-muted'
@@ -352,6 +376,90 @@ export default function PluginsPage() {
           </>
         )}
       </section>
+
+      {detail?.kind === 'installed' && (
+        <SkillDetailModal
+          title={detail.skill.name}
+          subtitle={`/${detail.skill.id} · ${detail.skill.description}`}
+          chips={
+            <span className="rounded bg-paper-inset px-1.5 py-0.5 text-[11px] text-ink-muted">
+              {detail.skill.source === 'user' ? '用户' : '内置'}
+            </span>
+          }
+          loadMarkdown={() => api.getSkill(detail.skill.id).then((s) => s?.body ?? null)}
+          onClose={() => setDetail(null)}
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setDetail(null);
+                  void handleUse(detail.skill);
+                }}
+                className="rounded-full bg-ink px-4 py-1.5 text-xs text-paper-raised transition-opacity hover:opacity-85"
+              >
+                在新会话中使用
+              </button>
+            </>
+          }
+        />
+      )}
+
+      {detail?.kind === 'market' && (
+        <SkillDetailModal
+          icon={<SkillIcon entry={detail.entry} />}
+          title={detail.entry.name}
+          subtitle={`${detail.entry.canonicalName} · ${detail.entry.version ? `v${detail.entry.version} · ` : ''}${detail.entry.description}`}
+          chips={
+            <span className="rounded bg-paper-inset px-1.5 py-0.5 text-[11px] text-ink-muted">
+              {SOURCE_LABELS[detail.entry.source] ?? detail.entry.source}
+            </span>
+          }
+          loadMarkdown={() =>
+            window.reizo
+              .previewSkillHubSkill({ slug: detail.entry.slug, namespace: detail.entry.namespace })
+              .catch((): null => null)
+          }
+          onClose={() => setDetail(null)}
+          footer={
+            <>
+              <span className="mr-auto inline-flex items-center gap-3 text-[11px] text-ink-muted">
+                <span className="inline-flex items-center gap-1">
+                  <Download size={11} />
+                  {formatCount(detail.entry.downloads)}
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <Star size={11} />
+                  {formatCount(detail.entry.stars)}
+                </span>
+              </span>
+              <button
+                type="button"
+                disabled={
+                  installing === detail.entry.canonicalName || installedIds.has(detail.entry.slug)
+                }
+                onClick={() => void handleInstall(detail.entry)}
+                className={`inline-flex items-center gap-1 rounded-full px-4 py-1.5 text-xs transition-opacity ${
+                  installedIds.has(detail.entry.slug)
+                    ? 'cursor-default bg-paper-inset text-ink-muted'
+                    : 'bg-ink text-paper-raised hover:opacity-85 disabled:opacity-60'
+                }`}
+              >
+                {installing === detail.entry.canonicalName ? (
+                  <>
+                    <Loader2 size={11} className="animate-spin" />
+                    安装中
+                  </>
+                ) : installedIds.has(detail.entry.slug) ? (
+                  '已安装'
+                ) : (
+                  '安装'
+                )}
+              </button>
+            </>
+          }
+        />
+      )}
     </div>
   );
 }
