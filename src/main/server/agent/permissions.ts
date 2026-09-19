@@ -82,6 +82,9 @@ interface PendingInteraction extends PendingInteractionInfo {
   decision?: PermissionDecision;
   /** Set once the user answers an `ask` interaction. */
   answers?: Record<string, string>;
+  /** Duplicate `ask` calls are folded into the first identical one: this
+   * points at its toolCallId and inherits its answers on resolution. */
+  mirrorOf?: string;
 }
 
 export interface ResolvedInteraction {
@@ -134,7 +137,7 @@ function recordPending(item: PendingInteraction): void {
 
 function emitNextInteraction(sessionId: string): void {
   if (visibleInteraction.has(sessionId)) return;
-  const next = (pending.get(sessionId) ?? []).find((item) => !isResolved(item));
+  const next = (pending.get(sessionId) ?? []).find((item) => !isResolved(item) && !item.mirrorOf);
   if (!next) return;
   visibleInteraction.set(sessionId, next.toolCallId);
   const sink = sinks.get(sessionId);
@@ -193,6 +196,16 @@ export function registerPendingAsk(options: {
   name: string;
   questions: AskQuestion[];
 }): void {
+  // Models occasionally emit the same ask_user call more than once in one
+  // burst. Fold exact duplicates (identical question payloads) into the
+  // still-unanswered first one so the user is not asked twice.
+  const signature = JSON.stringify(options.questions);
+  const source = (pending.get(options.sessionId) ?? []).find(
+    (p) =>
+      p.kind === 'ask' &&
+      p.answers === undefined &&
+      JSON.stringify(p.questions) === signature,
+  );
   recordPending({
     sessionId: options.sessionId,
     toolCallId: options.toolCallId,
@@ -200,6 +213,7 @@ export function registerPendingAsk(options: {
     args: {},
     kind: 'ask',
     questions: options.questions,
+    ...(source ? { mirrorOf: source.toolCallId } : {}),
   });
 }
 
@@ -235,6 +249,9 @@ export function answerAsk(toolCallId: string, answers: Record<string, string>): 
     item.answers = answers;
     if (visibleInteraction.get(sessionId) === toolCallId) visibleInteraction.delete(sessionId);
     console.info(`[chat] ask answered session=${sessionId} id=${toolCallId}`);
+    for (const dup of list) {
+      if (dup.mirrorOf === toolCallId && dup.answers === undefined) dup.answers = answers;
+    }
     emitNextInteraction(sessionId);
     maybeResolveWaiter(sessionId);
     return true;

@@ -149,4 +149,43 @@ describe('interaction gate', () => {
       { toolCallId: 'q1', name: 'ask_user', args: {}, kind: 'ask', decision: undefined, answers: { colour: 'blue' } },
     ]);
   });
+
+  it('folds duplicate identical asks into the first one', async () => {
+    const events: ChatStreamEvent[] = [];
+    setPermissionSink('s1', (event) => events.push(event));
+    const questions = [{ id: 'vibe', prompt: '什么气质?' }];
+    registerPendingAsk({ sessionId: 's1', toolCallId: 'q1', name: 'ask_user', questions });
+    registerPendingAsk({ sessionId: 's1', toolCallId: 'q2', name: 'ask_user', questions });
+    // Only one card ever surfaces.
+    expect(ids(events, 'ask')).toEqual(['q1']);
+
+    expect(answerAsk('q1', { vibe: 'minimal' })).toBe(true);
+    await waitForInteractions('s1');
+    // No second card; the mirrored call resolves with the same answers.
+    expect(ids(events, 'ask')).toEqual(['q1']);
+    expect(consumeInteractions('s1')).toEqual([
+      { toolCallId: 'q1', name: 'ask_user', args: {}, kind: 'ask', decision: undefined, answers: { vibe: 'minimal' } },
+      { toolCallId: 'q2', name: 'ask_user', args: {}, kind: 'ask', decision: undefined, answers: { vibe: 'minimal' } },
+    ]);
+  });
+
+  it('does not fold asks whose question payload differs', () => {
+    const events: ChatStreamEvent[] = [];
+    setPermissionSink('s1', (event) => events.push(event));
+    registerPendingAsk({
+      sessionId: 's1',
+      toolCallId: 'q1',
+      name: 'ask_user',
+      questions: [{ id: 'vibe', prompt: '什么气质?' }],
+    });
+    registerPendingAsk({
+      sessionId: 's1',
+      toolCallId: 'q2',
+      name: 'ask_user',
+      questions: [{ id: 'size', prompt: '什么画幅?' }],
+    });
+    expect(ids(events, 'ask')).toEqual(['q1']);
+    expect(answerAsk('q1', { vibe: 'minimal' })).toBe(true);
+    expect(ids(events, 'ask')).toEqual(['q1', 'q2']);
+  });
 });
