@@ -30,10 +30,13 @@ if (process.platform === 'win32') {
 // build) via REIZO_DEV_NO_SANDBOX=1, purely so `npm start` is testable here.
 if (process.env.REIZO_DEV_NO_SANDBOX === '1') {
   app.commandLine.appendSwitch('no-sandbox');
+  // Some sandboxes can't host Chromium POSIX shm files at all — write them to
+  // a real temp dir instead of /dev/shm.
+  app.commandLine.appendSwitch('disable-dev-shm-usage');
   app.commandLine.appendSwitch('disable-gpu');
   app.commandLine.appendSwitch('disable-software-rasterizer');
-  app.commandLine.appendSwitch('disable-dev-shm-usage');
   app.commandLine.appendSwitch('in-process-gpu');
+  app.commandLine.appendSwitch('no-zygote');
   app.commandLine.appendSwitch('disable-setuid-sandbox');
   app.disableHardwareAcceleration();
 } else {

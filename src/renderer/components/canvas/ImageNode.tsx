@@ -31,6 +31,8 @@ import ParamPopover from './imageEdit/ParamPopover';
 import EditParamsPanel from './imageEdit/EditParamsPanel';
 import type { EditCommitMode } from './imageEdit/commitEdit';
 import { OPEN_IMAGE_EDIT_EVENT, openImageEdit, type OpenImageEditDetail } from './imageEdit/openImageEdit';
+import { OPEN_REGION_MARK_EVENT, type OpenRegionMarkDetail } from './imageEdit/openRegionMark';
+import RegionMarkOverlay from './imageEdit/RegionMarkOverlay';
 
 export interface CanvasNodeData extends Record<string, unknown> {
   sessionId: string;
@@ -219,6 +221,7 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
   const [zoom, setZoom] = useState<string | null>(null);
   const [activeOverlay, setActiveOverlay] = useState<ImageEditKind | null>(null);
   const [overlayCommitMode, setOverlayCommitMode] = useState<EditCommitMode>('derive');
+  const [regionMarkOpen, setRegionMarkOpen] = useState(false);
   const [assetIdx, setAssetIdx] = useState(node.output?.activeAssetIndex ?? 0);
   const [variationsCount, setVariationsCount] = useState<1 | 2 | 4>(
     params.count === 4 ? 4 : params.count === 2 ? 2 : 1,
@@ -280,6 +283,16 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
     };
     window.addEventListener(OPEN_IMAGE_EDIT_EVENT, onOpen);
     return () => window.removeEventListener(OPEN_IMAGE_EDIT_EVENT, onOpen);
+  }, [sessionId, node.id]);
+
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const detail = (e as CustomEvent<OpenRegionMarkDetail>).detail;
+      if (!detail || detail.sessionId !== sessionId || detail.nodeId !== node.id) return;
+      setRegionMarkOpen(true);
+    };
+    window.addEventListener(OPEN_REGION_MARK_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_REGION_MARK_EVENT, onOpen);
   }, [sessionId, node.id]);
 
   const promptDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -735,6 +748,14 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
       )}
 
       {zoom ? <Lightbox src={zoom} onClose={() => setZoom(null)} /> : null}
+      {regionMarkOpen && assetUrl ? (
+        <RegionMarkOverlay
+          sessionId={sessionId}
+          node={node}
+          imageUrl={assetUrl}
+          onClose={() => setRegionMarkOpen(false)}
+        />
+      ) : null}
       {activeOverlay && (overlayCommitMode === 'revise' ? sourceUrl || assetUrl : assetUrl) ? (
         <ImageEditOverlay
           kind={activeOverlay}

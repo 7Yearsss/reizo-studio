@@ -120,7 +120,12 @@ export default function Composer({
   function submit() {
     if (!draft.trim() || disabled) return;
     const selectionMentions = unpinnedSelectionNodes.map((n) => `canvas:${n.id}`);
-    const allMentions = [...mentions, ...nodeRefs.map((r) => `canvas:${r.id}`), ...selectionMentions];
+    const refMentions = nodeRefs.map((r) =>
+      r.region
+        ? `canvas:${r.id}@r=${[r.region.x, r.region.y, r.region.w, r.region.h].map((v) => v.toFixed(3)).join(',')}`
+        : `canvas:${r.id}`,
+    );
+    const allMentions = [...mentions, ...refMentions, ...selectionMentions];
     onSend(draft, allMentions, { skillId, attachments, replaceFromId: replaceFromIdRef.current });
     setDraft('');
     setMentions([]);
@@ -326,7 +331,7 @@ export default function Composer({
                     <span
                       key={ref.id}
                       className="group inline-flex items-center gap-1.5 rounded-lg border border-accent/30 bg-accent/10 py-0.5 pl-1 pr-1.5 text-xs text-ink shadow-sm backdrop-blur-sm transition-all hover:border-accent/60 hover:bg-accent/15"
-                      title={`画布节点引用: ${ref.label}`}
+                      title={ref.region ? `画布节点区域引用: ${ref.label}` : `画布节点引用: ${ref.label}`}
                     >
                       {ref.thumbnail ? (
                         <img
@@ -352,12 +357,12 @@ export default function Composer({
                         </span>
                       )}
                       <span className="max-w-[120px] truncate text-[11px] font-medium text-ink">
-                        {ref.label}
+                        {ref.label}{ref.region ? ' · 区域' : ''}
                       </span>
                       <button
                         type="button"
                         className="flex h-4 w-4 items-center justify-center rounded-full text-ink-muted hover:bg-white/20 hover:text-ink transition-colors cursor-pointer text-[12px] leading-none"
-                        onClick={() => chatStore.removeNodeRef(sessionId, ref.id)}
+                        onClick={() => chatStore.removeNodeRef(sessionId, ref.id, ref.region)}
                         title="移除引用"
                       >
                         ×
