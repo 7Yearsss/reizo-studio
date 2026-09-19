@@ -147,7 +147,9 @@ adding logic here (with a unit test) over embedding it in a route or component.
   `./skills` (bundled) and `<userData>/data/skills` (user-installed) — `src/main/skills.ts`.
   A `prompt` frontmatter field prefills the composer when the skill is picked, and a
   `## 提问` body section declares inputs the agent must collect via `ask_user`
-  question cards before executing (see `skills/cover-image/`).
+  question cards before executing (see `skills/cover-image/`). Files under
+  `<skill>/assets/` are served at `/api/skills/:id/assets/:file` and can be
+  referenced from direction cards as `skill-asset:<id>/<file>` (`imageUrl`).
 - `.claude/`, `.agents/`, and `skills-lock.json` are git-ignored per-developer skill
   tooling; `.agents/skills/` (beui, diffs, shadcn, frontend-design) are references for
   building UI, not part of the app.

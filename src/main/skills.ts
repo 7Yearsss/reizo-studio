@@ -9,6 +9,8 @@ export interface Skill {
   /** Optional prompt template prefilled into the composer when the skill is picked. */
   prompt?: string;
   source: 'bundled' | 'user';
+  /** Directory the skill file lives in — used to serve `skill-asset:` URLs. */
+  dir: string;
 }
 
 function parseFrontmatter(raw: string): { name?: string; description?: string; prompt?: string; body: string } {
@@ -41,6 +43,7 @@ async function loadSkillFile(file: string, source: Skill['source']): Promise<Ski
       prompt: parsed.prompt,
       body: parsed.body,
       source,
+      dir: path.dirname(file),
     };
   } catch {
     return null;

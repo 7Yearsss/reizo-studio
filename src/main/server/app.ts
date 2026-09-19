@@ -20,6 +20,8 @@ import { createComputerUseRouter } from './routes/computerUse';
 import { createCanvasStore } from './storage/canvasStore';
 import { openDb, type DbHandle } from './db/client';
 import { createProviderStore, type ProviderStore } from './storage/providerStore';
+import { createInteractionStore } from './storage/interactionStore';
+import { initInteractionPersistence } from './agent/permissions';
 import { createAdminProvidersRouter } from './routes/adminProviders';
 import { createPublicProvidersRouter } from './routes/publicProviders';
 
@@ -139,6 +141,9 @@ export function createApp(options: CreateAppOptions) {
   const db = options.db ?? openDb(':memory:');
   const artifactStore = createArtifactStore(db, options.dataRoot);
   const canvasStore = createCanvasStore(db);
+
+  // Ask cards the user never answered survive an app restart.
+  void initInteractionPersistence(createInteractionStore(options.dataRoot));
 
   const app = new Hono();
   app.use('*', originGuard(options));

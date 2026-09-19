@@ -688,6 +688,11 @@ export function getAgentSession(sessionId: string): AgentSession {
   return session;
 }
 
+/** True while a turn for this session is in flight (including suspended on an interaction). */
+export function isSessionTurnLive(sessionId: string): boolean {
+  return sessions.get(sessionId)?.running ?? false;
+}
+
 export function abortChatTurn(sessionId: string): boolean {
   return sessions.get(sessionId)?.abort() ?? false;
 }

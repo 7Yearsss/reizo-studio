@@ -17,7 +17,11 @@ prompt: 帮我做一张封面图
 
 1. 方向：这张封面要传达什么气质？（按用户主题个性化选项，如 极简留白 / 大字冲击 / 场景叙事）
 2. 画幅：什么比例？（16:9 横版 / 1:1 方形 / 9:16 竖版 / 3:4）
-3. 样式：用什么视觉风格？（写实摄影 / 扁平插画 / 3D 渲染 / 水彩手绘）
+3. 样式：用什么视觉风格？——这一问用 `kind: 'direction'` 的方向卡，4 张预设样例图供挑选，每张卡带 `imageUrl` 指向技能内置样图：
+   - `style-photoreal` 写实摄影 `skill-asset:cover-image/style-photoreal.jpg`
+   - `style-flat` 扁平插画 `skill-asset:cover-image/style-flat.jpg`
+   - `style-3d` 3D 渲染 `skill-asset:cover-image/style-3d.jpg`
+   - `style-watercolor` 水彩手绘 `skill-asset:cover-image/style-watercolor.jpg`
 
 ## 流程
 

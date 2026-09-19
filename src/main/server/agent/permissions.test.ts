@@ -4,12 +4,15 @@ import {
   answerAsk,
   answerPermission,
   consumeInteractions,
+  initInteractionPersistence,
   isReadOnlyShellCommand,
+  pendingAsksForSession,
   registerPendingAsk,
   requestPermission,
   resetPermissionsForTests,
   setPermissionSink,
   waitForInteractions,
+  type PersistedInteraction,
 } from './permissions';
 
 afterEach(() => {
@@ -167,6 +170,34 @@ describe('interaction gate', () => {
       { toolCallId: 'q1', name: 'ask_user', args: {}, kind: 'ask', decision: undefined, answers: { vibe: 'minimal' } },
       { toolCallId: 'q2', name: 'ask_user', args: {}, kind: 'ask', decision: undefined, answers: { vibe: 'minimal' } },
     ]);
+  });
+
+  it('persists unanswered asks and restores them as restart-orphaned cards', async () => {
+    const data: PersistedInteraction[] = [];
+    const store = {
+      list: async () => [...data],
+      setAll: async (items: PersistedInteraction[]) => {
+        data.length = 0;
+        data.push(...items);
+      },
+    };
+    const questions = [{ id: 'vibe', prompt: '什么气质?' }];
+    await initInteractionPersistence(store);
+    registerPendingAsk({ sessionId: 's1', toolCallId: 'q1', name: 'ask_user', questions });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(data.map((d) => d.toolCallId)).toEqual(['q1']);
+
+    // Simulate a restart: memory wiped, disk copy restored.
+    resetPermissionsForTests();
+    await initInteractionPersistence(store);
+    expect(pendingAsksForSession('s1').map((i) => i.toolCallId)).toEqual(['q1']);
+
+    // Answering a restored card resolves it but leaves nothing to consume.
+    expect(answerAsk('q1', { vibe: 'minimal' })).toBe(true);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(pendingAsksForSession('s1')).toEqual([]);
+    expect(data).toEqual([]);
+    expect(consumeInteractions('s1')).toEqual([]);
   });
 
   it('folds repackaged asks (same prompts, different ids/options) and translates answers', async () => {

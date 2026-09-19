@@ -33,6 +33,8 @@ export interface DirectionCard {
   references?: string[];
   /** Canvas node whose latest output previews this option (e.g. a draft image on the canvas). */
   nodeId?: string;
+  /** Preset sample image — absolute URL, or `skill-asset:<skillId>/<file>` for an asset bundled inside a skill directory. */
+  imageUrl?: string;
 }
 
 export type ReplyPhase = 'preparing' | 'thinking' | 'tools' | 'replying' | 'waiting';

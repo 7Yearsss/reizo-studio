@@ -86,6 +86,60 @@ interface PendingInteraction extends PendingInteractionInfo {
    * prompts: this points at its toolCallId and inherits its answers on
    * resolution. */
   mirrorOf?: string;
+  /** Restored from disk after an app restart — the turn that raised it is
+   * gone, so answering it cannot resume the original tool call. */
+  restored?: boolean;
+}
+
+/** Disk persistence for unanswered `ask` cards (wired by `initInteractionPersistence`). */
+type InteractionPersister = {
+  list(): Promise<PersistedInteraction[]>;
+  setAll(items: PersistedInteraction[]): Promise<void>;
+};
+export interface PersistedInteraction extends PendingInteractionInfo {
+  sessionId: string;
+}
+
+let persister: InteractionPersister | null = null;
+
+function persistPending(): void {
+  if (!persister) return;
+  const items: PersistedInteraction[] = [];
+  for (const list of pending.values()) {
+    for (const item of list) {
+      // Only `ask` cards survive a restart — a restored permission prompt could
+      // not run the tool it was gating, so it would just confuse.
+      if (item.kind !== 'ask' || item.mirrorOf || item.answers !== undefined) continue;
+      const { sessionId, toolCallId, name, args, kind, questions } = item;
+      items.push({ sessionId, toolCallId, name, args, kind, questions });
+    }
+  }
+  void persister.setAll(items).catch((err) => {
+    console.warn('[chat] failed to persist pending interactions', err);
+  });
+}
+
+export async function initInteractionPersistence(store: InteractionPersister): Promise<void> {
+  persister = store;
+  for (const item of await store.list()) {
+    const list = pending.get(item.sessionId) ?? [];
+    if (list.some((p) => p.toolCallId === item.toolCallId)) continue;
+    list.push({ ...item, restored: true });
+    pending.set(item.sessionId, list);
+  }
+}
+
+/** Unresolved `ask` cards for a session — used to re-show the card after a restart. */
+export function pendingAsksForSession(sessionId: string): PendingInteractionInfo[] {
+  return (pending.get(sessionId) ?? [])
+    .filter((item) => item.kind === 'ask' && !item.mirrorOf && item.answers === undefined)
+    .map((item) => ({
+      toolCallId: item.toolCallId,
+      name: item.name,
+      args: item.args,
+      kind: item.kind,
+      questions: item.questions,
+    }));
 }
 
 export interface ResolvedInteraction {
@@ -120,6 +174,7 @@ export function clearPermissionSink(sessionId: string): void {
   answeredAskHistory.delete(sessionId);
   waiters.get(sessionId)?.resolve();
   waiters.delete(sessionId);
+  persistPending();
 }
 
 function rememberSessionAllow(sessionId: string, name: string): void {
@@ -194,6 +249,7 @@ export async function requestPermission(options: {
     return true;
   }
   recordPending({ sessionId, toolCallId, name, args, kind: 'permission', preview });
+  persistPending();
   return false;
 }
 
@@ -268,6 +324,7 @@ export function registerPendingAsk(options: {
     ...(unanswered ? { mirrorOf: unanswered.toolCallId } : {}),
     ...(fromHistory ? { answers: fromHistory } : {}),
   });
+  persistPending();
 }
 
 export function answerPermission(toolCallId: string, decision: PermissionDecision): boolean {
@@ -299,13 +356,19 @@ export function answerAsk(toolCallId: string, answers: Record<string, string>): 
     const item = list.find((p) => p.toolCallId === toolCallId && p.kind === 'ask');
     if (!item) continue;
     if (item.answers !== undefined) return true;
-    item.answers = answers;
-    const history = answeredAskHistory.get(sessionId) ?? new Map<string, string>();
-    for (const q of item.questions ?? []) {
-      const v = answers[q.id];
-      if (v !== undefined) history.set(promptKey(q.prompt), v);
+    if (item.restored) {
+      // The turn that asked is gone — nothing will consume the answer. Drop
+      // the card; the renderer posts the answers as a normal user message.
+      pending.set(sessionId, list.filter((p) => p !== item && p.mirrorOf !== toolCallId));
+    } else {
+      item.answers = answers;
+      const history = answeredAskHistory.get(sessionId) ?? new Map<string, string>();
+      for (const q of item.questions ?? []) {
+        const v = answers[q.id];
+        if (v !== undefined) history.set(promptKey(q.prompt), v);
+      }
+      answeredAskHistory.set(sessionId, history);
     }
-    answeredAskHistory.set(sessionId, history);
     if (visibleInteraction.get(sessionId) === toolCallId) visibleInteraction.delete(sessionId);
     console.info(`[chat] ask answered session=${sessionId} id=${toolCallId}`);
     for (const dup of list) {
@@ -317,6 +380,7 @@ export function answerAsk(toolCallId: string, answers: Record<string, string>): 
     }
     emitNextInteraction(sessionId);
     maybeResolveWaiter(sessionId);
+    persistPending();
     return true;
   }
   return false;
@@ -364,6 +428,7 @@ export function consumeInteractions(sessionId: string): ResolvedInteraction[] {
   const list = pending.get(sessionId) ?? [];
   pending.delete(sessionId);
   visibleInteraction.delete(sessionId);
+  persistPending();
   return list.map((item) => ({
     toolCallId: item.toolCallId,
     name: item.name,

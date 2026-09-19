@@ -4,7 +4,16 @@ import type { DirectionCard as Direction } from '../../../shared/stream';
 import { useCanvasStore } from '../../state/useCanvasStore';
 import * as canvasStore from '../../state/canvasStore';
 import { getCanvasNodeThumbnail } from '../canvas/canvasThumbnail';
+import { getResolvedApiOrigin } from '../../api';
 import Lightbox from '../canvas/Lightbox';
+
+/** `skill-asset:<skillId>/<file>` → served asset URL; anything else is used verbatim. */
+function resolveImageUrl(url: string): string | null {
+  const m = url.match(/^skill-asset:([^/]+)\/(.+)$/);
+  if (!m) return url;
+  const origin = getResolvedApiOrigin();
+  return origin ? `${origin}/api/skills/${encodeURIComponent(m[1])}/assets/${encodeURIComponent(m[2])}` : null;
+}
 
 export default function DirectionCardChoice({
   direction,
@@ -24,7 +33,7 @@ export default function DirectionCardChoice({
       (n) => n.id === direction.nodeId,
     );
     return node ? getCanvasNodeThumbnail(node) : undefined;
-  });
+  }) ?? (direction.imageUrl ? resolveImageUrl(direction.imageUrl) ?? undefined : undefined);
 
   return (
     <button
