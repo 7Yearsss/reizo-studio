@@ -81,9 +81,13 @@ export default function WorkGroupCard({
       />
       {active && parts.length > 0 ? (
         <div className="mt-1 flex flex-col items-start gap-1">
-          {parts.filter((part) => !part.result && !part.error).map((part) => (
-            <ToolCard key={part.id} part={part} />
-          ))}
+          {parts
+            // ask_user's real UI is the ask card under the message stream — a
+            // per-call tool row would only echo noise next to it.
+            .filter((part) => !part.result && !part.error && part.name !== 'ask_user')
+            .map((part) => (
+              <ToolCard key={part.id} part={part} />
+            ))}
         </div>
       ) : null}
       {/* After the turn ends the activity strip collapses, so keep write cards

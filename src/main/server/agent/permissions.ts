@@ -82,8 +82,9 @@ interface PendingInteraction extends PendingInteractionInfo {
   decision?: PermissionDecision;
   /** Set once the user answers an `ask` interaction. */
   answers?: Record<string, string>;
-  /** Duplicate `ask` calls are folded into the first identical one: this
-   * points at its toolCallId and inherits its answers on resolution. */
+  /** Duplicate `ask` calls are folded into the first one covering the same
+   * prompts: this points at its toolCallId and inherits its answers on
+   * resolution. */
   mirrorOf?: string;
 }
 
@@ -189,6 +190,31 @@ export async function requestPermission(options: {
   return false;
 }
 
+/** Prompt text normalized for duplicate-ask detection — ignores whitespace/case. */
+function promptKey(prompt: string): string {
+  return prompt.trim().toLowerCase().replace(/\s+/g, '');
+}
+
+/** Map the source ask's answers onto the mirror's own question ids, matched by prompt. */
+function translateAnswers(
+  answers: Record<string, string>,
+  sourceQuestions: AskQuestion[],
+  mirrorQuestions: AskQuestion[],
+): Record<string, string> {
+  const translated: Record<string, string> = {};
+  for (const q of mirrorQuestions) {
+    const direct = answers[q.id];
+    if (direct !== undefined) {
+      translated[q.id] = direct;
+      continue;
+    }
+    const key = promptKey(q.prompt);
+    const source = sourceQuestions.find((s) => promptKey(s.prompt) === key);
+    if (source && answers[source.id] !== undefined) translated[q.id] = answers[source.id];
+  }
+  return translated;
+}
+
 /** Record a pending `ask` interaction. The caller then throws `ApprovalRequiredError`. */
 export function registerPendingAsk(options: {
   sessionId: string;
@@ -196,16 +222,18 @@ export function registerPendingAsk(options: {
   name: string;
   questions: AskQuestion[];
 }): void {
-  // Models occasionally emit the same ask_user call more than once in one
-  // burst. Fold exact duplicates (identical question payloads) into the
-  // still-unanswered first one so the user is not asked twice.
-  const signature = JSON.stringify(options.questions);
-  const source = (pending.get(options.sessionId) ?? []).find(
-    (p) =>
-      p.kind === 'ask' &&
-      p.answers === undefined &&
-      JSON.stringify(p.questions) === signature,
-  );
+  // Models occasionally emit the same ask_user call more than once — with
+  // identical payloads or with the same questions repackaged (different
+  // option sets, kinds, or order). Fold any call whose questions are all
+  // already covered by a still-unanswered ask into that first one, so the
+  // user never has to answer the same prompt twice.
+  const unanswered = (pending.get(options.sessionId) ?? []).find((p) => {
+    const qs = p.kind === 'ask' && p.answers === undefined ? p.questions : undefined;
+    if (!qs || options.questions.length === 0) return false;
+    return options.questions.every((q) =>
+      qs.some((s) => promptKey(s.prompt) === promptKey(q.prompt)),
+    );
+  });
   recordPending({
     sessionId: options.sessionId,
     toolCallId: options.toolCallId,
@@ -213,7 +241,7 @@ export function registerPendingAsk(options: {
     args: {},
     kind: 'ask',
     questions: options.questions,
-    ...(source ? { mirrorOf: source.toolCallId } : {}),
+    ...(unanswered ? { mirrorOf: unanswered.toolCallId } : {}),
   });
 }
 
@@ -250,7 +278,11 @@ export function answerAsk(toolCallId: string, answers: Record<string, string>): 
     if (visibleInteraction.get(sessionId) === toolCallId) visibleInteraction.delete(sessionId);
     console.info(`[chat] ask answered session=${sessionId} id=${toolCallId}`);
     for (const dup of list) {
-      if (dup.mirrorOf === toolCallId && dup.answers === undefined) dup.answers = answers;
+      if (dup.mirrorOf === toolCallId && dup.answers === undefined) {
+        dup.answers = item.questions && dup.questions
+          ? translateAnswers(answers, item.questions, dup.questions)
+          : answers;
+      }
     }
     emitNextInteraction(sessionId);
     maybeResolveWaiter(sessionId);
