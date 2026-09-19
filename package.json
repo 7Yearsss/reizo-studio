@@ -6,6 +6,7 @@
   "main": ".vite/build/index.js",
   "private": true,
   "scripts": {
+    "prestart": "node scripts/dev-kill.mjs",
     "start": "electron-forge start",
     "package": "electron-forge package",
     "make": "electron-forge make",
