@@ -170,9 +170,18 @@ export default function Composer({
     setAttachments(next);
   }
 
+  const composerBodyRef = useRef<HTMLDivElement>(null);
+
+  const focusComposer = useCallback(() => {
+    composerBodyRef.current?.querySelector('textarea')?.focus();
+  }, []);
+
   function pickSlash(command: SlashCommand, args: string) {
     setSkillId(command.id);
     setDraft(applySlashArgs(command.prompt, args));
+    // The palette button steals focus on click — hand it back to the textarea
+    // so the skill chip feels like an inline token you can keep typing after.
+    window.setTimeout(focusComposer, 0);
   }
 
   const liveStatus = sessionId && sending ? (
@@ -197,7 +206,7 @@ export default function Composer({
         compact ? 'px-3 pb-3 pt-8' : 'px-6 pb-6 pt-16',
       )}
     >
-      <div className="pointer-events-auto relative mx-auto max-w-3xl">
+      <div ref={composerBodyRef} className="pointer-events-auto relative mx-auto max-w-3xl">
         {!sending && turnOutcome === 'error' && turnError && (
           <div className="mb-2 flex items-center gap-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[13px] text-ink" role="alert">
             <span className="flex-1">回复失败：{turnError}</span>
@@ -255,6 +264,7 @@ export default function Composer({
             onPickSkill={(skill) => {
               setDraft(draft.replace(/@([^\s@]*)$/, ''));
               setSkillId(skill.id);
+              window.setTimeout(focusComposer, 0);
             }}
           />
         )}
@@ -270,7 +280,7 @@ export default function Composer({
             if (e.dataTransfer.files.length) void addDroppedFiles(e.dataTransfer.files);
           }}
         >
-            {(activeSkill || attachments.length > 0 || nodeRefs.length > 0 || mentions.length > 0 || unpinnedSelectionNodes.length > 0) && (
+            {(attachments.length > 0 || nodeRefs.length > 0 || mentions.length > 0 || unpinnedSelectionNodes.length > 0) && (
               <div className={cn("mb-2 flex flex-wrap gap-1.5", compact && "max-h-24 overflow-y-auto pr-0.5")}>
                 {sessionId && unpinnedSelectionNodes.length > 0 && (
                   <div
@@ -385,23 +395,6 @@ export default function Composer({
                       </button>
                     </span>
                   ))}
-                {activeSkill && (
-                  <span
-                    className="inline-flex items-center gap-1 rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-[11px] text-ink"
-                    title={`技能已钉住：本会话每条消息都带此技能 · ${activeSkill.description || activeSkill.id}`}
-                  >
-                    <Wrench size={10} className="text-accent" />
-                    /{activeSkill.id} · {activeSkill.name}
-                    <button
-                      type="button"
-                      className="ml-0.5 text-ink-muted hover:text-ink"
-                      onClick={() => setSkillId(undefined)}
-                      title="取消技能"
-                    >
-                      ×
-                    </button>
-                  </span>
-                )}
                 {attachments.map((file) => (
                   <span key={file.name} className="rounded-full bg-paper-inset px-2 py-0.5 text-[11px] text-ink">
                     {file.name}
@@ -418,6 +411,33 @@ export default function Composer({
             )}
             <div className="rounded-2xl border border-line bg-paper-raised p-2 shadow-[0_8px_30px_rgba(28,22,18,0.06)]">
               {liveStatus ? <div className="mb-2 px-2">{liveStatus}</div> : null}
+              {activeSkill && (
+                <div className="mb-1.5 px-1">
+                  <span
+                    className="pop-in inline-flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent/10 py-0.5 pl-1 pr-1 text-xs text-ink shadow-sm transition-colors hover:border-accent/60"
+                    title={`本会话持续生效 · ${activeSkill.description || activeSkill.id}（退格键可移除）`}
+                  >
+                    <span className="flex h-5 w-5 items-center justify-center rounded bg-accent/20 text-accent">
+                      <Wrench size={11} />
+                    </span>
+                    <span className="font-mono text-[11px] font-medium">/{activeSkill.id}</span>
+                    <span className="max-w-[160px] truncate text-[11px] text-ink-muted">
+                      {activeSkill.name}
+                    </span>
+                    <button
+                      type="button"
+                      className="flex h-4 w-4 items-center justify-center rounded-full text-ink-muted transition-colors hover:bg-accent/20 hover:text-ink"
+                      onClick={() => {
+                        setSkillId(undefined);
+                        focusComposer();
+                      }}
+                      title="退出技能"
+                    >
+                      ×
+                    </button>
+                  </span>
+                </div>
+              )}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -437,11 +457,22 @@ export default function Composer({
                 disabled={disabled}
                 autoFocus={autoFocus}
                 minRows={2}
-                placeholder="输入消息，/ 调用技能，@ 引用文件…"
+                placeholder={
+                  activeSkill
+                    ? `技能 /${activeSkill.id} 生效中 — 直接描述任务，退格或 × 退出`
+                    : '输入消息，/ 调用技能，@ 引用文件…'
+                }
                 onKeyDown={(e) => {
                   if (isImeComposingEvent(e)) return;
                   if ((mentionQuery !== null || slash !== null) && e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
+                    return;
+                  }
+                  // Atomic chip delete: Backspace on an empty draft unpins the
+                  // skill, mirroring how Cursor/Linear remove context chips.
+                  if (e.key === 'Backspace' && draft === '' && skillId) {
+                    e.preventDefault();
+                    setSkillId(undefined);
                   }
                 }}
                 leadingAction={
