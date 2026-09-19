@@ -619,7 +619,7 @@ function finishThinkingActivity(acc: { activities: ReplyActivity[] }): void {
 
 function makeEventFolder(
   sessionId: string,
-  acc: { text: string; reasoning: string; tools: ToolCallPart[]; activities: ReplyActivity[] },
+  acc: { text: string; reasoning: string; tools: ToolCallPart[]; activities: ReplyActivity[]; breakPending?: boolean },
 ) {
   return (event: ChatStreamEvent, meta?: StreamMeta): void => {
     if (meta) {
@@ -643,6 +643,10 @@ function makeEventFolder(
 
     switch (event.type) {
       case 'text': {
+        // New prose after a finished tool call starts a new paragraph — the
+        // alternative is every pass's reply concatenating into one wall.
+        if (acc.breakPending && acc.text.length > 0 && !acc.text.endsWith('\n\n')) acc.text += '\n\n';
+        acc.breakPending = false;
         acc.text += event.delta;
         const thinkingRunning = acc.activities.some((activity) => activity.kind === 'thinking' && activity.status === 'running');
         finishThinkingActivity(acc);
@@ -680,6 +684,7 @@ function makeEventFolder(
         finishThinkingActivity(acc);
         const part = upsertToolPart(acc, event);
         upsertToolActivity(acc, part);
+        if (part.result !== undefined || part.error !== undefined) acc.breakPending = true;
         // The agent touched the canvas — open panel, record a trail entry, spotlight the
         // affected nodes, and (P0-2) batch structural writes into the undo stack.
         {
