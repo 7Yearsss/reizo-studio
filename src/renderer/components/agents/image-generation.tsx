@@ -335,7 +335,7 @@ export function ImageGeneration({
           ) : null}
         </div>
 
-        {showStatus || prompt ? (
+        {status !== "complete" && (showStatus || prompt) ? (
           <div className="mt-3 text-left">
             {showStatus ? (
               <div
