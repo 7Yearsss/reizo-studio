@@ -3,7 +3,7 @@ import { nanoid } from 'nanoid';
 import { getProviderPreset } from '../../../shared/providers';
 import type { ChatStreamEvent, TodoItem } from '../../../shared/stream';
 import { createOpenAiModel } from './provider/openai';
-import { createWorkspaceTools } from './workspaceTools';
+import { createAskUserTool, createWorkspaceTools } from './workspaceTools';
 import { createCanvasTools } from './canvasTools';
 import { createArtifactTools } from './artifactTools';
 import { createImageTools } from './imageTools';
@@ -333,9 +333,14 @@ export async function runChatTurn(options: {
         })
       : undefined;
 
+  // ask_user is a chat-interaction tool, not a workspace one — include it even
+  // when no workspace is configured so the agent can always ask questions.
+  const askTool = createAskUserTool(sessionId);
+
   const tools =
-    toolset?.tools || canvasTools || artifactTools || imageTools || computerTools
+    toolset?.tools || canvasTools || artifactTools || imageTools || computerTools || askTool
       ? {
+          ask_user: askTool,
           ...(toolset?.tools ?? {}),
           ...(canvasTools ?? {}),
           ...(artifactTools ?? {}),
