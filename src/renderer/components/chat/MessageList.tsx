@@ -146,6 +146,7 @@ export default function MessageList({
             {m.role === 'user' ? (
               <UserMessage
                 content={m.content}
+                sessionId={sessionId}
                 searchQuery={searchQuery}
                 currentMatch={currentMatchId === m.id}
                 canEdit={!sending && m.id === lastUserId}
@@ -154,6 +155,7 @@ export default function MessageList({
             ) : (
               <AssistantMessage
                 content={m.content}
+                sessionId={sessionId}
                 parts={m.parts}
                 reasoning={m.reasoning}
                 reasoningMs={m.reasoningMs}
@@ -170,6 +172,7 @@ export default function MessageList({
           <div data-message-id="streaming">
             <AssistantMessage
               content={streaming}
+              sessionId={sessionId}
               parts={streamingTools}
               reasoning={streamingReasoning || undefined}
               reasoningStreaming={Boolean(streamingReasoning) && !streaming}
