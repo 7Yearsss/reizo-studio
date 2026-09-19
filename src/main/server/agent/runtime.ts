@@ -274,7 +274,7 @@ export async function runChatTurn(options: {
     memory ? `Workspace MEMORY.md:\n${redactSecrets(memory)}` : '',
     skill
       ? `The user invoked skill "${skill.name}". Follow this skill:\n${skill.body}\n\n` +
-        'If this skill declares a "提问"/"Questions" section, collect each missing input through `ask_user` question cards (concrete options + free text) before producing output — never ask those questions as plain chat text.'
+        'If this skill declares a "提问"/"Questions" section, collect each missing input through `ask_user` question cards (concrete options + free text) before producing output — never ask those questions as plain chat text. Ask each question at most once; an input the user already answered is never re-asked.'
       : '',
     projectInstructions ? `Project "${projectName}" working rules:\n${projectInstructions}` : '',
   ].filter(Boolean);
@@ -403,7 +403,9 @@ export async function runChatTurn(options: {
             const diff = snap.nodes.length - lastSeenNodeCount;
             lastSeenNodeCount = snap.nodes.length;
             const deltaNote: ModelMessage = {
-              role: 'system',
+              // Not a system message — several providers reject mid-prompt
+              // system entries; a bracketed user note reads the same to the model.
+              role: 'user',
               content: `[画布状态增量: 当前共有 ${snap.nodes.length} 个节点 (${diff > 0 ? `+${diff}` : diff})，最新: ${snap.nodes.slice(-2).map((n) => `「${n.title || n.id}」(${n.type})`).join(', ')}]`,
             };
             compacted.push(deltaNote);
