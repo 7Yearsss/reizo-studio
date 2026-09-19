@@ -404,18 +404,20 @@ export function registerPendingAsk(options: {
       sessionId: options.sessionId,
       toolCallId: options.toolCallId,
       name: options.name,
-      args: {},
+      args: { questions: options.questions },
       kind: 'ask',
       questions: options.questions,
     });
     return;
   }
 
+  // args carry the questions so the synthesized tool-result part persists
+  // them — the renderer derives Q/A summary rows from part.args.questions.
   recordPending({
     sessionId: options.sessionId,
     toolCallId: options.toolCallId,
     name: options.name,
-    args: {},
+    args: { questions: options.questions },
     kind: 'ask',
     questions: options.questions,
     ...(unanswered ? { mirrorOf: unanswered.toolCallId } : {}),
