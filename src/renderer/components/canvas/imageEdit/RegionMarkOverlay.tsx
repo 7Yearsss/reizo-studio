@@ -27,6 +27,7 @@ export default function RegionMarkOverlay({
   const wrapRef = useRef<HTMLDivElement>(null);
   const [rect, setRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const drag = useRef<{ startX: number; startY: number } | null>(null);
 
   const onPointerDown = (e: React.PointerEvent) => {
@@ -63,6 +64,7 @@ export default function RegionMarkOverlay({
   const confirm = async () => {
     if (!rect) return;
     setBusy(true);
+    setError(null);
     try {
       const blob = await cropImageBlob(imageUrl, rect);
       const thumbnail = await blobToDataUrl(blob);
@@ -76,6 +78,8 @@ export default function RegionMarkOverlay({
         region: { ...rect },
       });
       onClose();
+    } catch {
+      setError('区域裁剪失败，请重试');
     } finally {
       setBusy(false);
     }
@@ -91,7 +95,11 @@ export default function RegionMarkOverlay({
       confirmDisabled={!rect}
       confirmHint="在图片上按住拖动，框出要引用的区域"
       footer={
-        <p className="text-[11px] text-ink-muted">框选后该区域会以 chip 形式加入输入框，随消息一起发给 Agent</p>
+        error ? (
+          <p className="text-[11px] text-danger">{error}</p>
+        ) : (
+          <p className="text-[11px] text-ink-muted">框选后该区域会以 chip 形式加入输入框，随消息一起发给 Agent</p>
+        )
       }
     >
       <div

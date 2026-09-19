@@ -117,8 +117,12 @@ function originGuard(options: CreateAppOptions): MiddlewareHandler {
     // only surface after a reload. Mutating `c.res.headers` covers it.
     if (origin !== undefined) {
       c.res.headers.set('Access-Control-Allow-Origin', origin);
-      c.res.headers.append('Vary', 'Origin');
     }
+    // Same URLs are fetched both as plain <img> (no Origin) and as CORS
+    // requests (crossOrigin='anonymous', Origin set). Always splitting the
+    // cache on Origin keeps a no-ACAO variant from being served to a CORS
+    // fetch and failing with MissingAllowOriginHeader.
+    c.res.headers.append('Vary', 'Origin');
   };
 }
 
