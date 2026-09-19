@@ -1,0 +1,102 @@
+---
+name: testing-reizo-studio
+description: How to launch and drive the Reizo Studio Electron app for E2E testing in this sandbox, including the renderer-crash workaround and CDP fallback.
+---
+
+# Testing Reizo Studio (Electron) in this sandbox
+
+## Launching
+
+`REIZO_DEV_NO_SANDBOX=1 npm start` (per blueprint) can crash the renderer on this box:
+it adds `--disable-dev-shm-usage`, moving Chromium shared memory to `/tmp`, where
+creation fails with ESRCH → `[render-process-gone] exitCode 133` → black/unresponsive
+window. Workaround — pass the flags directly (keeps shm in `/dev/shm`, which is a
+healthy tmpfs here):
+
+```bash
+cd /home/ubuntu/repos/reizo-studio
+npx electron-forge start -- --no-sandbox --disable-gpu --disable-software-rasterizer --remote-debugging-port=9222
+```
+
+Electron args go after the `--` separator (`npm start -- --flag` forwards to
+electron-forge, not electron). The window may start behind Chrome or unmaximized:
+
+```bash
+WID=$(wmctrl -l | grep 'Reizo Studio' | awk '{print $1}')
+wmctrl -i -a "$WID"; wmctrl -i -r "$WID" -b add,maximized_vert,maximized_horz
+```
+
+X11 typing (`type` tool) into the Electron window works for ASCII, but CJK text
+(e.g. 中文) silently fails to land in the textarea — use ASCII test strings, or drive
+the renderer via CDP `Input.insertText` (handles Unicode) on :9222. Note that after
+a chip/palette pick the textarea cursor can land at position 0, so typed text may
+prepend the seeded draft rather than append — harmless, still proves focus.
+
+## CDP access
+
+`/json/list` works over plain HTTP, but the WebSocket handshake rejects any Origin —
+use `websocket-client` (pip) with `suppress_origin=True`, or relaunch with
+`--remote-allow-origins=*`. A helper script lives at /tmp/cdp.py (ephemeral — recreate
+if gone): connect to the page target whose URL contains `:46173`, then
+`Runtime.evaluate`/`Page.captureScreenshot`/`Input.insertText`.
+
+## Coordinate scaling gotcha
+
+The Electron window's CSS viewport can be LARGER than the 1024×768 screenshot/click
+space (observed 1600×1156 at dpr=1). Screenshot coordinates ≈ DOM ×
+(1024/innerWidth, 768/innerHeight). Small buttons near panel edges (e.g. ask-card
+提交/确定 at the card's right edge) are easy to miss by eyeballing — when a click
+"succeeded" but nothing changed, get exact positions via CDP:
+
+```python
+c.eval('''[...document.querySelectorAll('[data-message-id="pending-interaction"] button')]
+  .map(b => ({t: b.textContent.trim(), ...b.getBoundingClientRect().toJSON()}))''')
+```
+
+then click at `x * 1024/1600, y * 768/1156`. Single-choice ask cards auto-advance on
+option click (no submit needed); multi-page cards need an explicit 提交 click.
+Canvas fit-all shortcut is `F` (click canvas first to focus).
+
+## Settings appear stale → reload the renderer
+
+`settingsStore.loadSettings()` runs only at App mount. If settings were patched via
+`PATCH /api/settings` (or by another agent) after the page loaded, the UI keeps
+showing old state (e.g. "还没有 API Key", wrong model chip) until you CDP
+`Page.reload`. The stale banner is cosmetic — the main process already has the key.
+
+## Draining a flooded ask_user queue
+
+`interactionBySession` is a single slot fed one-at-a-time by the server's pending
+queue — a model that emits parallel/duplicate `ask_user` calls produces a long
+series of look-alike cards (dedup only folds byte-identical payloads). To drain
+without endless clicking, replay the event buffer and answer each pending id
+directly (idempotent — `{"ok":false}` = already answered/not pending):
+
+```bash
+curl -sN "http://127.0.0.1:47100/api/sessions/<SID>/stream/resume?after=-1" | grep '"ask"'
+POST /api/sessions/<SID>/ask  {"id": "<toolCallId>", "answers": {"<qid>": "<answer>"}}
+```
+
+For `kind:"direction"` asks the answer value is the picked direction card `id`
+(e.g. `neon`), not the title. `/api/canvas/<sessionId>` lists canvas nodes with
+runState/assets — handy to verify drafts/final landed without pixel-peeping.
+
+## Paths
+
+- userData: `~/.config/Reizo Studio/` (dev: productName, not package name)
+- Real SQLite: `~/.config/Reizo Studio/data/reizo.db` (the top-level `reizo.db` is empty/unused)
+- User skills: `~/.config/Reizo Studio/data/skills/<id>/` + `.skillhub.json` marker for hub installs
+- Renderer dev server: http://127.0.0.1:46173 ; local API: 127.0.0.1:47100
+
+## Feature map (relevant pages)
+
+- Sidebar "技能" (Sparkles icon, 2nd item) → uiStore.mode 'skills' → PluginsPage ("插件" title):
+  "我的技能" + "SkillHub 技能市场" (search, sort chips, install cards)
+- 使用 on a user skill → creates session "/<skillId>" and sends a message with skillId
+- No API key configured by default → chat turns fail with 400 "No API key configured";
+  session/tab creation is still verifiable, provider reply is not.
+
+## Devin Secrets Needed
+
+None for launch/UI testing. A provider API key would be needed to verify an actual
+model reply end-to-end.

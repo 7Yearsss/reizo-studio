@@ -82,8 +82,9 @@ interface PendingInteraction extends PendingInteractionInfo {
   decision?: PermissionDecision;
   /** Set once the user answers an `ask` interaction. */
   answers?: Record<string, string>;
-  /** Duplicate `ask` calls are folded into the first identical one: this
-   * points at its toolCallId and inherits its answers on resolution. */
+  /** Duplicate `ask` calls are folded into the first one covering the same
+   * prompts: this points at its toolCallId and inherits its answers on
+   * resolution. */
   mirrorOf?: string;
   /** Restored from disk after an app restart — the turn that raised it is
    * gone, so answering it cannot resume the original tool call. */
@@ -152,6 +153,10 @@ export interface ResolvedInteraction {
 
 const sessionAllow = new Map<string, Set<string>>();
 const sinks = new Map<string, (event: ChatStreamEvent) => void>();
+/** Per-session map of normalized prompt → answer, for asks already answered
+ * this turn. A model that re-asks the same question within the turn gets the
+ * earlier answer back instantly instead of surfacing another card. */
+const answeredAskHistory = new Map<string, Map<string, string>>();
 /** Interaction id currently shown to the user — the queue is drained one at a time. */
 const visibleInteraction = new Map<string, string>();
 /** Ordered pending interactions per session (answered ones stay until consumed). */
@@ -166,6 +171,7 @@ export function clearPermissionSink(sessionId: string): void {
   sinks.delete(sessionId);
   visibleInteraction.delete(sessionId);
   pending.delete(sessionId);
+  answeredAskHistory.delete(sessionId);
   waiters.get(sessionId)?.resolve();
   waiters.delete(sessionId);
   persistPending();
@@ -188,6 +194,8 @@ function recordPending(item: PendingInteraction): void {
     pending.set(item.sessionId, list);
   }
   emitNextInteraction(item.sessionId);
+  // Items can arrive already resolved (answer replayed from history).
+  maybeResolveWaiter(item.sessionId);
 }
 
 function emitNextInteraction(sessionId: string): void {
@@ -245,6 +253,31 @@ export async function requestPermission(options: {
   return false;
 }
 
+/** Prompt text normalized for duplicate-ask detection — ignores whitespace/case. */
+function promptKey(prompt: string): string {
+  return prompt.trim().toLowerCase().replace(/\s+/g, '');
+}
+
+/** Map the source ask's answers onto the mirror's own question ids, matched by prompt. */
+function translateAnswers(
+  answers: Record<string, string>,
+  sourceQuestions: AskQuestion[],
+  mirrorQuestions: AskQuestion[],
+): Record<string, string> {
+  const translated: Record<string, string> = {};
+  for (const q of mirrorQuestions) {
+    const direct = answers[q.id];
+    if (direct !== undefined) {
+      translated[q.id] = direct;
+      continue;
+    }
+    const key = promptKey(q.prompt);
+    const source = sourceQuestions.find((s) => promptKey(s.prompt) === key);
+    if (source && answers[source.id] !== undefined) translated[q.id] = answers[source.id];
+  }
+  return translated;
+}
+
 /** Record a pending `ask` interaction. The caller then throws `ApprovalRequiredError`. */
 export function registerPendingAsk(options: {
   sessionId: string;
@@ -252,16 +285,35 @@ export function registerPendingAsk(options: {
   name: string;
   questions: AskQuestion[];
 }): void {
-  // Models occasionally emit the same ask_user call more than once in one
-  // burst. Fold exact duplicates (identical question payloads) into the
-  // still-unanswered first one so the user is not asked twice.
-  const signature = JSON.stringify(options.questions);
-  const source = (pending.get(options.sessionId) ?? []).find(
-    (p) =>
-      p.kind === 'ask' &&
-      p.answers === undefined &&
-      JSON.stringify(p.questions) === signature,
-  );
+  // Models occasionally emit the same ask_user call more than once — with
+  // identical payloads or with the same questions repackaged (different
+  // option sets, kinds, or order). Fold any call whose questions are all
+  // already covered by a still-unanswered ask into that first one, so the
+  // user never has to answer the same prompt twice.
+  const unanswered = (pending.get(options.sessionId) ?? []).find((p) => {
+    const qs = p.kind === 'ask' && p.answers === undefined ? p.questions : undefined;
+    if (!qs || options.questions.length === 0) return false;
+    return options.questions.every((q) =>
+      qs.some((s) => promptKey(s.prompt) === promptKey(q.prompt)),
+    );
+  });
+
+  // Already answered once this turn? Answer the re-ask from history without
+  // surfacing a card at all.
+  const history = answeredAskHistory.get(options.sessionId);
+  const fromHistory =
+    !unanswered &&
+    history &&
+    options.questions.length > 0 &&
+    options.questions.every((q) => history.has(promptKey(q.prompt)))
+      ? Object.fromEntries(
+          options.questions.flatMap((q) => {
+            const v = history.get(promptKey(q.prompt));
+            return v === undefined ? [] : [[q.id, v]];
+          }),
+        )
+      : undefined;
+
   recordPending({
     sessionId: options.sessionId,
     toolCallId: options.toolCallId,
@@ -269,7 +321,8 @@ export function registerPendingAsk(options: {
     args: {},
     kind: 'ask',
     questions: options.questions,
-    ...(source ? { mirrorOf: source.toolCallId } : {}),
+    ...(unanswered ? { mirrorOf: unanswered.toolCallId } : {}),
+    ...(fromHistory ? { answers: fromHistory } : {}),
   });
   persistPending();
 }
@@ -309,12 +362,22 @@ export function answerAsk(toolCallId: string, answers: Record<string, string>): 
       pending.set(sessionId, list.filter((p) => p !== item && p.mirrorOf !== toolCallId));
     } else {
       item.answers = answers;
-      for (const dup of list) {
-        if (dup.mirrorOf === toolCallId && dup.answers === undefined) dup.answers = answers;
+      const history = answeredAskHistory.get(sessionId) ?? new Map<string, string>();
+      for (const q of item.questions ?? []) {
+        const v = answers[q.id];
+        if (v !== undefined) history.set(promptKey(q.prompt), v);
       }
+      answeredAskHistory.set(sessionId, history);
     }
     if (visibleInteraction.get(sessionId) === toolCallId) visibleInteraction.delete(sessionId);
     console.info(`[chat] ask answered session=${sessionId} id=${toolCallId}`);
+    for (const dup of list) {
+      if (dup.mirrorOf === toolCallId && dup.answers === undefined) {
+        dup.answers = item.questions && dup.questions
+          ? translateAnswers(answers, item.questions, dup.questions)
+          : answers;
+      }
+    }
     emitNextInteraction(sessionId);
     maybeResolveWaiter(sessionId);
     persistPending();
@@ -382,5 +445,6 @@ export function resetPermissionsForTests(): void {
   sinks.clear();
   visibleInteraction.clear();
   pending.clear();
+  answeredAskHistory.clear();
   waiters.clear();
 }
