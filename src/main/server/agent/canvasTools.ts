@@ -39,6 +39,21 @@ function nodeBrief(node: CanvasNode) {
  * node is a paid call but agent-initiated inside a user-started turn, so it
  * runs directly here; the UI Run button is the pre-flight-confirmed path.
  */
+/** Default placement when the caller gives no x/y: append to the right of
+ * the current rightmost node, wrapping to a fresh row past ~2400px. Keeps
+ * multiple agent-created nodes from stacking on top of each other. */
+function nextFreeSpot(nodes: CanvasNode[]): { x: number; y: number } {
+  if (nodes.length === 0) return { x: 40, y: 40 };
+  let rightmost = nodes[0];
+  for (const n of nodes) if (n.x + n.w > rightmost.x + rightmost.w) rightmost = n;
+  const x = rightmost.x + rightmost.w + 40;
+  if (x + 360 > 2800) {
+    const bottom = Math.max(...nodes.map((n) => n.y + n.h));
+    return { x: 40, y: bottom + 40 };
+  }
+  return { x, y: rightmost.y };
+}
+
 export function createCanvasTools(options: {
   sessionId: string;
   canvasStore: CanvasStore;
@@ -87,10 +102,14 @@ export function createCanvasTools(options: {
                 : input.type === 'anchor'
                   ? { role: input.role ?? 'character', strength: input.strength ?? 'mid' }
                   : { instruction: input.instruction ?? '' };
+        const spot =
+          typeof input.x === 'number' && typeof input.y === 'number'
+            ? { x: input.x, y: input.y }
+            : nextFreeSpot(canvasStore.getSnapshot(canvas.id).nodes);
         const { rev, node } = canvasStore.addNode(canvas.id, {
           type: input.type,
-          x: typeof input.x === 'number' ? input.x : 40,
-          y: typeof input.y === 'number' ? input.y : 40,
+          x: spot.x,
+          y: spot.y,
           w: box.w,
           h: box.h,
           title: input.title ?? '',
