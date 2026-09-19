@@ -1061,7 +1061,9 @@ export async function answerAsk(sessionId: string, answers: Record<string, strin
   if (res.ok && res.live === false) {
     const lines = pending.questions.map((q) => {
       const answer = answers[q.id];
-      return answer ? `${q.prompt}：${answer}` : null;
+      if (!answer) return null;
+      const label = q.directions?.find((d) => d.id === answer)?.title ?? answer;
+      return `${q.prompt}：${label}`;
     }).filter((line): line is string => line !== null);
     const text = lines.length > 0 ? lines.join('\n') : Object.values(answers).join('\n');
     await sendMessage(sessionId, `（对之前提问的回答）\n${text}`);
