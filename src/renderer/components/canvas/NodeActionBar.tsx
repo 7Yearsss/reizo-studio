@@ -50,13 +50,13 @@ export default function NodeActionBar({
   return (
     <div
       className={cn(
-        'node-action-bar nodrag cursor-default absolute bottom-[calc(100%+6px)] left-0 z-20 flex items-center gap-1 rounded-lg border border-line bg-paper-raised/95 px-1 py-0.5 shadow-md backdrop-blur-sm whitespace-nowrap transition-opacity',
+        'node-action-bar nodrag cursor-default absolute bottom-[calc(100%+6px)] left-1/2 z-20 flex items-center gap-1 rounded-lg border border-line bg-paper-raised/95 px-1 py-0.5 shadow-md backdrop-blur-sm whitespace-nowrap transition-opacity',
         visible ? 'opacity-100' : 'pointer-events-none opacity-0',
         className,
       )}
       style={{
-        transform: `scale(${scale}) translateY(-26px)`,
-        transformOrigin: 'bottom left',
+        transform: `translateX(-50%) scale(${scale}) translateY(-26px)`,
+        transformOrigin: 'bottom center',
         ...style,
       }}
       onClick={(e) => e.stopPropagation()}

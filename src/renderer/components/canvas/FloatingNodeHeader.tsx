@@ -127,12 +127,12 @@ function FloatingNodeHeader({
   return (
     <div
       className={cn(
-        'floating-node-header nodrag cursor-default pointer-events-auto absolute bottom-[calc(100%+6px)] left-0 z-10 flex items-center gap-1.5 select-none whitespace-nowrap',
+        'floating-node-header nodrag cursor-default pointer-events-auto absolute bottom-[calc(100%+6px)] left-1/2 z-10 flex items-center gap-1.5 select-none whitespace-nowrap',
         className,
       )}
       style={{
-        transform: `scale(${scale})`,
-        transformOrigin: 'bottom left',
+        transform: `translateX(-50%) scale(${scale})`,
+        transformOrigin: 'bottom center',
         ...style,
       }}
     >
