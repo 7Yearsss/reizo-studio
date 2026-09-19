@@ -6,10 +6,12 @@ export interface Skill {
   name: string;
   description: string;
   body: string;
+  /** Optional prompt template prefilled into the composer when the skill is picked. */
+  prompt?: string;
   source: 'bundled' | 'user';
 }
 
-function parseFrontmatter(raw: string): { name?: string; description?: string; body: string } {
+function parseFrontmatter(raw: string): { name?: string; description?: string; prompt?: string; body: string } {
   if (!raw.startsWith('---')) return { body: raw.trim() };
   const end = raw.indexOf('\n---', 3);
   if (end < 0) return { body: raw.trim() };
@@ -21,7 +23,7 @@ function parseFrontmatter(raw: string): { name?: string; description?: string; b
     if (idx < 0) continue;
     fields[line.slice(0, idx).trim()] = line.slice(idx + 1).trim().replace(/^["']|["']$/g, '');
   }
-  return { name: fields.name, description: fields.description, body };
+  return { name: fields.name, description: fields.description, prompt: fields.prompt, body };
 }
 
 async function loadSkillFile(file: string, source: Skill['source']): Promise<Skill | null> {
@@ -36,6 +38,7 @@ async function loadSkillFile(file: string, source: Skill['source']): Promise<Ski
       id,
       name: parsed.name || id,
       description: parsed.description || '',
+      prompt: parsed.prompt,
       body: parsed.body,
       source,
     };

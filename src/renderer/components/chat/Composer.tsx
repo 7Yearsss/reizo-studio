@@ -160,7 +160,7 @@ export default function Composer({
 
   function pickSlash(command: SlashCommand) {
     setSkillId(command.id);
-    setDraft('');
+    setDraft(command.prompt ?? '');
   }
 
   const liveStatus = sessionId && sending ? (
