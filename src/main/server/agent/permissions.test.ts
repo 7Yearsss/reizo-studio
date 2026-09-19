@@ -198,6 +198,33 @@ describe('interaction gate', () => {
     ]);
   });
 
+  it('answers a re-ask of an already-answered prompt from history without surfacing a card', async () => {
+    const events: ChatStreamEvent[] = [];
+    setPermissionSink('s1', (event) => events.push(event));
+    registerPendingAsk({
+      sessionId: 's1',
+      toolCallId: 'q1',
+      name: 'ask_user',
+      questions: [{ id: 'vibe', prompt: '什么气质?' }],
+    });
+    expect(answerAsk('q1', { vibe: 'minimal' })).toBe(true);
+    // Consume the answered batch, as the resumed provider pass does.
+    consumeInteractions('s1');
+
+    // A later pass re-asks the same question — no card surfaces.
+    registerPendingAsk({
+      sessionId: 's1',
+      toolCallId: 'q2',
+      name: 'ask_user',
+      questions: [{ id: 'vibe2', prompt: '什么气质?' }],
+    });
+    expect(ids(events, 'ask')).toEqual(['q1']);
+    await waitForInteractions('s1');
+    expect(consumeInteractions('s1')).toEqual([
+      { toolCallId: 'q2', name: 'ask_user', args: {}, kind: 'ask', decision: undefined, answers: { vibe2: 'minimal' } },
+    ]);
+  });
+
   it('does not fold asks whose question payload differs', () => {
     const events: ChatStreamEvent[] = [];
     setPermissionSink('s1', (event) => events.push(event));

@@ -99,6 +99,10 @@ export interface ResolvedInteraction {
 
 const sessionAllow = new Map<string, Set<string>>();
 const sinks = new Map<string, (event: ChatStreamEvent) => void>();
+/** Per-session map of normalized prompt → answer, for asks already answered
+ * this turn. A model that re-asks the same question within the turn gets the
+ * earlier answer back instantly instead of surfacing another card. */
+const answeredAskHistory = new Map<string, Map<string, string>>();
 /** Interaction id currently shown to the user — the queue is drained one at a time. */
 const visibleInteraction = new Map<string, string>();
 /** Ordered pending interactions per session (answered ones stay until consumed). */
@@ -113,6 +117,7 @@ export function clearPermissionSink(sessionId: string): void {
   sinks.delete(sessionId);
   visibleInteraction.delete(sessionId);
   pending.delete(sessionId);
+  answeredAskHistory.delete(sessionId);
   waiters.get(sessionId)?.resolve();
   waiters.delete(sessionId);
 }
@@ -134,6 +139,8 @@ function recordPending(item: PendingInteraction): void {
     pending.set(item.sessionId, list);
   }
   emitNextInteraction(item.sessionId);
+  // Items can arrive already resolved (answer replayed from history).
+  maybeResolveWaiter(item.sessionId);
 }
 
 function emitNextInteraction(sessionId: string): void {
@@ -234,6 +241,23 @@ export function registerPendingAsk(options: {
       qs.some((s) => promptKey(s.prompt) === promptKey(q.prompt)),
     );
   });
+
+  // Already answered once this turn? Answer the re-ask from history without
+  // surfacing a card at all.
+  const history = answeredAskHistory.get(options.sessionId);
+  const fromHistory =
+    !unanswered &&
+    history &&
+    options.questions.length > 0 &&
+    options.questions.every((q) => history.has(promptKey(q.prompt)))
+      ? Object.fromEntries(
+          options.questions.flatMap((q) => {
+            const v = history.get(promptKey(q.prompt));
+            return v === undefined ? [] : [[q.id, v]];
+          }),
+        )
+      : undefined;
+
   recordPending({
     sessionId: options.sessionId,
     toolCallId: options.toolCallId,
@@ -242,6 +266,7 @@ export function registerPendingAsk(options: {
     kind: 'ask',
     questions: options.questions,
     ...(unanswered ? { mirrorOf: unanswered.toolCallId } : {}),
+    ...(fromHistory ? { answers: fromHistory } : {}),
   });
 }
 
@@ -275,6 +300,12 @@ export function answerAsk(toolCallId: string, answers: Record<string, string>): 
     if (!item) continue;
     if (item.answers !== undefined) return true;
     item.answers = answers;
+    const history = answeredAskHistory.get(sessionId) ?? new Map<string, string>();
+    for (const q of item.questions ?? []) {
+      const v = answers[q.id];
+      if (v !== undefined) history.set(promptKey(q.prompt), v);
+    }
+    answeredAskHistory.set(sessionId, history);
     if (visibleInteraction.get(sessionId) === toolCallId) visibleInteraction.delete(sessionId);
     console.info(`[chat] ask answered session=${sessionId} id=${toolCallId}`);
     for (const dup of list) {
@@ -349,5 +380,6 @@ export function resetPermissionsForTests(): void {
   sinks.clear();
   visibleInteraction.clear();
   pending.clear();
+  answeredAskHistory.clear();
   waiters.clear();
 }
