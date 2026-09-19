@@ -11,6 +11,7 @@ export function createSkillsRouter(dirs: string[]) {
         id: skill.id,
         name: skill.name,
         description: skill.description,
+        prompt: skill.prompt,
         source: skill.source,
       })),
     });

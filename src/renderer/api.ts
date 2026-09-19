@@ -287,7 +287,7 @@ export async function answerAsk(sessionId: string, id: string, answers: Record<s
   });
 }
 
-export async function listSkills(): Promise<{ id: string; name: string; description: string; source: 'bundled' | 'user' }[]> {
+export async function listSkills(): Promise<{ id: string; name: string; description: string; prompt?: string; source: 'bundled' | 'user' }[]> {
   const res = await api('/api/skills');
   const body = await res.json();
   return body.skills ?? [];

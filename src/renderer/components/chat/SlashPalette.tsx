@@ -11,6 +11,8 @@ export interface SlashCommand {
   name: string;
   description: string;
   kind: 'builtin' | 'skill';
+  /** Prompt template prefilled into the draft when a skill is picked. */
+  prompt?: string;
 }
 
 export function extractSlashQuery(text: string): string | null {
@@ -27,6 +29,7 @@ export function buildSlashCommands(skills: SkillSummary[]): SlashCommand[] {
       name: skill.id,
       description: skill.description || skill.name,
       kind: 'skill' as const,
+      prompt: skill.prompt,
     })),
   ];
 }

@@ -4,6 +4,7 @@ export interface SkillSummary {
   id: string;
   name: string;
   description: string;
+  prompt?: string;
   source: 'bundled' | 'user';
 }
 
