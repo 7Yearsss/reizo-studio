@@ -76,7 +76,7 @@ export default function RunStatusIsland({ sessionId }: { sessionId: string }) {
         compact={
           <>
             <Loader2 size={12} className="animate-spin" />
-            <TextShimmer className="text-xs">{label}</TextShimmer>
+            <TextShimmer className="whitespace-nowrap text-xs">{label}</TextShimmer>
           </>
         }
       >
