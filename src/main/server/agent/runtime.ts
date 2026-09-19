@@ -261,7 +261,7 @@ export async function runChatTurn(options: {
     '- Canvas Rules: The canvas is for complex multi-step node graphs and workflows. Only call canvas tools (`add_node`, `run_node`, `open_canvas`, etc.) when the user explicitly asks to build or edit a canvas node workflow, wire nodes, or explicitly mentions "在画布上" / "工作流节点". Otherwise, leave the canvas alone so the user can open it manually without distraction.\n' +
     '- Never expose internal identifiers in user-facing text — no node ids, `canvas:<id>` strings, or tool names. Refer to canvas items by their title/label (e.g. "水彩那张", "方向 B") so the conversation reads naturally.',
     canvasSummary,
-    'When a request needs a visual direction (mood, palette, typography) before you generate or design something, call ask_user with kind:"direction" and 2-4 `directions` cards (title, palette hex list, displayFont/bodyFont stacks, one-line mood, real-world references) so the user picks by looking. If a direction maps to a node already on the canvas (e.g. a draft image the user can inspect), set the card\'s `nodeId` so the card shows that node\'s real thumbnail.',
+    'When a request needs a visual direction (mood, palette, typography) before you generate or design something, call ask_user with kind:"direction" and 2-4 `directions` cards (title, palette hex list, displayFont/bodyFont stacks, one-line mood, real-world references) so the user picks by looking. If a direction maps to a node already on the canvas (e.g. a draft image the user can inspect), set the card\'s `nodeId` so the card shows that node\'s real thumbnail. To show real draft images on the cards: add the draft nodes directly (never asProposal — proposals need manual acceptance and stay idle), call run_node on each, and wait until their outputs land before sending the direction question.',
     artifactStore
       ? 'When the user asks for a flowchart, sequence diagram, system architecture diagram, or mind map, call generate_diagram with Mermaid syntax to produce an interactive Excalidraw canvas artifact in the right panel. When the user asks for a spreadsheet, budget, financial report, or table calculation, call generate_sheet with rows, columns, and formulas to render a full-featured Excel sheet artifact in the right panel.'
       : '',
@@ -272,7 +272,10 @@ export async function runChatTurn(options: {
         'The user approves once at the start of the session. Never type passwords, card numbers, or other secrets — ask the user to do that themselves.'
       : '',
     memory ? `Workspace MEMORY.md:\n${redactSecrets(memory)}` : '',
-    skill ? `The user invoked skill "${skill.name}". Follow this skill:\n${skill.body}` : '',
+    skill
+      ? `The user invoked skill "${skill.name}". Follow this skill:\n${skill.body}\n\n` +
+        'If this skill declares a "提问"/"Questions" section, collect each missing input through `ask_user` question cards (concrete options + free text) before producing output — never ask those questions as plain chat text. Ask each question at most once; an input the user already answered is never re-asked.'
+      : '',
     projectInstructions ? `Project "${projectName}" working rules:\n${projectInstructions}` : '',
   ].filter(Boolean);
   const instructions = systemParts.join('\n\n');
@@ -400,7 +403,9 @@ export async function runChatTurn(options: {
             const diff = snap.nodes.length - lastSeenNodeCount;
             lastSeenNodeCount = snap.nodes.length;
             const deltaNote: ModelMessage = {
-              role: 'system',
+              // Not a system message — several providers reject mid-prompt
+              // system entries; a bracketed user note reads the same to the model.
+              role: 'user',
               content: `[画布状态增量: 当前共有 ${snap.nodes.length} 个节点 (${diff > 0 ? `+${diff}` : diff})，最新: ${snap.nodes.slice(-2).map((n) => `「${n.title || n.id}」(${n.type})`).join(', ')}]`,
             };
             compacted.push(deltaNote);
