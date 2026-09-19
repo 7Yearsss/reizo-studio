@@ -3,6 +3,7 @@ import { useStore } from '@xyflow/react';
 import { Play, Crosshair, Frame, Lock, Unlock, Unlink, Trash2, LayoutGrid } from 'lucide-react';
 import type { CanvasNode } from '../../../shared/canvas';
 import Tooltip from '../ui/Tooltip';
+import { chromeScale } from './chromeScale';
 
 export const GROUP_COLORS = [
   '#3b82f6', // Blue
@@ -48,8 +49,7 @@ export default function GroupToolbar({
   const [colorPickerOpen, setColorPickerOpen] = useState(false);
   const ty = useStore((s) => s.transform[1]);
   const zoom = useStore((s) => s.transform[2]) || 1;
-  // Inverse scale: 1 / zoom, clamped safely to keep crisp physical size
-  const scale = Math.min(6, Math.max(1, 1 / zoom));
+  const scale = Math.min(6, chromeScale(zoom));
   const screenY = (group.y || 0) * zoom + ty;
   // If near screen top, place below the group
   const placeBelow = screenY < 60;
