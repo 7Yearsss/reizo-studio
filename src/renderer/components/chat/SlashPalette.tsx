@@ -15,9 +15,26 @@ export interface SlashCommand {
   prompt?: string;
 }
 
-export function extractSlashQuery(text: string): string | null {
-  const match = text.match(/^\/([^\s]*)$/);
-  return match ? match[1] : null;
+export interface SlashQuery {
+  query: string;
+  /** Everything typed after `/command ` — passed to the skill's prompt template. */
+  args: string;
+}
+
+export function extractSlashQuery(text: string): SlashQuery | null {
+  const match = text.match(/^\/([^\s]*)([\s\S]*)$/);
+  if (!match) return null;
+  return { query: match[1], args: match[2].trim() };
+}
+
+/** Substitute `$ARGUMENTS` / `$1`…`$N` in a skill's prompt template with user args. */
+export function applySlashArgs(template: string | undefined, args: string): string {
+  if (!template) return args;
+  const words = args ? args.split(/\s+/) : [];
+  let out = template.replace(/\$(\d+)/g, (_, i) => words[Number(i) - 1] ?? '');
+  out = out.replace(/\$ARGUMENTS/g, args);
+  if (!/\$(?:\d+|ARGUMENTS)/.test(template) && args) out = out ? `${out} ${args}` : args;
+  return out;
 }
 
 export function buildSlashCommands(skills: SkillSummary[]): SlashCommand[] {
@@ -36,12 +53,14 @@ export function buildSlashCommands(skills: SkillSummary[]): SlashCommand[] {
 
 export default function SlashPalette({
   query,
+  args = '',
   commands,
   onPick,
 }: {
   query: string;
+  args?: string;
   commands: SlashCommand[];
-  onPick: (command: SlashCommand) => void;
+  onPick: (command: SlashCommand, args: string) => void;
 }) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const filtered = commands
@@ -85,7 +104,7 @@ export default function SlashPalette({
       uiStore.setMode('settings');
       return;
     }
-    onPick(cmd);
+    onPick(cmd, args);
   }
 
   return (

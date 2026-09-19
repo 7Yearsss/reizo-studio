@@ -26,6 +26,7 @@ export const IPC = {
   SKILL_UNINSTALL: 'reizo:skill-uninstall',
   SKILLHUB_SEARCH: 'reizo:skillhub-search',
   SKILLHUB_INSTALL: 'reizo:skillhub-install',
+  SKILLHUB_PREVIEW: 'reizo:skillhub-preview',
   EXPORT_PDF: 'reizo:export-pdf',
 } as const;
 

@@ -26,6 +26,7 @@ export default function ReplyStatusBar({
   lastTextAt,
   lastProgressAt,
   onStop,
+  skillName,
 }: {
   startedAt?: number;
   toolCount: number;
@@ -37,6 +38,8 @@ export default function ReplyStatusBar({
   lastProgressAt?: number;
   /** When set, shows a small stop button (used while the composer is in send mode). */
   onStop?: () => void;
+  /** Name of the pinned skill this turn is running under. */
+  skillName?: string;
 }) {
   const [now, setNow] = useState(() => Date.now());
 
@@ -76,7 +79,7 @@ export default function ReplyStatusBar({
         ? PHASE_LABEL.waiting
         : waitLabel || PHASE_LABEL[phase] || '处理中';
 
-  const fullLabel = `${baseLabel}${suffix}`;
+  const fullLabel = `${skillName ? `技能 · ${skillName} · ` : ''}${baseLabel}${suffix}`;
 
   return (
     <div className="flex min-h-6 min-w-0 items-center justify-between py-1" role="status" aria-live="polite">

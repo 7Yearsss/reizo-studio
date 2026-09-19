@@ -27,5 +27,6 @@ contextBridge.exposeInMainWorld('reizo', {
   uninstallSkill: (id: string) => ipcRenderer.invoke(IPC.SKILL_UNINSTALL, id),
   searchSkillHub: (query: SkillHubSearchQuery) => ipcRenderer.invoke(IPC.SKILLHUB_SEARCH, query),
   installSkillHubSkill: (request: SkillHubInstallRequest) => ipcRenderer.invoke(IPC.SKILLHUB_INSTALL, request),
+  previewSkillHubSkill: (request: SkillHubInstallRequest) => ipcRenderer.invoke(IPC.SKILLHUB_PREVIEW, request),
   exportPdf: (html: string): Promise<string> => ipcRenderer.invoke(IPC.EXPORT_PDF, html),
 });

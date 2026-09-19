@@ -135,6 +135,15 @@ async function pickInstallDir(userSkillsDir: string, slug: string, namespace: st
   throw new Error(`无法为 ${slug} 分配安装目录`);
 }
 
+/** Fetch a single file (defaults to SKILL.md) from a hub package for preview. */
+export async function previewSkillHubSkill(request: SkillHubInstallRequest): Promise<string> {
+  const params = new URLSearchParams({ path: 'SKILL.md' });
+  if (request.namespace) params.set('namespace', request.namespace);
+  if (request.version) params.set('version', request.version);
+  const res = await hubFetch(`${API_BASE}/api/v1/skills/${encodeURIComponent(request.slug)}/file?${params.toString()}`);
+  return res.text();
+}
+
 export async function installSkillHubPackage(
   userSkillsDir: string,
   request: SkillHubInstallRequest,

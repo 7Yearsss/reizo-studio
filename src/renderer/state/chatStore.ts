@@ -17,6 +17,7 @@ import * as uiStore from './uiStore';
 import * as canvasStore from './canvasStore';
 import { isCanvasTool, trailEntryFromTool, UNDOABLE_TRAIL_VERBS } from '../../shared/agentTrail';
 import * as artifactStore from './artifactStore';
+import { recordRecentSkill } from './skillStore';
 import { appendTerminalLine } from './terminalStore';
 
 export interface PendingPermission {
@@ -83,6 +84,8 @@ export interface ChatState {
   loopNoticeBySession: Record<string, string | null>;
   queueBySession: Record<string, QueuedTurn[]>;
   composerSeedBySession: Record<string, ComposerSeed | undefined>;
+  /** Skill pinned to a session — stays active across turns until unpinned. */
+  skillBySession: Record<string, string | undefined>;
   /** Canvas nodes the user pulled into the composer as `@`-style references. */
   nodeRefsBySession: Record<string, NodeRef[]>;
   /** When true, clicking nodes on canvas adds them to the composer as references. */
@@ -113,6 +116,7 @@ let state: ChatState = {
   loopNoticeBySession: {},
   queueBySession: {},
   composerSeedBySession: {},
+  skillBySession: {},
   nodeRefsBySession: {},
   pickingReferenceBySession: {},
   interruptDismissedBySession: {},
@@ -401,6 +405,10 @@ export function seedComposer(
       },
     },
   });
+}
+
+export function setSessionSkill(sessionId: string, skillId?: string): void {
+  setState({ skillBySession: { ...state.skillBySession, [sessionId]: skillId } });
 }
 
 export function clearComposerSeed(sessionId: string): void {
@@ -822,6 +830,9 @@ async function dispatchTurn(
         createdAt: new Date().toISOString(),
       };
   const nextMessages = userMessage ? [...existing, userMessage] : existing;
+  // An explicit skillId pins/records it; otherwise fall back to the session pin
+  // so queued and programmatic sends run under the same skill.
+  const effectiveSkillId = extra.skillId ?? state.skillBySession[sessionId];
   const abort = new AbortController();
   abortBySession.set(sessionId, abort);
   fenceBySession.set(sessionId, createFence(sessionId));
@@ -846,7 +857,13 @@ async function dispatchTurn(
     loopNoticeBySession: { ...state.loopNoticeBySession, [sessionId]: null },
     interactionBySession: { ...state.interactionBySession, [sessionId]: null },
     interruptDismissedBySession: { ...state.interruptDismissedBySession, [sessionId]: false },
+    // An explicit skillId pins the skill to the session; omitting it leaves
+    // any existing pin in place (the composer's pinned chip keeps sending it).
+    ...(effectiveSkillId
+      ? { skillBySession: { ...state.skillBySession, [sessionId]: effectiveSkillId } }
+      : {}),
   });
+  if (effectiveSkillId) recordRecentSkill(effectiveSkillId);
   clearComposerSeed(sessionId);
 
   const settings = settingsStore.getSnapshot().settings;
@@ -858,7 +875,7 @@ async function dispatchTurn(
       providerId: settings.activeProviderId,
       model: settings.providers.find((p) => p.id === settings.activeProviderId)?.model,
       mentions,
-      skillId: extra.skillId,
+      skillId: effectiveSkillId,
       attachments: extra.attachments,
       truncateAfterId: turn.truncateAfterId,
       regenerate: turn.regenerate,
