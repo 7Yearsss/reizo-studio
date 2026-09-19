@@ -4,6 +4,7 @@ import type { TurnOutcome } from '../../../shared/stream';
 import MarkdownContent, { CopyButton } from './MarkdownContent';
 import WorkGroupCard from './WorkGroupCard';
 import AskAnswers from './AskAnswers';
+import GeneratedMediaStrip from './GeneratedMediaStrip';
 
 function StreamingCaret() {
   return (
@@ -16,6 +17,7 @@ function StreamingCaret() {
 
 export default function AssistantMessage({
   content,
+  sessionId,
   parts,
   reasoning,
   reasoningStreaming = false,
@@ -30,6 +32,7 @@ export default function AssistantMessage({
   turnOutcome = null,
 }: {
   content: string;
+  sessionId?: string;
   parts?: ToolCallPart[];
   reasoning?: string;
   reasoningStreaming?: boolean;
@@ -57,6 +60,7 @@ export default function AssistantMessage({
         turnOutcome={turnOutcome}
       />
       <AskAnswers parts={parts} />
+      {sessionId ? <GeneratedMediaStrip parts={parts} sessionId={sessionId} /> : null}
       {content ? (
         <div className="markdown text-[15px] leading-[1.75] text-ink">
           <MarkdownContent content={content} streaming={streaming} />
