@@ -10,6 +10,7 @@ import * as canvasStore from '../../../state/canvasStore';
 import { EditKindIcon } from './editIcons';
 import { openImageEdit } from './openImageEdit';
 import { openRegionMark } from './openRegionMark';
+import { chromeScale } from '../chromeScale';
 
 const PRIMARY = IMAGE_EDIT_KINDS.filter((k) => EDIT_META[k].primary);
 const MORE = IMAGE_EDIT_KINDS.filter((k) => !EDIT_META[k].primary);
@@ -24,7 +25,7 @@ export default function ImageNodeEditToolbar({
   visible: boolean;
 }) {
   const zoom = useStore((s) => s.transform[2]) || 1;
-  const scale = Math.min(8, Math.max(1, 1 / zoom));
+  const scale = chromeScale(zoom);
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
 

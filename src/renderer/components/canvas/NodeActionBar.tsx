@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useStore } from '@xyflow/react';
 import { cn } from '../../lib/cn';
+import { chromeScale } from './chromeScale';
 import Tooltip from '../ui/Tooltip';
 
 /**
@@ -43,7 +44,7 @@ export default function NodeActionBar({
   style?: CSSProperties;
 }) {
   const zoom = useStore((s) => s.transform[2]) || 1;
-  const scale = Math.min(8, Math.max(1, 1 / zoom));
+  const scale = chromeScale(zoom);
 
   if (actions.length === 0) return null;
   return (
