@@ -169,6 +169,7 @@ export default function Composer({
       recovering={Boolean(turnError?.includes('正在恢复'))}
       lastTextAt={lastTextAt}
       lastProgressAt={lastProgressAt}
+      onStop={interaction ? onStop : undefined}
     />
   ) : null;
 
@@ -401,7 +402,7 @@ export default function Composer({
                 value={draft}
                 onValueChange={setDraft}
                 onSubmit={() => submit()}
-                loading={Boolean(sending)}
+                loading={Boolean(sending && !interaction)}
                 onStop={onStop}
                 disabled={disabled}
                 autoFocus={autoFocus}
