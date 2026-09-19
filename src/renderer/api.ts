@@ -5,7 +5,7 @@ import type { DirEntry } from '../shared/workspace';
 import type { PublicSettings, SettingsPatch } from '../shared/settings';
 import type { Schedule, Thought } from '../shared/schedule';
 import { SCHEDULE_PRESETS } from '../shared/schedule';
-import { parseStreamLine, type ChatStreamEvent } from '../shared/stream';
+import { parseStreamLine, type AskQuestion, type ChatStreamEvent } from '../shared/stream';
 import { isLiveEnvelope } from '../shared/liveRevision';
 import type { CanvasSnapshot, CanvasEdge, CanvasNode, CanvasNodeParams, CanvasNodeType, CanvasNodeOutput } from '../shared/canvas';
 import { isCanvasEnvelope, type CanvasEvent } from '../shared/canvasStream';
@@ -279,12 +279,30 @@ export async function answerPermission(
   });
 }
 
-export async function answerAsk(sessionId: string, id: string, answers: Record<string, string>): Promise<void> {
-  await api(`/api/sessions/${sessionId}/ask`, {
+export async function answerAsk(
+  sessionId: string,
+  id: string,
+  answers: Record<string, string>,
+): Promise<{ ok: boolean; live?: boolean }> {
+  const res = await api(`/api/sessions/${sessionId}/ask`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ id, answers }),
   });
+  return res.json();
+}
+
+export interface PendingAskDto {
+  toolCallId: string;
+  name: string;
+  kind: 'ask';
+  questions?: AskQuestion[];
+}
+
+export async function getPendingInteractions(sessionId: string): Promise<PendingAskDto[]> {
+  const res = await api(`/api/sessions/${sessionId}/interactions`);
+  const body = await res.json();
+  return body.interactions ?? [];
 }
 
 export async function listSkills(): Promise<{ id: string; name: string; description: string; prompt?: string; source: 'bundled' | 'user' }[]> {

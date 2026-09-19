@@ -4,8 +4,8 @@ import type { SettingsStore } from '../storage/settingsStore';
 import type { ArtifactStore } from '../storage/artifactStore';
 import type { ProjectStore } from '../storage/projectStore';
 import { abortChatTurn, runChatTurn } from '../agent/runtime';
-import { resumeAgentTurn } from '../agent/session';
-import { answerAsk, answerPermission, type PermissionDecision } from '../agent/permissions';
+import { isSessionTurnLive, resumeAgentTurn } from '../agent/session';
+import { answerAsk, answerPermission, pendingAsksForSession, type PermissionDecision } from '../agent/permissions';
 import { loadSkills } from '../../skills';
 import type { LargeValueStore } from '../storage/largeValueStore';
 import type { CanvasStore } from '../storage/canvasStore';
@@ -117,13 +117,22 @@ export function createChatRouter(
     return c.json({ ok });
   });
 
+  // Unanswered ask cards, including ones restored after an app restart — the
+  // renderer fetches these on session open so a pending question never vanishes.
+  router.get('/:id/interactions', (c) => {
+    return c.json({ interactions: pendingAsksForSession(c.req.param('id')) });
+  });
+
   router.post('/:id/ask', async (c) => {
     const body = await c.req.json().catch((): null => null);
     if (typeof body?.id !== 'string' || !body.answers || typeof body.answers !== 'object') {
       return c.json({ error: 'id and answers are required' }, 400);
     }
     const ok = answerAsk(body.id, body.answers as Record<string, string>);
-    return c.json({ ok });
+    // `live` tells the renderer whether a suspended turn is still around to
+    // consume the answer — false after a restart, when it should fall back to
+    // sending the answers as a normal user message.
+    return c.json({ ok, live: ok && isSessionTurnLive(c.req.param('id')) });
   });
 
   return router;

@@ -361,6 +361,22 @@ export async function ensureSessionMessages(id: string): Promise<void> {
   if (isInterrupted(summaryOf(session)) && !state.sendingBySession[id]) {
     void resumeInterruptedTurn(id);
   }
+  // Ask cards persist across restarts — re-show any unanswered one (e.g. the
+  // app was killed while a question card was on screen).
+  if (!state.interactionBySession[id]) {
+    void api.getPendingInteractions(id).then((interactions): void => {
+      const ask = interactions.find((i) => i.kind === 'ask' && i.questions?.length);
+      if (!ask || state.interactionBySession[id]) return;
+      setState({
+        interactionBySession: {
+          ...state.interactionBySession,
+          [id]: { kind: 'ask', id: ask.toolCallId, questions: ask.questions ?? [] },
+        },
+      });
+    }).catch(() => {
+      /* session may not exist yet — ignore */
+    });
+  }
 }
 
 function summaryOf(session: {
@@ -1038,6 +1054,16 @@ export async function answerPermission(
 export async function answerAsk(sessionId: string, answers: Record<string, string>): Promise<void> {
   const pending = state.interactionBySession[sessionId];
   if (!pending || pending.kind !== 'ask') return;
-  await api.answerAsk(sessionId, pending.id, answers);
+  const res = await api.answerAsk(sessionId, pending.id, answers);
   setState({ interactionBySession: { ...state.interactionBySession, [sessionId]: null } });
+  // The card survived an app restart but its turn didn't — nothing will
+  // consume the answer. Send it as a normal message so the agent picks up.
+  if (res.ok && res.live === false) {
+    const lines = pending.questions.map((q) => {
+      const answer = answers[q.id];
+      return answer ? `${q.prompt}：${answer}` : null;
+    }).filter((line): line is string => line !== null);
+    const text = lines.length > 0 ? lines.join('\n') : Object.values(answers).join('\n');
+    await sendMessage(sessionId, `（对之前提问的回答）\n${text}`);
+  }
 }

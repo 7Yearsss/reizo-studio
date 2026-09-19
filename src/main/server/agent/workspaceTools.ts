@@ -347,6 +347,10 @@ export function createAskUserTool(sessionId: string) {
                 mood: z.string().optional(),
                 references: z.array(z.string()).optional(),
                 nodeId: z.string().optional().describe('Canvas node id to preview as this card\'s image.'),
+                imageUrl: z
+                  .string()
+                  .optional()
+                  .describe('Preset sample image URL, or skill-asset:<skillId>/<file> for an image bundled in a skill directory.'),
               }),
             )
             .optional(),
