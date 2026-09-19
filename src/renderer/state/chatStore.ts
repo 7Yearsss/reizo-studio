@@ -363,20 +363,24 @@ export async function ensureSessionMessages(id: string): Promise<void> {
   }
   // Ask cards persist across restarts — re-show any unanswered one (e.g. the
   // app was killed while a question card was on screen).
-  if (!state.interactionBySession[id]) {
-    void api.getPendingInteractions(id).then((interactions): void => {
-      const ask = interactions.find((i) => i.kind === 'ask' && i.questions?.length);
-      if (!ask || state.interactionBySession[id]) return;
-      setState({
-        interactionBySession: {
-          ...state.interactionBySession,
-          [id]: { kind: 'ask', id: ask.toolCallId, questions: ask.questions ?? [] },
-        },
-      });
-    }).catch(() => {
-      /* session may not exist yet — ignore */
+  restorePendingAsk(id);
+}
+
+/** Re-show an unanswered ask card from the server (hydrate, reconnect, stream end). */
+function restorePendingAsk(id: string): void {
+  if (state.interactionBySession[id]) return;
+  void api.getPendingInteractions(id).then((interactions): void => {
+    const ask = interactions.find((i) => i.kind === 'ask' && i.questions?.length);
+    if (!ask || state.interactionBySession[id]) return;
+    setState({
+      interactionBySession: {
+        ...state.interactionBySession,
+        [id]: { kind: 'ask', id: ask.toolCallId, questions: ask.questions ?? [] },
+      },
     });
-  }
+  }).catch(() => {
+    /* session may not exist yet — ignore */
+  });
 }
 
 function summaryOf(session: {
@@ -815,6 +819,10 @@ async function reconcileAfterTurn(sessionId: string, fallbackOutcome?: TurnOutco
     },
     interruptRequestedBySession: { ...state.interruptRequestedBySession, [sessionId]: false },
   });
+  // The stream may have ended while the turn is suspended awaiting an answer
+  // (reload, dropped connection) — don't leave the user staring at a spinner:
+  // re-fetch any still-unanswered ask and re-show its card.
+  restorePendingAsk(sessionId);
   tabStore.renameChatTab(sessionId, session.title);
   void artifactStore.loadSessionArtifacts(sessionId);
   notifyIfHidden(session.title);
