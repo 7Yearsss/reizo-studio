@@ -3,6 +3,7 @@ import { useStore } from '@xyflow/react';
 import { Loader2 } from 'lucide-react';
 import * as canvasStore from '../../state/canvasStore';
 import { cn } from '../../lib/cn';
+import { chromeScale } from './chromeScale';
 
 export interface NodeTitleProps {
   sessionId: string;
@@ -116,8 +117,8 @@ function FloatingNodeHeader({
 }: FloatingNodeHeaderProps) {
   // Read current canvas zoom level from React Flow store
   const zoom = useStore((s) => s.transform[2]) || 1;
-  // Inverse scale: 1 / zoom, clamped safely to prevent extreme sizes (down to ~12% zoom)
-  const scale = Math.min(8, Math.max(1, 1 / zoom));
+  // Inverse-compensated when zoomed out; grows √zoom when zoomed in — see chromeScale.
+  const scale = chromeScale(zoom);
 
   // At low zoom, hide minor details and badges to match TapNow's clean bird's-eye view
   const isLowZoom = zoom < 0.5;
@@ -126,12 +127,12 @@ function FloatingNodeHeader({
   return (
     <div
       className={cn(
-        'floating-node-header nodrag cursor-default pointer-events-auto absolute bottom-[calc(100%+6px)] left-0 z-10 flex items-center gap-1.5 select-none whitespace-nowrap',
+        'floating-node-header nodrag cursor-default pointer-events-auto absolute bottom-[calc(100%+6px)] left-1/2 z-10 flex items-center gap-1.5 select-none whitespace-nowrap',
         className,
       )}
       style={{
-        transform: `scale(${scale})`,
-        transformOrigin: 'bottom left',
+        transform: `translateX(-50%) scale(${scale})`,
+        transformOrigin: 'bottom center',
         ...style,
       }}
     >

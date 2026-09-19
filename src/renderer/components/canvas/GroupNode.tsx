@@ -6,6 +6,7 @@ import * as canvasStore from '../../state/canvasStore';
 import type { CanvasNodeData } from './ImageNode';
 import { useIsSoloSelected } from './useSelectionCount';
 import GroupToolbar from './GroupToolbar';
+import { chromeScale } from './chromeScale';
 import NodeCornerResizer from './NodeCornerResizer';
 
 function GroupNode({ id, data, selected }: NodeProps) {
@@ -23,8 +24,7 @@ function GroupNode({ id, data, selected }: NodeProps) {
 
   const rf = useReactFlow();
   const zoom = useStore((s) => s.transform[2]) || 1;
-  // Inverse scale: 1 / zoom, clamped safely to keep title legible at low zoom
-  const titleScale = Math.min(8, Math.max(1, 1 / zoom));
+  const titleScale = chromeScale(zoom);
 
   useEffect(() => {
     setDraft(node.title || '新建组');

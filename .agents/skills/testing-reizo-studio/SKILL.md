@@ -116,3 +116,11 @@ runState/assets — handy to verify drafts/final landed without pixel-peeping.
 
 None for launch/UI testing. A provider API key would be needed to verify an actual
 model reply end-to-end.
+- Multi-question ask cards paginate ("Question N of 3"): option clicks auto-advance radio
+  questions; multi-select uses checkboxes then the orange → button (aria-label "Submit
+  response" / "Previous question"). Final page shows 提交.
+- The direction card's question may be asked twice by the model (answered → presented
+  again) — answer it a second time; this is a known model-side pattern, not a renderer bug.
+- A vite "page reload" mid-turn (any commit touching index.ts while app runs) drops the
+  rendered pending card even though the server presented the ask — Page.reload restores it
+  via ask persistence.

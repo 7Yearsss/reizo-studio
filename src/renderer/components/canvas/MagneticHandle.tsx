@@ -4,6 +4,7 @@ import { Plus } from 'lucide-react';
 import { cn } from '../../lib/cn';
 import Tooltip from '../ui/Tooltip';
 import { colorForKind, type EdgeKind } from './edges/edgeStyles';
+import { chromeScale } from './chromeScale';
 
 export const OPEN_HANDLE_MENU_EVENT = 'reizo:open-handle-menu';
 
@@ -76,9 +77,9 @@ function MagneticHandle({
 
   // Read current canvas zoom level from React Flow store
   const zoom = useStore((s) => s.transform[2]) || 1;
-  // Inverse scale: maintain comfortable physical button size on screen when zoomed out
-  // Clamped between 1x and 5x (supports bird's-eye view down to ~20% zoom)
-  const scale = Math.min(5, Math.max(1, 1 / zoom));
+  // Inverse-compensated when zoomed out, grows √zoom when zoomed in
+  // (see chromeScale); capped at 5x for bird's-eye view.
+  const scale = Math.min(5, chromeScale(zoom));
 
   // Read the node's dragging flag straight from the RF store — same source RF uses
   // internally, so it flips to true the instant the drag starts with zero lag.

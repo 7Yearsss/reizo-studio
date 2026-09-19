@@ -149,7 +149,14 @@ describe('interaction gate', () => {
     expect(answerAsk('q1', { colour: 'blue' })).toBe(true);
     await waitForInteractions('s1');
     expect(consumeInteractions('s1')).toEqual([
-      { toolCallId: 'q1', name: 'ask_user', args: {}, kind: 'ask', decision: undefined, answers: { colour: 'blue' } },
+      {
+        toolCallId: 'q1',
+        name: 'ask_user',
+        args: { questions: [{ id: 'colour', prompt: 'Which colour?' }] },
+        kind: 'ask',
+        decision: undefined,
+        answers: { colour: 'blue' },
+      },
     ]);
   });
 
@@ -167,8 +174,8 @@ describe('interaction gate', () => {
     // No second card; the mirrored call resolves with the same answers.
     expect(ids(events, 'ask')).toEqual(['q1']);
     expect(consumeInteractions('s1')).toEqual([
-      { toolCallId: 'q1', name: 'ask_user', args: {}, kind: 'ask', decision: undefined, answers: { vibe: 'minimal' } },
-      { toolCallId: 'q2', name: 'ask_user', args: {}, kind: 'ask', decision: undefined, answers: { vibe: 'minimal' } },
+      { toolCallId: 'q1', name: 'ask_user', args: { questions }, kind: 'ask', decision: undefined, answers: { vibe: 'minimal' } },
+      { toolCallId: 'q2', name: 'ask_user', args: { questions }, kind: 'ask', decision: undefined, answers: { vibe: 'minimal' } },
     ]);
   });
 
@@ -224,8 +231,22 @@ describe('interaction gate', () => {
     await waitForInteractions('s1');
     // The mirror resolves with answers keyed by its own question ids.
     expect(consumeInteractions('s1')).toEqual([
-      { toolCallId: 'q1', name: 'ask_user', args: {}, kind: 'ask', decision: undefined, answers: { vibe: '大字冲击' } },
-      { toolCallId: 'q2', name: 'ask_user', args: {}, kind: 'ask', decision: undefined, answers: { 'direction-2': '大字冲击' } },
+      {
+        toolCallId: 'q1',
+        name: 'ask_user',
+        args: { questions: [{ id: 'vibe', prompt: '这张封面要传达什么气质?', options: ['极简', '大字'] }] },
+        kind: 'ask',
+        decision: undefined,
+        answers: { vibe: '大字冲击' },
+      },
+      {
+        toolCallId: 'q2',
+        name: 'ask_user',
+        args: { questions: [{ id: 'direction-2', prompt: ' 这张封面要传达什么气质? ', kind: 'direction' }] },
+        kind: 'ask',
+        decision: undefined,
+        answers: { 'direction-2': '大字冲击' },
+      },
     ]);
   });
 
@@ -252,7 +273,14 @@ describe('interaction gate', () => {
     expect(ids(events, 'ask')).toEqual(['q1']);
     await waitForInteractions('s1');
     expect(consumeInteractions('s1')).toEqual([
-      { toolCallId: 'q2', name: 'ask_user', args: {}, kind: 'ask', decision: undefined, answers: { vibe2: 'minimal' } },
+      {
+        toolCallId: 'q2',
+        name: 'ask_user',
+        args: { questions: [{ id: 'vibe2', prompt: '什么气质?' }] },
+        kind: 'ask',
+        decision: undefined,
+        answers: { vibe2: 'minimal' },
+      },
     ]);
   });
 
@@ -290,7 +318,18 @@ describe('interaction gate', () => {
     expect(ids(events, 'ask')).toEqual(['q1']);
     await waitForInteractions('s1');
     expect(consumeInteractions('s1')).toEqual([
-      { toolCallId: 'q2', name: 'ask_user', args: {}, kind: 'ask', decision: undefined, answers: { 'vibe-again': '冷峻' } },
+      {
+        toolCallId: 'q2',
+        name: 'ask_user',
+        args: {
+          questions: [
+            { id: 'vibe-again', prompt: '这张封面想传达什么气质？也可以自由输入。', options: ['冷峻', '热烈', '其他'] },
+          ],
+        },
+        kind: 'ask',
+        decision: undefined,
+        answers: { 'vibe-again': '冷峻' },
+      },
     ]);
   });
 
@@ -319,7 +358,14 @@ describe('interaction gate', () => {
     expect(ids(events, 'ask')).toEqual(['q1']);
     await waitForInteractions('s1');
     expect(consumeInteractions('s1')).toEqual([
-      { toolCallId: 'q2', name: 'ask_user', args: {}, kind: 'ask', decision: undefined, answers: { vibe2: '极简' } },
+      {
+        toolCallId: 'q2',
+        name: 'ask_user',
+        args: { questions: [{ id: 'vibe2', prompt: '请选择封面气质', options: ['极简', '复古', '大字冲击'] }] },
+        kind: 'ask',
+        decision: undefined,
+        answers: { vibe2: '极简' },
+      },
     ]);
   });
 
@@ -432,8 +478,46 @@ describe('interaction gate', () => {
     });
     expect(ids(events, 'ask')).toEqual(['q1', 'q2']);
     expect(consumeInteractions('s1')).toEqual([
-      { toolCallId: 'q2', name: 'ask_user', args: {}, kind: 'ask', decision: undefined, answers: {} },
-      { toolCallId: 'q3', name: 'ask_user', args: {}, kind: 'ask', decision: undefined, answers: { pick3: 'dB' } },
+      {
+        toolCallId: 'q2',
+        name: 'ask_user',
+        args: {
+          questions: [
+            {
+              id: 'pick2',
+              prompt: '选一个方向',
+              kind: 'direction',
+              directions: [
+                { id: 'n1', title: '色块' },
+                { id: 'n2', title: '大字' },
+              ],
+            },
+          ],
+        },
+        kind: 'ask',
+        decision: undefined,
+        answers: {},
+      },
+      {
+        toolCallId: 'q3',
+        name: 'ask_user',
+        args: {
+          questions: [
+            {
+              id: 'pick3',
+              prompt: '请选一个方向',
+              kind: 'direction',
+              directions: [
+                { id: 'dA', title: '几何' },
+                { id: 'dB', title: '剪影' },
+              ],
+            },
+          ],
+        },
+        kind: 'ask',
+        decision: undefined,
+        answers: { pick3: 'dB' },
+      },
     ]);
   });
 

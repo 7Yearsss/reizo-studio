@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { ViewportPortal, useStore } from '@xyflow/react';
 import { CheckSquare, MessageSquarePlus, FolderPlus, Play, Trash2 } from 'lucide-react';
 import type { CanvasNode } from '../../../shared/canvas';
+import { chromeScale } from './chromeScale';
 import Tooltip from '../ui/Tooltip';
 
 export interface MultiSelectToolbarProps {
@@ -29,7 +30,7 @@ export default function MultiSelectToolbar({
 }: MultiSelectToolbarProps) {
   const ty = useStore((s) => s.transform[1]);
   const zoom = useStore((s) => s.transform[2]) || 1;
-  const scale = Math.min(3, Math.max(1, 1 / zoom));
+  const scale = Math.min(3, chromeScale(zoom));
 
   const bounds = useMemo(() => {
     if (selectedNodes.length <= 1) return null;

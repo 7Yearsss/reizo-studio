@@ -10,6 +10,7 @@ import {
   type ImageEditParams,
 } from '../../../../shared/canvasImageEdit';
 import { estimateNodeCost } from '../../../../shared/canvasPricing';
+import { chromeScale } from '../chromeScale';
 import { cn } from '../../../lib/cn';
 import * as canvasStore from '../../../state/canvasStore';
 import EditSlider from './EditSlider';
@@ -38,7 +39,7 @@ export default function EditParamsPanel({
   onRedraw: (kind: ImageEditKind) => void;
 }) {
   const zoom = useStore((s) => s.transform[2]) || 1;
-  const floatScale = Math.min(10, Math.max(0.5, 1 / zoom));
+  const floatScale = chromeScale(zoom);
   const isDragging = useStore((s) => s.nodes.find((n) => n.id === node.id)?.dragging ?? false);
   const [shouldRender, setShouldRender] = useState(false);
 

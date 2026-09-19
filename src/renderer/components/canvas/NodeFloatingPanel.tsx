@@ -18,6 +18,7 @@ import {
   Check,
 } from 'lucide-react';
 import { cn } from '../../lib/cn';
+import { chromeScale } from './chromeScale';
 import { toast } from '../../lib/toast';
 import MentionTextArea, { type MentionTextAreaHandle } from './MentionTextArea';
 import { useAssetUrl } from './useAssetUrl';
@@ -120,8 +121,7 @@ function NodeFloatingPanel({
 }: NodeFloatingPanelProps) {
   // Read current canvas zoom level from React Flow store
   const zoom = useStore((s) => s.transform[2]) || 1;
-  // Inverse scale: 1 / zoom, clamped safely to prevent extreme scales (down to 0.1x zoom)
-  const floatScale = Math.min(10, Math.max(0.5, 1 / zoom));
+  const floatScale = chromeScale(zoom);
 
   // Read the node's dragging flag straight from the RF store — same source RF uses
   // internally, so it flips to true the instant the drag starts with zero lag.
