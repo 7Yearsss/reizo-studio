@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { IPC } from '../shared/constants';
 import type { DirEntry } from '../shared/workspace';
+import type { SkillHubInstallRequest, SkillHubSearchQuery } from '../shared/skillhub';
 
 contextBridge.exposeInMainWorld('reizo', {
   platform: process.platform,
@@ -24,5 +25,7 @@ contextBridge.exposeInMainWorld('reizo', {
   gitStatus: () => ipcRenderer.invoke(IPC.WORKSPACE_GIT),
   installSkill: () => ipcRenderer.invoke(IPC.SKILL_INSTALL),
   uninstallSkill: (id: string) => ipcRenderer.invoke(IPC.SKILL_UNINSTALL, id),
+  searchSkillHub: (query: SkillHubSearchQuery) => ipcRenderer.invoke(IPC.SKILLHUB_SEARCH, query),
+  installSkillHubSkill: (request: SkillHubInstallRequest) => ipcRenderer.invoke(IPC.SKILLHUB_INSTALL, request),
   exportPdf: (html: string): Promise<string> => ipcRenderer.invoke(IPC.EXPORT_PDF, html),
 });
