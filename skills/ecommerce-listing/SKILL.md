@@ -32,6 +32,10 @@ prompt: 帮我做一套电商套图
    - `style-lifestyle` 生活场景 `skill-asset:ecommerce-listing/style-lifestyle.jpg`
    - `style-jp` 日系留白 `skill-asset:ecommerce-listing/style-jp.jpg`
 
+## 信息补收
+
+分析产品图后、输出 Listing 文案之前，先盘点信息缺口：**品牌名、材质、尺寸/容量、重量**这些用户多半没给但文案必须写。缺什么就用 `ask_user` 发一张提问卡补收（一题一项、允许自由输入、可跳过）——比如「品牌名是什么？（没有就填无品牌 Generic）」「容量/尺寸是多少？」。从图片能确定的信息（颜色、品类、外观特征）不要再问。用户跳过的项在文案里写通用描述，不要写「未提供」。
+
 ## 流程
 
 1. 产品图节点确定后（画布引用或新建节点出图完毕），先输出 **Listing 文案**（一条 assistant 消息）：
