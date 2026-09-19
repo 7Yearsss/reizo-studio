@@ -294,6 +294,35 @@ describe('interaction gate', () => {
     ]);
   });
 
+  it('folds a short rephrase when the option set is identical even at low prompt similarity', async () => {
+    const events: ChatStreamEvent[] = [];
+    setPermissionSink('s1', (event) => events.push(event));
+    registerPendingAsk({
+      sessionId: 's1',
+      toolCallId: 'q1',
+      name: 'ask_user',
+      questions: [
+        { id: 'vibe', prompt: '这张封面要传达什么气质？', options: ['极简', '复古', '大字冲击'] },
+      ],
+    });
+    expect(answerAsk('q1', { vibe: '极简' })).toBe(true);
+    consumeInteractions('s1');
+
+    // "请选择封面气质" scores ~0.25 Dice vs the original — below the prompt
+    // threshold — but the option set is byte-identical, so it is the same ask.
+    registerPendingAsk({
+      sessionId: 's1',
+      toolCallId: 'q2',
+      name: 'ask_user',
+      questions: [{ id: 'vibe2', prompt: '请选择封面气质', options: ['极简', '复古', '大字冲击'] }],
+    });
+    expect(ids(events, 'ask')).toEqual(['q1']);
+    await waitForInteractions('s1');
+    expect(consumeInteractions('s1')).toEqual([
+      { toolCallId: 'q2', name: 'ask_user', args: {}, kind: 'ask', decision: undefined, answers: { vibe2: '极简' } },
+    ]);
+  });
+
   it('surfaces a rephrased re-ask when the recorded answer is not a valid option', () => {
     const events: ChatStreamEvent[] = [];
     setPermissionSink('s1', (event) => events.push(event));

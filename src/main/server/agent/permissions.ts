@@ -153,10 +153,11 @@ export interface ResolvedInteraction {
 
 const sessionAllow = new Map<string, Set<string>>();
 const sinks = new Map<string, (event: ChatStreamEvent) => void>();
-/** Per-session map of normalized prompt → answer, for asks already answered
- * this turn. A model that re-asks the same question within the turn gets the
- * earlier answer back instantly instead of surfacing another card. */
-const answeredAskHistory = new Map<string, Map<string, string>>();
+/** Per-session map of normalized prompt → {question, answer}, for asks already
+ * answered this turn. A model that re-asks the same question within the turn
+ * gets the earlier answer back instantly instead of surfacing another card. */
+type AnsweredQuestion = { question: AskQuestion; answer: string };
+const answeredAskHistory = new Map<string, Map<string, AnsweredQuestion>>();
 /** Interaction id currently shown to the user — the queue is drained one at a time. */
 const visibleInteraction = new Map<string, string>();
 /** Ordered pending interactions per session (answered ones stay until consumed). */
@@ -313,25 +314,35 @@ function promptsMatch(a: AskQuestion, b: AskQuestion): boolean {
  * replay unconditionally (still via answerFits — the option set may have
  * changed under an identical prompt). Rephrased prompts replay only at a
  * decent match (≥0.35 when the new question's options can validate the answer,
- * ≥0.8 when free text gives nothing to check against).
+ * ≥0.8 when free text gives nothing to check against) — or when the option
+ * set itself is identical, which is a stronger same-question signal than
+ * prompt wording.
  */
-function lookupHistory(q: AskQuestion, history: Map<string, string>): string | undefined {
+function sameOptionSet(a?: string[], b?: string[]): boolean {
+  return !!a?.length && !!b?.length && a.length === b.length && a.every((o) => b.includes(o));
+}
+
+function lookupHistory(q: AskQuestion, history: Map<string, AnsweredQuestion>): string | undefined {
   const want = promptKey(q.prompt);
   const constrained =
     q.kind === 'direction' ? (q.directions?.length ?? 0) > 0 : (q.options?.length ?? 0) > 0;
   const minSim = constrained ? 0.35 : 0.8;
   let best: string | undefined;
   let bestSim = 0;
-  for (const [k, v] of history) {
+  for (const [k, h] of history) {
     const s = promptSimilarity(want, k);
-    if (s < minSim || s <= bestSim) continue;
-    // Rephrased asks only replay answers that still fit the new option set /
-    // direction ids. Identical wording replays whatever the user answered —
-    // choice cards always allow custom text — except direction asks, whose
-    // stored answer is a direction id that's meaningless under a new set.
-    if (!answerFits(q, v) && !(s === 1 && q.kind !== 'direction')) continue;
+    // An identical option set is a stronger signal than prompt wording — the
+    // model's rephrase carries its choices with it (short CJK prompts like
+    // "请选择封面气质" score ~0.25 on bigram Dice despite being the same ask).
+    const sameChoices = q.kind !== 'direction' && sameOptionSet(q.options, h.question.options);
+    if (s <= bestSim) continue;
+    const accept =
+      q.kind === 'direction'
+        ? s >= minSim && answerFits(q, h.answer)
+        : s === 1 || sameChoices || (s >= minSim && answerFits(q, h.answer));
+    if (!accept) continue;
     bestSim = s;
-    best = v;
+    best = h.answer;
   }
   return best;
 }
@@ -448,10 +459,10 @@ export function answerAsk(toolCallId: string, answers: Record<string, string>): 
       pending.set(sessionId, list.filter((p) => p !== item && p.mirrorOf !== toolCallId));
     } else {
       item.answers = answers;
-      const history = answeredAskHistory.get(sessionId) ?? new Map<string, string>();
+      const history = answeredAskHistory.get(sessionId) ?? new Map<string, AnsweredQuestion>();
       for (const q of item.questions ?? []) {
         const v = answers[q.id];
-        if (v !== undefined) history.set(promptKey(q.prompt), v);
+        if (v !== undefined) history.set(promptKey(q.prompt), { question: q, answer: v });
       }
       answeredAskHistory.set(sessionId, history);
     }
