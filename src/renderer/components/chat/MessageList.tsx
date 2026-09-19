@@ -12,6 +12,7 @@ import { MessageScroller } from '../agents/message-scroller';
 import UserMessage from './UserMessage';
 import AssistantMessage from './AssistantMessage';
 import EmptyChatHints from './EmptyChatHints';
+import PendingInteraction from './PendingInteraction';
 
 const GROW_TRIGGER_PX = 160;
 
@@ -32,8 +33,10 @@ export default function MessageList({
   onRetryLastAssistant,
   onPickHint,
   compact = false,
+  sessionId,
 }: {
   messages: ChatMessage[];
+  sessionId?: string;
   streaming: string;
   streamingTools?: ToolCallPart[];
   streamingReasoning?: string;
@@ -176,6 +179,7 @@ export default function MessageList({
             />
           </div>
         )}
+        {sessionId ? <PendingInteraction sessionId={sessionId} /> : null}
       </MessageScroller>
       {!following && (
         <button
