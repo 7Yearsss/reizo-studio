@@ -3,6 +3,7 @@ import type { ReplyActivity, ToolCallPart } from '../../../shared/chat';
 import type { TurnOutcome } from '../../../shared/stream';
 import MarkdownContent, { CopyButton } from './MarkdownContent';
 import WorkGroupCard from './WorkGroupCard';
+import AskAnswers from './AskAnswers';
 
 function StreamingCaret() {
   return (
@@ -55,6 +56,7 @@ export default function AssistantMessage({
         activities={activities}
         turnOutcome={turnOutcome}
       />
+      <AskAnswers parts={parts} />
       {content ? (
         <div className="markdown text-[15px] leading-[1.75] text-ink">
           <MarkdownContent content={content} streaming={streaming} />

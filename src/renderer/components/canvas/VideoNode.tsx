@@ -14,6 +14,7 @@ import { type CanvasNodeData } from './ImageNode';
 import { useHoverIntent } from './NodeActionBar';
 import MagneticHandle from './MagneticHandle';
 import NodeFloatingPanel, { type UpstreamSourceItem } from './NodeFloatingPanel';
+import ImageGenerationPending from './imageEdit/ImageGenerationPending';
 import { useIsSoloSelected } from './useSelectionCount';
 import AgentMark from './AgentMark';
 import MissingInputWarning from './MissingInputWarning';
@@ -317,16 +318,6 @@ function VideoNode({ id, data, selected }: NodeProps) {
         }
       />
 
-      {/* Running Progress Bar (always visible when running) */}
-      {running ? (
-        <div className="mb-2 w-full overflow-hidden rounded-full bg-paper-inset">
-          <div
-            className="h-1.5 rounded-full bg-accent transition-all duration-300"
-            style={{ width: `${Math.max(5, progress)}%` }}
-          />
-        </div>
-      ) : null}
-
       {/* Error state */}
       {node.output?.error ? (
         <div className="mb-2 flex flex-col gap-1 rounded-lg bg-danger/10 p-2 text-[11px] text-danger">
@@ -567,12 +558,7 @@ function VideoNode({ id, data, selected }: NodeProps) {
             }}
           />
           {running ? (
-            <div className="flex flex-col items-center justify-center gap-2">
-              <Loader2 size={26} className="animate-spin text-[#edd7a3]" />
-              <span className="text-[11px] font-medium text-white/60">
-                {progress > 0 ? `生成视频中 ${progress}%` : '生成视频中…'}
-              </span>
-            </div>
+            <ImageGenerationPending label={progress > 0 ? `生成视频中 ${progress}%` : '生成视频中…'} className="w-full h-full" />
           ) : (
             <Video
               size={36}
