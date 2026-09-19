@@ -145,6 +145,9 @@ adding logic here (with a unit test) over embedding it in a route or component.
   (Winlume)", same backend as the web Studio; keys are pasted by the user, never committed.
 - Skills are Markdown files with `name`/`description` frontmatter, loaded from
   `./skills` (bundled) and `<userData>/data/skills` (user-installed) — `src/main/skills.ts`.
+  A `prompt` frontmatter field prefills the composer when the skill is picked, and a
+  `## 提问` body section declares inputs the agent must collect via `ask_user`
+  question cards before executing (see `skills/cover-image/`).
 - `.claude/`, `.agents/`, and `skills-lock.json` are git-ignored per-developer skill
   tooling; `.agents/skills/` (beui, diffs, shadcn, frontend-design) are references for
   building UI, not part of the app.

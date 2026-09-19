@@ -272,7 +272,10 @@ export async function runChatTurn(options: {
         'The user approves once at the start of the session. Never type passwords, card numbers, or other secrets — ask the user to do that themselves.'
       : '',
     memory ? `Workspace MEMORY.md:\n${redactSecrets(memory)}` : '',
-    skill ? `The user invoked skill "${skill.name}". Follow this skill:\n${skill.body}` : '',
+    skill
+      ? `The user invoked skill "${skill.name}". Follow this skill:\n${skill.body}\n\n` +
+        'If this skill declares a "提问"/"Questions" section, collect each missing input through `ask_user` question cards (concrete options + free text) before producing output — never ask those questions as plain chat text.'
+      : '',
     projectInstructions ? `Project "${projectName}" working rules:\n${projectInstructions}` : '',
   ].filter(Boolean);
   const instructions = systemParts.join('\n\n');
