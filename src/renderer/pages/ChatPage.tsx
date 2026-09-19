@@ -6,6 +6,7 @@ import MessageList from '../components/chat/MessageList';
 import Composer from '../components/chat/Composer';
 import ChatSearchPanel from '../components/chat/ChatSearchPanel';
 import TopRightToolbar from '../components/chat/TopRightToolbar';
+import RunStatusIsland from '../components/chat/RunStatusIsland';
 import { collectMessageMatches } from '../lib/highlightText';
 import type { ReplyPhase } from '../components/chat/ReplyStatusBar';
 import { liveReplyPhase } from '../state/liveReply';
@@ -185,6 +186,7 @@ export default function ChatPage({
           }}
         />
       </header>
+      <RunStatusIsland sessionId={sessionId} />
       {searchOpen && (
         <ChatSearchPanel
           query={searchQuery}

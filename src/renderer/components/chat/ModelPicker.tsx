@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, ChevronDown, Sparkles } from 'lucide-react';
+import { Check, ChevronDown } from 'lucide-react';
 import { useSettingsStore } from '../../state/useSettingsStore';
 import * as settingsStore from '../../state/settingsStore';
 import SelectField, { type SelectOption } from '../ui/SelectField';
@@ -8,6 +8,15 @@ import {
   MorphPopoverContent,
   MorphPopoverTrigger,
 } from '../motion/popover-morph';
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+  ComboboxTrigger,
+} from '../motion/combobox';
 import { cn } from '../../lib/cn';
 
 export default function ModelPicker({ compact = false }: { compact?: boolean }) {
@@ -30,11 +39,6 @@ export default function ModelPicker({ compact = false }: { compact?: boolean }) 
       dot: p.id === settings.activeProviderId ? 'accent' : undefined,
     };
   });
-
-  const modelOptions: SelectOption[] = active.models.map((m) => ({ value: m.id, label: m.name }));
-  if (active.model && !active.models.some((m) => m.id === active.model)) {
-    modelOptions.push({ value: active.model, label: active.model });
-  }
 
   const currentModelObj = active.models.find((m) => m.id === active.model);
   const currentModelLabel = currentModelObj?.name || active.model || active.name;
@@ -132,13 +136,30 @@ export default function ModelPicker({ compact = false }: { compact?: boolean }) 
         className="max-w-[150px]"
       />
       {active.models.length > 0 ? (
-        <SelectField
-          ariaLabel="模型"
+        <Combobox
           value={active.model}
-          options={modelOptions}
-          onChange={(model) => void settingsStore.patchSettings({ provider: { id: active.id, model } })}
-          className="max-w-[170px]"
-        />
+          onValueChange={(model) =>
+            void settingsStore.patchSettings({ provider: { id: active.id, model } })
+          }
+        >
+          <ComboboxTrigger className="h-8 min-w-0 max-w-[190px] rounded-lg border-line px-2 text-[13px] shadow-none">
+            <ComboboxInput
+              aria-label="模型"
+              placeholder="搜索模型…"
+              className="h-8 text-[13px]"
+            />
+          </ComboboxTrigger>
+          <ComboboxContent className="min-w-56">
+            <ComboboxList ariaLabel="模型">
+              {active.models.map((m) => (
+                <ComboboxItem key={m.id} value={m.id}>
+                  {m.name}
+                </ComboboxItem>
+              ))}
+              <ComboboxEmpty>无匹配模型</ComboboxEmpty>
+            </ComboboxList>
+          </ComboboxContent>
+        </Combobox>
       ) : (
         <input
           value={active.model}

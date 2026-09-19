@@ -13,6 +13,7 @@ import { estimateNodeCost } from '../../../../shared/canvasPricing';
 import { cn } from '../../../lib/cn';
 import * as canvasStore from '../../../state/canvasStore';
 import EditSlider from './EditSlider';
+import { Switch } from '../../motion/switch';
 
 const DIRS: Array<{ id: NonNullable<ImageEditParams['lightDir']>; label: string }> = [
   { id: 'left', label: '左侧' },
@@ -190,14 +191,15 @@ function RelightFields({
           </button>
         ))}
       </div>
-      <label className="flex items-center justify-between text-[11px] text-ink-muted">
+      <div className="flex items-center justify-between text-[11px] text-ink-muted">
         轮廓光
-        <input
-          type="checkbox"
+        <Switch
           checked={Boolean(value.rimLight)}
-          onChange={(e) => patch({ rimLight: e.target.checked })}
+          onCheckedChange={(v) => patch({ rimLight: v })}
+          ariaLabel="轮廓光"
+          className="scale-[0.72] origin-right"
         />
-      </label>
+      </div>
     </div>
   );
 }
@@ -237,14 +239,15 @@ function MultiAngleFields({
         max={10}
         onChange={(n) => patch({ zoom: n })}
       />
-      <label className="flex items-center justify-between text-[11px] text-ink-muted">
+      <div className="flex items-center justify-between text-[11px] text-ink-muted">
         广角镜头
-        <input
-          type="checkbox"
+        <Switch
           checked={Boolean(value.wideAngle)}
-          onChange={(e) => patch({ wideAngle: e.target.checked })}
+          onCheckedChange={(v) => patch({ wideAngle: v })}
+          ariaLabel="广角镜头"
+          className="scale-[0.72] origin-right"
         />
-      </label>
+      </div>
     </div>
   );
 }
