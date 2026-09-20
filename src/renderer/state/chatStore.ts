@@ -481,6 +481,36 @@ export function removeQueuedTurn(sessionId: string, id: string): void {
   });
 }
 
+/** Interrupt the live turn (if any) and send immediately — Cursor's "Send now". */
+export async function sendNow(
+  sessionId: string,
+  text: string,
+  mentions: string[] = [],
+  extra: QueuedTurn['extra'] = {},
+): Promise<void> {
+  if (!text.trim()) return;
+  if (state.sendingBySession[sessionId]) await stopMessage(sessionId);
+  await dispatchTurn(sessionId, text, mentions, extra, {
+    truncateAfterId: extra.replaceFromId,
+  });
+}
+
+/** Pull a queued item out of the queue and send it right away, interrupting the live turn first. */
+export async function sendQueuedNow(sessionId: string, id: string): Promise<void> {
+  const item = (state.queueBySession[sessionId] ?? []).find((q) => q.id === id);
+  if (!item) return;
+  removeQueuedTurn(sessionId, id);
+  await sendNow(sessionId, item.text, item.mentions, item.extra);
+}
+
+/** Pop every queued turn so the composer can put their text back for editing (Claude Code's ↑ recall). */
+export function recallQueue(sessionId: string): QueuedTurn[] {
+  const items = state.queueBySession[sessionId] ?? [];
+  if (items.length === 0) return [];
+  setState({ queueBySession: { ...state.queueBySession, [sessionId]: [] } });
+  return items;
+}
+
 export async function continueQueue(sessionId: string): Promise<void> {
   const next = (state.queueBySession[sessionId] ?? [])[0];
   if (!next || state.sendingBySession[sessionId]) return;

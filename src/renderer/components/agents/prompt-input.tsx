@@ -61,6 +61,8 @@ export interface PromptInputProps extends Omit<
   onSubmit?: (value: string, model?: string) => void | Promise<void>;
   loading?: boolean;
   onStop?: () => void;
+  /** Ctrl/Cmd+Enter while `loading` — interrupt the live run and send now (Cursor's "Send now"). */
+  onSendNow?: (value: string, model?: string) => void;
   minRows?: number;
   maxRows?: number;
   leadingAction?: ReactNode;
@@ -80,6 +82,7 @@ export function PromptInput({
   onSubmit,
   loading = false,
   onStop,
+  onSendNow,
   minRows = 2,
   maxRows = 8,
   leadingAction,
@@ -103,7 +106,11 @@ export function PromptInput({
   const currentModel = models.find(
     (option) => option.value === currentModelValue,
   );
-  const canSubmit = Boolean(currentValue.trim()) && !disabled && !loading;
+  const hasDraft = Boolean(currentValue.trim());
+  const canSubmit = hasDraft && !disabled;
+  // While a run is live the button is a stop control only when the box is
+  // empty; with text it becomes the queue/send button so Enter keeps working.
+  const showStop = loading && !hasDraft;
 
   const resizeTextarea = useCallback(() => {
     const textarea = textareaRef.current;
@@ -141,14 +148,22 @@ export function PromptInput({
     onModelChange?.(next);
   };
 
-  const submit = (event?: FormEvent) => {
-    event?.preventDefault();
+  const fire = (sendNow: boolean) => {
     const prompt = currentValue.trim();
-    if (!prompt || disabled || loading) return;
+    if (!prompt || disabled) return;
 
-    onSubmit?.(prompt, currentModelValue);
+    if (sendNow && loading && onSendNow) {
+      onSendNow(prompt, currentModelValue);
+    } else {
+      onSubmit?.(prompt, currentModelValue);
+    }
     if (value === undefined) setInternalValue("");
     textareaRef.current?.focus({ preventScroll: true });
+  };
+
+  const submit = (event?: FormEvent) => {
+    event?.preventDefault();
+    fire(false);
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -162,7 +177,7 @@ export function PromptInput({
       return;
     }
     event.preventDefault();
-    submit();
+    fire(Boolean(event.metaKey || event.ctrlKey));
   };
 
   return (
@@ -299,23 +314,30 @@ export function PromptInput({
         ) : null}
 
         <Button
-          type={loading ? "button" : "submit"}
+          type={showStop ? "button" : "submit"}
           size="icon"
-          disabled={loading ? !onStop : !canSubmit}
-          aria-label={loading ? "Stop generating" : "Send prompt"}
-          onClick={loading ? onStop : undefined}
+          disabled={showStop ? !onStop : !canSubmit}
+          aria-label={showStop ? "Stop generating" : loading ? "Queue message" : "Send prompt"}
+          title={
+            showStop
+              ? "停止生成"
+              : loading
+                ? "排队发送 · Ctrl+Enter 立即打断发送"
+                : "发送"
+          }
+          onClick={showStop ? onStop : undefined}
           className="ml-auto size-8 rounded-full"
         >
           <AnimatePresence initial={false} mode="popLayout">
             <motion.span
-              key={loading ? "stop" : "send"}
+              key={showStop ? "stop" : "send"}
               initial={reduce ? { opacity: 1 } : { opacity: 0, y: 3, scale: 0.8 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={reduce ? { opacity: 0 } : { opacity: 0, y: -3, scale: 0.8 }}
               transition={reduce ? { duration: 0 } : SPRING_SWAP}
               className="grid place-items-center"
             >
-              {loading ? (
+              {showStop ? (
                 <Square className="size-3 fill-current" />
               ) : (
                 <ArrowUp className="size-4" />

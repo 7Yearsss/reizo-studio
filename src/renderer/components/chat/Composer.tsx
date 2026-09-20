@@ -131,16 +131,20 @@ export default function Composer({
     replaceFromIdRef.current = seed.replaceFromId;
   }, [seed?.nonce, seed?.text, seed?.replaceFromId]);
 
-  function submit() {
-    if (!draft.trim() || disabled) return;
+  function buildSubmitPayload() {
     const selectionMentions = unpinnedSelectionNodes.map((n) => `canvas:${n.id}`);
     const refMentions = nodeRefs.map((r) =>
       r.region
         ? `canvas:${r.id}@r=${[r.region.x, r.region.y, r.region.w, r.region.h].map((v) => v.toFixed(3)).join(',')}`
         : `canvas:${r.id}`,
     );
-    const allMentions = [...mentions, ...refMentions, ...selectionMentions];
-    onSend(draft, allMentions, { skillId, attachments, replaceFromId: replaceFromIdRef.current });
+    return {
+      mentions: [...mentions, ...refMentions, ...selectionMentions],
+      extra: { skillId, attachments, replaceFromId: replaceFromIdRef.current },
+    };
+  }
+
+  function resetAfterSubmit() {
     setDraft('');
     setMentions([]);
     // skillId intentionally NOT cleared — a pinned skill applies to the whole session
@@ -151,6 +155,41 @@ export default function Composer({
       chatStore.clearNodeRefs(sessionId);
       chatStore.setPickingReference(sessionId, false);
     }
+  }
+
+  function submit() {
+    if (!draft.trim() || disabled) return;
+    const { mentions: allMentions, extra } = buildSubmitPayload();
+    onSend(draft, allMentions, extra);
+    resetAfterSubmit();
+  }
+
+  /** Ctrl/Cmd+Enter while a turn is live — interrupt it and send immediately. */
+  function submitNow() {
+    if (!draft.trim() || disabled || !sessionId) return;
+    const { mentions: allMentions, extra } = buildSubmitPayload();
+    void chatStore.sendNow(sessionId, draft, allMentions, extra);
+    resetAfterSubmit();
+  }
+
+  /** Move a queued message back into the composer for editing. */
+  function editQueuedItem(item: (typeof queue)[number]) {
+    if (!sessionId) return;
+    chatStore.removeQueuedTurn(sessionId, item.id);
+    setDraft((prev) => (prev ? `${prev}\n${item.text}` : item.text));
+    focusComposer();
+  }
+
+  /** ArrowUp at the start of the box recalls every queued message (Claude Code style). */
+  function recallQueuedMessages(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (!sessionId || queue.length === 0) return false;
+    const cursor = e.currentTarget.selectionStart ?? 0;
+    if (draft.slice(0, cursor).includes('\n')) return false;
+    const items = chatStore.recallQueue(sessionId);
+    if (items.length === 0) return false;
+    const recalled = items.map((i) => i.text).join('\n');
+    setDraft((prev) => (prev ? `${recalled}\n${prev}` : recalled));
+    return true;
   }
 
   useEffect(() => {
@@ -197,7 +236,9 @@ export default function Composer({
       recovering={Boolean(turnError?.includes('正在恢复'))}
       lastTextAt={lastTextAt}
       lastProgressAt={lastProgressAt}
-      onStop={interaction ? onStop : undefined}
+      // Always offer stop while a turn is live — the composer button switches to
+      // queue/send once the user has typed, so this stays the persistent interrupt.
+      onStop={onStop}
       onRetry={onRetryStalled}
       skillName={activeSkill?.name}
     />
@@ -244,7 +285,12 @@ export default function Composer({
           />
         )}
         {sessionId && (
-          <QueuePanel items={queue} onRemove={(id) => chatStore.removeQueuedTurn(sessionId, id)} />
+          <QueuePanel
+            items={queue}
+            onRemove={(id) => chatStore.removeQueuedTurn(sessionId, id)}
+            onEdit={editQueuedItem}
+            onSendNow={(item) => void chatStore.sendQueuedNow(sessionId, item.id)}
+          />
         )}
         {mentionQuery !== null && (
           <MentionMenu
@@ -474,13 +520,16 @@ export default function Composer({
                 onSubmit={() => submit()}
                 loading={Boolean(sending && !interaction)}
                 onStop={onStop}
+                onSendNow={() => submitNow()}
                 disabled={disabled}
                 autoFocus={autoFocus}
                 minRows={2}
                 placeholder={
-                  activeSkill
-                    ? `技能 /${activeSkill.id} 生效中 — 直接描述任务，退格或 × 退出`
-                    : '输入消息，/ 调用技能，@ 引用文件…'
+                  sending && !interaction
+                    ? '回复中 — Enter 排队，Ctrl+Enter 立即打断发送'
+                    : activeSkill
+                      ? `技能 /${activeSkill.id} 生效中 — 直接描述任务，退格或 × 退出`
+                      : '输入消息，/ 调用技能，@ 引用文件…'
                 }
                 onKeyDown={(e) => {
                   if (isImeComposingEvent(e)) return;
@@ -493,6 +542,10 @@ export default function Composer({
                   if (e.key === 'Backspace' && draft === '' && skillId) {
                     e.preventDefault();
                     setSkillId(undefined);
+                  }
+                  // ↑ at the start of the box pulls queued messages back in for editing.
+                  if (e.key === 'ArrowUp' && recallQueuedMessages(e)) {
+                    e.preventDefault();
                   }
                 }}
                 leadingAction={
