@@ -3,7 +3,7 @@ import { Check, FolderOpen, KeyRound } from 'lucide-react';
 import { motion } from 'motion/react';
 import { cn } from '../lib/cn';
 import { APP_NAME, APP_VERSION } from '../../shared/constants';
-import type { Appearance, PermissionMode, PublicProvider } from '../../shared/settings';
+import type { Appearance, BusyEnterBehavior, PermissionMode, PublicProvider } from '../../shared/settings';
 import { useSettingsStore } from '../state/useSettingsStore';
 import * as settingsStore from '../state/settingsStore';
 import * as api from '../api';
@@ -161,6 +161,38 @@ function GeneralSection() {
               {active && (
                 <motion.span
                   layoutId="computer-use-active"
+                  className="absolute inset-0 rounded-full bg-ink"
+                  transition={{ type: 'spring', stiffness: 450, damping: 35 }}
+                />
+              )}
+              <span className="relative z-10">{label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <h2 className="mb-3 text-sm font-medium">对话</h2>
+      <p className="mb-3 text-xs text-ink-muted">
+        Agent 回复中按 Enter 时：排队等这条回复完，或直接插话进当前这轮（Ctrl+Enter 始终是另一种）。
+      </p>
+      <div className="mb-8 flex flex-wrap gap-2">
+        {([
+          ['queue', '排队发送'],
+          ['steer', '直接插话'],
+        ] as [BusyEnterBehavior, string][]).map(([id, label]) => {
+          const active = settings.busyEnter === id;
+          return (
+            <button
+              key={id}
+              onClick={() => void settingsStore.patchSettings({ busyEnter: id })}
+              className={cn(
+                'relative rounded-full px-4 py-1.5 text-sm transition-colors duration-150',
+                active ? 'font-medium text-paper-raised' : 'text-ink hover:bg-paper-inset/80',
+              )}
+            >
+              {active && (
+                <motion.span
+                  layoutId="busy-enter-active"
                   className="absolute inset-0 rounded-full bg-ink"
                   transition={{ type: 'spring', stiffness: 450, damping: 35 }}
                 />

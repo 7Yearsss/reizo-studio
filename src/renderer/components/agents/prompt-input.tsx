@@ -61,8 +61,12 @@ export interface PromptInputProps extends Omit<
   onSubmit?: (value: string, model?: string) => void | Promise<void>;
   loading?: boolean;
   onStop?: () => void;
-  /** Ctrl/Cmd+Enter while `loading` — interrupt the live run and send now (Cursor's "Send now"). */
+  /** Ctrl/Cmd+Enter while `loading` — the alternate busy-lane (queue vs steer, per settings). */
   onSendNow?: (value: string, model?: string) => void;
+  /** Ctrl/Cmd+Enter while `loading` with an empty draft — e.g. steer every queued message at once. */
+  onEmptySendNow?: () => void;
+  /** Tooltip tail for the send button while a run is live (describes the Ctrl+Enter lane). */
+  busySendTitle?: string;
   minRows?: number;
   maxRows?: number;
   leadingAction?: ReactNode;
@@ -83,6 +87,8 @@ export function PromptInput({
   loading = false,
   onStop,
   onSendNow,
+  onEmptySendNow,
+  busySendTitle,
   minRows = 2,
   maxRows = 8,
   leadingAction,
@@ -150,6 +156,10 @@ export function PromptInput({
 
   const fire = (sendNow: boolean) => {
     const prompt = currentValue.trim();
+    if (sendNow && !prompt && loading && !disabled) {
+      onEmptySendNow?.();
+      return;
+    }
     if (!prompt || disabled) return;
 
     if (sendNow && loading && onSendNow) {
@@ -322,7 +332,7 @@ export function PromptInput({
             showStop
               ? "停止生成"
               : loading
-                ? "排队发送 · Ctrl+Enter 立即打断发送"
+                ? (busySendTitle ?? "Enter 排队发送")
                 : "发送"
           }
           onClick={showStop ? onStop : undefined}

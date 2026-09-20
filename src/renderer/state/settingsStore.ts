@@ -2,6 +2,7 @@ import * as api from '../api';
 import type { PublicSettings, SettingsPatch } from '../../shared/settings';
 import {
   DEFAULT_APPEARANCE,
+  DEFAULT_BUSY_ENTER,
   DEFAULT_COMPUTER_USE,
   DEFAULT_PERMISSION_MODE,
   DEFAULT_PROVIDER_ID,
@@ -17,6 +18,7 @@ let state: SettingsState = {
   settings: {
     appearance: DEFAULT_APPEARANCE,
     permissionMode: DEFAULT_PERMISSION_MODE,
+    busyEnter: DEFAULT_BUSY_ENTER,
     computerUse: DEFAULT_COMPUTER_USE,
     activeProviderId: DEFAULT_PROVIDER_ID,
     workspacePath: null,

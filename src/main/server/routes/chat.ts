@@ -3,7 +3,13 @@ import type { SessionStore } from '../../../shared/chat';
 import type { SettingsStore } from '../storage/settingsStore';
 import type { ArtifactStore } from '../storage/artifactStore';
 import type { ProjectStore } from '../storage/projectStore';
-import { abortChatTurn, runChatTurn } from '../agent/runtime';
+import {
+  abortChatTurn,
+  buildSteerContent,
+  drainSteerInbox,
+  pushSteer,
+  runChatTurn,
+} from '../agent/runtime';
 import { isSessionTurnLive, resumeAgentTurn } from '../agent/session';
 import { answerAsk, answerPermission, pendingAsksForSession, type PermissionDecision } from '../agent/permissions';
 import { loadSkills } from '../../skills';
@@ -106,6 +112,37 @@ export function createChatRouter(
   router.post('/:id/stop', (c) => {
     abortChatTurn(c.req.param('id'));
     return c.json({ ok: true });
+  });
+
+  // Steer (插话): park a message in the live turn's inbox — the agent loop
+  // injects it at the next step boundary, no interrupt, no new turn. Returns
+  // `accepted: false` when no turn is live so the renderer falls back to
+  // queueing it.
+  router.post('/:id/steer', async (c) => {
+    const id = c.req.param('id');
+    const body = (await c.req.json().catch(() => ({}))) as {
+      id?: string;
+      text?: string;
+      mentions?: string[];
+    };
+    const text = body.text?.trim() ?? '';
+    if (!text) return c.json({ error: 'text is required' }, 400);
+    if (!isSessionTurnLive(id)) return c.json({ accepted: false });
+    pushSteer(id, {
+      id: body.id ?? crypto.randomUUID(),
+      content: buildSteerContent(canvas?.canvasStore, id, text, body.mentions ?? []),
+    });
+    return c.json({ accepted: true });
+  });
+
+  // Leftover steers when the turn ended before the inbox drained — the
+  // renderer moves them into its queue.
+  router.delete('/:id/steer', (c) => {
+    const items = drainSteerInbox(c.req.param('id')).map((s) => ({
+      id: s.id,
+      content: s.content,
+    }));
+    return c.json({ items });
   });
 
   router.post('/:id/permissions', async (c) => {

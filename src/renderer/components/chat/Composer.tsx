@@ -85,9 +85,14 @@ export default function Composer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const workspacePath = useSettingsStore((s) => s.settings.workspacePath);
   const permissionMode = useSettingsStore((s) => s.settings.permissionMode);
+  // Busy-Enter preference (DSH): plain Enter while a turn runs either queues
+  // the message for the next turn or steers it into the live one; Ctrl+Enter
+  // always takes the opposite lane.
+  const busyEnter = useSettingsStore((s) => s.settings.busyEnter);
   const skills = useSkillStore().skills;
   const interaction = useChatStore((s) => (sessionId ? s.interactionBySession[sessionId] : null)) ?? null;
   const queue = useChatStore((s) => (sessionId ? s.queueBySession[sessionId] : undefined)) ?? [];
+  const steerPending = useChatStore((s) => (sessionId ? s.steerPendingBySession[sessionId] : undefined)) ?? [];
   const todos = useChatStore((s) => (sessionId ? s.todosBySession[sessionId] : undefined)) ?? [];
   const lastTextAt = useChatStore((s) => (sessionId ? s.lastTextAtBySession[sessionId] : undefined));
   const lastProgressAt = useChatStore((s) => (sessionId ? s.lastProgressAtBySession[sessionId] : undefined));
@@ -160,16 +165,33 @@ export default function Composer({
   function submit() {
     if (!draft.trim() || disabled) return;
     const { mentions: allMentions, extra } = buildSubmitPayload();
-    onSend(draft, allMentions, extra);
+    // Busy-Enter lane: while a turn runs, Enter follows the user's preference —
+    // queue (default, next turn) or steer (inject into the live turn).
+    if (sessionId && sending && !interaction && busyEnter === 'steer') {
+      void chatStore.steerNow(sessionId, draft, allMentions, extra);
+    } else {
+      onSend(draft, allMentions, extra);
+    }
     resetAfterSubmit();
   }
 
-  /** Ctrl/Cmd+Enter while a turn is live — interrupt it and send immediately. */
+  /** Ctrl/Cmd+Enter while a turn is live — the opposite of the busyEnter lane. */
   function submitNow() {
     if (!draft.trim() || disabled || !sessionId) return;
     const { mentions: allMentions, extra } = buildSubmitPayload();
-    void chatStore.sendNow(sessionId, draft, allMentions, extra);
+    if (busyEnter === 'steer') {
+      // Opposite lane = queue it like a normal send-while-busy.
+      onSend(draft, allMentions, extra);
+    } else {
+      void chatStore.steerNow(sessionId, draft, allMentions, extra);
+    }
     resetAfterSubmit();
+  }
+
+  /** Empty draft + Ctrl/Cmd+Enter while busy — steer every queued message at once (DSH). */
+  function steerAllQueued() {
+    if (!sessionId || queue.length === 0) return;
+    void chatStore.steerAllQueued(sessionId);
   }
 
   /** Move a queued message back into the composer for editing. */
@@ -287,6 +309,7 @@ export default function Composer({
         {sessionId && (
           <QueuePanel
             items={queue}
+            steers={steerPending}
             onRemove={(id) => chatStore.removeQueuedTurn(sessionId, id)}
             onEdit={editQueuedItem}
             onSendNow={(item) => void chatStore.sendQueuedNow(sessionId, item.id)}
@@ -521,12 +544,20 @@ export default function Composer({
                 loading={Boolean(sending && !interaction)}
                 onStop={onStop}
                 onSendNow={() => submitNow()}
+                onEmptySendNow={queue.length > 0 ? steerAllQueued : undefined}
+                busySendTitle={
+                  busyEnter === 'steer'
+                    ? 'Enter 插话（本轮生效）· Ctrl+Enter 排队'
+                    : 'Enter 排队 · Ctrl+Enter 插话（本轮生效）'
+                }
                 disabled={disabled}
                 autoFocus={autoFocus}
                 minRows={2}
                 placeholder={
                   sending && !interaction
-                    ? '回复中 — Enter 排队，Ctrl+Enter 立即打断发送'
+                    ? busyEnter === 'steer'
+                      ? '回复中 — Enter 插话（本轮生效），Ctrl+Enter 排队'
+                      : '回复中 — Enter 排队，Ctrl+Enter 插话（本轮生效）'
                     : activeSkill
                       ? `技能 /${activeSkill.id} 生效中 — 直接描述任务，退格或 × 退出`
                       : '输入消息，/ 调用技能，@ 引用文件…'
