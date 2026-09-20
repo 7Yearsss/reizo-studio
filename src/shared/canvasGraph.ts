@@ -86,6 +86,33 @@ export function wouldCycle(edges: CanvasEdge[], source: string, target: string):
   return false;
 }
 
+/** Canonical default output-handle id per node type (must match the Handle ids rendered by each node component). */
+const DEFAULT_SOURCE_HANDLE: Record<string, string | null> = {
+  image: 'image_out',
+  video: 'prompt_out',
+  audio: 'audio_out',
+  note: 'prompt_out',
+  anchor: 'anchor_out',
+  frameExtractor: 'frame_out',
+  subgraph: 'output',
+};
+
+/**
+ * Resolve a caller-supplied source handle to a real handle id on the node.
+ * Callers (agent tools, quick-wire menus) often pass generic names like
+ * "output" that no node actually registers — React Flow then silently drops
+ * the edge. Normalizing keeps edges renderable and correctly coloured.
+ */
+export function normalizeSourceHandle(
+  nodeType: string,
+  handle: string | null | undefined,
+): string | null {
+  if (!handle || handle === 'output' || handle === 'out' || handle === 'default') {
+    return DEFAULT_SOURCE_HANDLE[nodeType] ?? null;
+  }
+  return handle;
+}
+
 /**
  * Type Guard Matrix checking if an edge between source and target node is semantically valid.
  */

@@ -465,7 +465,7 @@ export function createCanvasTools(options: {
       inputSchema: z.object({
         source: z.string(),
         target: z.string(),
-        sourceHandle: z.string().optional().describe('Handle on source node (e.g. "output").'),
+        sourceHandle: z.string().optional().describe('Handle on source node (e.g. "image_out"). Omit to use the node\'s default output.'),
         targetHandle: z.string().optional().describe('Handle on target node (e.g. "prompt", "start_frame", "reference", "ref_1").'),
         operationId: z.string().optional().describe('Idempotent operation ID.'),
       }),
