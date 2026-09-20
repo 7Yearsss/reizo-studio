@@ -97,6 +97,23 @@ const selectionTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const proposalToastTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const pendingProposalCounts = new Map<string, number>();
 
+/** Burst-coalesce "Agent 更新了 N 个节点" toasts within an 800ms window. */
+export function queueAgentNodesToast(sessionId: string, count: number): void {
+  const pending = pendingProposalCounts.get(sessionId) ?? 0;
+  pendingProposalCounts.set(sessionId, pending + count);
+  const prev = proposalToastTimers.get(sessionId);
+  if (prev) clearTimeout(prev);
+  proposalToastTimers.set(
+    sessionId,
+    setTimeout(() => {
+      const total = pendingProposalCounts.get(sessionId) ?? 0;
+      pendingProposalCounts.delete(sessionId);
+      proposalToastTimers.delete(sessionId);
+      if (total > 0) toast.info(`Agent 更新了 ${total} 个节点`);
+    }, 800),
+  );
+}
+
 interface HistoryEntry {
   undo: () => Promise<void>;
   redo: () => Promise<void>;
@@ -238,24 +255,11 @@ function applyEvent(sessionId: string, event: CanvasEvent): void {
       });
       break;
     }
-    case 'proposal_created': {
-      // Auto-accept: nodes land as normal members; a burst-coalesced toast
-      // replaces the ProposalBar review step.
-      const pending = pendingProposalCounts.get(sessionId) ?? 0;
-      pendingProposalCounts.set(sessionId, pending + event.nodeIds.length);
-      const prev = proposalToastTimers.get(sessionId);
-      if (prev) clearTimeout(prev);
-      proposalToastTimers.set(
-        sessionId,
-        setTimeout(() => {
-          const count = pendingProposalCounts.get(sessionId) ?? 0;
-          pendingProposalCounts.delete(sessionId);
-          proposalToastTimers.delete(sessionId);
-          if (count > 0) toast.info(`Agent 更新了 ${count} 个节点`);
-        }, 800),
-      );
+    case 'proposal_created':
+      // Auto-accept: nodes land as normal members; a toast replaces the
+      // ProposalBar review step.
+      queueAgentNodesToast(sessionId, event.nodeIds.length);
       break;
-    }
     case 'proposal_accepted':
     case 'proposal_rejected':
       setProposals(sessionId, []);
