@@ -35,7 +35,8 @@ function nodeBrief(node: CanvasNode) {
 }
 
 const RUNNABLE_TYPES = new Set(['image', 'agent', 'video']);
-const WAIT_POLL_MS = 1_500;
+const SETTLE_GRACE_MS = 5_000;
+const SETTLE_GRACE_POLL_MS = 250;
 
 /** Node ids `runGraph` would execute for the same args (nodeIds whitelist > from-descendants > all runnable). */
 function runGraphScope(
@@ -75,19 +76,28 @@ async function settleNodes(
     const byId = new Map((snap?.nodes ?? []).map((n) => [n.id, n] as const));
     return ids.map((id) => byId.get(id)).filter((n): n is CanvasNode => Boolean(n));
   };
-  const poll = (async (): Promise<CanvasNode[]> => {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      const nodes = read();
-      if (nodes.length > 0 && nodes.every((n) => n.runState === 'done' || n.runState === 'error')) {
-        return nodes;
-      }
-      await new Promise((r) => setTimeout(r, WAIT_POLL_MS));
+  if (ids.length === 0) return [];
+  // Bound by the deadline, not by work — a hung provider must not pin the turn.
+  const workSettled = Promise.resolve(work).then(
+    () => true,
+    () => true,
+  );
+  const timedOut = await Promise.race([
+    workSettled.then(() => false),
+    new Promise<boolean>((r) => setTimeout(() => r(true), timeoutMs)),
+  ]);
+  if (!timedOut) {
+    // Brief grace: a node whose promise just resolved may need a tick for the
+    // store write (and any rerun's fresh 'running' state) to land.
+    const graceDeadline = Date.now() + SETTLE_GRACE_MS;
+    let nodes = read();
+    while (nodes.some((n) => n.runState === 'running') && Date.now() < graceDeadline) {
+      await new Promise((r) => setTimeout(r, SETTLE_GRACE_POLL_MS));
+      nodes = read();
     }
-    return read();
-  })();
-  await Promise.allSettled([poll, work]);
-  return poll;
+    return nodes;
+  }
+  return read();
 }
 
 /**
@@ -380,7 +390,7 @@ export function createCanvasTools(options: {
               ? runVideoNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node, waitForCompletion: true })
               : runImageNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node });
         if (wait === false) {
-          void running;
+          void running.catch((): undefined => undefined);
           return { ok: true, id, status: 'running' };
         }
         const settled = await settleNodes(canvasStore, canvas.id, [id], timeoutMs ?? 300_000, running);
@@ -415,7 +425,7 @@ export function createCanvasTools(options: {
           nodeIds,
         });
         if (wait === false) {
-          void running;
+          void running.catch((): undefined => undefined);
           return { ok: true, status: 'running', scope: nodeIds ? 'nodeIds' : from ? 'from' : 'all' };
         }
         const scope = runGraphScope(canvasStore, canvas.id, from, nodeIds);
