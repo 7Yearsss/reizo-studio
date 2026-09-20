@@ -1,6 +1,6 @@
 import { tool } from 'ai';
 import { z } from 'zod';
-import { CANVAS_IMAGE_SIZES, defaultNodeBox } from '../../../shared/canvas';
+import { CANVAS_IMAGE_MODELS, CANVAS_IMAGE_SIZES, defaultNodeBox } from '../../../shared/canvas';
 import { cameraFromPreset } from '../../../shared/cameraMotion';
 import { serializeMention } from '../../../shared/resolveMentions';
 import type { SettingsStore } from '../storage/settingsStore';
@@ -80,6 +80,12 @@ export function createCanvasTools(options: {
         type: z.enum(['image', 'agent', 'video', 'note', 'anchor']),
         prompt: z.string().optional().describe('Prompt (type "image", "video", or "note").'),
         size: z.enum(CANVAS_IMAGE_SIZES as [string, ...string[]]).optional(),
+        model: z
+          .string()
+          .optional()
+          .describe(
+            `type "image": model id. Available: ${CANVAS_IMAGE_MODELS.map((m) => m.id).join(', ')}.`,
+          ),
         instruction: z.string().optional().describe('Task description (type "agent").'),
         role: z.enum(['character', 'style', 'content']).optional().describe('type "anchor": what the pin locks.'),
         strength: z.enum(['low', 'mid', 'high']).optional().describe('type "anchor": how strictly to hold it.'),
@@ -94,7 +100,7 @@ export function createCanvasTools(options: {
         const box = defaultNodeBox(input.type);
         const params =
           input.type === 'image'
-            ? { prompt: input.prompt ?? '', size: input.size ?? '1024x1024' }
+            ? { prompt: input.prompt ?? '', size: input.size ?? '1024x1024', ...(input.model ? { model: input.model } : {}) }
             : input.type === 'video'
               ? { prompt: input.prompt ?? '', duration: '5s', ratio: '16:9', cameraMotion: 'none' }
               : input.type === 'note'

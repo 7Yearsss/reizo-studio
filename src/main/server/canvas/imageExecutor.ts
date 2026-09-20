@@ -23,7 +23,7 @@ const MAX_REFERENCE_IMAGES = 4;
 /** Gemini image models (nano-banana family) return images through
  * chat/completions with `modalities:[image,text]`, not /images/generations. */
 function isChatCompletionsImageModel(modelId: string): boolean {
-  return /^gemini-[\w.]*image/i.test(modelId);
+  return /^gemini-[\w.-]*image/i.test(modelId);
 }
 
 interface RawImage {
