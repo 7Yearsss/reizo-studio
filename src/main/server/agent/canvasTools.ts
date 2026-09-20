@@ -10,6 +10,7 @@ import { broadcastDownstreamDirty, runImageNode } from '../canvas/imageExecutor'
 import { runAgentNode } from '../canvas/agentExecutor';
 import { runVideoNode } from '../canvas/videoExecutor';
 import { runGraph } from '../canvas/graphExecutor';
+import { descendants } from '../canvas/graph';
 import type { CanvasNode } from '../../../shared/canvas';
 
 function nodeBrief(node: CanvasNode) {
@@ -31,6 +32,62 @@ function nodeBrief(node: CanvasNode) {
     assets: node.output?.assets ?? [],
     error: node.output?.error,
   };
+}
+
+const RUNNABLE_TYPES = new Set(['image', 'agent', 'video']);
+const WAIT_POLL_MS = 1_500;
+
+/** Node ids `runGraph` would execute for the same args (nodeIds whitelist > from-descendants > all runnable). */
+function runGraphScope(
+  canvasStore: CanvasStore,
+  canvasId: string,
+  from?: string,
+  nodeIds?: string[],
+): string[] {
+  const snap = canvasStore.getSnapshot(canvasId);
+  if (!snap) return [];
+  let keep: Set<string>;
+  if (nodeIds && nodeIds.length > 0) {
+    keep = new Set(nodeIds);
+  } else if (from) {
+    keep = descendants(snap.edges, from);
+    keep.add(from);
+  } else {
+    keep = new Set(snap.nodes.map((n) => n.id));
+  }
+  return snap.nodes.filter((n) => keep.has(n.id) && RUNNABLE_TYPES.has(n.type)).map((n) => n.id);
+}
+
+/**
+ * Wait for `ids` to reach done/error (or the timeout), while `work` runs.
+ * Returns the latest node snapshots — callers report per-node status instead
+ * of the agent polling read_canvas in a loop and spamming the message stream.
+ */
+async function settleNodes(
+  canvasStore: CanvasStore,
+  canvasId: string,
+  ids: string[],
+  timeoutMs: number,
+  work: Promise<unknown>,
+): Promise<CanvasNode[]> {
+  const read = (): CanvasNode[] => {
+    const snap = canvasStore.getSnapshot(canvasId);
+    const byId = new Map((snap?.nodes ?? []).map((n) => [n.id, n] as const));
+    return ids.map((id) => byId.get(id)).filter((n): n is CanvasNode => Boolean(n));
+  };
+  const poll = (async (): Promise<CanvasNode[]> => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const nodes = read();
+      if (nodes.length > 0 && nodes.every((n) => n.runState === 'done' || n.runState === 'error')) {
+        return nodes;
+      }
+      await new Promise((r) => setTimeout(r, WAIT_POLL_MS));
+    }
+    return read();
+  })();
+  await Promise.allSettled([poll, work]);
+  return poll;
 }
 
 /**
@@ -306,39 +363,50 @@ export function createCanvasTools(options: {
 
     run_node: tool({
       description:
-        'Run a canvas node by id. An image or video node generates the media; an agent node runs a read-only research/critique pass. Returns immediately; the result streams onto the canvas.',
-      inputSchema: z.object({ id: z.string() }),
-      execute: async ({ id }) => {
+        'Run a canvas node by id. An image or video node generates the media; an agent node runs a read-only research/critique pass. By default waits for the node to finish and returns its outcome — pass wait:false to fire-and-forget.',
+      inputSchema: z.object({
+        id: z.string(),
+        wait: z.boolean().optional().describe('Wait for the run to finish (default true).'),
+        timeoutMs: z.number().optional().describe('Max wait in ms (default 300000).'),
+      }),
+      execute: async ({ id, wait, timeoutMs }) => {
         const canvas = canvasStore.ensureCanvas(sessionId);
         const node = canvasStore.getNode(canvas.id, id);
         if (!node) return { error: `No canvas node "${id}"` };
-        if (node.type === 'agent') {
-          void runAgentNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node });
-        } else if (node.type === 'video') {
-          void runVideoNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node });
-        } else {
-          void runImageNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node });
+        const running =
+          node.type === 'agent'
+            ? runAgentNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node })
+            : node.type === 'video'
+              ? runVideoNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node, waitForCompletion: true })
+              : runImageNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node });
+        if (wait === false) {
+          void running;
+          return { ok: true, id, status: 'running' };
         }
-        return { ok: true, id, status: 'running' };
+        const settled = await settleNodes(canvasStore, canvas.id, [id], timeoutMs ?? 300_000, running);
+        const n = settled[0];
+        return { ok: n?.runState !== 'error', id, status: n?.runState ?? 'running', error: n?.output?.error };
       },
     }),
 
     run_graph: tool({
       description:
-        'Run the canvas as a pipeline. Independent nodes in the same dependency layer run in parallel; a node starts only after its inputs are done. Pass `from` to run that node and everything downstream, or `nodeIds` to run only an explicit set (e.g. the members of one group). `from` and `nodeIds` are mutually exclusive — `nodeIds` wins. Returns immediately; results stream onto the canvas.',
+        'Run the canvas as a pipeline. Independent nodes in the same dependency layer run in parallel; a node starts only after its inputs are done. Pass `from` to run that node and everything downstream, or `nodeIds` to run only an explicit set (e.g. the members of one group). `from` and `nodeIds` are mutually exclusive — `nodeIds` wins. By default waits for the whole run and returns every node\'s outcome — pass wait:false to fire-and-forget.',
       inputSchema: z.object({
         from: z.string().optional(),
         nodeIds: z
           .array(z.string())
           .optional()
           .describe("Explicit whitelist of node ids to run. Pass a group node's memberIds to run just that group."),
+        wait: z.boolean().optional().describe('Wait for the run to finish (default true).'),
+        timeoutMs: z.number().optional().describe('Max wait in ms (default 300000).'),
       }),
-      execute: async ({ from, nodeIds }) => {
+      execute: async ({ from, nodeIds, wait, timeoutMs }) => {
         const canvas = canvasStore.ensureCanvas(sessionId);
         if (from && !canvasStore.getNode(canvas.id, from)) return { error: `No canvas node "${from}"` };
         const missing = (nodeIds ?? []).filter((id) => !canvasStore.getNode(canvas.id, id));
         if (missing.length > 0) return { error: `No canvas node(s) ${missing.join(', ')}` };
-        void runGraph({
+        const running = runGraph({
           canvasStore,
           settingsStore,
           dataRoot,
@@ -346,7 +414,18 @@ export function createCanvasTools(options: {
           fromNodeId: from,
           nodeIds,
         });
-        return { ok: true, status: 'running', scope: nodeIds ? 'nodeIds' : from ? 'from' : 'all' };
+        if (wait === false) {
+          void running;
+          return { ok: true, status: 'running', scope: nodeIds ? 'nodeIds' : from ? 'from' : 'all' };
+        }
+        const scope = runGraphScope(canvasStore, canvas.id, from, nodeIds);
+        const settled = await settleNodes(canvasStore, canvas.id, scope, timeoutMs ?? 300_000, running);
+        const pending = settled.filter((n) => n.runState !== 'done' && n.runState !== 'error').length;
+        return {
+          ok: settled.every((n) => n.runState === 'done'),
+          status: pending > 0 ? 'running' : 'done',
+          results: settled.map((n) => ({ id: n.id, title: n.title, status: n.runState, error: n.output?.error })),
+        };
       },
     }),
 
