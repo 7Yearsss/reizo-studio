@@ -49,7 +49,13 @@ export default function WorkGroupCard({
   const runningToolCount = visibleParts.filter((part) => !part.result && !part.error).length;
   const runningActivity = activities.find((activity) => activity.status === 'running');
   const active = streaming || reasoningStreaming || runningToolCount > 0 || Boolean(runningActivity);
-  const items = toActivityItems({ activities, parts: visibleParts, reasoning, reasoningStreaming });
+  const items = toActivityItems({
+    activities,
+    parts: visibleParts,
+    reasoning,
+    reasoningStreaming,
+    detail: !active,
+  });
   const liveLabel = runningActivity?.kind === 'thinking' || reasoningStreaming
     ? '正在思考'
     : runningToolCount > 0
@@ -112,6 +118,9 @@ function toActivityItems(input: {
   parts: ToolCallPart[];
   reasoning?: string;
   reasoningStreaming: boolean;
+  /** Turn finished — swap plain tool rows for collapsed ToolCards so each
+   * row drills into its full command/output (Claude Code's Ran-N-commands). */
+  detail: boolean;
 }): AgentActivityItem[] {
   const items: AgentActivityItem[] = [];
   if (input.activities.length > 0) {
@@ -137,6 +146,14 @@ function toActivityItems(input: {
       // ask_user's real UI is the ask card under the message stream — a
       // per-call row ('Read 等待你的回答') only echoes noise next to it.
       if (!activity.tool || activity.tool.name === 'ask_user') continue;
+      if (input.detail && !PERSISTENT_TOOL_NAMES.has(activity.tool.name)) {
+        items.push({
+          id: activity.id,
+          type: 'text',
+          content: <ToolCard part={activity.tool} collapsed />,
+        });
+        continue;
+      }
       items.push({
         id: activity.id,
         type: 'tool',
@@ -156,6 +173,14 @@ function toActivityItems(input: {
     }
     for (const part of input.parts) {
       if (part.name === 'ask_user') continue;
+      if (input.detail && !PERSISTENT_TOOL_NAMES.has(part.name)) {
+        items.push({
+          id: part.id,
+          type: 'text',
+          content: <ToolCard part={part} collapsed />,
+        });
+        continue;
+      }
       items.push({
         id: part.id,
         type: 'tool',
@@ -165,7 +190,9 @@ function toActivityItems(input: {
     }
   }
 
-  const hasTools = items.some((item) => item.type === 'tool');
+  const hasTools =
+    input.parts.length > 0 ||
+    input.activities.some((a) => a.kind === 'tool' && a.tool && a.tool.name !== 'ask_user');
   // The working header already says 正在思考. A lone 思考中 row under an
   // empty 220px viewport is what looked like a broken blank card.
   if (!hasTools) return [];
