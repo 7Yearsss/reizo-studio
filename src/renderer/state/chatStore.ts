@@ -731,7 +731,7 @@ function makeEventFolder(
             if (trail.status === 'done' && UNDOABLE_TRAIL_VERBS.has(trail.verb)) {
               canvasStore.recordAgentBatch(sessionId, trail);
               if (trail.nodeIds.length > 0) {
-                canvasStore.addProposals(sessionId, trail.nodeIds);
+                canvasStore.queueAgentNodesToast(sessionId, trail.nodeIds.length);
               }
             }
           }
