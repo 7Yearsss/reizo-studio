@@ -9,6 +9,7 @@ import {
   WINDOW_GROW_ITEMS,
 } from '../../lib/buildRenderItems';
 import { MessageScroller } from '../agents/message-scroller';
+import ErrorBoundary from '../ErrorBoundary';
 import UserMessage from './UserMessage';
 import AssistantMessage from './AssistantMessage';
 import EmptyChatHints from './EmptyChatHints';
@@ -143,43 +144,61 @@ export default function MessageList({
                 : 'transition-opacity duration-150'
             }
           >
-            {m.role === 'user' ? (
-              <UserMessage
-                content={m.content}
-                sessionId={sessionId}
-                searchQuery={searchQuery}
-                currentMatch={currentMatchId === m.id}
-                canEdit={!sending && m.id === lastUserId}
-                onEdit={onEditLastUser}
-              />
-            ) : (
-              <AssistantMessage
-                content={m.content}
-                sessionId={sessionId}
-                parts={m.parts}
-                reasoning={m.reasoning}
-                reasoningMs={m.reasoningMs}
-                durationMs={m.durationMs}
-                currentMatch={currentMatchId === m.id}
-                canRetry={!sending && m.id === lastAssistantId}
-                onRetry={onRetryLastAssistant}
-                turnOutcome={!sending && m.id === lastAssistantId ? turnOutcome : null}
-              />
-            )}
+            {/* Per-message boundary: one bad message (e.g. malformed tool args
+                after an upstream stall) must not blank the whole stream. */}
+            <ErrorBoundary
+              fallback={
+                <div className="rounded-lg border border-line bg-paper-inset px-3 py-2 text-[11px] text-ink-muted">
+                  这条消息渲染失败
+                </div>
+              }
+            >
+              {m.role === 'user' ? (
+                <UserMessage
+                  content={m.content}
+                  sessionId={sessionId}
+                  searchQuery={searchQuery}
+                  currentMatch={currentMatchId === m.id}
+                  canEdit={!sending && m.id === lastUserId}
+                  onEdit={onEditLastUser}
+                />
+              ) : (
+                <AssistantMessage
+                  content={m.content}
+                  sessionId={sessionId}
+                  parts={m.parts}
+                  reasoning={m.reasoning}
+                  reasoningMs={m.reasoningMs}
+                  durationMs={m.durationMs}
+                  currentMatch={currentMatchId === m.id}
+                  canRetry={!sending && m.id === lastAssistantId}
+                  onRetry={onRetryLastAssistant}
+                  turnOutcome={!sending && m.id === lastAssistantId ? turnOutcome : null}
+                />
+              )}
+            </ErrorBoundary>
           </div>
         ))}
         {sending && (
           <div data-message-id="streaming">
-            <AssistantMessage
-              content={streaming}
-              sessionId={sessionId}
-              parts={streamingTools}
-              reasoning={streamingReasoning || undefined}
-              reasoningStreaming={Boolean(streamingReasoning) && !streaming}
-              reasoningStartedAt={reasoningStartedAt}
-              streaming
-              activities={streamingActivities}
-            />
+            <ErrorBoundary
+              fallback={
+                <div className="rounded-lg border border-line bg-paper-inset px-3 py-2 text-[11px] text-ink-muted">
+                  回复渲染异常 — 请尝试刷新
+                </div>
+              }
+            >
+              <AssistantMessage
+                content={streaming}
+                sessionId={sessionId}
+                parts={streamingTools}
+                reasoning={streamingReasoning || undefined}
+                reasoningStreaming={Boolean(streamingReasoning) && !streaming}
+                reasoningStartedAt={reasoningStartedAt}
+                streaming
+                activities={streamingActivities}
+              />
+            </ErrorBoundary>
           </div>
         )}
         {sessionId ? <PendingInteraction sessionId={sessionId} /> : null}
