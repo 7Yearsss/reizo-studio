@@ -44,8 +44,11 @@ const PROVIDER_MAX_RETRIES = 2;
  */
 const PROVIDER_TIMEOUT = {
   firstChunkMs: 3 * 60_000,
-  chunkMs: 60_000,
-  stepMs: 5 * 60_000,
+  // Reasoning models on buffered gateways (grok via new-api relays) can sit
+  // silent well past a minute mid-step — upstream buffers the reasoning and
+  // flushes it as a burst. Silent thinking is real generation, not a stall.
+  chunkMs: 3 * 60_000,
+  stepMs: 10 * 60_000,
 } as const;
 
 export { abortChatTurn };

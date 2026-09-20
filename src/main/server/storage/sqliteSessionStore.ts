@@ -75,6 +75,7 @@ function decodeContent(raw: string): {
   reasoning?: string;
   reasoningMs?: number;
   durationMs?: number;
+  turnOutcome?: TurnOutcome;
 } {
   try {
     const parsed = JSON.parse(raw) as {
@@ -83,6 +84,7 @@ function decodeContent(raw: string): {
       reasoning?: unknown;
       reasoningMs?: unknown;
       durationMs?: unknown;
+      turnOutcome?: unknown;
     };
     if (parsed && typeof parsed === 'object' && 'text' in parsed) {
       return {
@@ -91,6 +93,12 @@ function decodeContent(raw: string): {
         reasoning: typeof parsed.reasoning === 'string' ? parsed.reasoning : undefined,
         reasoningMs: typeof parsed.reasoningMs === 'number' ? parsed.reasoningMs : undefined,
         durationMs: typeof parsed.durationMs === 'number' ? parsed.durationMs : undefined,
+        turnOutcome:
+          parsed.turnOutcome === 'completed' ||
+          parsed.turnOutcome === 'interrupted' ||
+          parsed.turnOutcome === 'error'
+            ? parsed.turnOutcome
+            : undefined,
       };
     }
   } catch {
@@ -106,11 +114,12 @@ function encodeContent(message: ChatMessage): string {
     reasoning: message.reasoning ?? null,
     reasoningMs: message.reasoningMs ?? null,
     durationMs: message.durationMs ?? null,
+    turnOutcome: message.turnOutcome ?? null,
   });
 }
 
 function toMessage(row: MessageRowRaw): ChatMessage {
-  const { text, parts, reasoning, reasoningMs, durationMs } = decodeContent(row.content);
+  const { text, parts, reasoning, reasoningMs, durationMs, turnOutcome } = decodeContent(row.content);
   return {
     id: row.id,
     role: row.role as ChatRole,
@@ -119,6 +128,7 @@ function toMessage(row: MessageRowRaw): ChatMessage {
     reasoning: reasoning || undefined,
     reasoningMs,
     durationMs,
+    turnOutcome,
     createdAt: new Date(row.created_at).toISOString(),
     clientId: row.client_id ?? undefined,
     toolUseId: row.tool_use_id ?? undefined,

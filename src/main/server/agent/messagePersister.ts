@@ -1,5 +1,6 @@
 import { nanoid } from 'nanoid';
 import type { ChatMessage, SessionStore, ToolCallPart } from '../../../shared/chat';
+import type { TurnOutcome } from '../../../shared/stream';
 import type { LargeValueStore } from '../storage/largeValueStore';
 
 /**
@@ -36,7 +37,7 @@ export interface TurnPersister {
   /** Assistant text + tool parts accumulated so far (defensive copies). */
   snapshot(): { text: string; parts: ToolCallPart[] };
   /** Serialized append of the assistant row. No-op when aborted / empty. */
-  commit(opts: { aborted: boolean }): Promise<void>;
+  commit(opts: { aborted: boolean; outcome?: TurnOutcome }): Promise<void>;
   /**
    * Discard accumulated state without persisting. Called on provider stream
    * crashes (HTTP 524 / mid-flight abort) so the session DB never contains a
@@ -82,7 +83,7 @@ export function createTurnPersister(deps: {
     return text.length > 0 || parts.length > 0;
   }
 
-  async function commit({ aborted }: { aborted: boolean }): Promise<void> {
+  async function commit({ aborted, outcome }: { aborted: boolean; outcome?: TurnOutcome }): Promise<void> {
     if (aborted || !hasContent()) return;
     const spilledParts = parts.length
       ? parts.map((p) => ({
@@ -101,6 +102,7 @@ export function createTurnPersister(deps: {
         ? { reasoning, reasoningMs: Math.max(0, reasoningEndedAt - reasoningStartedAt) }
         : {}),
       durationMs: Math.max(0, Date.now() - turnStartedAt),
+      ...(outcome ? { turnOutcome: outcome } : {}),
       createdAt: new Date().toISOString(),
       turnId,
       generation,
