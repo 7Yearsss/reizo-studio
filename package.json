@@ -52,6 +52,7 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.47",
+    "@ai-sdk/openai-compatible": "^3.0.40",
     "@excalidraw/excalidraw": "^0.18.1",
     "@excalidraw/mermaid-to-excalidraw": "^2.2.2",
     "@hono/node-server": "^2.1.1",
