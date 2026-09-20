@@ -83,6 +83,9 @@ export interface ChatState {
   /** Transient "this run may be stuck" notice from the tool-loop guard. */
   loopNoticeBySession: Record<string, string | null>;
   queueBySession: Record<string, QueuedTurn[]>;
+  /** Steer messages accepted by the live turn's inbox, waiting for the
+   * `user_message` event that confirms injection (renders the real bubble). */
+  steerPendingBySession: Record<string, { id: string; text: string }[]>;
   composerSeedBySession: Record<string, ComposerSeed | undefined>;
   /** Skill pinned to a session — stays active across turns until unpinned. */
   skillBySession: Record<string, string | undefined>;
@@ -115,6 +118,7 @@ let state: ChatState = {
   todosBySession: {},
   loopNoticeBySession: {},
   queueBySession: {},
+  steerPendingBySession: {},
   composerSeedBySession: {},
   skillBySession: {},
   nodeRefsBySession: {},
@@ -303,6 +307,7 @@ export async function deleteSession(id: string): Promise<void> {
   const { [id]: _removedPhase, ...replyPhaseBySession } = state.replyPhaseBySession;
   const { [id]: _removedOutcome, ...turnOutcomeBySession } = state.turnOutcomeBySession;
   const { [id]: _removedInterrupt, ...interruptRequestedBySession } = state.interruptRequestedBySession;
+  const { [id]: _removedSteers, ...steerPendingBySession } = state.steerPendingBySession;
   fenceBySession.delete(id);
   streamMetaBySession.delete(id);
   resetReveals(id);
@@ -322,6 +327,7 @@ export async function deleteSession(id: string): Promise<void> {
     replyPhaseBySession,
     turnOutcomeBySession,
     interruptRequestedBySession,
+    steerPendingBySession,
   });
   tabStore.closeSessionTabs(id);
   artifactStore.dropSessionArtifacts(id);
@@ -353,7 +359,10 @@ export function dismissInterrupt(sessionId: string): void {
   });
 }
 
-export async function ensureSessionMessages(id: string): Promise<void> {
+export async function ensureSessionMessages(
+  id: string,
+  opts: { resume?: boolean } = {},
+): Promise<void> {
   const session = await api.getSession(id);
   if (state.sendingBySession[id]) {
     setState({
@@ -368,7 +377,10 @@ export async function ensureSessionMessages(id: string): Promise<void> {
     errorBySession: { ...state.errorBySession, [id]: session.lastTurnError ?? null },
   });
   // A turn was in flight when we last lost the connection — try to reattach.
-  if (isInterrupted(summaryOf(session)) && !state.sendingBySession[id]) {
+  // Hidden tabs must not hold a resume stream: a turn suspended on an ask card
+  // keeps its socket open indefinitely, and N mounted tabs exhaust the pool.
+  // The effect re-runs on activation, so the stream attaches when the tab shows.
+  if (opts.resume !== false && isInterrupted(summaryOf(session)) && !state.sendingBySession[id]) {
     void resumeInterruptedTurn(id);
   }
   // Ask cards persist across restarts — re-show any unanswered one (e.g. the
@@ -479,6 +491,134 @@ export function removeQueuedTurn(sessionId: string, id: string): void {
       [sessionId]: (state.queueBySession[sessionId] ?? []).filter((item) => item.id !== id),
     },
   });
+}
+
+/** Interrupt the live turn (if any) and send immediately — Cursor's "Send now". */
+export async function sendNow(
+  sessionId: string,
+  text: string,
+  mentions: string[] = [],
+  extra: QueuedTurn['extra'] = {},
+): Promise<void> {
+  if (!text.trim()) return;
+  if (state.sendingBySession[sessionId]) await stopMessage(sessionId);
+  await dispatchTurn(sessionId, text, mentions, extra, {
+    truncateAfterId: extra.replaceFromId,
+  });
+}
+
+/** Pull a queued item out of the queue and send it right away, interrupting the live turn first. */
+export async function sendQueuedNow(sessionId: string, id: string): Promise<void> {
+  const item = (state.queueBySession[sessionId] ?? []).find((q) => q.id === id);
+  if (!item) return;
+  removeQueuedTurn(sessionId, id);
+  await sendNow(sessionId, item.text, item.mentions, item.extra);
+}
+
+/** Pop every queued turn so the composer can put their text back for editing (Claude Code's ↑ recall). */
+export function recallQueue(sessionId: string): QueuedTurn[] {
+  const items = state.queueBySession[sessionId] ?? [];
+  if (items.length === 0) return [];
+  setState({ queueBySession: { ...state.queueBySession, [sessionId]: [] } });
+  return items;
+}
+
+/**
+ * Steer (插话): send a message into the LIVE turn — the server parks it in the
+ * turn's inbox and injects it at the next step boundary, no interrupt, no new
+ * turn. Shows as a pending row until the `user_message` event confirms the
+ * injection; falls back to the queue when no turn is live or the steer
+ * carries things only a normal turn supports (attachments, replace/regenerate).
+ */
+export async function steerNow(
+  sessionId: string,
+  text: string,
+  mentions: string[] = [],
+  extra: QueuedTurn['extra'] = {},
+): Promise<void> {
+  const trimmed = text.trim();
+  if (!trimmed) return;
+  if (!state.sendingBySession[sessionId] || extra.attachments?.length || extra.replaceFromId) {
+    await sendMessage(sessionId, text, mentions, extra);
+    return;
+  }
+  const id = `steer-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const pending = { id, text: trimmed };
+  setState({
+    steerPendingBySession: {
+      ...state.steerPendingBySession,
+      [sessionId]: [...(state.steerPendingBySession[sessionId] ?? []), pending],
+    },
+  });
+  try {
+    const res = await api.steerTurn(sessionId, { id, text: trimmed, mentions });
+    if (!res.accepted) throw new Error('no live turn');
+  } catch {
+    setState({
+      steerPendingBySession: {
+        ...state.steerPendingBySession,
+        [sessionId]: (state.steerPendingBySession[sessionId] ?? []).filter((p) => p.id !== id),
+      },
+    });
+    await sendMessage(sessionId, text, mentions, extra);
+  }
+}
+
+/** Steer every queued message into the live turn at once (empty-draft Ctrl+Enter). */
+export async function steerAllQueued(sessionId: string): Promise<void> {
+  const items = state.queueBySession[sessionId] ?? [];
+  if (items.length === 0) return;
+  setState({ queueBySession: { ...state.queueBySession, [sessionId]: [] } });
+  for (const item of items) {
+    await steerNow(sessionId, item.text, item.mentions, item.extra);
+  }
+}
+
+/**
+ * Turn over: park any steer the server accepted but never injected back into
+ * the queue (send order preserved — leftovers append behind older queued
+ * items). Anything still in `steerPending` but absent from the server drain
+ * was never accepted (the fallback already queued it), so only the drain is
+ * authoritative for what to re-enqueue.
+ */
+async function settleSteerInbox(sessionId: string): Promise<void> {
+  let leftovers: { id: string; content: string }[] = [];
+  try {
+    leftovers = (await api.drainSteers(sessionId)).items;
+  } catch {
+    /* local API unreachable — pending steers just drop */
+  }
+  const pending = state.steerPendingBySession[sessionId] ?? [];
+  const leftoverById = new Map(leftovers.map((i) => [i.id, i.content]));
+  // Union of client-pending (POST accepted but pending until injected) and
+  // server-leftover (covers a renderer reload, where steerPending is empty
+  // but the server inbox still holds items).
+  const pendingIds = new Set(pending.map((p) => p.id));
+  const requeue = [
+    ...pending.map((p) => leftoverById.get(p.id) ?? p.text),
+    ...leftovers.filter((i) => !pendingIds.has(i.id)).map((i) => i.content),
+  ];
+  if (pending.length > 0 || leftovers.length > 0) {
+    setState({
+      steerPendingBySession: { ...state.steerPendingBySession, [sessionId]: [] },
+      ...(requeue.length > 0
+        ? {
+            queueBySession: {
+              ...state.queueBySession,
+              [sessionId]: [
+                ...(state.queueBySession[sessionId] ?? []),
+                ...requeue.map((text, i) => ({
+                  id: `q-steer-${Date.now()}-${i}`,
+                  text,
+                  mentions: [] as string[],
+                  extra: {},
+                })),
+              ],
+            },
+          }
+        : {}),
+    });
+  }
 }
 
 export async function continueQueue(sessionId: string): Promise<void> {
@@ -813,6 +953,34 @@ function makeEventFolder(
           replyPhaseBySession: { ...state.replyPhaseBySession, [sessionId]: event.phase },
         });
         break;
+      case 'user_message':
+        // A steer was injected mid-turn — render the real user bubble and
+        // clear its pending row. Dedupe guards against reconnect replays.
+        setState({
+          messagesBySession: {
+            ...state.messagesBySession,
+            [sessionId]: (state.messagesBySession[sessionId] ?? []).some(
+              (m) => m.id === event.id,
+            )
+              ? state.messagesBySession[sessionId] ?? []
+              : [
+                  ...(state.messagesBySession[sessionId] ?? []),
+                  {
+                    id: event.id,
+                    role: 'user' as const,
+                    content: event.content,
+                    createdAt: event.createdAt,
+                  },
+                ],
+          },
+          steerPendingBySession: {
+            ...state.steerPendingBySession,
+            [sessionId]: (state.steerPendingBySession[sessionId] ?? []).filter(
+              (p) => p.id !== event.id,
+            ),
+          },
+        });
+        break;
       case 'done':
         getReveal(sessionId).flush();
         getReasoningReveal(sessionId).flush();
@@ -992,6 +1160,7 @@ async function dispatchTurn(
       await resumeInterruptedTurn(sessionId, { takeover: true });
     } else {
       setState({ sendingBySession: { ...state.sendingBySession, [sessionId]: false } });
+      await settleSteerInbox(sessionId);
       const next = (getSnapshot().queueBySession[sessionId] ?? [])[0];
       if (next && getSnapshot().turnOutcomeBySession[sessionId] === 'completed') void continueQueue(sessionId);
       // A watchdog trip means the provider stopped answering — retry the turn

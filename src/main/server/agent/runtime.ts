@@ -50,6 +50,109 @@ const PROVIDER_TIMEOUT = {
 
 export { abortChatTurn };
 
+export interface SteerItem {
+  /** Client-supplied id — the persisted user message reuses it. */
+  id: string;
+  /** Persisted bubble content: user text + any canvas-ref block (same shape as a normal user message). */
+  content: string;
+}
+
+/** Prepended to the model-facing copy so the model reads the message as mid-turn steering, not a new request. */
+const STEER_PREFIX = '(The user sent this while you were mid-turn — treat it as steering input for the current work.)';
+
+/**
+ * Mid-turn steering inbox (DSH's "next-step" lane): messages the user sends
+ * while a turn is live. `prepareStep` drains this at the next step boundary —
+ * between tool calls — so the model sees the steer in the SAME turn instead
+ * of it queueing for the next one. Anything still pending when the turn ends
+ * is returned by `drainSteerInbox` for the renderer to park in its queue.
+ */
+const steerInbox = new Map<string, SteerItem[]>();
+
+export function pushSteer(sessionId: string, item: SteerItem): void {
+  const list = steerInbox.get(sessionId) ?? [];
+  list.push(item);
+  steerInbox.set(sessionId, list);
+}
+
+export function drainSteerInbox(sessionId: string): SteerItem[] {
+  const list = steerInbox.get(sessionId) ?? [];
+  steerInbox.delete(sessionId);
+  return list;
+}
+
+interface CanvasRef {
+  id: string;
+  region?: { x: number; y: number; w: number; h: number };
+}
+
+function parseCanvasRefs(mentions: string[]): { refs: CanvasRef[]; paths: string[] } {
+  const refs = mentions
+    .filter((m) => m.startsWith('canvas:'))
+    .map((m) => {
+      const raw = m.slice('canvas:'.length);
+      const [id, regionStr] = raw.split('@r=');
+      const region = regionStr?.split(',').map(Number);
+      return {
+        id,
+        region:
+          region && region.length === 4 && region.every((v) => Number.isFinite(v))
+            ? { x: region[0], y: region[1], w: region[2], h: region[3] }
+            : undefined,
+      };
+    });
+  return { refs, paths: mentions.filter((m) => !m.startsWith('canvas:')) };
+}
+
+function buildCanvasRefBlock(
+  canvasStore: CanvasStore | undefined,
+  sessionId: string,
+  refs: CanvasRef[],
+): string {
+  if (refs.length === 0 || !canvasStore) return '';
+  const canvas = canvasStore.findCanvasBySession(sessionId);
+  const lines: string[] = [];
+  let hasRegion = false;
+  for (const ref of refs) {
+    const node = canvas ? canvasStore.getNode(canvas.id, ref.id) : null;
+    if (!node) continue;
+    const p = node.params as { prompt?: string; instruction?: string; size?: string };
+    let line =
+      `- ${node.id} [${node.type}, ${node.runState}] ${node.title || ''} ${p.prompt ? `prompt: "${p.prompt.slice(0, 120)}"` : p.instruction ? `task: "${p.instruction.slice(0, 120)}"` : ''}`.trim();
+    if (ref.region) {
+      hasRegion = true;
+      const r = ref.region;
+      line += ` — user marked region: x ${(r.x * 100).toFixed(0)}%–${((r.x + r.w) * 100).toFixed(0)}%, y ${(r.y * 100).toFixed(0)}%–${((r.y + r.h) * 100).toFixed(0)}%`;
+    }
+    lines.push(line);
+  }
+  if (lines.length === 0) return '';
+  return (
+    `Referenced canvas nodes:\n${lines.join('\n')}` +
+    (hasRegion
+      ? '\n(Marked regions are normalized rects the user drew on that node\'s image — they are pointing at that specific area, so treat it as the subject of the message.)'
+      : '')
+  );
+}
+
+/**
+ * Content persisted for a steered message — same shape as a normal user
+ * message (text + ref blocks) so the renderer's canvas chips work on it.
+ */
+export function buildSteerContent(
+  canvasStore: CanvasStore | undefined,
+  sessionId: string,
+  text: string,
+  mentions: string[],
+): string {
+  const { refs, paths } = parseCanvasRefs(mentions);
+  const blocks = [
+    paths.length > 0 ? `Referenced workspace paths:\n${paths.map((m) => `- ${m}`).join('\n')}` : '',
+    buildCanvasRefBlock(canvasStore, sessionId, refs),
+  ].filter(Boolean);
+  return blocks.length > 0 ? `${text}\n\n${blocks.join('\n\n')}` : text;
+}
+
 export async function runChatTurn(options: {
   sessionStore: SessionStore;
   settingsStore: SettingsStore;
@@ -120,48 +223,8 @@ export async function runChatTurn(options: {
     session = await sessionStore.setMessages(sessionId, session.messages.slice(0, idx));
   }
 
-  const canvasRefs = mentions
-    .filter((m) => m.startsWith('canvas:'))
-    .map((m) => {
-      const raw = m.slice('canvas:'.length);
-      const [id, regionStr] = raw.split('@r=');
-      const region = regionStr?.split(',').map(Number);
-      return {
-        id,
-        region:
-          region && region.length === 4 && region.every((v) => Number.isFinite(v))
-            ? { x: region[0], y: region[1], w: region[2], h: region[3] }
-            : undefined,
-      };
-    });
-  const pathMentions = mentions.filter((m) => !m.startsWith('canvas:'));
-
-  let canvasRefBlock = '';
-  if (canvasRefs.length > 0 && canvasStore) {
-    const canvas = canvasStore.findCanvasBySession(sessionId);
-    const lines: string[] = [];
-    let hasRegion = false;
-    for (const ref of canvasRefs) {
-      const node = canvas ? canvasStore.getNode(canvas.id, ref.id) : null;
-      if (!node) continue;
-      const p = node.params as { prompt?: string; instruction?: string; size?: string };
-      let line =
-        `- ${node.id} [${node.type}, ${node.runState}] ${node.title || ''} ${p.prompt ? `prompt: "${p.prompt.slice(0, 120)}"` : p.instruction ? `task: "${p.instruction.slice(0, 120)}"` : ''}`.trim();
-      if (ref.region) {
-        hasRegion = true;
-        const r = ref.region;
-        line += ` — user marked region: x ${(r.x * 100).toFixed(0)}%–${((r.x + r.w) * 100).toFixed(0)}%, y ${(r.y * 100).toFixed(0)}%–${((r.y + r.h) * 100).toFixed(0)}%`;
-      }
-      lines.push(line);
-    }
-    if (lines.length > 0) {
-      canvasRefBlock =
-        `Referenced canvas nodes:\n${lines.join('\n')}` +
-        (hasRegion
-          ? '\n(Marked regions are normalized rects the user drew on that node\'s image — they are pointing at that specific area, so treat it as the subject of the message.)'
-          : '');
-    }
-  }
+  const { refs: canvasRefs, paths: pathMentions } = parseCanvasRefs(mentions);
+  const canvasRefBlock = buildCanvasRefBlock(canvasStore, sessionId, canvasRefs);
 
   const extraBlocks = [
     pathMentions.length > 0 ? `Referenced workspace paths:\n${pathMentions.map((m) => `- ${m}`).join('\n')}` : '',
@@ -396,8 +459,29 @@ export async function runChatTurn(options: {
       maxRetries: PROVIDER_MAX_RETRIES,
       timeout: PROVIDER_TIMEOUT,
       abortSignal: signal,
-      prepareStep: ({ messages: stepMessages }) => {
+      prepareStep: async ({ messages: stepMessages }) => {
         const compacted = compactModelMessages(stepMessages as ModelMessage[]);
+        // Steer inbox drains at every step boundary (the AI SDK carries the
+        // appended user messages forward through the rest of this pass).
+        const steers = drainSteerInbox(sessionId);
+        for (const steer of steers) {
+          const message: ChatMessage = {
+            id: steer.id,
+            role: 'user',
+            content: steer.content,
+            createdAt: new Date().toISOString(),
+          };
+          try {
+            await sessionStore.appendMessage(sessionId, message);
+          } catch (err) {
+            console.warn(`[chat] steer persist failed session=${sessionId}: ${(err as Error).message}`);
+          }
+          emit({ type: 'user_message', id: message.id, content: message.content, createdAt: message.createdAt });
+          const modelMessage: ModelMessage = { role: 'user', content: `${STEER_PREFIX}\n${steer.content}` };
+          // `history` feeds any later continuation pass in this same turn.
+          history.push(modelMessage);
+          compacted.push(modelMessage);
+        }
         if (canvasStore && lastSeenNodeCount >= 0) {
           const canvas = canvasStore.findCanvasBySession(sessionId);
           const snap = canvas ? canvasStore.getSnapshot(canvas.id) : null;

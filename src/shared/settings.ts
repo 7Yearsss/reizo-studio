@@ -2,6 +2,8 @@ import type { ProviderPreset } from './providers';
 
 export type Appearance = 'system' | 'light' | 'dark';
 export type PermissionMode = 'ask' | 'workspace' | 'full';
+/** Plain Enter while the agent is busy: 'queue' parks it for the next turn, 'steer' injects it mid-turn. */
+export type BusyEnterBehavior = 'queue' | 'steer';
 
 export interface StoredProvider {
   apiKey: string | null;
@@ -14,6 +16,8 @@ export interface LocalSettings {
   activeProviderId: string;
   workspacePath: string | null;
   permissionMode: PermissionMode;
+  /** What plain Enter does while a turn is running: queue the message or steer it into the live turn. */
+  busyEnter: BusyEnterBehavior;
   /** Let the agent drive the real mouse/keyboard/screen (the `computer` tool). Off by default. */
   computerUse: boolean;
   providers: Record<string, StoredProvider>;
@@ -31,6 +35,7 @@ export interface PublicSettings {
   activeProviderId: string;
   workspacePath: string | null;
   permissionMode: PermissionMode;
+  busyEnter: BusyEnterBehavior;
   computerUse: boolean;
   providers: PublicProvider[];
 }
@@ -38,6 +43,7 @@ export interface PublicSettings {
 export interface SettingsPatch {
   appearance?: Appearance;
   permissionMode?: PermissionMode;
+  busyEnter?: BusyEnterBehavior;
   computerUse?: boolean;
   activeProviderId?: string;
   workspacePath?: string | null;
@@ -51,5 +57,6 @@ export interface SettingsPatch {
 
 export const DEFAULT_APPEARANCE: Appearance = 'system';
 export const DEFAULT_PERMISSION_MODE: PermissionMode = 'ask';
+export const DEFAULT_BUSY_ENTER: BusyEnterBehavior = 'queue';
 export const DEFAULT_COMPUTER_USE = false;
 export const DEFAULT_PROVIDER_ID = 'openai';

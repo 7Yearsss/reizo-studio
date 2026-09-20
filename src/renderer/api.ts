@@ -267,6 +267,27 @@ export async function stopMessage(sessionId: string): Promise<void> {
   await api(`/api/sessions/${sessionId}/stop`, { method: 'POST' });
 }
 
+/** Mid-turn steer (插话): the message injects into the running turn at the next step boundary. */
+export async function steerTurn(
+  sessionId: string,
+  item: { id: string; text: string; mentions?: string[] },
+): Promise<{ accepted: boolean }> {
+  const res = await api(`/api/sessions/${sessionId}/steer`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(item),
+  });
+  return (await res.json()) as { accepted: boolean };
+}
+
+/** Steers the turn ended before consuming — park them back in the queue. */
+export async function drainSteers(
+  sessionId: string,
+): Promise<{ items: { id: string; content: string }[] }> {
+  const res = await api(`/api/sessions/${sessionId}/steer`, { method: 'DELETE' });
+  return (await res.json()) as { items: { id: string; content: string }[] };
+}
+
 export async function answerPermission(
   sessionId: string,
   id: string,

@@ -4,10 +4,12 @@ import { safeDecrypt, safeEncrypt } from './providerStore';
 import { PROVIDER_PRESETS } from '../../../shared/providers';
 import {
   DEFAULT_APPEARANCE,
+  DEFAULT_BUSY_ENTER,
   DEFAULT_COMPUTER_USE,
   DEFAULT_PERMISSION_MODE,
   DEFAULT_PROVIDER_ID,
   type Appearance,
+  type BusyEnterBehavior,
   type LocalSettings,
   type PermissionMode,
   type PublicProvider,
@@ -19,6 +21,7 @@ import {
 interface DiskSettings {
   appearance?: Appearance;
   permissionMode?: PermissionMode;
+  busyEnter?: BusyEnterBehavior;
   computerUse?: boolean;
   activeProviderId?: string;
   workspacePath?: string | null;
@@ -73,6 +76,7 @@ export function createSettingsStore(root: string) {
     const settings: LocalSettings = {
       appearance: disk.appearance ?? DEFAULT_APPEARANCE,
       permissionMode: disk.permissionMode ?? DEFAULT_PERMISSION_MODE,
+      busyEnter: disk.busyEnter ?? DEFAULT_BUSY_ENTER,
       computerUse: disk.computerUse ?? DEFAULT_COMPUTER_USE,
       activeProviderId: disk.activeProviderId ?? DEFAULT_PROVIDER_ID,
       workspacePath: disk.workspacePath ?? null,
@@ -98,6 +102,7 @@ export function createSettingsStore(root: string) {
     return {
       appearance: settings.appearance,
       permissionMode: settings.permissionMode,
+      busyEnter: settings.busyEnter,
       computerUse: settings.computerUse,
       activeProviderId: settings.activeProviderId,
       workspacePath: settings.workspacePath,
@@ -131,6 +136,7 @@ export function createSettingsStore(root: string) {
     return {
       appearance: settings.appearance,
       permissionMode: settings.permissionMode,
+      busyEnter: settings.busyEnter,
       computerUse: settings.computerUse,
       activeProviderId: settings.activeProviderId,
       workspacePath: settings.workspacePath,
@@ -143,6 +149,7 @@ export function createSettingsStore(root: string) {
 
     if (patch.appearance) settings.appearance = patch.appearance;
     if (patch.permissionMode) settings.permissionMode = patch.permissionMode;
+    if (patch.busyEnter) settings.busyEnter = patch.busyEnter;
     if (patch.computerUse !== undefined) settings.computerUse = patch.computerUse;
     if (patch.activeProviderId) {
       if (!PROVIDER_PRESETS.some((p) => p.id === patch.activeProviderId)) {

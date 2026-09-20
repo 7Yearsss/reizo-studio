@@ -78,6 +78,9 @@ export type ChatStreamEvent =
   | { type: 'ask'; id: string; questions: AskQuestion[] }
   | { type: 'todos'; items: TodoItem[] }
   | { type: 'tool_loop'; tier: 'warn' | 'halt'; reason: string }
+  // A steered (插话) user message the agent loop injected mid-turn — persisted
+  // server-side; `content` matches the stored message so canvas-ref chips work.
+  | { type: 'user_message'; id: string; content: string; createdAt: string }
   | { type: 'error'; error: string }
   | { type: 'done'; outcome: TurnOutcome; aborted?: boolean; error?: string };
 
