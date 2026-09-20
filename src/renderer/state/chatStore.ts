@@ -1117,20 +1117,37 @@ export async function answerPermission(
 ): Promise<void> {
   const pending = state.interactionBySession[sessionId];
   if (!pending || pending.kind !== 'permission') return;
-  await api.answerPermission(sessionId, pending.id, decision);
+  // Optimistic dismiss — restore on failure. If the stream has already queued
+  // the next permission, leave that one showing.
   const current = state.interactionBySession[sessionId];
-  // The live stream may already have the next queued permission. Only clear
-  // if we are still looking at the one we just answered.
   if (current?.kind === 'permission' && current.id === pending.id) {
     setState({ interactionBySession: { ...state.interactionBySession, [sessionId]: null } });
+  }
+  try {
+    await api.answerPermission(sessionId, pending.id, decision);
+  } catch (err) {
+    setState({ interactionBySession: { ...state.interactionBySession, [sessionId]: pending } });
+    throw err;
   }
 }
 
 export async function answerAsk(sessionId: string, answers: Record<string, string>): Promise<void> {
   const pending = state.interactionBySession[sessionId];
   if (!pending || pending.kind !== 'ask') return;
-  const res = await api.answerAsk(sessionId, pending.id, answers);
-  setState({ interactionBySession: { ...state.interactionBySession, [sessionId]: null } });
+  // Optimistic: the card dismisses on click; a slow/failed request restores it
+  // so a hung POST never leaves the card looking unanswered. If the stream
+  // already queued the next ask, leave that one showing.
+  const current = state.interactionBySession[sessionId];
+  if (current?.kind === 'ask' && current.id === pending.id) {
+    setState({ interactionBySession: { ...state.interactionBySession, [sessionId]: null } });
+  }
+  let res: { ok: boolean; live?: boolean };
+  try {
+    res = await api.answerAsk(sessionId, pending.id, answers);
+  } catch (err) {
+    setState({ interactionBySession: { ...state.interactionBySession, [sessionId]: pending } });
+    throw err;
+  }
   // The card survived an app restart but its turn didn't — nothing will
   // consume the answer. Send it as a normal message so the agent picks up.
   if (res.ok && res.live === false) {
