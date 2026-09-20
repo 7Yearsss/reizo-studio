@@ -14,10 +14,10 @@ const RUNNABLE = new Set(['image', 'agent', 'video']);
 
 /**
  * Maximum concurrent node executions per wave.
- * Capped at 3 to prevent provider rate-limiting (HTTP 429) while still
- * delivering 3x faster multi-shot parallel generations.
+ * Capped at 5 to bound provider rate-limiting (HTTP 429) while keeping
+ * multi-shot listing/storyboard sets close to single-image wall time.
  */
-export const MAX_CONCURRENCY = 3;
+export const MAX_CONCURRENCY = 5;
 
 /** In-flight `runGraph` per canvas, so a "stop" can abort between nodes. */
 const activeRuns = new Map<string, AbortController>();
