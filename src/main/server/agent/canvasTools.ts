@@ -108,10 +108,13 @@ export function createCanvasTools(options: {
                 : input.type === 'anchor'
                   ? { role: input.role ?? 'character', strength: input.strength ?? 'mid' }
                   : { instruction: input.instruction ?? '' };
+        const existing = canvasStore.getSnapshot(canvas.id).nodes;
+        const collides = (x: number, y: number) =>
+          existing.some((n) => x < n.x + n.w && x + box.w > n.x && y < n.y + n.h && y + box.h > n.y);
         const spot =
-          typeof input.x === 'number' && typeof input.y === 'number'
+          typeof input.x === 'number' && typeof input.y === 'number' && !collides(input.x, input.y)
             ? { x: input.x, y: input.y }
-            : nextFreeSpot(canvasStore.getSnapshot(canvas.id).nodes);
+            : nextFreeSpot(existing);
         const { rev, node } = canvasStore.addNode(canvas.id, {
           type: input.type,
           x: spot.x,
