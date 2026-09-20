@@ -218,12 +218,14 @@ export const CANVAS_VIDEO_CAMERAS: Array<{ id: NonNullable<CanvasVideoParams['ca
   { id: 'orbit', label: '环绕运镜 (Orbit)' },
 ];
 
-export const CANVAS_IMAGE_MODELS = [
+export const CANVAS_IMAGE_MODELS: readonly { id: string; name: string; badge?: string }[] = [
+  { id: 'gemini-3.1-flash-image', name: 'Gemini 3.1 Flash Image (快·一致性)' },
+  { id: 'gemini-3-pro-image', name: 'Gemini 3 Pro Image (高质量)' },
   { id: 'flux-schnell', name: 'Flux.1 Schnell (极速)', badge: '推荐' },
   { id: 'flux-dev', name: 'Flux.1 Dev (商业写实)' },
   { id: 'sd-3.5', name: 'SD 3.5 Large (平衡)' },
   { id: 'dall-e-3', name: 'DALL-E 3 (奇幻插画)' },
-] as const;
+];
 
 export interface VideoModelCapabilities {
   startFrame: boolean;

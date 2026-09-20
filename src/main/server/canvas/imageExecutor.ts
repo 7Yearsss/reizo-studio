@@ -20,6 +20,88 @@ import { planAnchors } from '../../../shared/referenceAnchors';
  */
 const MAX_REFERENCE_IMAGES = 4;
 
+/** Gemini image models (nano-banana family) return images through
+ * chat/completions with `modalities:[image,text]`, not /images/generations. */
+function isChatCompletionsImageModel(modelId: string): boolean {
+  return /^gemini-[\w.]*image/i.test(modelId);
+}
+
+interface RawImage {
+  uint8Array: Uint8Array;
+  mediaType: string;
+}
+
+function pushDataUrlImage(dataUrl: string, out: RawImage[]): void {
+  const m = /^data:image\/(\w+);base64,(.+)$/s.exec(dataUrl);
+  if (!m) return;
+  out.push({ uint8Array: new Uint8Array(Buffer.from(m[2], 'base64')), mediaType: `image/${m[1]}` });
+}
+
+async function generateImageViaChat(options: {
+  baseUrl?: string;
+  apiKey: string;
+  modelId: string;
+  prompt: string;
+  images?: Uint8Array[];
+  size?: string;
+}): Promise<{ images: RawImage[] }> {
+  const content: Array<Record<string, unknown>> = [
+    { type: 'text', text: options.size ? `${options.prompt}\n\nImage size: ${options.size}` : options.prompt },
+  ];
+  for (const img of options.images ?? []) {
+    content.push({ type: 'image_url', image_url: { url: `data:image/png;base64,${Buffer.from(img).toString('base64')}` } });
+  }
+  const base = (options.baseUrl || 'https://api.openai.com/v1').replace(/\/$/, '');
+  const res = await fetch(`${base}/chat/completions`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${options.apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: options.modelId,
+      messages: [{ role: 'user', content }],
+      modalities: ['image', 'text'],
+    }),
+  });
+  if (!res.ok) throw new Error(`image model ${options.modelId} failed: HTTP ${res.status} ${(await res.text()).slice(0, 300)}`);
+  const body = (await res.json()) as {
+    choices?: Array<{ message?: { content?: unknown; images?: Array<{ image_url?: { url?: string } }> } }>;
+  };
+  const msg = body.choices?.[0]?.message ?? {};
+  const images: RawImage[] = [];
+  for (const img of msg.images ?? []) {
+    if (img.image_url?.url) pushDataUrlImage(img.image_url.url, images);
+  }
+  if (typeof msg.content === 'string') {
+    for (const m of msg.content.matchAll(/data:image\/\w+;base64,[A-Za-z0-9+/=]+/g)) {
+      pushDataUrlImage(m[0], images);
+    }
+  } else if (Array.isArray(msg.content)) {
+    for (const part of msg.content as Array<{ type?: string; image_url?: { url?: string } }>) {
+      if (part.type === 'image_url' && part.image_url?.url) pushDataUrlImage(part.image_url.url, images);
+    }
+  }
+  if (!images.length) throw new Error(`${options.modelId} returned no image`);
+  return { images };
+}
+
+/** Route to chat/completions for Gemini image models, /images otherwise. */
+async function generateOne(
+  resolved: { provider: ReturnType<typeof createOpenAiProvider>; modelId: string; apiKey: string; baseUrl?: string },
+  prompt: string | { text: string; images: Uint8Array[] },
+  size: string,
+): Promise<{ images: RawImage[] }> {
+  if (isChatCompletionsImageModel(resolved.modelId)) {
+    return generateImageViaChat({
+      baseUrl: resolved.baseUrl,
+      apiKey: resolved.apiKey,
+      modelId: resolved.modelId,
+      prompt: typeof prompt === 'string' ? prompt : prompt.text,
+      images: typeof prompt === 'string' ? [] : prompt.images,
+      size,
+    });
+  }
+  return generateImage({ model: resolved.provider.image(resolved.modelId), prompt, size: size as `${number}x${number}` }) as Promise<{ images: RawImage[] }>;
+}
+
 /**
  * Re-broadcast a node and its descendants (annotated) so their `dirty` badge
  * reflects the just-changed inputs. Rides the `rev` of the mutation that
@@ -62,7 +144,7 @@ async function resolveImageProvider(
   settingsStore: SettingsStore,
   providerId: string | undefined,
   params: CanvasImageParams,
-): Promise<{ provider: ReturnType<typeof createOpenAiProvider>; modelId: string } | { error: string }> {
+): Promise<{ provider: ReturnType<typeof createOpenAiProvider>; modelId: string; apiKey: string; baseUrl?: string } | { error: string }> {
   const settings = await settingsStore.get();
   let resolvedId = providerId || settings.activeProviderId || 'openai';
   let stored = settings.providers[resolvedId];
@@ -83,7 +165,7 @@ async function resolveImageProvider(
   const isOfficial = !baseUrl || baseUrl.includes('api.openai.com');
   const modelId = params.model || (isOfficial ? 'dall-e-3' : 'gpt-image-2');
   const provider = createOpenAiProvider({ apiKey: stored.apiKey, baseUrl });
-  return { provider, modelId };
+  return { provider, modelId, apiKey: stored.apiKey, baseUrl };
 }
 
 async function writeImageAssetsAndBroadcast(options: {
@@ -241,11 +323,7 @@ export async function runImageNode(options: {
       }
       const srcParams = (srcNode.params || {}) as CanvasImageParams;
       const size = params.size ?? srcParams.size ?? '1024x1024';
-      const result = await generateImage({
-        model: resolved.provider.image(resolved.modelId),
-        prompt: { text: rawPrompt, images: imgs },
-        size,
-      });
+      const result = await generateOne(resolved, { text: rawPrompt, images: imgs }, size);
       await writeImageAssetsAndBroadcast({
         canvasStore,
         dataRoot,
@@ -365,11 +443,7 @@ export async function runImageNode(options: {
     );
 
     const genPromises = Array.from({ length: variationsCount }, () =>
-      generateImage({
-        model: provider.image(modelId),
-        prompt,
-        size: params.size ?? '1024x1024',
-      }),
+      generateOne(resolved, prompt, params.size ?? '1024x1024'),
     );
     const results = await Promise.all(genPromises);
     await writeImageAssetsAndBroadcast({
