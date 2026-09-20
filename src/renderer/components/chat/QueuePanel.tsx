@@ -21,16 +21,23 @@ export default function QueuePanel({
 }) {
   const total = items.length + steers.length;
   // DSH-style dock: once there are several parked messages, collapse the list
-  // to a single header line so the composer stays compact.
+  // to a single header line so the composer stays compact. `override` is the
+  // user's manual toggle; items accreting past 2 must still auto-collapse.
   const collapsible = total > 2;
-  const [collapsed, setCollapsed] = useState(collapsible);
+  const [override, setOverride] = useState<boolean | null>(null);
+  const collapsed = override ?? collapsible;
+  const setCollapsed = (v: boolean | ((c: boolean) => boolean)) =>
+    setOverride((prev) => {
+      const next = typeof v === 'function' ? v(prev ?? collapsible) : v;
+      return next === collapsible ? null : next;
+    });
   if (total === 0) return null;
 
   return (
     <div className="mb-2 space-y-1">
       <button
         type="button"
-        onClick={collapsible ? () => setCollapsed((c) => !c) : undefined}
+        onClick={collapsible ? () => setCollapsed((c: boolean) => !c) : undefined}
         className="flex items-center gap-1.5 px-1 text-[11px] text-ink-muted"
       >
         <ListOrdered size={11} />

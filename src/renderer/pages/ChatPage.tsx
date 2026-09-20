@@ -54,8 +54,10 @@ export default function ChatPage({
   const [matchCursor, setMatchCursor] = useState(0);
 
   useEffect(() => {
-    void chatStore.ensureSessionMessages(sessionId);
-  }, [sessionId]);
+    // Hidden tabs skip the resume stream — it holds a socket the whole time a
+    // turn is suspended, and every mounted tab pays it.
+    void chatStore.ensureSessionMessages(sessionId, { resume: active });
+  }, [sessionId, active]);
 
   useEffect(() => {
     if (!renaming) setTitleDraft(session?.title ?? '');

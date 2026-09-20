@@ -359,7 +359,10 @@ export function dismissInterrupt(sessionId: string): void {
   });
 }
 
-export async function ensureSessionMessages(id: string): Promise<void> {
+export async function ensureSessionMessages(
+  id: string,
+  opts: { resume?: boolean } = {},
+): Promise<void> {
   const session = await api.getSession(id);
   if (state.sendingBySession[id]) {
     setState({
@@ -374,7 +377,10 @@ export async function ensureSessionMessages(id: string): Promise<void> {
     errorBySession: { ...state.errorBySession, [id]: session.lastTurnError ?? null },
   });
   // A turn was in flight when we last lost the connection — try to reattach.
-  if (isInterrupted(summaryOf(session)) && !state.sendingBySession[id]) {
+  // Hidden tabs must not hold a resume stream: a turn suspended on an ask card
+  // keeps its socket open indefinitely, and N mounted tabs exhaust the pool.
+  // The effect re-runs on activation, so the stream attaches when the tab shows.
+  if (opts.resume !== false && isInterrupted(summaryOf(session)) && !state.sendingBySession[id]) {
     void resumeInterruptedTurn(id);
   }
   // Ask cards persist across restarts — re-show any unanswered one (e.g. the
