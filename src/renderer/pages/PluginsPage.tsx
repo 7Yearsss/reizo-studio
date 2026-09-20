@@ -43,6 +43,30 @@ function formatCount(n: number): string {
   return String(n);
 }
 
+/** `coverUrl` arrives as an API-root path — resolve it against the API origin. */
+function coverSrc(coverUrl: string): string | null {
+  const origin = api.getResolvedApiOrigin();
+  if (!origin) return null;
+  return coverUrl.startsWith('http') ? coverUrl : `${origin}${coverUrl}`;
+}
+
+function SkillCover({ skill }: { skill: SkillSummary }) {
+  const [failed, setFailed] = useState(false);
+  const src = skill.coverUrl ? coverSrc(skill.coverUrl) : null;
+  if (!src || failed) return null;
+  return (
+    <div className="-mx-5 -mt-5 mb-3 overflow-hidden rounded-t-2xl">
+      <img
+        src={src}
+        alt=""
+        className="aspect-[16/10] w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
+        loading="lazy"
+        onError={() => setFailed(true)}
+      />
+    </div>
+  );
+}
+
 function SkillIcon({ entry }: { entry: SkillHubEntry }) {
   const [failed, setFailed] = useState(false);
   if (entry.iconUrl && !failed) {
@@ -175,17 +199,18 @@ export default function PluginsPage() {
           </p>
         ) : (
           <div className="grid max-w-4xl grid-cols-1 gap-4 md:grid-cols-2">
-            {skills.map((skill) => (
+            {[...skills].sort((a, b) => Number(Boolean(b.coverUrl)) - Number(Boolean(a.coverUrl))).map((skill) => (
               <div
                 key={skill.id}
                 role="button"
                 tabIndex={0}
                 onClick={() => setDetail({ kind: 'installed', skill })}
                 onKeyDown={(e) => e.key === 'Enter' && setDetail({ kind: 'installed', skill })}
-                className="cursor-pointer rounded-2xl border border-line bg-paper-raised p-5 transition-shadow hover:shadow-md"
+                className="group cursor-pointer rounded-2xl border border-line bg-paper-raised p-5 transition-shadow hover:shadow-md"
               >
+                <SkillCover skill={skill} />
                 <div className="mb-2 flex items-center gap-2">
-                  <Plug size={16} className="text-ink-muted" />
+                  {!skill.coverUrl && <Plug size={16} className="text-ink-muted" />}
                   <h3 className="font-semibold">{skill.name}</h3>
                   <span className="rounded bg-paper-inset px-1.5 py-0.5 text-[11px] text-ink-muted">
                     {skill.source === 'user' ? '用户' : '内置'}
@@ -379,6 +404,7 @@ export default function PluginsPage() {
 
       {detail?.kind === 'installed' && (
         <SkillDetailModal
+          coverSrc={detail.skill.coverUrl ? coverSrc(detail.skill.coverUrl) : null}
           title={detail.skill.name}
           subtitle={`/${detail.skill.id} · ${detail.skill.description}`}
           chips={

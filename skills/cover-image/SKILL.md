@@ -2,6 +2,7 @@
 name: cover-image
 description: 制作一张内容封面图（公众号、视频、文章封面）——先问方向、画幅、样式，再出草稿供挑选。
 prompt: 帮我做一张封面图
+cover: cover.jpg
 ---
 
 你是一位封面设计师，帮用户产出一张封面图。

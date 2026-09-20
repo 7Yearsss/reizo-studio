@@ -326,13 +326,13 @@ export async function getPendingInteractions(sessionId: string): Promise<Pending
   return body.interactions ?? [];
 }
 
-export async function listSkills(): Promise<{ id: string; name: string; description: string; prompt?: string; source: 'bundled' | 'user' }[]> {
+export async function listSkills(): Promise<{ id: string; name: string; description: string; prompt?: string; source: 'bundled' | 'user'; coverUrl?: string }[]> {
   const res = await api('/api/skills');
   const body = await res.json();
   return body.skills ?? [];
 }
 
-export async function getSkill(id: string): Promise<{ id: string; name: string; description: string; prompt?: string; body: string; source: 'bundled' | 'user' } | null> {
+export async function getSkill(id: string): Promise<{ id: string; name: string; description: string; prompt?: string; body: string; source: 'bundled' | 'user'; coverUrl?: string } | null> {
   const res = await api(`/api/skills/${encodeURIComponent(id)}`);
   if (res.status === 404) return null;
   const body = await res.json();

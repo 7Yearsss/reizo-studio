@@ -6,6 +6,8 @@ export interface SkillSummary {
   description: string;
   prompt?: string;
   source: 'bundled' | 'user';
+  /** Resolved cover image URL for visual skills (set by the server). */
+  coverUrl?: string;
 }
 
 export interface SkillState {
