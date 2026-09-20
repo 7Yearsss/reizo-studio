@@ -368,7 +368,10 @@ export async function ensureSessionMessages(id: string): Promise<void> {
     errorBySession: { ...state.errorBySession, [id]: session.lastTurnError ?? null },
   });
   // A turn was in flight when we last lost the connection — try to reattach.
-  if (isInterrupted(summaryOf(session)) && !state.sendingBySession[id]) {
+  // Only the active tab resumes eagerly: a mounted background tab's resume
+  // stream holds a browser same-origin connection, and ~6 of them starve
+  // every other API call. ChatPage re-runs this on tab activation.
+  if (isInterrupted(summaryOf(session)) && !state.sendingBySession[id] && tabStore.activeSessionId() === id) {
     void resumeInterruptedTurn(id);
   }
   // Ask cards persist across restarts — re-show any unanswered one (e.g. the

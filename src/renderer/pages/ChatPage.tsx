@@ -55,7 +55,7 @@ export default function ChatPage({
 
   useEffect(() => {
     void chatStore.ensureSessionMessages(sessionId);
-  }, [sessionId]);
+  }, [sessionId, active]);
 
   useEffect(() => {
     if (!renaming) setTitleDraft(session?.title ?? '');

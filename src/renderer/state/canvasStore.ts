@@ -1,4 +1,8 @@
 import * as api from '../api';
+import {
+  activeSessionId as tabStoreActiveSessionId,
+  subscribe as subscribeTabs,
+} from './tabStore';
 import type {
   CanvasNode,
   CanvasEdge,
@@ -269,6 +273,59 @@ function applyEvent(sessionId: string, event: CanvasEvent): void {
   }
 }
 
+/**
+ * Only the foreground session holds a live canvas stream. Every mounted tab
+ * used to keep one open — HTTP/1.1 browsers cap same-origin connections at
+ * ~6, so a handful of restored tabs starved every other API call (this is why
+ * ask cards looked unanswerable: the submit POST never reached the server).
+ * Inactive sessions get a one-shot snapshot and resync when re-activated.
+ */
+const desiredOpen = new Set<string>();
+const startingStreams = new Set<string>();
+let tabWatchStarted = false;
+
+async function activateStream(sessionId: string): Promise<void> {
+  if (streamAborts.has(sessionId) || startingStreams.has(sessionId)) return;
+  startingStreams.add(sessionId);
+  try {
+    const snap = await api.getCanvas(sessionId);
+    ingestSnapshot(sessionId, snap);
+    if (!desiredOpen.has(sessionId) || tabStoreActiveSessionId() !== sessionId) return;
+    const abort = new AbortController();
+    streamAborts.set(sessionId, abort);
+    void runStream(sessionId, snap.canvas.id, abort.signal);
+  } catch {
+    /* snapshot failed — retry on next activation */
+  } finally {
+    startingStreams.delete(sessionId);
+  }
+}
+
+function syncStreams(): void {
+  const active = tabStoreActiveSessionId();
+  for (const sessionId of [...streamAborts.keys()]) {
+    if (sessionId !== active) {
+      streamAborts.get(sessionId)?.abort();
+      streamAborts.delete(sessionId);
+    }
+  }
+  for (const sessionId of desiredOpen) {
+    if (sessionId === active) void activateStream(sessionId);
+  }
+}
+
+function ensureTabWatch(): void {
+  if (tabWatchStarted) return;
+  tabWatchStarted = true;
+  let last = tabStoreActiveSessionId();
+  subscribeTabs(() => {
+    const next = tabStoreActiveSessionId();
+    if (next === last) return;
+    last = next;
+    syncStreams();
+  });
+}
+
 async function runStream(sessionId: string, canvasId: string, signal: AbortSignal): Promise<void> {
   while (!signal.aborted) {
     try {
@@ -296,21 +353,21 @@ async function runStream(sessionId: string, canvasId: string, signal: AbortSigna
 }
 
 export async function openCanvas(sessionId: string): Promise<void> {
-  if (streamAborts.has(sessionId)) return;
+  desiredOpen.add(sessionId);
+  ensureTabWatch();
   primeNotifications();
-  const abort = new AbortController();
-  streamAborts.set(sessionId, abort);
   try {
     const snap = await api.getCanvas(sessionId);
     ingestSnapshot(sessionId, snap);
-    void runStream(sessionId, snap.canvas.id, abort.signal);
   } catch (err) {
-    streamAborts.delete(sessionId);
+    desiredOpen.delete(sessionId);
     throw err;
   }
+  syncStreams();
 }
 
 export function closeCanvas(sessionId: string): void {
+  desiredOpen.delete(sessionId);
   streamAborts.get(sessionId)?.abort();
   streamAborts.delete(sessionId);
 }
