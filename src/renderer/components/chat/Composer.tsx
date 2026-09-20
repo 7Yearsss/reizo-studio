@@ -47,6 +47,7 @@ export default function Composer({
   loopNotice = null,
   showInterruptBanner = false,
   onRetryTurn,
+  onRetryStalled,
   onDismissInterrupt,
   compact = false,
 }: {
@@ -71,6 +72,8 @@ export default function Composer({
   loopNotice?: string | null;
   showInterruptBanner?: boolean;
   onRetryTurn?: () => void;
+  /** Kill the stalled live turn and re-run it — shown in the status row. */
+  onRetryStalled?: () => void;
   onDismissInterrupt?: () => void;
   compact?: boolean;
 }) {
@@ -195,6 +198,7 @@ export default function Composer({
       lastTextAt={lastTextAt}
       lastProgressAt={lastProgressAt}
       onStop={interaction ? onStop : undefined}
+      onRetry={onRetryStalled}
       skillName={activeSkill?.name}
     />
   ) : null;

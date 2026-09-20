@@ -167,6 +167,10 @@ export function setPickingReference(sessionId: string, active: boolean): void {
 }
 
 const abortBySession = new Map<string, AbortController>();
+/** Watchdog-trip errors that mean the upstream stopped answering — worth one automatic retry. */
+const UPSTREAM_STALL_ERRORS = new Set(['Upstream idle timeout', 'Turn stalled']);
+/** Auto-retry budget per user turn — reset on each fresh (non-regenerate) send. */
+const autoRetryBySession = new Map<string, number>();
 /** Non-reactive: liveRevision fence + last seen stream meta, per session. */
 const fenceBySession = new Map<string, Fence>();
 const streamMetaBySession = new Map<string, StreamMeta>();
@@ -526,6 +530,26 @@ export async function retryInterruptedTurn(sessionId: string): Promise<void> {
   });
 }
 
+/** "重试" on the stalled-reply status row: kill the live turn and re-run the
+ * last user message immediately instead of waiting out the watchdog. */
+export async function retryStalledTurn(sessionId: string): Promise<void> {
+  if (!state.sendingBySession[sessionId]) {
+    await retryInterruptedTurn(sessionId);
+    return;
+  }
+  try {
+    await api.stopMessage(sessionId);
+  } catch {
+    /* still release below */
+  }
+  abortBySession.get(sessionId)?.abort();
+  // Wait for the in-flight dispatch's cleanup to release the session.
+  for (let i = 0; i < 50 && getSnapshot().sendingBySession[sessionId]; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  await retryInterruptedTurn(sessionId);
+}
+
 export function editLastUserMessage(sessionId: string): void {
   if (state.sendingBySession[sessionId]) return;
   const messages = state.messagesBySession[sessionId] ?? [];
@@ -850,6 +874,7 @@ async function dispatchTurn(
     const idx = current.findIndex((m) => m.id === turn.truncateAfterId);
     return idx < 0 ? current : current.slice(0, idx);
   })();
+  if (!turn.regenerate) autoRetryBySession.delete(sessionId);
   const userMessage: ChatMessage | null = turn.regenerate
     ? null
     : {
@@ -946,6 +971,16 @@ async function dispatchTurn(
       setState({ sendingBySession: { ...state.sendingBySession, [sessionId]: false } });
       const next = (getSnapshot().queueBySession[sessionId] ?? [])[0];
       if (next && getSnapshot().turnOutcomeBySession[sessionId] === 'completed') void continueQueue(sessionId);
+      // A watchdog trip means the provider stopped answering — retry the turn
+      // once instead of leaving the user staring at a dead error banner.
+      const lastError = getSnapshot().errorBySession[sessionId];
+      if (UPSTREAM_STALL_ERRORS.has(lastError ?? '') && (autoRetryBySession.get(sessionId) ?? 0) < 1) {
+        autoRetryBySession.set(sessionId, 1);
+        setState({
+          errorBySession: { ...getSnapshot().errorBySession, [sessionId]: '上游超时，正在自动重试…' },
+        });
+        window.setTimeout((): void => void retryInterruptedTurn(sessionId), 1200);
+      }
     }
   }
 }
