@@ -25,6 +25,7 @@ import { variantGrid } from '../../shared/variantLayout';
 import type { AgentTrailEntry } from '../../shared/agentTrail';
 import { grabVideoFrameBlob, type FramePick } from '../lib/videoFrame';
 import { notifyJobDone, primeNotifications } from '../lib/notify';
+import { toast } from '../lib/toast';
 import type { CanvasEvent } from '../../shared/canvasStream';
 import {
   isStructuralTargetHandle,
@@ -93,6 +94,8 @@ const listeners = new Set<() => void>();
 const streamAborts = new Map<string, AbortController>();
 const lastRevBySession = new Map<string, number>();
 const selectionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const proposalToastTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const pendingProposalCounts = new Map<string, number>();
 
 interface HistoryEntry {
   undo: () => Promise<void>;
@@ -235,9 +238,24 @@ function applyEvent(sessionId: string, event: CanvasEvent): void {
       });
       break;
     }
-    case 'proposal_created':
-      addProposals(sessionId, event.nodeIds);
+    case 'proposal_created': {
+      // Auto-accept: nodes land as normal members; a burst-coalesced toast
+      // replaces the ProposalBar review step.
+      const pending = pendingProposalCounts.get(sessionId) ?? 0;
+      pendingProposalCounts.set(sessionId, pending + event.nodeIds.length);
+      const prev = proposalToastTimers.get(sessionId);
+      if (prev) clearTimeout(prev);
+      proposalToastTimers.set(
+        sessionId,
+        setTimeout(() => {
+          const count = pendingProposalCounts.get(sessionId) ?? 0;
+          pendingProposalCounts.delete(sessionId);
+          proposalToastTimers.delete(sessionId);
+          if (count > 0) toast.info(`Agent 更新了 ${count} 个节点`);
+        }, 800),
+      );
       break;
+    }
     case 'proposal_accepted':
     case 'proposal_rejected':
       setProposals(sessionId, []);
