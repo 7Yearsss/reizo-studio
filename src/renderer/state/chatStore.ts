@@ -167,10 +167,16 @@ export function setPickingReference(sessionId: string, active: boolean): void {
 }
 
 const abortBySession = new Map<string, AbortController>();
-/** Watchdog-trip errors that mean the upstream stopped answering — worth one automatic retry. */
+/** Watchdog-trip errors that mean the upstream stopped answering — worth an automatic retry. */
 const UPSTREAM_STALL_ERRORS = new Set(['Upstream idle timeout', 'Turn stalled']);
 /** Auto-retry budget per user turn — reset on each fresh (non-regenerate) send. */
 const autoRetryBySession = new Map<string, number>();
+const AUTO_RETRY_LIMIT = 2;
+/** No stream events for this long (while idle — no tools running, not waiting on
+ * the user) counts as a silent upstream: abort and retry instead of waiting
+ * for the server's 5-minute watchdog. */
+const STALL_DETECT_MS = 90_000;
+const STALL_POLL_MS = 15_000;
 /** Non-reactive: liveRevision fence + last seen stream meta, per session. */
 const fenceBySession = new Map<string, Fence>();
 const streamMetaBySession = new Map<string, StreamMeta>();
@@ -924,6 +930,22 @@ async function dispatchTurn(
   const acc = { text: '', reasoning: '', tools: [] as ToolCallPart[], activities: [] as ReplyActivity[] };
   let reconnectAfterTransportLoss = false;
 
+  // Proactive stall detection: the server watchdog gives up after 5 idle
+  // minutes, which feels like a hang. If the stream goes quiet while nothing
+  // is legitimately running (no in-flight tool, not parked on an ask card),
+  // abort and re-dispatch the turn ourselves — capped by autoRetryBySession.
+  const stallPoll = window.setInterval(() => {
+    const snap = getSnapshot();
+    if (!snap.sendingBySession[sessionId]) return;
+    if (snap.interactionBySession[sessionId]) return;
+    if ((snap.streamingToolsBySession[sessionId] ?? []).some((p) => p.result === undefined && p.error === undefined)) return;
+    const lastProgress = snap.lastProgressAtBySession[sessionId];
+    if (!lastProgress || Date.now() - lastProgress < STALL_DETECT_MS) return;
+    if ((autoRetryBySession.get(sessionId) ?? 0) >= AUTO_RETRY_LIMIT) return;
+    autoRetryBySession.set(sessionId, (autoRetryBySession.get(sessionId) ?? 0) + 1);
+    void retryStalledTurn(sessionId);
+  }, STALL_POLL_MS);
+
   try {
     await api.sendMessage(sessionId, text, {
       providerId: settings.activeProviderId,
@@ -964,6 +986,7 @@ async function dispatchTurn(
       setState({ errorBySession: { ...state.errorBySession, [sessionId]: (err as Error).message } });
     }
   } finally {
+    window.clearInterval(stallPoll);
     if (abortBySession.get(sessionId) === abort) abortBySession.delete(sessionId);
     if (reconnectAfterTransportLoss) {
       await resumeInterruptedTurn(sessionId, { takeover: true });
@@ -972,10 +995,14 @@ async function dispatchTurn(
       const next = (getSnapshot().queueBySession[sessionId] ?? [])[0];
       if (next && getSnapshot().turnOutcomeBySession[sessionId] === 'completed') void continueQueue(sessionId);
       // A watchdog trip means the provider stopped answering — retry the turn
-      // once instead of leaving the user staring at a dead error banner.
+      // automatically (shared budget with the proactive stall detector)
+      // instead of leaving the user staring at a dead error banner.
       const lastError = getSnapshot().errorBySession[sessionId];
-      if (UPSTREAM_STALL_ERRORS.has(lastError ?? '') && (autoRetryBySession.get(sessionId) ?? 0) < 1) {
-        autoRetryBySession.set(sessionId, 1);
+      if (
+        UPSTREAM_STALL_ERRORS.has(lastError ?? '') &&
+        (autoRetryBySession.get(sessionId) ?? 0) < AUTO_RETRY_LIMIT
+      ) {
+        autoRetryBySession.set(sessionId, (autoRetryBySession.get(sessionId) ?? 0) + 1);
         setState({
           errorBySession: { ...getSnapshot().errorBySession, [sessionId]: '上游超时，正在自动重试…' },
         });
