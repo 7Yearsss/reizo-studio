@@ -411,11 +411,17 @@ export function createCanvasTools(options: {
     }),
 
     update_node: tool({
-      description: 'Change a canvas node\'s params. For an image node pass `prompt` and/or `size`; for an agent node pass `instruction`; for a video node pass `prompt` and/or `camera` (structured camera motion, each axis −10..10). Also renames via `title`. An image/video `prompt` may embed `@[label](canvas:<nodeId>)` references to other nodes — each resolves to an ordered reference image from that node\'s output at run time. Does not re-run the node.',
+      description: 'Change a canvas node\'s params. For an image node pass `prompt`, `size`, and/or `model`; for an agent node pass `instruction`; for a video node pass `prompt` and/or `camera` (structured camera motion, each axis −10..10). Also renames via `title`. An image/video `prompt` may embed `@[label](canvas:<nodeId>)` references to other nodes — each resolves to an ordered reference image from that node\'s output at run time. Does not re-run the node.',
       inputSchema: z.object({
         id: z.string(),
         prompt: z.string().optional(),
         size: z.enum(CANVAS_IMAGE_SIZES as [string, ...string[]]).optional(),
+        model: z
+          .string()
+          .optional()
+          .describe(
+            `type "image": model id. Available: ${CANVAS_IMAGE_MODELS.map((m) => m.id).join(', ')}.`,
+          ),
         instruction: z.string().optional(),
         title: z.string().optional(),
         camera: z
@@ -431,13 +437,14 @@ export function createCanvasTools(options: {
           .describe('Video node only. Camera motion by axis; negative = left/down/out/ccw, positive = right/up/in/cw.'),
         operationId: z.string().optional().describe('Idempotent operation ID.'),
       }),
-      execute: async ({ id, prompt, size, instruction, title, camera, operationId }) => {
+      execute: async ({ id, prompt, size, model, instruction, title, camera, operationId }) => {
         const canvas = canvasStore.ensureCanvas(sessionId);
         const node = canvasStore.getNode(canvas.id, id);
         if (!node) return { error: `No canvas node "${id}"` };
         const params = { ...(node.params as Record<string, unknown>) };
         if (prompt !== undefined) params.prompt = prompt;
         if (size !== undefined) params.size = size;
+        if (model !== undefined) params.model = model;
         if (instruction !== undefined) params.instruction = instruction;
         if (camera !== undefined) params.camera = camera;
         const res = canvasStore.updateNode(canvas.id, id, {
