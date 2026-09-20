@@ -173,7 +173,11 @@ export default function MessageList({
                   currentMatch={currentMatchId === m.id}
                   canRetry={!sending && m.id === lastAssistantId}
                   onRetry={onRetryLastAssistant}
-                  turnOutcome={!sending && m.id === lastAssistantId ? turnOutcome : null}
+                  // Prefer the outcome persisted on the message itself —
+                  // the session-level stamp only applies to the last
+                  // assistant row, and a no-message interrupt must not
+                  // mislabel the previous completed reply.
+                  turnOutcome={m.turnOutcome ?? (!sending && m.id === lastAssistantId ? turnOutcome : null)}
                 />
               )}
             </ErrorBoundary>

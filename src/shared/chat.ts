@@ -58,6 +58,8 @@ export interface ChatMessage {
   reasoning?: string;
   /** Wall-clock ms the model spent reasoning, frozen once the turn ends. */
   reasoningMs?: number;
+  /** Outcome of the turn that produced this message (completed/interrupted). */
+  turnOutcome?: TurnOutcome;
   /** Wall-clock ms for the full turn, including tools and final response. */
   durationMs?: number;
   createdAt: string;

@@ -503,15 +503,15 @@ class AgentSession {
         if (!interrupted && !terminalError && !persister.hasContent()) {
           terminalError = 'Provider ended without an assistant result';
         }
+        const outcome = interrupted ? 'interrupted' : terminalError ? 'error' : 'completed';
         if (terminalError) {
           persister.rollback();
         } else if (persister.hasContent()) {
-          await persister.commit({ aborted: false });
+          await persister.commit({ aborted: false, outcome });
         }
         if (terminalError && !errorEmitted) {
           emit({ type: 'error', error: terminalError });
         }
-        const outcome = interrupted ? 'interrupted' : terminalError ? 'error' : 'completed';
         finalOutcome = outcome;
         markEnd();
         emit({
