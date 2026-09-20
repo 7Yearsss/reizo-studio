@@ -37,15 +37,19 @@ export default function WorkGroupCard({
   activities?: ReplyActivity[];
   turnOutcome?: TurnOutcome | null;
 }) {
+  // ask_user parts are rendered by AskAnswers/the ask card — a turn that only
+  // asked questions (e.g. a folded duplicate direction card) shouldn't leave
+  // an empty "工作完成" shell behind.
+  const visibleParts = parts.filter((part) => part.name !== 'ask_user');
   const hasReasoning = Boolean(reasoning || reasoningStreaming);
-  const hasTools = parts.length > 0;
+  const hasTools = visibleParts.length > 0;
   const hasActivities = activities.length > 0;
   if (!hasReasoning && !hasTools && !hasActivities) return null;
 
-  const runningToolCount = parts.filter((part) => !part.result && !part.error).length;
+  const runningToolCount = visibleParts.filter((part) => !part.result && !part.error).length;
   const runningActivity = activities.find((activity) => activity.status === 'running');
   const active = streaming || reasoningStreaming || runningToolCount > 0 || Boolean(runningActivity);
-  const items = toActivityItems({ activities, parts, reasoning, reasoningStreaming });
+  const items = toActivityItems({ activities, parts: visibleParts, reasoning, reasoningStreaming });
   const liveLabel = runningActivity?.kind === 'thinking' || reasoningStreaming
     ? '正在思考'
     : runningToolCount > 0
@@ -79,12 +83,10 @@ export default function WorkGroupCard({
         renderWorkingStatus={({ label }) => <ThinkingShimmer>{label}</ThinkingShimmer>}
         maxHeight={220}
       />
-      {active && parts.length > 0 ? (
+      {active && visibleParts.length > 0 ? (
         <div className="mt-1 flex flex-col items-start gap-1">
-          {parts
-            // ask_user's real UI is the ask card under the message stream — a
-            // per-call tool row would only echo noise next to it.
-            .filter((part) => !part.result && !part.error && part.name !== 'ask_user')
+          {visibleParts
+            .filter((part) => !part.result && !part.error)
             .map((part) => (
               <ToolCard key={part.id} part={part} />
             ))}
@@ -92,9 +94,9 @@ export default function WorkGroupCard({
       ) : null}
       {/* After the turn ends the activity strip collapses, so keep write cards
           (and their diffs) visible — that is the point of the review surface. */}
-      {!active && parts.some((part) => PERSISTENT_TOOL_NAMES.has(part.name)) ? (
+      {!active && visibleParts.some((part) => PERSISTENT_TOOL_NAMES.has(part.name)) ? (
         <div className="mt-1 flex flex-col items-start gap-1">
-          {parts
+          {visibleParts
             .filter((part) => PERSISTENT_TOOL_NAMES.has(part.name))
             .map((part) => (
               <ToolCard key={part.id} part={part} collapsed />

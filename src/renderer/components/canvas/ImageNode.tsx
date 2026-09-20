@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback, memo } from 'react';
 import { Handle, Position, type NodeProps, useStore } from '@xyflow/react';
-import { Loader2, Play, Sparkles, ImageIcon, X, FileUp, Bot, Upload } from 'lucide-react';
+import { Loader2, Play, Sparkles, ImageIcon, X, FileUp, Bot, Upload, RotateCcw } from 'lucide-react';
 import type { CanvasImageParams, CanvasNode } from '../../../shared/canvas';
 import { editNodeTitle, type ImageEditKind } from '../../../shared/canvasImageEdit';
 import { estimateNodeCost } from '../../../shared/canvasPricing';
@@ -553,22 +553,35 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
       {node.output?.error ? (
         <div className="mb-2 flex flex-col gap-1 rounded-lg bg-danger/10 p-2 text-[11px] text-danger">
           <p className="line-clamp-2">{node.output.error}</p>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              void chatStore.sendMessage(
-                sessionId,
-                `画布上的图片节点「${node.title || node.id}」运行报错：\n“${node.output?.error}”\n当前 Prompt 为：“${prompt}”。\n请分析报错原因并帮我生成优化修正后的可用 Prompt。`,
-                [],
-                {},
-              );
-            }}
-            className="nodrag inline-flex items-center gap-1 self-start rounded bg-danger/20 px-1.5 py-0.5 text-[10px] font-medium text-danger hover:bg-danger/30 transition-colors"
-          >
-            <Bot size={11} />
-            让 Agent 协助修复提示词
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                void canvasStore.runNode(sessionId, node.id);
+              }}
+              className="nodrag inline-flex items-center gap-1 rounded bg-danger/20 px-1.5 py-0.5 text-[10px] font-medium text-danger hover:bg-danger/30 transition-colors"
+            >
+              <RotateCcw size={10} />
+              重试
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                void chatStore.sendMessage(
+                  sessionId,
+                  `画布上的图片节点「${node.title || node.id}」运行报错：\n“${node.output?.error}”\n当前 Prompt 为：“${prompt}”。\n请分析报错原因并帮我生成优化修正后的可用 Prompt。`,
+                  [],
+                  {},
+                );
+              }}
+              className="nodrag inline-flex items-center gap-1 self-start rounded bg-danger/20 px-1.5 py-0.5 text-[10px] font-medium text-danger hover:bg-danger/30 transition-colors"
+            >
+              <Bot size={11} />
+              让 Agent 协助修复提示词
+            </button>
+          </div>
         </div>
       ) : null}
 
