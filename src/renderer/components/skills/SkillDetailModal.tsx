@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm';
 
 export default function SkillDetailModal({
   icon,
+  coverSrc,
   title,
   subtitle,
   chips,
@@ -13,6 +14,8 @@ export default function SkillDetailModal({
   footer,
 }: {
   icon?: React.ReactNode;
+  /** Resolved image URL shown as a banner above the body. */
+  coverSrc?: string | null;
   title: string;
   subtitle?: string;
   chips?: React.ReactNode;
@@ -79,6 +82,15 @@ export default function SkillDetailModal({
             <X size={16} />
           </button>
         </header>
+
+        {coverSrc ? (
+          <img
+            src={coverSrc}
+            alt=""
+            className="max-h-52 w-full border-b border-line object-cover"
+            loading="lazy"
+          />
+        ) : null}
 
         <div className="min-h-0 flex-1 overflow-auto px-6 py-4">
           {state === 'loading' ? (
