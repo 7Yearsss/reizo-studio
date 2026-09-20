@@ -13,7 +13,7 @@ import type {
 import type { DbHandle } from '../db/client';
 import { descendants, inputHash, wouldCycle } from '../canvas/graph';
 import { cancelVideoJob } from '../canvas/asyncJobManager';
-import { isPortCompatible } from '../../../shared/canvasGraph';
+import { isPortCompatible, normalizeSourceHandle } from '../../../shared/canvasGraph';
 
 interface CanvasRowRaw {
   id: string;
@@ -85,12 +85,14 @@ function toNode(row: NodeRowRaw): CanvasNode {
   };
 }
 
-function toEdge(row: EdgeRowRaw): CanvasEdge {
+function toEdge(row: EdgeRowRaw & { source_type?: string }): CanvasEdge {
   return {
     id: row.id,
     canvasId: row.canvas_id,
     sourceId: row.source_id,
-    sourceHandle: row.source_handle,
+    // Heal legacy rows that stored a generic handle name (e.g. "output"):
+    // React Flow silently drops edges whose sourceHandle matches no rendered handle.
+    sourceHandle: normalizeSourceHandle(row.source_type ?? '', row.source_handle),
     targetId: row.target_id,
     targetHandle: row.target_handle,
   };
@@ -146,7 +148,9 @@ export function createCanvasStore(handle: DbHandle) {
   const selCanvasBySession = raw.prepare('SELECT * FROM canvases WHERE session_id = ?');
   const selNodes = raw.prepare('SELECT * FROM canvas_nodes WHERE canvas_id = ? ORDER BY updated_at');
   const selNode = raw.prepare('SELECT * FROM canvas_nodes WHERE canvas_id = ? AND id = ?');
-  const selEdges = raw.prepare('SELECT * FROM canvas_edges WHERE canvas_id = ?');
+  const selEdges = raw.prepare(
+    'SELECT e.*, sn.type AS source_type FROM canvas_edges e LEFT JOIN canvas_nodes sn ON sn.id = e.source_id WHERE e.canvas_id = ?',
+  );
   const bumpRev = raw.prepare(
     'UPDATE canvases SET live_revision = live_revision + 1, updated_at = ? WHERE id = ?',
   );
@@ -327,7 +331,8 @@ export function createCanvasStore(handle: DbHandle) {
         const src = readNode(canvasId, input.sourceId);
         const tgt = readNode(canvasId, input.targetId);
         if (!src || !tgt) return { error: 'missing' };
-        const compat = isPortCompatible(src, tgt, input.sourceHandle, input.targetHandle);
+        const sourceHandle = normalizeSourceHandle(src.type, input.sourceHandle);
+        const compat = isPortCompatible(src, tgt, sourceHandle, input.targetHandle);
         if (!compat.valid) {
           return { error: 'incompatible' };
         }
@@ -344,12 +349,12 @@ export function createCanvasStore(handle: DbHandle) {
             `INSERT INTO canvas_edges (id, canvas_id, source_id, source_handle, target_id, target_handle)
              VALUES (?, ?, ?, ?, ?, ?)`,
           )
-          .run(id, canvasId, input.sourceId, input.sourceHandle ?? null, input.targetId, input.targetHandle ?? null);
+          .run(id, canvasId, input.sourceId, sourceHandle ?? null, input.targetId, input.targetHandle ?? null);
         const rev = nextRev(canvasId);
         const edgeRow = raw
           .prepare('SELECT * FROM canvas_edges WHERE id = ?')
           .get(id) as unknown as EdgeRowRaw;
-        return { rev, edge: toEdge(edgeRow) };
+        return { rev, edge: toEdge({ ...edgeRow, source_type: src.type }) };
       });
     },
 

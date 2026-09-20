@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isPortCompatible, wouldCycle } from './canvasGraph';
+import { isPortCompatible, normalizeSourceHandle, wouldCycle } from './canvasGraph';
 import type { CanvasNode, CanvasEdge } from './canvas';
 
 function makeNode(type: CanvasNode['type'], id: string): CanvasNode {
@@ -84,5 +84,29 @@ describe('wouldCycle', () => {
     ];
     expect(wouldCycle(edges, 'c', 'a')).toBe(true);
     expect(wouldCycle(edges, 'a', 'c')).toBe(false);
+  });
+});
+
+describe('normalizeSourceHandle', () => {
+  it('maps generic "output"/missing handles to the node type\'s real output id', () => {
+    expect(normalizeSourceHandle('image', 'output')).toBe('image_out');
+    expect(normalizeSourceHandle('image', null)).toBe('image_out');
+    expect(normalizeSourceHandle('image', undefined)).toBe('image_out');
+    expect(normalizeSourceHandle('audio', 'default')).toBe('audio_out');
+    expect(normalizeSourceHandle('note', 'output')).toBe('prompt_out');
+    expect(normalizeSourceHandle('video', 'output')).toBe('prompt_out');
+    expect(normalizeSourceHandle('anchor', 'output')).toBe('anchor_out');
+    expect(normalizeSourceHandle('frameExtractor', 'output')).toBe('frame_out');
+    expect(normalizeSourceHandle('subgraph', 'output')).toBe('output');
+  });
+
+  it('keeps explicit real handles untouched', () => {
+    expect(normalizeSourceHandle('image', 'image_out')).toBe('image_out');
+    expect(normalizeSourceHandle('image', 'edit_src')).toBe('edit_src');
+  });
+
+  it('returns null for types without an output handle', () => {
+    expect(normalizeSourceHandle('agent', 'output')).toBeNull();
+    expect(normalizeSourceHandle('agent', null)).toBeNull();
   });
 });

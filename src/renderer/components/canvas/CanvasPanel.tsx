@@ -1920,7 +1920,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
                   { prompt: '镜头向前平滑推近，环境光微动' } as Record<string, unknown>,
                 );
                 if (imageId && videoId) {
-                  await canvasStore.connectNodes(sessionId, imageId, videoId, 'output', 'start_frame');
+                  await canvasStore.connectNodes(sessionId, imageId, videoId, 'image_out', 'start_frame');
                 }
                 flash('已创建「首帧生成视频」流水线');
                 setTimeout(() => rf.fitView({ padding: 0.25, duration: 300 }), 120);
@@ -1934,7 +1934,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
                 const audioId = await canvasStore.addNode(sessionId, 'audio', { x: startX, y: startY });
                 const videoId = await canvasStore.addNode(sessionId, 'video', { x: startX + 380, y: startY });
                 if (audioId && videoId) {
-                  await canvasStore.connectNodes(sessionId, audioId, videoId, 'output', 'reference');
+                  await canvasStore.connectNodes(sessionId, audioId, videoId, 'audio_out', 'reference');
                 }
                 flash('已创建「音频生视频」卡片');
                 setTimeout(() => rf.fitView({ padding: 0.25, duration: 300 }), 120);
