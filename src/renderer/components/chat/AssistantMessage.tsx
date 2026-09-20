@@ -74,7 +74,7 @@ export default function AssistantMessage({
           </span>
         </div>
       ) : null}
-      {(content || parts?.length) && !streaming && (
+      {(Boolean(content) || (parts?.length ?? 0) > 0) && !streaming && (
         <div className="flex items-center gap-3">
           {turnOutcome === 'interrupted' ? (
             <span className="text-[11px] text-amber-500/90">已中断{durationMs ? ` · ${formatDuration(durationMs)}` : ''}</span>
