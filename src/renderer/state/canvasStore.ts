@@ -352,6 +352,24 @@ async function runStream(sessionId: string, canvasId: string, signal: AbortSigna
   }
 }
 
+// Snapshot-only loads share one in-flight fetch per session and never hold a
+// socket — use this for read-once consumers (thumbnails, ref chips) that would
+// otherwise keep a live stream per mounted tab and exhaust Chromium's
+// six-connection HTTP/1.1 pool to the API origin.
+const ensureInflight = new Map<string, Promise<void>>();
+
+export async function ensureCanvasLoaded(sessionId: string): Promise<void> {
+  if (state.loadedBySession[sessionId] || streamAborts.has(sessionId)) return;
+  let inflight = ensureInflight.get(sessionId);
+  if (!inflight) {
+    inflight = api.getCanvas(sessionId).then((snap) => {
+      ingestSnapshot(sessionId, snap);
+    }).finally(() => ensureInflight.delete(sessionId));
+    ensureInflight.set(sessionId, inflight);
+  }
+  await inflight;
+}
+
 export async function openCanvas(sessionId: string): Promise<void> {
   desiredOpen.add(sessionId);
   ensureTabWatch();

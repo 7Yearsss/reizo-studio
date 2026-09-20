@@ -49,10 +49,10 @@ export default function GeneratedMediaStrip({
   }, [parts]);
   const nodes = useCanvasStore((s) => s.nodesBySession[sessionId]);
   // The canvas panel usually already opened the stream during the run; fetch
-  // lazily so history still shows thumbnails when it never did. openCanvas is
-  // a no-op when a stream is already attached.
+  // a snapshot lazily so history still shows thumbnails when it never did.
+  // Snapshot-only: a live stream per mounted tab would exhaust the socket pool.
   useEffect(() => {
-    if (nodeIds.length && !nodes?.length) void canvasStore.openCanvas(sessionId).catch((): void => undefined);
+    if (nodeIds.length && !nodes?.length) void canvasStore.ensureCanvasLoaded(sessionId).catch((): void => undefined);
   }, [nodeIds.length, nodes?.length, sessionId]);
   const mediaNodes = useMemo(
     () =>

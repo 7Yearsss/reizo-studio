@@ -52,7 +52,9 @@ export default function CanvasRefChips({ nodeIds, sessionId }: { nodeIds: string
   );
   useEffect(() => {
     if (sessionId && missing.length && !nodes?.length) {
-      void canvasStore.openCanvas(sessionId).catch((): void => undefined);
+      // Snapshot-only: opening a live stream per mounted tab would exhaust
+      // Chromium's six-socket pool to the API origin.
+      void canvasStore.ensureCanvasLoaded(sessionId).catch((): void => undefined);
     }
   }, [missing.length, nodes?.length, sessionId]);
   if (!nodeIds.length) return null;

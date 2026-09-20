@@ -1,4 +1,5 @@
 import { createOpenAI } from '@ai-sdk/openai';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 
 /**
  * Provider factory — mirrors the shape of winlume's
@@ -81,7 +82,7 @@ function isRetryableStatus(status: number): boolean {
  * pick the surface: `.chat(id)` / `(id)` for language models, `.image(id)` for
  * `generateImage`.
  */
-export function createOpenAiProvider(options: { apiKey: string; baseUrl?: string }) {
+function createLoggedFetch(): typeof globalThis.fetch {
   const loggedFetch: typeof globalThis.fetch = async (input, init) => {
     const url = input instanceof Request ? input.url : String(input);
     const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
@@ -127,20 +128,38 @@ export function createOpenAiProvider(options: { apiKey: string; baseUrl?: string
       }
     }
   };
+  return loggedFetch;
+}
+
+/**
+ * The bare `@ai-sdk/openai` provider, with request logging wired in. Callers
+ * pick the surface: `.chat(id)` / `(id)` for language models, `.image(id)` for
+ * `generateImage`.
+ */
+export function createOpenAiProvider(options: { apiKey: string; baseUrl?: string }) {
   return createOpenAI({
     apiKey: options.apiKey,
     baseURL: options.baseUrl || undefined,
-    fetch: loggedFetch,
+    fetch: createLoggedFetch(),
   });
 }
 
 export function createOpenAiModel(options: { apiKey: string; modelId: string; baseUrl?: string }) {
-  const openai = createOpenAiProvider(options);
   // Default `openai(model)` is the Responses API (`/v1/responses`). new-api
   // gateways (v2api.top) stream that poorly with tools: each step resends
   // every function_call item and nginx returns HTTP 524 after ~165s.
   // Chat Completions is the path a "normal" curl uses and is what those
   // proxies actually keep open.
-  if (isOfficialOpenAi(options.baseUrl)) return openai(options.modelId);
-  return openai.chat(options.modelId);
+  if (isOfficialOpenAi(options.baseUrl)) {
+    return createOpenAiProvider(options)(options.modelId);
+  }
+  // `@ai-sdk/openai`'s chat-completions parser drops `delta.reasoning_content`,
+  // so reasoning models on third-party gateways (grok/deepseek/kimi on
+  // new-api) never produce thinking events. `openai-compatible` parses it.
+  return createOpenAICompatible({
+    name: 'openai-compatible',
+    apiKey: options.apiKey,
+    baseURL: options.baseUrl || 'https://api.openai.com/v1',
+    fetch: createLoggedFetch(),
+  }).chatModel(options.modelId);
 }
