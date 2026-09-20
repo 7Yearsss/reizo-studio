@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Square } from 'lucide-react';
+import { RotateCcw, Square } from 'lucide-react';
 import type { TodoItem } from '../../../shared/stream';
 import type { ReplyPhase } from '../../../shared/stream';
 import type { ChatInteraction } from '../../state/chatStore';
@@ -26,6 +26,7 @@ export default function ReplyStatusBar({
   lastTextAt,
   lastProgressAt,
   onStop,
+  onRetry,
   skillName,
 }: {
   startedAt?: number;
@@ -38,6 +39,8 @@ export default function ReplyStatusBar({
   lastProgressAt?: number;
   /** When set, shows a small stop button (used while the composer is in send mode). */
   onStop?: () => void;
+  /** Shown once the upstream has been silent past the stale threshold. */
+  onRetry?: () => void;
   /** Name of the pinned skill this turn is running under. */
   skillName?: string;
 }) {
@@ -88,17 +91,29 @@ export default function ReplyStatusBar({
         elapsedSeconds={elapsed / 1000}
         className="gap-2 text-[12px] text-ink-muted"
       />
-      {onStop && (
-        <button
-          type="button"
-          aria-label="停止"
-          title="停止当前回合"
-          onClick={onStop}
-          className="flex h-5 w-5 items-center justify-center rounded-full border border-line text-ink-muted transition-colors hover:bg-paper-inset hover:text-ink"
-        >
-          <Square size={9} className="fill-current" />
-        </button>
-      )}
+      <span className="flex shrink-0 items-center gap-1.5">
+        {onRetry && silence === 'stale' && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[11px] text-ink transition-colors hover:bg-paper-inset"
+          >
+            <RotateCcw size={10} />
+            重试
+          </button>
+        )}
+        {onStop && (
+          <button
+            type="button"
+            aria-label="停止"
+            title="停止当前回合"
+            onClick={onStop}
+            className="flex h-5 w-5 items-center justify-center rounded-full border border-line text-ink-muted transition-colors hover:bg-paper-inset hover:text-ink"
+          >
+            <Square size={9} className="fill-current" />
+          </button>
+        )}
+      </span>
     </div>
   );
 }

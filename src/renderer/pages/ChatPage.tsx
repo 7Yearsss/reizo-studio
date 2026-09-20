@@ -237,6 +237,7 @@ export default function ChatPage({
         loopNotice={loopNotice}
         showInterruptBanner={showInterruptBanner}
         onRetryTurn={() => void chatStore.retryInterruptedTurn(sessionId)}
+        onRetryStalled={() => void chatStore.retryStalledTurn(sessionId)}
         onDismissInterrupt={() => chatStore.dismissInterrupt(sessionId)}
       />
     </div>
