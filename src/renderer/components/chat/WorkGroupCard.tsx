@@ -2,7 +2,7 @@ import type { ReplyActivity, ToolCallPart } from '../../../shared/chat';
 import type { TurnOutcome } from '../../../shared/stream';
 import { AgentActivity, type AgentActivityItem } from '../agents/agent-activity';
 import { ThinkingShimmer } from '../agents/loading-states/thinking-shimmer';
-import { formatThinkingDuration } from './ThinkingCard';
+import ThinkingCard, { formatThinkingDuration } from './ThinkingCard';
 import ToolCard from './ToolCard';
 import { toolAction, toolLabel, toolTarget } from './toolDisplay';
 
@@ -54,6 +54,9 @@ export default function WorkGroupCard({
     parts: visibleParts,
     reasoning,
     reasoningStreaming,
+    // Reasoning lives in the ThinkingCard disclosure above the strip —
+    // thinking beats must not also clutter the work rows.
+    skipThinking: hasReasoning,
     detail: !active,
   });
   const liveLabel = runningActivity?.kind === 'thinking' || reasoningStreaming
@@ -72,6 +75,15 @@ export default function WorkGroupCard({
 
   return (
     <div className="w-full">
+      {hasReasoning && (
+        <ThinkingCard
+          content={reasoning ?? ''}
+          streaming={reasoningStreaming}
+          startedAt={reasoningStartedAt}
+          durationMs={reasoningMs}
+        />
+      )}
+      {(items.length > 0 || active) && (
       <AgentActivity
         items={items}
         contentType={hasTools ? 'tool' : 'mixed'}
@@ -89,6 +101,7 @@ export default function WorkGroupCard({
         renderWorkingStatus={({ label }) => <ThinkingShimmer>{label}</ThinkingShimmer>}
         maxHeight={220}
       />
+      )}
       {active && visibleParts.length > 0 ? (
         <div className="mt-1 flex flex-col items-start gap-1">
           {visibleParts
@@ -118,6 +131,8 @@ function toActivityItems(input: {
   parts: ToolCallPart[];
   reasoning?: string;
   reasoningStreaming: boolean;
+  /** Reasoning is shown by the ThinkingCard above — drop thinking rows. */
+  skipThinking: boolean;
   /** Turn finished — swap plain tool rows for collapsed ToolCards so each
    * row drills into its full command/output (Claude Code's Ran-N-commands). */
   detail: boolean;
@@ -125,6 +140,7 @@ function toActivityItems(input: {
   const items: AgentActivityItem[] = [];
   if (input.activities.length > 0) {
     for (const activity of input.activities) {
+      if (activity.kind === 'thinking' && input.skipThinking) continue;
       if (activity.kind === 'thinking') {
         const last = items[items.length - 1];
         if (last?.type === 'trace' && last.kind === 'thinking') {
@@ -162,7 +178,7 @@ function toActivityItems(input: {
       });
     }
   } else {
-    if (input.reasoning || input.reasoningStreaming) {
+    if ((input.reasoning || input.reasoningStreaming) && !input.skipThinking) {
       items.push({
         id: 'reasoning',
         type: 'trace',
