@@ -1,15 +1,8 @@
 import { useRef, useState } from 'react';
-import {
-  Maximize2,
-  Minimize2,
-  X,
-  Workflow,
-  FolderKanban,
-  FolderTree,
-  GitBranch,
-  Terminal,
-} from 'lucide-react';
+import { Maximize2, Minimize2, X } from 'lucide-react';
 import { cn } from '../../lib/cn';
+import { createPortal } from 'react-dom';
+import { useTitleBarSlot } from '../layout/titleBarSlots';
 import * as uiStore from '../../state/uiStore';
 import { useUiStore } from '../../state/useUiStore';
 import DirectoryPanel from './DirectoryPanel';
@@ -19,16 +12,7 @@ import ArtifactPanel from './ArtifactPanel';
 import CanvasPanel from '../canvas/CanvasPanel';
 import Tooltip from '../ui/Tooltip';
 
-const PANEL_METAS: Record<
-  uiStore.RightPanelTab,
-  { label: string; icon: React.ComponentType<{ size?: number; className?: string }> }
-> = {
-  canvas: { label: '画布', icon: Workflow },
-  artifacts: { label: '作品', icon: FolderKanban },
-  files: { label: '文件', icon: FolderTree },
-  git: { label: 'Git', icon: GitBranch },
-  terminal: { label: '终端', icon: Terminal },
-};
+
 
 export default function RightPanel({
   sessionId,
@@ -43,6 +27,7 @@ export default function RightPanel({
   const sidebarWidth = useUiStore((s) => s.sidebarWidth);
 
   const [isDragging, setIsDragging] = useState(false);
+  const rightSlot = useTitleBarSlot('right');
   const dragging = useRef(false);
   const startX = useRef(0);
   const startWidth = useRef(0);
@@ -134,9 +119,6 @@ export default function RightPanel({
     }
   };
 
-  const meta = PANEL_METAS[activeTab];
-  const Icon = meta?.icon;
-
   return (
     <aside
       ref={asideRef}
@@ -165,39 +147,34 @@ export default function RightPanel({
           )}
         />
       </div>
-      <div className="flex h-10 items-center justify-between border-b border-line/60 px-3">
-        <div className="flex items-center gap-2">
-          {Icon && (
-            <Icon
-              size={14}
-              className={cn(activeTab === 'canvas' ? 'text-accent' : 'text-ink-muted')}
-            />
-          )}
-          <span className="text-xs font-semibold text-ink">{meta?.label}</span>
-        </div>
-        <div className="flex items-center gap-0.5">
-          <Tooltip content={maximized ? '还原宽度' : '最大化面板'} side="bottom">
-            <button
-              type="button"
-              onClick={() => uiStore.toggleRightPanelMaximized()}
-              className="rounded-full p-1.5 text-ink-muted hover:bg-paper-inset/70 hover:text-ink transition-colors"
-              aria-label={maximized ? '还原宽度' : '最大化面板'}
-            >
-              {maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-            </button>
-          </Tooltip>
-          <Tooltip content="关闭面板" side="bottom">
-            <button
-              type="button"
-              onClick={() => uiStore.closeRightPanel()}
-              className="rounded-full p-1.5 text-ink-muted hover:bg-paper-inset/70 hover:text-ink transition-colors"
-              aria-label="关闭面板"
-            >
-              <X size={13} />
-            </button>
-          </Tooltip>
-        </div>
-      </div>
+      {/* Panel chrome lives in the window title bar (right slot) — keeps a single top row */}
+      {rightSlot &&
+        createPortal(
+          <div className="ml-1 flex items-center gap-0.5 border-l border-line/60 pl-1.5">
+              <Tooltip content="关闭面板" side="bottom">
+                <button
+                  type="button"
+                  onClick={() => uiStore.closeRightPanel()}
+                  className="rounded-full p-1.5 text-ink-muted hover:bg-paper-inset/70 hover:text-ink transition-colors"
+                  aria-label="关闭面板"
+                >
+                  <X size={13} />
+                </button>
+              </Tooltip>
+            </div>,
+          rightSlot,
+        )}
+      {/* Maximize floats inside the panel corner — the title bar only carries close */}
+      <Tooltip content={maximized ? '还原宽度' : '最大化面板'} side="left">
+        <button
+          type="button"
+          onClick={() => uiStore.toggleRightPanelMaximized()}
+          className="absolute bottom-3 right-3 z-30 rounded-full bg-paper-raised/80 p-1.5 text-ink-muted shadow-sm backdrop-blur-sm transition-colors hover:bg-paper-inset hover:text-ink"
+          aria-label={maximized ? '还原宽度' : '最大化面板'}
+        >
+          {maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+        </button>
+      </Tooltip>
       <div className="min-h-0 flex-1">
         {activeTab === 'canvas' && sessionId && <CanvasPanel key={sessionId} sessionId={sessionId} />}
         {activeTab === 'artifacts' && sessionId && <ArtifactPanel sessionId={sessionId} />}

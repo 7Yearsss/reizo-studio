@@ -22,6 +22,7 @@ import {
 } from '../../state/navHistory';
 import { openGlobalCommandPalette } from './GlobalCommandPalette';
 import { cn } from '../../lib/cn';
+import { setTitleBarSlot } from './titleBarSlots';
 
 const isWindows = typeof window !== 'undefined' && window.reizo?.platform === 'win32';
 
@@ -158,6 +159,10 @@ export default function CustomTitleBar() {
           </Tooltip>
         </div>
       </div>
+
+      {/* Contextual content slots — pages portal their title/toolbars in here */}
+      <div ref={(el) => setTitleBarSlot('center', el)} className="titlebar-no-drag flex h-full min-w-0 flex-1 items-center bg-paper pl-2" />
+      <div ref={(el) => setTitleBarSlot('right', el)} className="titlebar-no-drag ml-auto flex h-full items-center bg-paper pr-2" />
 
       {/* Window Controls (Windows only; on other platforms the strip stays an empty drag area) */}
       {isWindows && (

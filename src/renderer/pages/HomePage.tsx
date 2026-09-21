@@ -1,4 +1,6 @@
 import { useCallback, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useTitleBarSlot } from '../components/layout/titleBarSlots';
 import { FolderOpen, FolderPlus } from 'lucide-react';
 import ReizoWordmark from '../components/home/ReizoWordmark';
 import PromptCard from '../components/chat/PromptCard';
@@ -16,6 +18,7 @@ import { getRecentSkillIds } from '../state/skillStore';
 import type { SkillSummary } from '../state/skillStore';
 
 export default function HomePage({ active = true }: { active?: boolean }) {
+  const titleBarSlot = useTitleBarSlot('center');
   const [draft, setDraft] = useState('');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -95,9 +98,14 @@ export default function HomePage({ active = true }: { active?: boolean }) {
 
   return (
     <div className="relative flex h-full min-w-0 flex-col">
-      <header className="flex h-12 shrink-0 items-center justify-end px-8 pt-2">
-        <TopRightToolbar onOpenCanvas={() => void handleOpenCanvas()} />
-      </header>
+      {active &&
+        titleBarSlot &&
+        createPortal(
+          <div className="ml-auto shrink-0">
+            <TopRightToolbar onOpenCanvas={() => void handleOpenCanvas()} />
+          </div>,
+          titleBarSlot,
+        )}
       <div className="flex flex-1 flex-col items-center justify-center px-6 pb-12">
         <div className="relative">
           <ReizoWordmark active={active} onSettled={handleWordmarkSettled} />
