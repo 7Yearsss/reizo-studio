@@ -35,6 +35,7 @@ export default function MessageList({
   onPickHint,
   compact = false,
   sessionId,
+  bottomInset,
 }: {
   messages: ChatMessage[];
   sessionId?: string;
@@ -53,6 +54,8 @@ export default function MessageList({
   onRetryLastAssistant?: () => void;
   onPickHint?: (text: string) => void;
   compact?: boolean;
+  /** Rendered height of the composer overlay — the viewport pads this much so docked cards (plan/ask/queue) never cover scrolled content. */
+  bottomInset?: number;
 }) {
   const viewportRef = useRef<HTMLElement>(null);
   const [following, setFollowing] = useState(true);
@@ -113,13 +116,10 @@ export default function MessageList({
         label="对话"
         className="absolute inset-0"
         viewportRef={viewportRef}
-        viewportClassName={
-          compact
-            ? `px-3.5 pt-3 ${sending ? 'pb-48' : 'pb-36'}`
-            : `px-8 pt-4 ${sending ? 'pb-56' : 'pb-44'}`
-        }
+        viewportClassName={compact ? 'px-3.5 pt-3' : 'px-8 pt-4'}
         contentClassName="mx-auto max-w-3xl space-y-8"
         viewportProps={{
+          style: { paddingBottom: (bottomInset ?? (compact ? 144 : 176)) + 12 },
           onScroll: (event) => {
             const el = event.currentTarget;
             if (el.scrollTop < GROW_TRIGGER_PX && windowStart > 0 && growAnchorRef.current === null) {

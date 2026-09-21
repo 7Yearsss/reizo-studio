@@ -2210,9 +2210,9 @@ export async function refinePrompt(
   return api.refineCanvasPrompt(prompt, mode);
 }
 
-export async function importImage(sessionId: string, file: File, at: { x: number; y: number }): Promise<void> {
+export async function importImage(sessionId: string, file: File, at: { x: number; y: number }): Promise<CanvasNode | null> {
   const id = canvasId(sessionId);
-  if (!id) return;
+  if (!id) return null;
   const buffer = await file.arrayBuffer();
   let binary = '';
   const bytes = new Uint8Array(buffer);
@@ -2228,6 +2228,7 @@ export async function importImage(sessionId: string, file: File, at: { x: number
     undo: () => _deleteNode(sessionId, node.id),
     redo: () => Promise.resolve(), // imported bytes are gone from the drop event
   });
+  return node;
 }
 
 /** Drop an image onto the canvas as a reference `anchor` pin (character by default). */
