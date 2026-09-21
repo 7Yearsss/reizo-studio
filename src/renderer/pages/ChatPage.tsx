@@ -121,6 +121,7 @@ export default function ChatPage({
 
   const isCompact = containerWidth < 460;
   const titleBarSlot = useTitleBarSlot('center');
+  const titleBarRight = useTitleBarSlot('right');
   // Composer floats over the stream; its rendered height (docked plan / ask /
   // queue cards included) is what the list pads below so content can always
   // scroll fully clear — cards never sit on top of messages.
@@ -168,26 +169,29 @@ export default function ChatPage({
             {session?.title ?? '对话'}
           </button>
         )}
-            <div className="ml-1 shrink-0">
-              <TopRightToolbar
-                sessionId={sessionId}
-                compact={isCompact}
-                onSearch={() => setSearchOpen((open) => !open)}
-                searchOpen={searchOpen}
-                onRename={() => {
-                  setTitleDraft(session?.title ?? '');
-                  setRenaming(true);
-                }}
-                onDelete={() => {
-                  if (confirm('确定要删除此对话吗？')) {
-                    tabStore.closeSessionTabs(sessionId);
-                    void chatStore.deleteSession(sessionId);
-                  }
-                }}
-              />
-            </div>
           </>,
           titleBarSlot,
+        )}
+      {active &&
+        titleBarRight &&
+        createPortal(
+          <TopRightToolbar
+            sessionId={sessionId}
+            compact={isCompact}
+            onSearch={() => setSearchOpen((open) => !open)}
+            searchOpen={searchOpen}
+            onRename={() => {
+              setTitleDraft(session?.title ?? '');
+              setRenaming(true);
+            }}
+            onDelete={() => {
+              if (confirm('确定要删除此对话吗？')) {
+                tabStore.closeSessionTabs(sessionId);
+                void chatStore.deleteSession(sessionId);
+              }
+            }}
+          />,
+          titleBarRight,
         )}
       {searchOpen && (
         <ChatSearchPanel
