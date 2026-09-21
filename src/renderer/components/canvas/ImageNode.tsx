@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback, memo } from 'react';
-import { Handle, Position, type NodeProps, useStore } from '@xyflow/react';
+import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Loader2, Play, Sparkles, ImageIcon, X, FileUp, Bot, Upload, RotateCcw } from 'lucide-react';
 import type { CanvasImageParams, CanvasNode } from '../../../shared/canvas';
 import { editNodeTitle, type ImageEditKind } from '../../../shared/canvasImageEdit';
@@ -33,6 +33,7 @@ import type { EditCommitMode } from './imageEdit/commitEdit';
 import { OPEN_IMAGE_EDIT_EVENT, openImageEdit, type OpenImageEditDetail } from './imageEdit/openImageEdit';
 import { OPEN_REGION_MARK_EVENT, type OpenRegionMarkDetail } from './imageEdit/openRegionMark';
 import RegionMarkOverlay from './imageEdit/RegionMarkOverlay';
+import { AntiZoomScale } from './AntiZoomScale';
 
 export interface CanvasNodeData extends Record<string, unknown> {
   sessionId: string;
@@ -256,8 +257,6 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
 
   const solo = useIsSoloSelected(selected);
   const composing = useCanvasStore((s) => s.mentionComposerBySession[sessionId] === node.id);
-  const canvasZoom = useStore((s) => s.transform[2]) || 1;
-  const headerScale = Math.min(8, Math.max(1, 1 / canvasZoom));
   const expanded = solo || hovered || composing;
   const candidates = useMemo(() => {
     if (!expanded) return [];
@@ -470,13 +469,7 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
 
       {/* Floating Upload button above empty image node (pops up on hover or select) */}
       {!hasImage && !edit && (selected || hovered) ? (
-        <div
-          className="nodrag cursor-default absolute bottom-[calc(100%+8px)] left-1/2 z-30 -translate-x-1/2 animate-in fade-in zoom-in-95 duration-200"
-          style={{
-            transform: `translateX(-50%) scale(${headerScale}) translateY(-28px)`,
-            transformOrigin: 'bottom center',
-          }}
-        >
+        <AntiZoomScale className="nodrag cursor-default absolute bottom-[calc(100%+8px)] left-1/2 z-30 -translate-x-1/2 animate-in fade-in zoom-in-95 duration-200">
           <Tooltip content="上传本地图片" side="top" wrapperClassName="inline-flex">
           <button
             type="button"
@@ -490,7 +483,7 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
             <span>上传</span>
           </button>
           </Tooltip>
-        </div>
+        </AntiZoomScale>
       ) : null}
 
       {/* Floating anti-zoom header outside the card boundary (TapNow design) */}

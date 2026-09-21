@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback, memo } from 'react';
-import { Position, type NodeProps, useStore } from '@xyflow/react';
+import { Position, type NodeProps } from '@xyflow/react';
+import { AntiZoomScale } from './AntiZoomScale';
 import {
   Download,
   FolderPlus,
@@ -64,8 +65,6 @@ function AudioNode({ id, data, selected }: NodeProps) {
   const { hovered, hoverProps } = useHoverIntent();
   const solo = useIsSoloSelected(selected);
   const composing = useCanvasStore((s) => s.mentionComposerBySession[sessionId] === node.id);
-  const canvasZoom = useStore((s) => s.transform[2]) || 1;
-  const headerScale = Math.min(8, Math.max(1, 1 / canvasZoom));
   const expanded = solo || hovered || composing;
 
   // Multi-select collapses per-node chrome; drop any manually-opened config too.
@@ -320,13 +319,7 @@ function AudioNode({ id, data, selected }: NodeProps) {
 
       {/* Floating Header Upload Button (pops up on hover or select) */}
       {!hasAudio && (selected || hovered) ? (
-        <div
-          className="nodrag cursor-default absolute bottom-[calc(100%+8px)] left-1/2 z-30 -translate-x-1/2 animate-in fade-in zoom-in-95 duration-200"
-          style={{
-            transform: `translateX(-50%) scale(${headerScale}) translateY(-28px)`,
-            transformOrigin: 'bottom center',
-          }}
-        >
+        <AntiZoomScale className="nodrag cursor-default absolute bottom-[calc(100%+8px)] left-1/2 z-30 -translate-x-1/2 animate-in fade-in zoom-in-95 duration-200">
           <Tooltip content="上传本地音频" side="top" wrapperClassName="inline-flex">
           <button
             type="button"
@@ -340,7 +333,7 @@ function AudioNode({ id, data, selected }: NodeProps) {
             <span>上传</span>
           </button>
           </Tooltip>
-        </div>
+        </AntiZoomScale>
       ) : null}
 
       {/* Floating anti-zoom header outside the card boundary */}
