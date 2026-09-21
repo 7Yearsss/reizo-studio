@@ -409,6 +409,19 @@ export async function getSettings(): Promise<PublicSettings> {
   return res.json();
 }
 
+/** Models the provider's key can actually call (upstream `/models`). Throws on
+ * unreachable upstream / missing key — callers fall back to the preset list. */
+export async function getProviderModels(
+  providerId: string,
+): Promise<{ id: string; name: string }[]> {
+  const res = await fetch(
+    `${await apiOrigin()}/api/settings/providers/${encodeURIComponent(providerId)}/models`,
+  );
+  if (!res.ok) throw new Error(`models lookup failed: ${res.status}`);
+  const data = (await res.json()) as { models?: { id: string; name: string }[] };
+  return data.models ?? [];
+}
+
 export async function patchSettings(patch: SettingsPatch): Promise<PublicSettings> {
   const res = await api('/api/settings', {
     method: 'PUT',

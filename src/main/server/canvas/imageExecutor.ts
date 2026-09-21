@@ -163,7 +163,7 @@ async function resolveImageProvider(
   }
   const baseUrl = stored.baseUrl || preset.baseUrl;
   const isOfficial = !baseUrl || baseUrl.includes('api.openai.com');
-  const modelId = params.model || (isOfficial ? 'dall-e-3' : 'gpt-image-2');
+  const modelId = params.model || settings.mediaModels?.image || (isOfficial ? 'dall-e-3' : 'gpt-image-2');
   const provider = createOpenAiProvider({ apiKey: stored.apiKey, baseUrl });
   return { provider, modelId, apiKey: stored.apiKey, baseUrl };
 }

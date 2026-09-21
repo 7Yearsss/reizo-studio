@@ -23,6 +23,7 @@ interface DiskSettings {
   permissionMode?: PermissionMode;
   busyEnter?: BusyEnterBehavior;
   computerUse?: boolean;
+  mediaModels?: { image?: string; video?: string };
   activeProviderId?: string;
   workspacePath?: string | null;
   providers?: Record<string, { apiKey?: string; model?: string; baseUrl?: string }>;
@@ -78,6 +79,7 @@ export function createSettingsStore(root: string) {
       permissionMode: disk.permissionMode ?? DEFAULT_PERMISSION_MODE,
       busyEnter: disk.busyEnter ?? DEFAULT_BUSY_ENTER,
       computerUse: disk.computerUse ?? DEFAULT_COMPUTER_USE,
+      mediaModels: disk.mediaModels ?? {},
       activeProviderId: disk.activeProviderId ?? DEFAULT_PROVIDER_ID,
       workspacePath: disk.workspacePath ?? null,
       providers,
@@ -138,6 +140,7 @@ export function createSettingsStore(root: string) {
       permissionMode: settings.permissionMode,
       busyEnter: settings.busyEnter,
       computerUse: settings.computerUse,
+      mediaModels: settings.mediaModels,
       activeProviderId: settings.activeProviderId,
       workspacePath: settings.workspacePath,
       providers,
@@ -151,6 +154,9 @@ export function createSettingsStore(root: string) {
     if (patch.permissionMode) settings.permissionMode = patch.permissionMode;
     if (patch.busyEnter) settings.busyEnter = patch.busyEnter;
     if (patch.computerUse !== undefined) settings.computerUse = patch.computerUse;
+    if (patch.mediaModels) {
+      settings.mediaModels = { ...settings.mediaModels, ...patch.mediaModels };
+    }
     if (patch.activeProviderId) {
       if (!PROVIDER_PRESETS.some((p) => p.id === patch.activeProviderId)) {
         throw new Error('Unknown provider');

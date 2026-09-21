@@ -218,13 +218,17 @@ export const CANVAS_VIDEO_CAMERAS: Array<{ id: NonNullable<CanvasVideoParams['ca
   { id: 'orbit', label: '环绕运镜 (Orbit)' },
 ];
 
-export const CANVAS_IMAGE_MODELS: readonly { id: string; name: string; badge?: string }[] = [
-  { id: 'gemini-3.1-flash-image', name: 'Gemini 3.1 Flash Image (快·一致性)' },
-  { id: 'gemini-3-pro-image', name: 'Gemini 3 Pro Image (高质量)' },
-  { id: 'flux-schnell', name: 'Flux.1 Schnell (极速)', badge: '推荐' },
-  { id: 'flux-dev', name: 'Flux.1 Dev (商业写实)' },
-  { id: 'sd-3.5', name: 'SD 3.5 Large (平衡)' },
-  { id: 'dall-e-3', name: 'DALL-E 3 (奇幻插画)' },
+export const CANVAS_IMAGE_MODELS: readonly { id: string; name: string; badge?: string; description?: string }[] = [
+  // v2api 上游实有模型（new-api /models 拉取核对过）
+  { id: 'gpt-image-2.5-flare', name: 'GPT Image 2.5 Flare', description: '快速灵活出图，支持透明背景' },
+  { id: 'gpt-image-2.5-sunburst', name: 'GPT Image 2.5 Sunburst', description: '高质量，擅长精细编辑' },
+  { id: 'gpt-image-2.5', name: 'GPT Image 2.5', badge: '推荐', description: '均衡质量与速度' },
+  { id: 'gpt-image-2', name: 'GPT Image 2', description: '按提示自动调节质量' },
+  { id: 'gemini-3.1-flash-image', name: 'Gemini 3.1 Flash Image', description: '快，一致性好' },
+  { id: 'gemini-3.1-flash-image-preview', name: 'Gemini 3.1 Flash Image Preview', description: '预览版' },
+  { id: 'gemini-3-pro-image', name: 'Gemini 3 Pro Image', description: '高质量' },
+  { id: 'gemini-3-pro-image-preview', name: 'Gemini 3 Pro Image Preview', description: '预览版' },
+  { id: 'mj_imagine', name: 'Midjourney Imagine', description: '风格化插画' },
 ];
 
 export interface VideoModelCapabilities {

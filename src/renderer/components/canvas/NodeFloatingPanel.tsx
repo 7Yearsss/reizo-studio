@@ -30,6 +30,7 @@ import {
 import CameraDial from './CameraDial';
 import type { CameraControl } from '../../../shared/cameraMotion';
 import * as canvasStore from '../../state/canvasStore';
+import { useSettingsStore } from '../../state/useSettingsStore';
 
 export interface UpstreamSourceItem {
   edgeId: string;
@@ -234,7 +235,12 @@ function NodeFloatingPanel({
     }
   };
 
-  const defaultModel = isVideo ? 'kling-1.5' : isAudio ? (audioProviders?.[0]?.id || 'suno-v3') : 'flux-schnell';
+  const mediaModels = useSettingsStore((s) => s.settings.mediaModels);
+  const defaultModel = isVideo
+    ? mediaModels?.video || 'kling-1.5'
+    : isAudio
+      ? audioProviders?.[0]?.id || 'suno-v3'
+      : mediaModels?.image || 'gpt-image-2.5';
   const currentModel = model || defaultModel;
   const modelList = isVideo ? CANVAS_VIDEO_MODELS : CANVAS_IMAGE_MODELS;
 
