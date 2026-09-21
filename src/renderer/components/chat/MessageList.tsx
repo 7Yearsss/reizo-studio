@@ -143,6 +143,11 @@ export default function MessageList({
             key={m.id}
             data-message-id={m.id}
             data-chat-search-scope=""
+            // Skip layout/paint for off-screen messages — sidebar resizes and
+            // scrolls otherwise reflow every rendered markdown block each frame.
+            // `auto` on containIntrinsicSize keeps the last measured size so the
+            // scrollbar height stays stable once a message has been rendered.
+            style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 200px' }}
             className={
               searchQuery?.trim() && !m.content.toLowerCase().includes(searchQuery.trim().toLowerCase())
                 ? 'opacity-40 transition-opacity duration-150'
