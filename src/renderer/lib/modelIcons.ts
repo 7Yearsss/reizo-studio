@@ -15,26 +15,29 @@ import {
   Qwen,
   Stability,
 } from '@lobehub/icons';
-import type { IconType } from '@lobehub/icons';
+import type { ComponentType } from 'react';
+
+export type VendorIconComponent = ComponentType<{ size: number; className?: string }>;
 
 /**
  * Vendor logo for a model, keyed by the domains `modelVendorDomain()` emits.
+ * Each entry is the brand-colored `Avatar` variant (colored tile + glyph).
  * Callers fall back to favicon/`Bot` when a domain isn't listed here.
  */
-export const MODEL_VENDOR_ICONS: Record<string, IconType> = {
-  'openai.com': OpenAI,
-  'x.ai': Grok,
-  'anthropic.com': Claude,
-  'deepmind.google': Gemini,
-  'deepseek.com': DeepSeek,
-  'moonshot.cn': Kimi,
-  'bigmodel.cn': ChatGLM,
-  'www.aliyun.com': Qwen,
-  'mistral.ai': Mistral,
-  'bfl.ai': Bfl,
-  'www.midjourney.com': Midjourney,
-  'klingai.com': Kling,
-  'lumalabs.ai': Luma,
-  'stability.ai': Stability,
-  'www.llama.com': Meta,
+export const MODEL_VENDOR_ICONS: Record<string, VendorIconComponent> = {
+  'openai.com': OpenAI.Avatar,
+  'x.ai': Grok.Avatar,
+  'anthropic.com': Claude.Avatar,
+  'deepmind.google': Gemini.Avatar,
+  'deepseek.com': DeepSeek.Avatar,
+  'moonshot.cn': Kimi.Avatar,
+  'bigmodel.cn': ChatGLM.Avatar,
+  'www.aliyun.com': Qwen.Avatar,
+  'mistral.ai': Mistral.Avatar,
+  'bfl.ai': Bfl.Avatar,
+  'www.midjourney.com': Midjourney.Avatar,
+  'klingai.com': Kling.Avatar,
+  'lumalabs.ai': Luma.Avatar,
+  'stability.ai': Stability.Avatar,
+  'www.llama.com': Meta.Avatar,
 };
