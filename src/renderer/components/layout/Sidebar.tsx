@@ -233,6 +233,9 @@ export default function Sidebar() {
     startX.current = e.clientX;
     startWidth.current = sidebarWidth;
     setIsDragging(true);
+    // Lets non-React listeners (the titlebar's sidebar-width section) drop
+    // their width transition while the pointer drags.
+    document.documentElement.classList.add('sidebar-resizing');
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
   };
 
@@ -245,6 +248,7 @@ export default function Sidebar() {
       uiStore.setSidebarCollapsed(true);
       dragging.current = false;
       setIsDragging(false);
+      document.documentElement.classList.remove('sidebar-resizing');
       try {
         (e.target as HTMLElement).releasePointerCapture(e.pointerId);
       } catch {
@@ -262,12 +266,14 @@ export default function Sidebar() {
     );
     dragWidth.current = clamped;
     if (asideRef.current) asideRef.current.style.width = `${clamped}px`;
+    document.documentElement.style.setProperty('--sidebar-width', `${clamped}px`);
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
     if (!dragging.current) return;
     dragging.current = false;
     setIsDragging(false);
+    document.documentElement.classList.remove('sidebar-resizing');
     try {
       (e.target as HTMLElement).releasePointerCapture(e.pointerId);
     } catch {
