@@ -7,6 +7,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useRef } from "react";
 import { EASE_IN_OUT, EASE_OUT, SPRING_PRESS } from "@/renderer/lib/ease";
 import { useHoverCapable } from "@/renderer/lib/hooks/use-hover-capable";
+import { canvasInteracting } from "@/renderer/lib/canvasInteraction";
 import { cn } from "@/renderer/lib/cn";
 
 export type ImageGenerationStatus =
@@ -193,7 +194,35 @@ export function DitherField({
       }
 
       context.globalAlpha = 1;
-      if (!reduce) frame = window.requestAnimationFrame(draw);
+      if (!reduce) frame = window.requestAnimationFrame(drawFrame);
+    };
+
+    // Paint nothing while a canvas drag/pan gesture is in flight — the loop
+    // stays scheduled so the field resumes seamlessly, but skips its
+    // arcs/fills instead of eating the gesture's frame budget.
+    const drawFrame = (time: number) => {
+      if (canvasInteracting()) {
+        if (!reduce) frame = window.requestAnimationFrame(drawFrame);
+        return;
+      }
+      draw(time);
+    };
+
+    let onScreen = true;
+    const start = () => {
+      if (!frame && !reduce && onScreen && !document.hidden) {
+        frame = window.requestAnimationFrame(drawFrame);
+      }
+    };
+    const stop = () => {
+      if (frame) {
+        window.cancelAnimationFrame(frame);
+        frame = 0;
+      }
+    };
+    const syncVisibility = () => {
+      if (onScreen && !document.hidden) start();
+      else stop();
     };
 
     const handlePointerMove = (event: PointerEvent) => {
@@ -212,16 +241,31 @@ export function DitherField({
       typeof ResizeObserver === "undefined"
         ? null
         : new ResizeObserver(resize);
+    // Hidden tabs stay mounted (display:none) but rAF still fires — a pending
+    // card in a background tab would otherwise paint forever offscreen.
+    const visibilityObserver =
+      typeof IntersectionObserver === "undefined"
+        ? null
+        : new IntersectionObserver((entries) => {
+            onScreen = entries[0]?.isIntersecting ?? true;
+            syncVisibility();
+          });
+    const onPageVisibility = () => syncVisibility();
 
     resize();
     resizeObserver?.observe(canvas);
+    visibilityObserver?.observe(canvas);
+    document.addEventListener("visibilitychange", onPageVisibility);
     canvas.addEventListener("pointermove", handlePointerMove, { passive: true });
     canvas.addEventListener("pointerleave", handlePointerLeave);
-    draw(0);
+    if (reduce) draw(0);
+    else start();
 
     return () => {
-      if (frame) window.cancelAnimationFrame(frame);
+      stop();
       resizeObserver?.disconnect();
+      visibilityObserver?.disconnect();
+      document.removeEventListener("visibilitychange", onPageVisibility);
       canvas.removeEventListener("pointermove", handlePointerMove);
       canvas.removeEventListener("pointerleave", handlePointerLeave);
     };

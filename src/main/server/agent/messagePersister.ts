@@ -100,7 +100,15 @@ export function createTurnPersister(deps: {
       ? parts.map((p) => ({
           ...p,
           result: p.result !== undefined ? spillField(largeValues, p.result) : undefined,
-          error: p.error !== undefined ? spillField(largeValues, p.error) : undefined,
+          // The turn is committing — a part that never produced a result or an
+          // error (interrupt, crash mid-tool) can never finish. Marking it keeps
+          // the card from rendering its pending/animating state forever.
+          error:
+            p.error !== undefined
+              ? spillField(largeValues, p.error)
+              : p.result === undefined
+                ? 'interrupted'
+                : undefined,
         }))
       : undefined;
     const message: ChatMessage = {
