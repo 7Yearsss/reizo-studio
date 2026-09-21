@@ -1,14 +1,5 @@
 import { useRef, useState } from 'react';
-import {
-  Maximize2,
-  Minimize2,
-  X,
-  Workflow,
-  FolderKanban,
-  FolderTree,
-  GitBranch,
-  Terminal,
-} from 'lucide-react';
+import { Maximize2, Minimize2, X } from 'lucide-react';
 import { cn } from '../../lib/cn';
 import { createPortal } from 'react-dom';
 import { useTitleBarSlot } from '../layout/titleBarSlots';
@@ -21,16 +12,7 @@ import ArtifactPanel from './ArtifactPanel';
 import CanvasPanel from '../canvas/CanvasPanel';
 import Tooltip from '../ui/Tooltip';
 
-const PANEL_METAS: Record<
-  uiStore.RightPanelTab,
-  { label: string; icon: React.ComponentType<{ size?: number; className?: string }> }
-> = {
-  canvas: { label: '画布', icon: Workflow },
-  artifacts: { label: '作品', icon: FolderKanban },
-  files: { label: '文件', icon: FolderTree },
-  git: { label: 'Git', icon: GitBranch },
-  terminal: { label: '终端', icon: Terminal },
-};
+
 
 export default function RightPanel({
   sessionId,
@@ -122,9 +104,6 @@ export default function RightPanel({
     }
   };
 
-  const meta = PANEL_METAS[activeTab];
-  const Icon = meta?.icon;
-
   return (
     <aside
       className={cn(
@@ -155,17 +134,7 @@ export default function RightPanel({
       {/* Panel chrome lives in the window title bar (right slot) — keeps a single top row */}
       {rightSlot &&
         createPortal(
-          <>
-            <div className="mr-1 flex items-center gap-1.5 border-l border-line/60 pl-2.5">
-              {Icon && (
-                <Icon
-                  size={13}
-                  className={cn(activeTab === 'canvas' ? 'text-accent' : 'text-ink-muted')}
-                />
-              )}
-              <span className="text-[11px] font-semibold text-ink-muted">{meta?.label}</span>
-            </div>
-            <div className="flex items-center gap-0.5">
+          <div className="ml-1 flex items-center gap-0.5 border-l border-line/60 pl-1.5">
               <Tooltip content={maximized ? '还原宽度' : '最大化面板'} side="bottom">
                 <button
                   type="button"
@@ -186,8 +155,7 @@ export default function RightPanel({
                   <X size={13} />
                 </button>
               </Tooltip>
-            </div>
-          </>,
+            </div>,
           rightSlot,
         )}
       <div className="min-h-0 flex-1">
