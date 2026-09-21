@@ -17,14 +17,16 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     name: 'Reizo (Winlume)',
     tag: 'Reizo',
     baseUrl: 'https://v2api.top/v1',
-    defaultModel: 'gpt-5.4',
+    defaultModel: 'gpt-6-astra',
+    websiteUrl: 'https://reizo-ai.com',
     description: '与网页 Studio 同一后端（new-api / v2api.top）。粘贴一个 new-api 令牌或网页 Studio 的虚拟密钥。',
     models: [
-      { id: 'gpt-5.4', name: 'GPT-5.4' },
-      { id: 'gpt-5.5', name: 'GPT-5.5' },
+      { id: 'gpt-6-astra', name: 'GPT-6 Astra' },
       { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol' },
       { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna' },
       { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra' },
+      { id: 'gpt-5.5', name: 'GPT-5.5' },
+      { id: 'gpt-5.4', name: 'GPT-5.4' },
       { id: 'gpt-5.3-codex-spark', name: 'GPT-5.3 Codex Spark' },
       { id: 'grok-4.6', name: 'Grok 4.6' },
       { id: 'grok-4.5', name: 'Grok 4.5' },
@@ -136,4 +138,30 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
 
 export function getProviderPreset(id: string): ProviderPreset | undefined {
   return PROVIDER_PRESETS.find((p) => p.id === id);
+}
+
+/**
+ * Vendor site for a model id — used to render the model's favicon in pickers.
+ * Upstream aggregators (v2api/new-api) mix vendors, so map by id prefix rather
+ * than the provider the request goes through.
+ */
+export function modelVendorDomain(modelId: string): string | undefined {
+  const id = modelId.toLowerCase();
+  if (/^(gpt|o\d|dall-e|chatgpt)/.test(id)) return 'openai.com';
+  if (id.startsWith('grok')) return 'x.ai';
+  if (id.startsWith('claude')) return 'anthropic.com';
+  if (id.startsWith('gemini') || id.includes('nano-banana')) return 'deepmind.google';
+  if (id.startsWith('deepseek')) return 'deepseek.com';
+  if (id.startsWith('kimi') || id.startsWith('moonshot')) return 'moonshot.cn';
+  if (id.startsWith('glm') || id.startsWith('zhipu')) return 'bigmodel.cn';
+  if (id.startsWith('qwen')) return 'www.aliyun.com';
+  if (id.startsWith('mistral') || id.startsWith('codestral')) return 'mistral.ai';
+  if (id.startsWith('flux')) return 'bfl.ai';
+  if (id.startsWith('mj_') || id.startsWith('midjourney')) return 'www.midjourney.com';
+  if (id.startsWith('kling')) return 'klingai.com';
+  if (id.startsWith('wan')) return 'www.aliyun.com';
+  if (id.startsWith('luma') || id.startsWith('ray')) return 'lumalabs.ai';
+  if (id.startsWith('sd') || id.startsWith('stable')) return 'stability.ai';
+  if (id.startsWith('llama') || id.startsWith('meta-')) return 'www.llama.com';
+  return undefined;
 }

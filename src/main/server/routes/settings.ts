@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { SettingsStore } from '../storage/settingsStore';
 import type { Appearance, PermissionMode, SettingsPatch } from '../../../shared/settings';
+import { getProviderPreset } from '../../../shared/providers';
 
 const APPEARANCES = new Set<Appearance>(['system', 'light', 'dark']);
 const PERMISSION_MODES = new Set<PermissionMode>(['ask', 'workspace', 'full']);
@@ -39,6 +40,22 @@ export function createSettingsRouter(settingsStore: SettingsStore) {
         return c.json({ error: 'computerUse must be a boolean' }, 400);
       }
       patch.computerUse = body.computerUse;
+    }
+
+    if (body.mediaModels !== undefined) {
+      const mm = body.mediaModels;
+      if (!mm || typeof mm !== 'object') {
+        return c.json({ error: 'mediaModels must be an object' }, 400);
+      }
+      patch.mediaModels = {};
+      for (const key of ['image', 'video'] as const) {
+        if (mm[key] !== undefined) {
+          if (mm[key] !== null && typeof mm[key] !== 'string') {
+            return c.json({ error: `mediaModels.${key} must be a string` }, 400);
+          }
+          patch.mediaModels[key] = mm[key] ?? undefined;
+        }
+      }
     }
 
     if (body.activeProviderId !== undefined) {
@@ -80,6 +97,41 @@ export function createSettingsRouter(settingsStore: SettingsStore) {
       return c.json(settings);
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+  });
+
+  /** Upstream OpenAI-compatible `/models` for a configured provider — the
+   * picker shows what the key can actually call instead of the preset list. */
+  router.get('/providers/:id/models', async (c) => {
+    const id = c.req.param('id');
+    const preset = getProviderPreset(id);
+    if (!preset) return c.json({ error: 'Unknown provider' }, 404);
+
+    const settings = await settingsStore.get();
+    const stored = settings.providers[id];
+    if (!stored?.apiKey) return c.json({ error: 'No API key configured' }, 400);
+
+    const baseUrl = (stored.baseUrl || preset.baseUrl).replace(/\/+$/, '');
+    if (!baseUrl) return c.json({ error: 'No base URL configured' }, 400);
+
+    try {
+      const res = await fetch(`${baseUrl}/models`, {
+        headers: { Authorization: `Bearer ${stored.apiKey}` },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok) {
+        return c.json({ error: `Upstream responded ${res.status}` }, 502);
+      }
+      const data = (await res.json().catch((): null => null)) as {
+        data?: { id?: unknown }[];
+      } | null;
+      const models = (data?.data ?? [])
+        .map((m) => m.id)
+        .filter((x): x is string => typeof x === 'string' && x.length > 0)
+        .map((modelId) => ({ id: modelId, name: modelId }));
+      return c.json({ models });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 502);
     }
   });
 
