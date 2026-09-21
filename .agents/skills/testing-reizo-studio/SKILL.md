@@ -104,6 +104,24 @@ runState/assets — handy to verify drafts/final landed without pixel-peeping.
 - User skills: `~/.config/Reizo Studio/data/skills/<id>/` + `.skillhub.json` marker for hub installs
 - Renderer dev server: http://127.0.0.1:46173 ; local API: 127.0.0.1:47100
 
+## Drag-resize handles
+
+Sidebar/right-panel resize handles are a 12px strip, but the ~6px that overhangs the
+panel edge is clipped — the effective grab zone is only ~6px at the inner edge.
+X11 coordinate drags often miss; use CDP `Input.dispatchMouseEvent` with real px
+(real display is 1600×1156 vs 1024×768 screenshot space — multiply x by 1.5625):
+mousePressed on the handle, several mouseMoved with buttons=1, mouseReleased.
+For perf assertions, inject `localStorage.setItem` + `requestAnimationFrame`
+counters via Runtime.evaluate before the drag, then read them after.
+
+## Long-conversation fixture
+
+No API for seeding single messages (POST /messages runs a full agent turn needing a
+key). Insert rows directly into `~/.config/Reizo Studio/data/reizo.db` via
+`node:sqlite` while the app is stopped — messages cols: id, session_id, role
+('user'/'assistant'), content (plain text), created_at (unix ms); sessions also need
+live_revision + list_message_count. ~120 messages ≈390 chars each makes a tall list.
+
 ## Feature map (relevant pages)
 
 - Sidebar "技能" (Sparkles icon, 2nd item) → uiStore.mode 'skills' → PluginsPage ("插件" title):

@@ -166,6 +166,7 @@ export function createApp(options: CreateAppOptions) {
       {
         canvasStore,
         dataRoot: options.dataRoot,
+        providerStore,
       },
       memoryEventsStore,
     ),

@@ -533,6 +533,13 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
 
   const isDraggingRef = useRef(false);
   const isPanningRef = useRef(false);
+  // Inertia pan: sample viewport positions while panning, glide with decay on release.
+  const panSamplesRef = useRef<{ t: number; x: number; y: number }[]>([]);
+  const inertiaRafRef = useRef(0);
+  const stopInertia = useCallback(() => {
+    if (inertiaRafRef.current) cancelAnimationFrame(inertiaRafRef.current);
+    inertiaRafRef.current = 0;
+  }, []);
   const [isInteracting, setIsInteracting] = useState(false);
   // Mirror the drag/pan flag for JS animators (e.g. dither fields) that pause
   // their per-frame painting while a gesture owns the frame budget.
@@ -1778,15 +1785,67 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         onMoveStart={() => {
           isPanningRef.current = true;
           setIsInteracting(true);
+          stopInertia();
+          panSamplesRef.current = [];
+        }}
+        onMove={(_, v) => {
+          // Track the pan trajectory so a flick release can glide. Zoom-only
+          // moves (x/y unchanged) also land here but contribute no velocity.
+          const s = panSamplesRef.current;
+          s.push({ t: performance.now(), x: v.x, y: v.y });
+          if (s.length > 6) s.shift();
         }}
         onMoveEnd={(_, v) => {
           isPanningRef.current = false;
-          if (!isDraggingRef.current) setIsInteracting(false);
           try {
             localStorage.setItem(VIEWPORT_KEY(sessionId), JSON.stringify(v));
           } catch {
             /* ignore */
           }
+          // Inertia: take the release velocity from the last ~120ms of panning.
+          // Only the viewport transform animates — same per-frame cost as the
+          // drag itself — and the glide stops under ~1.2s or on any new gesture.
+          const s = panSamplesRef.current;
+          panSamplesRef.current = [];
+          const last = s[s.length - 1];
+          if (!last || s.length < 2) {
+            if (!isDraggingRef.current) setIsInteracting(false);
+            return;
+          }
+          let i = s.length - 2;
+          while (i > 0 && last.t - s[i - 1].t <= 120) i -= 1;
+          const base = s[i];
+          const dt = Math.max(last.t - base.t, 1);
+          let vx = ((last.x - base.x) / dt) * 16.7;
+          let vy = ((last.y - base.y) / dt) * 16.7;
+          const speed = Math.hypot(vx, vy);
+          const MIN_FLICK = 3;
+          if (speed < MIN_FLICK) {
+            if (!isDraggingRef.current) setIsInteracting(false);
+            return;
+          }
+          const zoom = v.zoom;
+          const startAt = performance.now();
+          const step = (now: number): void => {
+            const elapsed = now - startAt;
+            vx *= 0.92;
+            vy *= 0.92;
+            if (Math.hypot(vx, vy) < 0.5 || elapsed > 1200 || isPanningRef.current) {
+              inertiaRafRef.current = 0;
+              if (!isDraggingRef.current) setIsInteracting(false);
+              const vp = rf.getViewport();
+              try {
+                localStorage.setItem(VIEWPORT_KEY(sessionId), JSON.stringify(vp));
+              } catch {
+                /* ignore */
+              }
+              return;
+            }
+            const vp = rf.getViewport();
+            void rf.setViewport({ x: vp.x + vx, y: vp.y + vy, zoom }, { duration: 0 });
+            inertiaRafRef.current = requestAnimationFrame(step);
+          };
+          inertiaRafRef.current = requestAnimationFrame(step);
         }}
         onNodeContextMenu={(e, node) => {
           e.preventDefault();

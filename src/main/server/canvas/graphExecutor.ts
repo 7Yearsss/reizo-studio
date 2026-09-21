@@ -4,13 +4,15 @@ import { getCanvasChannel } from './channel';
 import { runImageNode } from './imageExecutor';
 import { runAgentNode } from './agentExecutor';
 import { runVideoNode } from './videoExecutor';
+import { runAudioNode } from './audioExecutor';
+import type { ProviderStore } from '../storage/providerStore';
 import { descendants, directUpstream, topoOrder, buildPipelineWaves, inputHash } from './graph';
 
 /** Node types the executor knows how to run. */
 // `note` / `group` / `anchor` are inert: `anchor` is a reference pin consumed
 // by imageExecutor, never executed, and `buildPipelineWaves` already walks
 // dependencies through non-runnable nodes.
-const RUNNABLE = new Set(['image', 'agent', 'video']);
+const RUNNABLE = new Set(['image', 'agent', 'video', 'audio']);
 
 /**
  * Maximum concurrent node executions per wave.
@@ -48,8 +50,9 @@ export async function runGraph(options: {
   fromNodeId?: string;
   nodeIds?: string[];
   providerId?: string;
+  providerStore?: ProviderStore;
 }): Promise<void> {
-  const { canvasStore, settingsStore, dataRoot, canvasId, fromNodeId, nodeIds, providerId } = options;
+  const { canvasStore, settingsStore, dataRoot, canvasId, fromNodeId, nodeIds, providerId, providerStore } = options;
   const snapshot = canvasStore.getSnapshot(canvasId);
   if (!snapshot) return;
   const { nodes, edges } = snapshot;
@@ -156,6 +159,16 @@ export async function runGraph(options: {
             node: fresh,
             providerId,
             waitForCompletion: true,
+          });
+        } else if (fresh.type === 'audio') {
+          if (!providerStore) throw new Error('Audio node needs a provider store');
+          await runAudioNode({
+            canvasStore,
+            providerStore,
+            dataRoot,
+            canvasId,
+            node: fresh,
+            providerId,
           });
         } else {
           await runImageNode({
