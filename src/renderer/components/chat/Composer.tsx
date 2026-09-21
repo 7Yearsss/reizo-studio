@@ -8,8 +8,7 @@ import MentionMenu, { extractMentionQuery } from './MentionMenu';
 import SlashPalette, { applySlashArgs, buildSlashCommands, extractSlashQuery, type SlashCommand } from './SlashPalette';
 import PendingInteraction from './PendingInteraction';
 import QueuePanel from './QueuePanel';
-import TodoCard from './TodoCard';
-import NextStepStrip from './NextStepStrip';
+import ComposerDock from './ComposerDock';
 import ReplyStatusBar, { type ReplyPhase } from './ReplyStatusBar';
 import InterruptedTurnBanner from './InterruptedTurnBanner';
 import SelectField from '../ui/SelectField';
@@ -338,10 +337,11 @@ export default function Composer({
             ⚠ {loopNotice}
           </div>
         )}
-        {sessionId && <TodoCard items={todos} />}
-        {sessionId && !sending && turnOutcome === 'completed' && (
-          <NextStepStrip
+        {sessionId && (
+          <ComposerDock
             sessionId={sessionId}
+            todos={todos}
+            showNext={!sending && turnOutcome === 'completed'}
             onPick={(prompt) => onSend(prompt, [], {})}
           />
         )}
