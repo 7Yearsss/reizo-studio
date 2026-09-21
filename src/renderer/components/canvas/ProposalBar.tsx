@@ -1,7 +1,10 @@
 import React, { useEffect, useState, memo } from 'react';
 import { Sparkles, Check, X, Eye } from 'lucide-react';
+import * as api from '../../api';
 import * as canvasStore from '../../state/canvasStore';
+import * as chatStore from '../../state/chatStore';
 import { useCanvasStore } from '../../state/useCanvasStore';
+import { CANVAS_BUDGET_TOOL } from '../../../shared/stream';
 
 export interface ProposalBarProps {
   sessionId: string;
@@ -12,6 +15,16 @@ function ProposalBar({ sessionId, onFocusProposals }: ProposalBarProps) {
   const proposalIds = useCanvasStore((s) => s.proposalsBySession[sessionId] ?? canvasStore.EMPTY_PROPOSALS);
   const count = proposalIds.length;
   const [focusIdx, setFocusIdx] = useState(0);
+
+  const acceptAll = () => {
+    void canvasStore.acceptProposals(sessionId);
+    // Accepting the plan also releases a pending execution-budget checkpoint —
+    // the ghost nodes are the "plan", this approval is the "go".
+    const pending = chatStore.getSnapshot().interactionBySession[sessionId];
+    if (pending?.kind === 'permission' && pending.name === CANVAS_BUDGET_TOOL) {
+      void api.answerPermission(sessionId, pending.id, 'allow');
+    }
+  };
 
   useEffect(() => {
     if (count === 0) return;
@@ -28,7 +41,7 @@ function ProposalBar({ sessionId, onFocusProposals }: ProposalBarProps) {
 
       if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
-        void canvasStore.acceptProposals(sessionId);
+        acceptAll();
       } else if (e.key === 'Escape') {
         e.preventDefault();
         void canvasStore.rejectProposals(sessionId);
@@ -69,7 +82,7 @@ function ProposalBar({ sessionId, onFocusProposals }: ProposalBarProps) {
 
         <button
           type="button"
-          onClick={() => void canvasStore.acceptProposals(sessionId)}
+          onClick={acceptAll}
           className="flex items-center gap-1 rounded-xl bg-accent text-accent-ink px-3 py-1 text-xs font-semibold shadow-xs hover:opacity-90 active:scale-95 transition-all"
           title="回车键确认接受全部提案"
         >

@@ -1,3 +1,9 @@
+/** Synthetic tool name for the canvas-execution budget checkpoint — a
+ * 'permission' interaction carrying this name means the agent hit its per-turn
+ * generation quota. Shared because the renderer recognizes it for copy and
+ * for "accept proposals also releases the checkpoint". */
+export const CANVAS_BUDGET_TOOL = 'canvas_budget';
+
 export interface TodoItem {
   id: string;
   content: string;

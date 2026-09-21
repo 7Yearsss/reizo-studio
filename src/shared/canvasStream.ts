@@ -17,6 +17,7 @@ export type CanvasEvent =
   | { type: 'proposal_created'; nodeIds: string[]; operationId?: string }
   | { type: 'proposal_accepted'; operationId?: string }
   | { type: 'proposal_rejected'; operationId?: string }
+  | { type: 'phase'; label: string; step?: number; total?: number }
   | { type: 'heartbeat' };
 
 export interface CanvasEnvelope {

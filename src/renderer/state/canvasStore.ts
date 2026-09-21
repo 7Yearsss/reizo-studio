@@ -1,4 +1,5 @@
 import * as api from '../api';
+import * as settingsStore from './settingsStore';
 import {
   activeSessionId as tabStoreActiveSessionId,
   subscribe as subscribeTabs,
@@ -60,6 +61,8 @@ export interface CanvasState {
   moodboardBySession: Record<string, boolean>;
   /** Node(s) currently in Agent proposal diff state (rendered with glowing dashed border). */
   proposalsBySession: Record<string, string[]>;
+  /** Latest director phase note per session (e.g. "铺设分镜节点") — auto-clears. */
+  phaseBySession: Record<string, { label: string; step?: number; total?: number; at: number } | undefined>;
   /** Selected node IDs per session on the canvas. */
   selectedNodeIdsBySession: Record<string, string[]>;
   /** Node whose prompt composer currently owns @ pick (Ctrl+click). Chat composer never sets this. */
@@ -87,6 +90,7 @@ let state: CanvasState = {
   historyBySession: {},
   moodboardBySession: {},
   proposalsBySession: {},
+  phaseBySession: {},
   selectedNodeIdsBySession: {},
   mentionComposerBySession: {},
   pickingCanvasRefsBySession: {},
@@ -99,6 +103,7 @@ const streamAborts = new Map<string, AbortController>();
 const lastRevBySession = new Map<string, number>();
 const selectionTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const proposalToastTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const phaseTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const pendingProposalCounts = new Map<string, number>();
 
 /** Burst-coalesce "Agent 更新了 N 个节点" toasts within an 800ms window. */
@@ -284,10 +289,33 @@ function applyEvent(sessionId: string, event: CanvasEvent): void {
       break;
     }
     case 'proposal_created':
-      // Auto-accept: nodes land as normal members; a toast replaces the
-      // ProposalBar review step.
-      queueAgentNodesToast(sessionId, event.nodeIds.length);
+      // Director mode keeps ghost nodes in review (ProposalBar); otherwise
+      // auto-accept: nodes land as normal members and a toast replaces the
+      // review step.
+      if (settingsStore.getSnapshot().settings.directorSessions?.[sessionId]) {
+        addProposals(sessionId, event.nodeIds);
+      } else {
+        queueAgentNodesToast(sessionId, event.nodeIds.length);
+      }
       break;
+    case 'phase': {
+      setState({
+        phaseBySession: {
+          ...state.phaseBySession,
+          [sessionId]: { label: event.label, step: event.step, total: event.total, at: Date.now() },
+        },
+      });
+      const prev = phaseTimers.get(sessionId);
+      if (prev) clearTimeout(prev);
+      phaseTimers.set(
+        sessionId,
+        setTimeout(() => {
+          phaseTimers.delete(sessionId);
+          setState({ phaseBySession: { ...state.phaseBySession, [sessionId]: undefined } });
+        }, 10_000),
+      );
+      break;
+    }
     case 'proposal_accepted':
     case 'proposal_rejected':
       setProposals(sessionId, []);

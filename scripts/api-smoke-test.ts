@@ -67,7 +67,7 @@ async function main() {
     const reizo = body.providers.find((p: { id: string }) => p.id === 'reizo');
     check(
       'settings-reizo-preset',
-      reizo?.name === 'Reizo (Winlume)' &&
+      reizo?.name === 'Reizo' &&
         typeof reizo?.baseUrl === 'string' &&
         reizo.baseUrl.includes('v2api.top') &&
         reizo.hasKey === false,

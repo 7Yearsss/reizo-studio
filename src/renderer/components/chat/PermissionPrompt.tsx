@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { CANVAS_BUDGET_TOOL } from '../../../shared/stream';
 import type { PendingPermission } from '../../state/chatStore';
 import { ToolApproval } from '../agents/tool-approval';
 import DiffView from './DiffView';
@@ -41,14 +42,20 @@ export default function PermissionPrompt({
     }));
 
   const isComputer = permission.name === 'computer';
+  const isCanvasBudget = permission.name === CANVAS_BUDGET_TOOL;
+  const executed = typeof permission.args.executed === 'number' ? permission.args.executed : null;
   const title = preview
     ? `允许写入 ${preview.path}？`
     : isComputer
       ? '允许 Agent 操作这台电脑？'
-      : '允许运行这个工具？';
+      : isCanvasBudget
+        ? `已生成 ${executed ?? ''} 个画布任务，继续生成更多吗？`
+        : '允许运行这个工具？';
   const description = isComputer
     ? '同意后，本次会话中 Agent 可以截屏并控制鼠标、键盘，直到会话结束。不要让它输入密码等敏感信息。'
-    : '高风险动作会先问你，再动文件或命令。';
+    : isCanvasBudget
+      ? '画布生成有每轮配额。允许一次会再放行一批；本会话都允许则本轮内不再询问。'
+      : '高风险动作会先问你，再动文件或命令。';
 
   return (
     <div className="rise-in space-y-2">

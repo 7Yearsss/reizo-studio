@@ -29,6 +29,8 @@ export interface LocalSettings {
   /** Let the agent drive the real mouse/keyboard/screen (the `computer` tool). Off by default. */
   computerUse: boolean;
   mediaModels: MediaModels;
+  /** Per-session opt-in: agent may proactively use canvas tools instead of only on explicit request. */
+  directorSessions: Record<string, boolean>;
   providers: Record<string, StoredProvider>;
 }
 
@@ -47,6 +49,7 @@ export interface PublicSettings {
   busyEnter: BusyEnterBehavior;
   computerUse: boolean;
   mediaModels: MediaModels;
+  directorSessions: Record<string, boolean>;
   providers: PublicProvider[];
 }
 
@@ -56,6 +59,7 @@ export interface SettingsPatch {
   busyEnter?: BusyEnterBehavior;
   computerUse?: boolean;
   mediaModels?: MediaModels;
+  directorSession?: { sessionId: string; enabled: boolean };
   activeProviderId?: string;
   workspacePath?: string | null;
   provider?: {

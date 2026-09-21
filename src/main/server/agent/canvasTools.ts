@@ -12,6 +12,8 @@ import { runVideoNode } from '../canvas/videoExecutor';
 import { runGraph } from '../canvas/graphExecutor';
 import { descendants } from '../canvas/graph';
 import { watchCanvasNodeJob } from './jobWatch';
+import { CANVAS_BUDGET_ALLOW_BATCH, type CanvasBudget } from './canvasBudget';
+import { ApprovalRequiredError, CANVAS_BUDGET_TOOL, requestBudgetCheckpoint } from './permissions';
 import type { CanvasNode } from '../../../shared/canvas';
 
 function nodeBrief(node: CanvasNode) {
@@ -127,8 +129,54 @@ export function createCanvasTools(options: {
   canvasStore: CanvasStore;
   settingsStore: SettingsStore;
   dataRoot: string;
+  /** Per-turn execution cap — created once per runChatTurn so an approval
+   * suspension and resume share the same counters. */
+  budget?: CanvasBudget;
 }) {
-  const { sessionId, canvasStore, settingsStore, dataRoot } = options;
+  const { sessionId, canvasStore, settingsStore, dataRoot, budget } = options;
+
+  /** Gate a paid canvas run (image/video/graph). Past the per-turn execute
+   * ceiling this records a checkpoint prompt and unwinds the step — approving
+   * it extends the ceiling so the resumed call passes. */
+  const gateExecute = (toolCallId: string, args: Record<string, unknown>): void => {
+    if (!budget) return;
+    budget.record('execute');
+    if (!budget.exceeded('execute')) return;
+    const { execute } = budget.counts();
+    const ok = requestBudgetCheckpoint({
+      sessionId,
+      toolCallId,
+      args: { ...args, executed: execute },
+      onAllow: () => budget.extendExecute(CANVAS_BUDGET_ALLOW_BATCH),
+    });
+    if (!ok) {
+      throw new ApprovalRequiredError({
+        toolCallId,
+        name: CANVAS_BUDGET_TOOL,
+        args: { ...args, executed: execute },
+        kind: 'permission',
+      });
+    }
+  };
+
+  /** Loop fuse: re-running the same node whose params haven't moved is burning
+   * a generation for nothing — warn once, then refuse until something changed. */
+  const runSigs = new Map<string, { sig: string; repeats: number }>();
+  const unchangedRunVerdict = (node: CanvasNode): { note?: string; blocked?: true } => {
+    const sig = JSON.stringify(node.params ?? {});
+    const prev = runSigs.get(node.id);
+    if (prev?.sig !== sig) {
+      runSigs.set(node.id, { sig, repeats: 1 });
+      return {};
+    }
+    prev.repeats += 1;
+    if (prev.repeats === 2) {
+      return {
+        note: 'warning: this node was just run with identical parameters — the output will not change unless inputs or params move. Skipping is free; only proceed if the user explicitly asked for a re-roll.',
+      };
+    }
+    return { blocked: true };
+  };
 
   return {
     open_canvas: tool({
@@ -164,6 +212,7 @@ export function createCanvasTools(options: {
         operationId: z.string().optional().describe('Idempotent operation ID for tracking and batched undo.'),
       }),
       execute: async (input) => {
+        budget?.record('structural');
         const canvas = canvasStore.ensureCanvas(sessionId);
         const box = defaultNodeBox(input.type);
         const params =
@@ -244,9 +293,12 @@ export function createCanvasTools(options: {
         asProposal: z.boolean().default(false).describe('When true, marks all created nodes as Ghost Proposals awaiting user approval in ProposalBar.'),
         operationId: z.string().optional().describe('Idempotent operation ID for tracking and batched undo.'),
       }),
-      execute: async (input) => {
+      execute: async (input, toolOptions) => {
         const canvas = canvasStore.ensureCanvas(sessionId);
         const channel = getCanvasChannel(canvas.id);
+        // A pipeline call creates many nodes — count them against the loose
+        // structural cap so a runaway planner still trips the breaker.
+        for (let i = 0; i < input.scenes.length * 2 + 1; i++) budget?.record('structural');
 
         // 1. Create Overview Note card
         const scriptOverview = `# ${input.storyTitle}\n\n画幅比例: ${input.ratio}\n分镜总数: ${input.scenes.length}\n\n${input.scenes
@@ -263,8 +315,10 @@ export function createCanvasTools(options: {
           params: { content: scriptOverview, color: 'amber' },
         });
         channel.broadcast(rNote, { type: 'node_added', node: noteNode });
+        channel.broadcast(rNote, { type: 'phase', label: '规划剧本骨架', step: 1, total: 3 });
 
         const createdSceneNodeIds: string[] = [];
+        let lastRev = rNote;
         const imageNodes: CanvasNode[] = [];
         const videoNodes: CanvasNode[] = [];
 
@@ -317,6 +371,13 @@ export function createCanvasTools(options: {
             },
           });
           channel.broadcast(rVid, { type: 'node_added', node: vidNode });
+          channel.broadcast(rVid, {
+            type: 'phase',
+            label: `铺设分镜节点 ${i + 1}/${input.scenes.length}`,
+            step: 2,
+            total: 3,
+          });
+          lastRev = rVid;
           videoNodes.push(vidNode);
           createdSceneNodeIds.push(vidNode.id);
 
@@ -346,7 +407,15 @@ export function createCanvasTools(options: {
           }
         }
 
+        channel.broadcast(lastRev, {
+          type: 'phase',
+          label: input.asProposal ? '编排完成，待确认' : '编排完成',
+          step: 3,
+          total: 3,
+        });
+
         if (input.autoRunFirstScene && imageNodes.length > 0) {
+          gateExecute(toolOptions?.toolCallId ?? '', { tool: 'create_storyboard_pipeline', scenes: input.scenes.length });
           void runImageNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node: imageNodes[0] });
         }
 
@@ -380,10 +449,22 @@ export function createCanvasTools(options: {
         wait: z.boolean().optional().describe('Wait for the run to finish (default true).'),
         timeoutMs: z.number().optional().describe('Max wait in ms (default 300000).'),
       }),
-      execute: async ({ id, wait, timeoutMs }) => {
+      execute: async ({ id, wait, timeoutMs }, toolOptions) => {
+        gateExecute(toolOptions?.toolCallId ?? '', { tool: 'run_node', id });
         const canvas = canvasStore.ensureCanvas(sessionId);
         const node = canvasStore.getNode(canvas.id, id);
         if (!node) return { error: `No canvas node "${id}"` };
+        const fuse = unchangedRunVerdict(node);
+        if (fuse.blocked) {
+          return {
+            ok: false,
+            id,
+            status: node.runState,
+            error:
+              'refused: this node has been re-run repeatedly with identical parameters and no upstream change. Change the prompt/inputs (update_node, connect_nodes) or explain why a re-roll is intended.',
+          };
+        }
+        const repeatNote = fuse.note;
         const running =
           node.type === 'agent'
             ? runAgentNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node })
@@ -395,11 +476,11 @@ export function createCanvasTools(options: {
           // Completion lands in this turn as a system note — the agent can
           // keep working and gets told instead of polling read_canvas.
           watchCanvasNodeJob(sessionId, canvas.id, canvasStore, [id]);
-          return { ok: true, id, status: 'running' };
+          return { ok: true, id, status: 'running', ...(repeatNote ? { note: repeatNote } : {}) };
         }
         const settled = await settleNodes(canvasStore, canvas.id, [id], timeoutMs ?? 300_000, running);
         const n = settled[0];
-        return { ok: n?.runState !== 'error', id, status: n?.runState ?? 'running', error: n?.output?.error };
+        return { ok: n?.runState !== 'error', id, status: n?.runState ?? 'running', error: n?.output?.error, ...(repeatNote ? { note: repeatNote } : {}) };
       },
     }),
 
@@ -415,7 +496,8 @@ export function createCanvasTools(options: {
         wait: z.boolean().optional().describe('Wait for the run to finish (default true).'),
         timeoutMs: z.number().optional().describe('Max wait in ms (default 300000).'),
       }),
-      execute: async ({ from, nodeIds, wait, timeoutMs }) => {
+      execute: async ({ from, nodeIds, wait, timeoutMs }, toolOptions) => {
+        gateExecute(toolOptions?.toolCallId ?? '', { tool: 'run_graph', ...(from ? { from } : {}), ...(nodeIds ? { nodeIds } : {}) });
         const canvas = canvasStore.ensureCanvas(sessionId);
         if (from && !canvasStore.getNode(canvas.id, from)) return { error: `No canvas node "${from}"` };
         const missing = (nodeIds ?? []).filter((id) => !canvasStore.getNode(canvas.id, id));
