@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import * as chatStore from '../state/chatStore';
 import * as tabStore from '../state/tabStore';
 import { useChatStore } from '../state/useChatStore';
@@ -9,7 +10,7 @@ import TopRightToolbar from '../components/chat/TopRightToolbar';
 import { collectMessageMatches } from '../lib/highlightText';
 import type { ReplyPhase } from '../components/chat/ReplyStatusBar';
 import { liveReplyPhase } from '../state/liveReply';
-import { cn } from '../lib/cn';
+import { useTitleBarSlot } from '../components/layout/titleBarSlots';
 
 export default function ChatPage({
   sessionId,
@@ -119,6 +120,7 @@ export default function ChatPage({
   }, []);
 
   const isCompact = containerWidth < 460;
+  const titleBarSlot = useTitleBarSlot('center');
   // Composer floats over the stream; its rendered height (docked plan / ask /
   // queue cards included) is what the list pads below so content can always
   // scroll fully clear — cards never sit on top of messages.
@@ -133,13 +135,11 @@ export default function ChatPage({
 
   return (
     <div ref={containerRef} className="relative flex h-full min-w-0 flex-col">
-      <header
-        className={cn(
-          'flex shrink-0 items-center gap-2',
-          isCompact ? 'px-3.5 pt-3 pb-1' : 'px-8 pt-4 pb-2',
-        )}
-      >
-        {renaming ? (
+      {active &&
+        titleBarSlot &&
+        createPortal(
+          <>
+            {renaming ? (
           <input
             autoFocus
             value={titleDraft}
@@ -152,10 +152,7 @@ export default function ChatPage({
                 setRenaming(false);
               }
             }}
-            className={cn(
-              'min-w-0 flex-1 rounded-md bg-paper-inset/70 px-2 py-0.5 font-semibold tracking-tight text-ink outline-none',
-              isCompact ? 'text-base' : 'text-lg',
-            )}
+            className="min-w-0 max-w-64 rounded-md bg-paper-inset/70 px-2 py-0.5 text-[13px] font-semibold tracking-tight text-ink outline-none"
             aria-label="会话标题"
           />
         ) : (
@@ -165,32 +162,33 @@ export default function ChatPage({
               setTitleDraft(session?.title ?? '');
               setRenaming(true);
             }}
-            className={cn(
-              'min-w-0 flex-1 truncate text-left font-semibold tracking-tight transition-colors',
-              isCompact ? 'text-base' : 'text-lg',
-            )}
+            className="min-w-0 max-w-64 truncate px-1 text-left text-[13px] font-semibold tracking-tight transition-colors"
             title={session?.title ? `${session.title} (点击重命名)` : '点击重命名'}
           >
             {session?.title ?? '对话'}
           </button>
         )}
-        <TopRightToolbar
-          sessionId={sessionId}
-          compact={isCompact}
-          onSearch={() => setSearchOpen((open) => !open)}
-          searchOpen={searchOpen}
-          onRename={() => {
-            setTitleDraft(session?.title ?? '');
-            setRenaming(true);
-          }}
-          onDelete={() => {
-            if (confirm('确定要删除此对话吗？')) {
-              tabStore.closeSessionTabs(sessionId);
-              void chatStore.deleteSession(sessionId);
-            }
-          }}
-        />
-      </header>
+            <div className="ml-1 shrink-0">
+              <TopRightToolbar
+                sessionId={sessionId}
+                compact={isCompact}
+                onSearch={() => setSearchOpen((open) => !open)}
+                searchOpen={searchOpen}
+                onRename={() => {
+                  setTitleDraft(session?.title ?? '');
+                  setRenaming(true);
+                }}
+                onDelete={() => {
+                  if (confirm('确定要删除此对话吗？')) {
+                    tabStore.closeSessionTabs(sessionId);
+                    void chatStore.deleteSession(sessionId);
+                  }
+                }}
+              />
+            </div>
+          </>,
+          titleBarSlot,
+        )}
       {searchOpen && (
         <ChatSearchPanel
           query={searchQuery}

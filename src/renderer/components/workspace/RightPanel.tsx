@@ -10,6 +10,8 @@ import {
   Terminal,
 } from 'lucide-react';
 import { cn } from '../../lib/cn';
+import { createPortal } from 'react-dom';
+import { useTitleBarSlot } from '../layout/titleBarSlots';
 import * as uiStore from '../../state/uiStore';
 import { useUiStore } from '../../state/useUiStore';
 import DirectoryPanel from './DirectoryPanel';
@@ -43,6 +45,7 @@ export default function RightPanel({
   const sidebarWidth = useUiStore((s) => s.sidebarWidth);
 
   const [isDragging, setIsDragging] = useState(false);
+  const rightSlot = useTitleBarSlot('right');
   const dragging = useRef(false);
   const startX = useRef(0);
   const startWidth = useRef(0);
@@ -149,39 +152,44 @@ export default function RightPanel({
           )}
         />
       </div>
-      <div className="flex h-10 items-center justify-between border-b border-line/60 px-3">
-        <div className="flex items-center gap-2">
-          {Icon && (
-            <Icon
-              size={14}
-              className={cn(activeTab === 'canvas' ? 'text-accent' : 'text-ink-muted')}
-            />
-          )}
-          <span className="text-xs font-semibold text-ink">{meta?.label}</span>
-        </div>
-        <div className="flex items-center gap-0.5">
-          <Tooltip content={maximized ? '还原宽度' : '最大化面板'} side="bottom">
-            <button
-              type="button"
-              onClick={() => uiStore.toggleRightPanelMaximized()}
-              className="rounded-full p-1.5 text-ink-muted hover:bg-paper-inset/70 hover:text-ink transition-colors"
-              aria-label={maximized ? '还原宽度' : '最大化面板'}
-            >
-              {maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-            </button>
-          </Tooltip>
-          <Tooltip content="关闭面板" side="bottom">
-            <button
-              type="button"
-              onClick={() => uiStore.closeRightPanel()}
-              className="rounded-full p-1.5 text-ink-muted hover:bg-paper-inset/70 hover:text-ink transition-colors"
-              aria-label="关闭面板"
-            >
-              <X size={13} />
-            </button>
-          </Tooltip>
-        </div>
-      </div>
+      {/* Panel chrome lives in the window title bar (right slot) — keeps a single top row */}
+      {rightSlot &&
+        createPortal(
+          <>
+            <div className="mr-1 flex items-center gap-1.5 border-l border-line/60 pl-2.5">
+              {Icon && (
+                <Icon
+                  size={13}
+                  className={cn(activeTab === 'canvas' ? 'text-accent' : 'text-ink-muted')}
+                />
+              )}
+              <span className="text-[11px] font-semibold text-ink-muted">{meta?.label}</span>
+            </div>
+            <div className="flex items-center gap-0.5">
+              <Tooltip content={maximized ? '还原宽度' : '最大化面板'} side="bottom">
+                <button
+                  type="button"
+                  onClick={() => uiStore.toggleRightPanelMaximized()}
+                  className="rounded-full p-1.5 text-ink-muted hover:bg-paper-inset/70 hover:text-ink transition-colors"
+                  aria-label={maximized ? '还原宽度' : '最大化面板'}
+                >
+                  {maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+                </button>
+              </Tooltip>
+              <Tooltip content="关闭面板" side="bottom">
+                <button
+                  type="button"
+                  onClick={() => uiStore.closeRightPanel()}
+                  className="rounded-full p-1.5 text-ink-muted hover:bg-paper-inset/70 hover:text-ink transition-colors"
+                  aria-label="关闭面板"
+                >
+                  <X size={13} />
+                </button>
+              </Tooltip>
+            </div>
+          </>,
+          rightSlot,
+        )}
       <div className="min-h-0 flex-1">
         {activeTab === 'canvas' && sessionId && <CanvasPanel key={sessionId} sessionId={sessionId} />}
         {activeTab === 'artifacts' && sessionId && <ArtifactPanel sessionId={sessionId} />}
