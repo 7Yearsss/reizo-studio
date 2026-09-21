@@ -77,6 +77,8 @@ export default function Composer({
   onRetryStalled?: () => void;
   onDismissInterrupt?: () => void;
   compact?: boolean;
+  /** Reports the floating overlay's rendered height so the message list can keep enough bottom padding for content to scroll fully clear of the docked cards. */
+  onOverlayHeight?: (height: number) => void;
 }) {
   const [draft, setDraft] = useState('');
   const [mentions, setMentions] = useState<string[]>([]);
@@ -219,9 +221,33 @@ export default function Composer({
     if (!draft.includes('@')) setMentions([]);
   }, [draft]);
 
+  const [draggingFiles, setDraggingFiles] = useState(false);
+  const dragDepth = useRef(0);
+
   async function addDroppedFiles(files: FileList | File[]) {
     const next = [...attachments];
     for (const file of Array.from(files)) {
+      // Images land on this session's canvas as a node and get @-referenced in
+      // the draft — the composer text path can't carry binaries.
+      if (sessionId && file.type.startsWith('image/')) {
+        try {
+          const nodes = canvasStore.getSnapshot().nodesBySession[sessionId] ?? [];
+          const right = nodes.reduce((m, n) => Math.max(m, n.x + n.w), 0);
+          const node = await canvasStore.importImage(sessionId, file, { x: (right || 0) + 40, y: 60 });
+          if (node) {
+            const p = (node.params as Record<string, unknown>) ?? {};
+            chatStore.addNodeRef(sessionId, {
+              id: node.id,
+              label: (node.title || file.name).toString().slice(0, 24),
+              type: 'image',
+              thumbnail: getCanvasNodeThumbnail(node) ?? (p.imageUrl as string | undefined),
+            });
+          }
+        } catch {
+          /* import failed — nothing to attach */
+        }
+        continue;
+      }
       try {
         const filePath = window.reizo.getPathForFile(file);
         const read = await window.reizo.readDroppedFile(filePath);
@@ -236,6 +262,16 @@ export default function Composer({
   }
 
   const composerBodyRef = useRef<HTMLDivElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = overlayRef.current;
+    if (!el || !onOverlayHeight) return;
+    onOverlayHeight(el.offsetHeight);
+    const observer = new ResizeObserver(() => onOverlayHeight(el.offsetHeight));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [onOverlayHeight]);
 
   const focusComposer = useCallback(() => {
     composerBodyRef.current?.querySelector('textarea')?.focus();
@@ -269,6 +305,7 @@ export default function Composer({
 
   return (
     <div
+      ref={overlayRef}
       className={cn(
         'pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-paper via-paper to-paper-a0',
         compact ? 'px-3 pb-3 pt-8' : 'px-6 pb-6 pt-16',
@@ -350,8 +387,20 @@ export default function Composer({
           onDragOver={(e) => {
             e.preventDefault();
           }}
+          onDragEnter={(e) => {
+            if (e.dataTransfer.types.includes('Files')) {
+              dragDepth.current += 1;
+              setDraggingFiles(true);
+            }
+          }}
+          onDragLeave={() => {
+            dragDepth.current = Math.max(0, dragDepth.current - 1);
+            if (dragDepth.current === 0) setDraggingFiles(false);
+          }}
           onDrop={(e) => {
             e.preventDefault();
+            dragDepth.current = 0;
+            setDraggingFiles(false);
             if (e.dataTransfer.files.length) void addDroppedFiles(e.dataTransfer.files);
           }}
         >
@@ -500,7 +549,10 @@ export default function Composer({
                 ))}
               </div>
             )}
-            <div className="rounded-2xl border border-line bg-paper-raised p-2 shadow-[0_8px_30px_rgba(28,22,18,0.06)]">
+            <div className={cn(
+              'rounded-2xl border bg-paper-raised p-2 shadow-[0_8px_30px_rgba(28,22,18,0.06)] transition-colors',
+              draggingFiles ? 'border-accent ring-2 ring-accent/40' : 'border-line',
+            )}>
               {liveStatus ? <div className="mb-2 px-2">{liveStatus}</div> : null}
               {activeSkill && (
                 <div className="mb-1.5 px-1">

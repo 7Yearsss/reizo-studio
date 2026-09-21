@@ -119,6 +119,10 @@ export default function ChatPage({
   }, []);
 
   const isCompact = containerWidth < 460;
+  // Composer floats over the stream; its rendered height (docked plan / ask /
+  // queue cards included) is what the list pads below so content can always
+  // scroll fully clear — cards never sit on top of messages.
+  const [composerH, setComposerH] = useState(176);
 
   function commitRename() {
     const next = titleDraft.trim();
@@ -219,6 +223,7 @@ export default function ChatPage({
         onEditLastUser={() => chatStore.editLastUserMessage(sessionId)}
         onRetryLastAssistant={() => void chatStore.retryLastAssistant(sessionId)}
         onPickHint={(text) => chatStore.seedComposer(sessionId, text)}
+        bottomInset={composerH}
       />
       <Composer
         sessionId={sessionId}
@@ -241,6 +246,7 @@ export default function ChatPage({
         onRetryTurn={() => void chatStore.retryInterruptedTurn(sessionId)}
         onRetryStalled={() => void chatStore.retryStalledTurn(sessionId)}
         onDismissInterrupt={() => chatStore.dismissInterrupt(sessionId)}
+        onOverlayHeight={setComposerH}
       />
     </div>
   );
