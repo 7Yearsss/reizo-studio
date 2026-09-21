@@ -100,7 +100,11 @@ const TABS: { id: PickerTab; label: string }[] = [
 export default function ModelPicker({ compact = false }: { compact?: boolean }) {
   const settings = useSettingsStore((s) => s.settings);
   const [tab, setTab] = useState<PickerTab>('text');
-  const configured = settings.providers.filter((p) => p.hasKey || p.id === 'custom');
+  // Reizo (the built-in upstream) always shows; third-party vendors only once
+  // they have a key. 'custom' stays for free-form endpoints.
+  const configured = settings.providers.filter(
+    (p) => p.hasKey || p.id === 'custom' || p.id === 'reizo',
+  );
   const active = settings.providers.find((p) => p.id === settings.activeProviderId) ?? configured[0];
 
   if (!active) {
