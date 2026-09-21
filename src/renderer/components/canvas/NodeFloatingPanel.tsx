@@ -209,6 +209,8 @@ function NodeFloatingPanel({
     [visualRefs],
   );
 
+  const mediaModels = useSettingsStore((s) => s.settings.mediaModels);
+
   // ── Early return after all hooks ─────────────────────────────────────────
   if (!shouldRender) return null;
 
@@ -235,7 +237,6 @@ function NodeFloatingPanel({
     }
   };
 
-  const mediaModels = useSettingsStore((s) => s.settings.mediaModels);
   const defaultModel = isVideo
     ? mediaModels?.video || 'kling-1.5'
     : isAudio
