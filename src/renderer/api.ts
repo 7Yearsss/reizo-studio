@@ -5,7 +5,7 @@ import type { DirEntry } from '../shared/workspace';
 import type { PublicSettings, SettingsPatch } from '../shared/settings';
 import type { Schedule, Thought } from '../shared/schedule';
 import { SCHEDULE_PRESETS } from '../shared/schedule';
-import { parseStreamLine, type AskQuestion, type ChatStreamEvent } from '../shared/stream';
+import { parseStreamLine, type AskQuestion, type ChatStreamEvent, type MemoryEventRecord } from '../shared/stream';
 import { isLiveEnvelope } from '../shared/liveRevision';
 import type { CanvasSnapshot, CanvasEdge, CanvasNode, CanvasNodeParams, CanvasNodeType, CanvasNodeOutput } from '../shared/canvas';
 import { isCanvasEnvelope, type CanvasEvent } from '../shared/canvasStream';
@@ -326,6 +326,17 @@ export async function getPendingInteractions(sessionId: string): Promise<Pending
   return body.interactions ?? [];
 }
 
+export async function fetchMemoryEvents(sessionId: string): Promise<MemoryEventRecord[]> {
+  const res = await api(`/api/memory/events?sessionId=${encodeURIComponent(sessionId)}`);
+  const body = await res.json();
+  return Array.isArray(body.events) ? body.events : [];
+}
+
+export async function deleteMemoryFile(file: string, sessionId?: string): Promise<void> {
+  const q = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : '';
+  await api(`/api/memory/${encodeURIComponent(file)}${q}`, { method: 'DELETE' });
+}
+
 export async function listSkills(): Promise<{ id: string; name: string; description: string; prompt?: string; source: 'bundled' | 'user'; coverUrl?: string }[]> {
   const res = await api('/api/skills');
   const body = await res.json();
@@ -396,6 +407,19 @@ export async function deleteThought(id: string): Promise<void> {
 export async function getSettings(): Promise<PublicSettings> {
   const res = await api('/api/settings');
   return res.json();
+}
+
+/** Models the provider's key can actually call (upstream `/models`). Throws on
+ * unreachable upstream / missing key — callers fall back to the preset list. */
+export async function getProviderModels(
+  providerId: string,
+): Promise<{ id: string; name: string }[]> {
+  const res = await fetch(
+    `${await apiOrigin()}/api/settings/providers/${encodeURIComponent(providerId)}/models`,
+  );
+  if (!res.ok) throw new Error(`models lookup failed: ${res.status}`);
+  const data = (await res.json()) as { models?: { id: string; name: string }[] };
+  return data.models ?? [];
 }
 
 export async function patchSettings(patch: SettingsPatch): Promise<PublicSettings> {

@@ -62,7 +62,7 @@ export default function AssistantMessage({
       <AskAnswers parts={parts} />
       {sessionId ? <GeneratedMediaStrip parts={parts} sessionId={sessionId} /> : null}
       {content ? (
-        <div className="markdown text-[15px] leading-[1.75] text-ink">
+        <div data-slot="message-content" className="markdown text-[15px] leading-[1.75] text-ink">
           <MarkdownContent content={content} streaming={streaming} />
           {streaming ? <StreamingCaret /> : null}
         </div>

@@ -27,6 +27,7 @@ export default function ChatPage({
   const error = useChatStore((s) => s.errorBySession[sessionId]) ?? null;
   const loopNotice = useChatStore((s) => s.loopNoticeBySession[sessionId]) ?? null;
   const turnOutcome = useChatStore((s) => s.turnOutcomeBySession[sessionId]) ?? null;
+  const memoryEvents = useChatStore((s) => s.memoryEventsBySession[sessionId]) ?? [];
   const interruptRequested = useChatStore((s) => s.interruptRequestedBySession[sessionId]) ?? false;
   const showInterruptBanner = useChatStore((s) => {
     const summary = s.sessions.find((x) => x.id === sessionId);
@@ -194,6 +195,7 @@ export default function ChatPage({
         lastUserId={lastUserId}
         lastAssistantId={lastAssistantId}
         turnOutcome={turnOutcome}
+        memoryEvents={memoryEvents}
         onEditLastUser={() => chatStore.editLastUserMessage(sessionId)}
         onRetryLastAssistant={() => void chatStore.retryLastAssistant(sessionId)}
         onPickHint={(text) => chatStore.seedComposer(sessionId, text)}

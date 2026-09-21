@@ -24,6 +24,8 @@ import { createInteractionStore } from './storage/interactionStore';
 import { initInteractionPersistence } from './agent/permissions';
 import { createAdminProvidersRouter } from './routes/adminProviders';
 import { createPublicProvidersRouter } from './routes/publicProviders';
+import { createMemoryEventsStore } from './storage/memoryEventsStore';
+import { createMemoryRouter } from './routes/memory';
 
 export interface CreateAppOptions {
   /** Directory the local session/settings JSON files live under. */
@@ -150,14 +152,25 @@ export function createApp(options: CreateAppOptions) {
 
   app.get('/api/health', (c) => c.json({ ok: true }));
   const skillsDirs = options.skillsDirs ?? [];
+  const memoryEventsStore = createMemoryEventsStore(options.dataRoot);
   app.route('/api/sessions', createSessionsRouter(sessionStore, artifactStore));
   app.route(
     '/api/sessions',
-    createChatRouter(sessionStore, settingsStore, skillsDirs, artifactStore, projectStore, largeValueStore, {
-      canvasStore,
-      dataRoot: options.dataRoot,
-    }),
+    createChatRouter(
+      sessionStore,
+      settingsStore,
+      skillsDirs,
+      artifactStore,
+      projectStore,
+      largeValueStore,
+      {
+        canvasStore,
+        dataRoot: options.dataRoot,
+      },
+      memoryEventsStore,
+    ),
   );
+  app.route('/api/memory', createMemoryRouter(memoryEventsStore, settingsStore));
   app.route('/api/sessions', createSessionArtifactsRouter(artifactStore, sessionStore));
   app.route('/api/artifacts', createArtifactsRouter(artifactStore));
   app.route('/api/refs', createRefsRouter(largeValueStore));

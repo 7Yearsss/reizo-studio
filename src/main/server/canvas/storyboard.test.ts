@@ -7,11 +7,11 @@ import {
 } from '../../../shared/canvas';
 
 describe('multi-modal canvas models and node specifications', () => {
-  it('provides curated image models with default Schnell', () => {
+  it('provides curated image models with a recommended default', () => {
     expect(CANVAS_IMAGE_MODELS.length).toBeGreaterThanOrEqual(4);
-    const schnell = CANVAS_IMAGE_MODELS.find((m) => m.id === 'flux-schnell');
-    expect(schnell).toBeDefined();
-    expect(schnell?.badge).toBe('推荐');
+    const recommended = CANVAS_IMAGE_MODELS.find((m) => m.id === 'gpt-image-2.5');
+    expect(recommended).toBeDefined();
+    expect(recommended?.badge).toBe('推荐');
   });
 
   it('provides curated video models with default Kling', () => {

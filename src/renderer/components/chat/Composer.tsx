@@ -648,6 +648,7 @@ export default function Composer({
                 }
                 actions={[
                   { value: 'attach', label: '上传附件', icon: <Paperclip size={14} /> },
+                  { value: 'skill', label: '使用技能', description: '等同输入 /', icon: <Wrench size={14} /> },
                   ...(sessionId
                     ? [{ value: 'canvas-pick', label: '从画布引用 (Insert from canvas)', description: '点击画布节点加入引用', icon: <Layers size={14} /> }]
                     : []),
@@ -660,6 +661,10 @@ export default function Composer({
                 ]}
                 onAction={(action) => {
                   if (action === 'attach') fileInputRef.current?.click();
+                  if (action === 'skill') {
+                    setDraft((d) => (d === '' ? '/' : d));
+                    window.setTimeout(focusComposer, 0);
+                  }
                   if (action === 'canvas-pick' && sessionId) chatStore.setPickingReference(sessionId, true);
                   if (action === 'mention') setDraft((d) => (d.endsWith('@') ? d : `${d}@`));
                   if (action === 'tree') onToggleTree?.();

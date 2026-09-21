@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown } from 'lucide-react';
 import type { ChatMessage } from '../../../shared/chat';
-import type { TurnOutcome } from '../../../shared/stream';
+import type { MemoryEventRecord, TurnOutcome } from '../../../shared/stream';
 import {
   buildRenderItems,
   initialWindowStart,
@@ -14,6 +14,7 @@ import ErrorBoundary from '../ErrorBoundary';
 import UserMessage from './UserMessage';
 import AssistantMessage from './AssistantMessage';
 import EmptyChatHints from './EmptyChatHints';
+import MemoryEventRow from './MemoryEventRow';
 
 const GROW_TRIGGER_PX = 160;
 
@@ -31,8 +32,11 @@ export default function MessageList({
   compact = false,
   sessionId,
   bottomInset,
+  memoryEvents = [],
 }: {
   messages: ChatMessage[];
+  /** 已记住/想起了 rows — rendered right after the message they follow. */
+  memoryEvents?: MemoryEventRecord[];
   sessionId?: string;
   sending: boolean;
   searchQuery?: string;
@@ -109,6 +113,8 @@ export default function MessageList({
         onFollowChange={setFollowing}
         busy={sending}
         label="对话"
+        navigation="rail"
+        navigationLabel="消息导航"
         className="absolute inset-0"
         viewportRef={viewportRef}
         viewportClassName={compact ? 'px-3.5 pt-3' : 'px-8 pt-4'}
@@ -128,10 +134,17 @@ export default function MessageList({
         {hasOlder && (
           <div className="pt-2 text-center text-[11px] text-ink-muted">向上滚动加载更早的消息…</div>
         )}
-        {shown.map(({ message: m }) => (
+        {shown.map(({ message: m }, idx) => {
+          const next = shown[idx + 1]?.message;
+          const after = memoryEvents.filter(
+            (ev) => ev.createdAt > m.createdAt && (!next || ev.createdAt <= next.createdAt),
+          );
+          return (
           <div
             key={m.id}
             data-message-id={m.id}
+            data-slot="message"
+            data-from={m.role}
             data-chat-search-scope=""
             // Skip layout/paint for off-screen messages — sidebar resizes and
             // scrolls otherwise reflow every rendered markdown block each frame.
@@ -182,8 +195,14 @@ export default function MessageList({
                 />
               )}
             </ErrorBoundary>
+            {after.map((ev) => (
+              <div key={ev.id} className="mt-1">
+                <MemoryEventRow event={ev} sessionId={sessionId} />
+              </div>
+            ))}
           </div>
-        ))}
+          );
+        })}
         {sending && sessionId && <StreamingAssistant sessionId={sessionId} />}
       </MessageScroller>
       {!following && (
@@ -216,7 +235,7 @@ function StreamingAssistant({ sessionId }: { sessionId: string }) {
   const streamingActivities =
     useChatStore((s) => s.replyActivitiesBySession[sessionId]) ?? EMPTY_ACTIVITIES;
   return (
-    <div data-message-id="streaming">
+    <div data-message-id="streaming" data-slot="message" data-from="assistant">
       <ErrorBoundary
         fallback={
           <div className="rounded-lg border border-line bg-paper-inset px-3 py-2 text-[11px] text-ink-muted">

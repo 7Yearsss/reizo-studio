@@ -95,6 +95,11 @@ export interface StartTurnOptions {
     finishReason?: string;
     passIndex: number;
   }) => Promise<FullStreamLike | null>;
+  /**
+   * Fired exactly once when the turn reaches a terminal outcome. Best-effort
+   * hook for post-turn jobs (memory extraction) — exceptions are swallowed.
+   */
+  onTurnTerminal?: (info: { outcome: TurnOutcome; text: string }) => void;
 }
 
 export type StartTurnOutcome = 'accepted' | 'rejected-before-dispatch';
@@ -240,6 +245,11 @@ class AgentSession {
       endMarked = true;
       rt.markTurnEnd?.(sessionId, finalOutcome, terminalError);
       const snap = persister.snapshot();
+      try {
+        options.onTurnTerminal?.({ outcome: finalOutcome, text: snap.text });
+      } catch {
+        /* post-turn hooks never fail the turn */
+      }
       console.info(
         `[chat] turn terminal session=${sessionId} turn=${turnId} outcome=${finalOutcome} durationMs=${Date.now() - turnStartedAt} tools=${snap.parts.length} textChars=${snap.text.length}${terminalError ? ` error=${terminalError}` : ''}`,
       );

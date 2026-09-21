@@ -35,6 +35,8 @@ const apiMock = {
   answerPermission: vi.fn(async () => undefined),
   answerAsk: vi.fn(async () => undefined),
   getPendingInteractions: vi.fn(async () => []),
+  fetchMemoryEvents: vi.fn(async () => []),
+  deleteMemoryFile: vi.fn(async () => undefined),
 };
 
 vi.mock('../api', () => apiMock);

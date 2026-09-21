@@ -20,6 +20,7 @@ let state: SettingsState = {
     permissionMode: DEFAULT_PERMISSION_MODE,
     busyEnter: DEFAULT_BUSY_ENTER,
     computerUse: DEFAULT_COMPUTER_USE,
+    mediaModels: {},
     activeProviderId: DEFAULT_PROVIDER_ID,
     workspacePath: null,
     providers: [],
