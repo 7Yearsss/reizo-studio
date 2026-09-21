@@ -122,6 +122,7 @@ export default function Sidebar() {
   const sessions = useChatStore((s) => s.sessions);
   const loaded = useChatStore((s) => s.sessionsLoaded);
   const interactionBySession = useChatStore((s) => s.interactionBySession);
+  const unreadBySession = useChatStore((s) => s.unreadBySession);
   const workspacePath = useSettingsStore((s) => s.settings.workspacePath);
   const activeTab = useTabStore((s) => s.tabs.find((t) => t.id === s.activeTabId));
   const projects = useProjectStore((s) => s.projects);
@@ -446,6 +447,9 @@ export default function Sidebar() {
                         >
                           <SquarePen size={14} className="shrink-0 opacity-70" />
                           <span className="flex-1 truncate">{session.title}</span>
+                          {unreadBySession[session.id] && (
+                            <span className="size-2 shrink-0 rounded-full bg-blue-500" aria-label="有新回复" />
+                          )}
                           {pendingKind && <PendingInteractionBadge kind={pendingKind} />}
                         </button>
                       </SessionContextMenu>
@@ -541,6 +545,9 @@ export default function Sidebar() {
                             </span>
                           )}
                         </span>
+                      )}
+                      {unreadBySession[session.id] && (
+                        <span className="mt-1 size-2 shrink-0 self-start rounded-full bg-blue-500" aria-label="有新回复" />
                       )}
                       {pendingKind && <PendingInteractionBadge kind={pendingKind} />}
                       <span
