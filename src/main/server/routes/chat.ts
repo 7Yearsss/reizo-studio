@@ -136,12 +136,15 @@ export function createChatRouter(
   });
 
   // Leftover steers when the turn ended before the inbox drained — the
-  // renderer moves them into its queue.
+  // renderer moves them into its queue. System notes (jobWatch) are transient
+  // and must never park there as if the user typed them.
   router.delete('/:id/steer', (c) => {
-    const items = drainSteerInbox(c.req.param('id')).map((s) => ({
-      id: s.id,
-      content: s.content,
-    }));
+    const items = drainSteerInbox(c.req.param('id'))
+      .filter((s) => !s.system)
+      .map((s) => ({
+        id: s.id,
+        content: s.content,
+      }));
     return c.json({ items });
   });
 

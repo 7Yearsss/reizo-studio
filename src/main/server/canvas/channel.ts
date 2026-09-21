@@ -40,6 +40,12 @@ class CanvasChannel {
     }
   }
 
+  /** Server-side tap (jobWatch) — same fan-out the SSE stream uses, no replay. */
+  subscribe(fn: Subscriber): () => void {
+    this.subscribers.add(fn);
+    return () => this.subscribers.delete(fn);
+  }
+
   stream(after: number): Response {
     const encoder = new TextEncoder();
     let unsubscribe: (() => void) | null = null;
