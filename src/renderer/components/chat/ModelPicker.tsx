@@ -169,8 +169,9 @@ export default function ModelPicker({ compact = false }: { compact?: boolean }) 
 
           <div className="mt-1.5 max-h-72 overflow-y-auto">
             {tab === 'text' &&
-              settings.providers.map((p) => {
-                const usable = p.hasKey || p.id === 'custom';
+              // Only configured providers — an unconfigured provider's models
+              // can't be called anyway, and the list stays clean.
+              configured.map((p) => {
                 const items = p.models.length
                   ? p.models
                   : [{ id: '__custom', name: p.model || '自定义模型' }];
@@ -179,7 +180,6 @@ export default function ModelPicker({ compact = false }: { compact?: boolean }) 
                     <div className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] text-ink-muted">
                       <ProviderIcon provider={p} className="size-3" />
                       {p.name}
-                      {!usable && <span className="text-[10px]">· 未配置</span>}
                     </div>
                     {items.map((m) => (
                       <Row
@@ -187,7 +187,6 @@ export default function ModelPicker({ compact = false }: { compact?: boolean }) 
                         icon={<ModelIcon domain={modelVendorDomain(m.id)} />}
                         name={m.name}
                         selected={p.id === active.id && (m.id === active.model || m.id === '__custom')}
-                        disabled={!usable}
                         onClick={() => pickText(`${p.id}::${m.id}`)}
                       />
                     ))}

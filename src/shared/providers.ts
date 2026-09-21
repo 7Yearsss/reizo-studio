@@ -26,10 +26,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna' },
       { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra' },
       { id: 'gpt-5.5', name: 'GPT-5.5' },
-      { id: 'gpt-5.4', name: 'GPT-5.4' },
-      { id: 'gpt-5.3-codex-spark', name: 'GPT-5.3 Codex Spark' },
       { id: 'grok-4.6', name: 'Grok 4.6' },
-      { id: 'grok-4.5', name: 'Grok 4.5' },
     ],
   },
   {
