@@ -3,13 +3,8 @@ import { Sparkles } from 'lucide-react';
 import { pickNextStepActions, type NextStepContext } from '../../../shared/nextStep';
 import { useArtifactStore } from '../../state/useArtifactStore';
 
-export default function NextStepStrip({
-  sessionId,
-  onPick,
-}: {
-  sessionId: string;
-  onPick: (prompt: string) => void;
-}) {
+/** Suggested follow-up actions for a session — shared by the strip and the composer dock pill. */
+export function useNextStepActions(sessionId: string) {
   const artifacts = useArtifactStore((s) => s.bySession[sessionId]) ?? [];
 
   const ctx: NextStepContext = useMemo(
@@ -21,7 +16,17 @@ export default function NextStepStrip({
     [artifacts],
   );
 
-  const actions = useMemo(() => pickNextStepActions(ctx), [ctx]);
+  return useMemo(() => pickNextStepActions(ctx), [ctx]);
+}
+
+export default function NextStepStrip({
+  sessionId,
+  onPick,
+}: {
+  sessionId: string;
+  onPick: (prompt: string) => void;
+}) {
+  const actions = useNextStepActions(sessionId);
   if (actions.length === 0) return null;
 
   return (
