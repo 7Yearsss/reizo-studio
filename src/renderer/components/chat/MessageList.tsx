@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown } from 'lucide-react';
-import type { ChatMessage, ReplyActivity, ToolCallPart } from '../../../shared/chat';
+import type { ChatMessage } from '../../../shared/chat';
 import type { TurnOutcome } from '../../../shared/stream';
 import {
   buildRenderItems,
@@ -9,20 +9,16 @@ import {
   WINDOW_GROW_ITEMS,
 } from '../../lib/buildRenderItems';
 import { MessageScroller } from '../agents/message-scroller';
+import { useChatStore } from '../../state/useChatStore';
 import ErrorBoundary from '../ErrorBoundary';
 import UserMessage from './UserMessage';
 import AssistantMessage from './AssistantMessage';
 import EmptyChatHints from './EmptyChatHints';
-import PendingInteraction from './PendingInteraction';
 
 const GROW_TRIGGER_PX = 160;
 
 export default function MessageList({
   messages,
-  streaming,
-  streamingTools,
-  streamingReasoning,
-  streamingActivities,
   sending,
   searchQuery,
   currentMatchId,
@@ -38,10 +34,6 @@ export default function MessageList({
 }: {
   messages: ChatMessage[];
   sessionId?: string;
-  streaming: string;
-  streamingTools?: ToolCallPart[];
-  streamingReasoning?: string;
-  streamingActivities?: ReplyActivity[];
   sending: boolean;
   searchQuery?: string;
   currentMatchId?: string | null;
@@ -192,27 +184,7 @@ export default function MessageList({
             </ErrorBoundary>
           </div>
         ))}
-        {sending && (
-          <div data-message-id="streaming">
-            <ErrorBoundary
-              fallback={
-                <div className="rounded-lg border border-line bg-paper-inset px-3 py-2 text-[11px] text-ink-muted">
-                  回复渲染异常 — 请尝试刷新
-                </div>
-              }
-            >
-              <AssistantMessage
-                content={streaming}
-                sessionId={sessionId}
-                parts={streamingTools}
-                reasoning={streamingReasoning || undefined}
-                reasoningStreaming={Boolean(streamingReasoning) && !streaming}
-                streaming
-                activities={streamingActivities}
-              />
-            </ErrorBoundary>
-          </div>
-        )}
+        {sending && sessionId && <StreamingAssistant sessionId={sessionId} />}
       </MessageScroller>
       {!following && (
         <button
@@ -225,6 +197,43 @@ export default function MessageList({
           跳到底部
         </button>
       )}
+    </div>
+  );
+}
+
+const EMPTY_PARTS: never[] = [];
+const EMPTY_ACTIVITIES: never[] = [];
+
+/**
+ * The live reply bubble subscribes to the per-token store slices itself so a
+ * 20fps stream commit only re-renders this row — not the whole message list,
+ * ChatPage, or the composer.
+ */
+function StreamingAssistant({ sessionId }: { sessionId: string }) {
+  const streaming = useChatStore((s) => s.streamingBySession[sessionId]) ?? '';
+  const streamingTools = useChatStore((s) => s.streamingToolsBySession[sessionId]) ?? EMPTY_PARTS;
+  const streamingReasoning = useChatStore((s) => s.streamingReasoningBySession[sessionId]) ?? '';
+  const streamingActivities =
+    useChatStore((s) => s.replyActivitiesBySession[sessionId]) ?? EMPTY_ACTIVITIES;
+  return (
+    <div data-message-id="streaming">
+      <ErrorBoundary
+        fallback={
+          <div className="rounded-lg border border-line bg-paper-inset px-3 py-2 text-[11px] text-ink-muted">
+            回复渲染异常 — 请尝试刷新
+          </div>
+        }
+      >
+        <AssistantMessage
+          content={streaming}
+          sessionId={sessionId}
+          parts={streamingTools}
+          reasoning={streamingReasoning || undefined}
+          reasoningStreaming={Boolean(streamingReasoning) && !streaming}
+          streaming
+          activities={streamingActivities}
+        />
+      </ErrorBoundary>
     </div>
   );
 }
