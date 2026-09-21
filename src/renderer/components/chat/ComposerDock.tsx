@@ -1,78 +1,64 @@
-import { useState } from 'react';
-import { ChevronUp, ListTodo, Loader2, Sparkles } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { ChevronUp, ListTodo, Loader2 } from 'lucide-react';
 import type { TodoItem } from '../../../shared/stream';
 import { cn } from '../../lib/cn';
 import TodoCard from './TodoCard';
-import NextStepStrip, { useNextStepActions } from './NextStepStrip';
 
 /**
- * The docked chrome above the composer (plan card, next-step suggestions) as a
- * single pill row — stacked full cards pushed the whole overlay up and covered
- * the message stream. Pills stay one line tall; clicking expands that card
- * inline below the row.
+ * Plan dock: a single pill pinned to the right edge above the composer. Click
+ * it once and the full plan card pops up in place (absolute, anchored to the
+ * pill) — it never takes a row of layout height, so the message stream keeps
+ * its space. Click the pill or anywhere outside to dismiss.
  */
-export default function ComposerDock({
-  sessionId,
-  todos,
-  showNext,
-  onPick,
-}: {
-  sessionId: string;
-  todos: TodoItem[];
-  showNext: boolean;
-  onPick: (prompt: string) => void;
-}) {
-  const [expanded, setExpanded] = useState<'plan' | 'next' | null>(null);
-  const actions = useNextStepActions(sessionId);
+export default function ComposerDock({ todos }: { todos: TodoItem[] }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(e: PointerEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  if (todos.length === 0) return null;
   const done = todos.filter((t) => t.status === 'completed').length;
   const running = todos.some((t) => t.status === 'in_progress');
-  const hasPlan = todos.length > 0;
-  const hasNext = showNext && actions.length > 0;
-  if (!hasPlan && !hasNext) return null;
 
   return (
-    <div className="mb-2">
-      <div className="flex items-center gap-1.5">
-        {hasPlan && (
-          <button
-            type="button"
-            onClick={() => setExpanded((e) => (e === 'plan' ? null : 'plan'))}
-            className={cn(
-              'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors',
-              expanded === 'plan'
-                ? 'border-accent/50 bg-accent/10 text-ink'
-                : 'border-line bg-paper-raised text-ink-muted hover:text-ink',
-            )}
-          >
-            {running ? (
-              <Loader2 size={11} className="animate-spin text-accent" />
-            ) : (
-              <ListTodo size={11} className={done === todos.length ? 'text-green-500' : 'text-accent'} />
-            )}
-            计划 {done}/{todos.length}
-            <ChevronUp size={11} className={cn('transition-transform', expanded === 'plan' ? '' : 'rotate-180')} />
-          </button>
+    <div ref={rootRef} className="pointer-events-auto absolute bottom-full right-0 mb-1.5">
+      {open && (
+        <div className="absolute bottom-full right-0 mb-1.5 w-80 max-w-[80vw]">
+          <TodoCard items={todos} />
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={cn(
+          'ml-auto flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium shadow-sm backdrop-blur-sm transition-colors',
+          open
+            ? 'border-accent/50 bg-accent/10 text-ink'
+            : 'border-line bg-paper-raised/90 text-ink-muted hover:text-ink',
         )}
-        {hasNext && (
-          <button
-            type="button"
-            onClick={() => setExpanded((e) => (e === 'next' ? null : 'next'))}
-            className={cn(
-              'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors',
-              expanded === 'next'
-                ? 'border-accent/50 bg-accent/10 text-ink'
-                : 'border-line bg-paper-raised text-ink-muted hover:text-ink',
-            )}
-          >
-            <Sparkles size={11} className="text-accent" />
-            下一步建议
-            <ChevronUp size={11} className={cn('transition-transform', expanded === 'next' ? '' : 'rotate-180')} />
-          </button>
+      >
+        {running ? (
+          <Loader2 size={11} className="animate-spin text-accent" />
+        ) : (
+          <ListTodo size={11} className={done === todos.length ? 'text-green-500' : 'text-accent'} />
         )}
-      </div>
-      {expanded === 'plan' && hasPlan && <div className="mt-1.5"><TodoCard items={todos} /></div>}
-      {expanded === 'next' && hasNext && <div className="mt-1.5"><NextStepStrip sessionId={sessionId} onPick={onPick} /></div>}
+        计划 {done}/{todos.length}
+        <ChevronUp size={11} className={cn('transition-transform', open ? '' : 'rotate-180')} />
+      </button>
     </div>
   );
 }
