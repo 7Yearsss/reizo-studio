@@ -327,7 +327,10 @@ export function createAskUserTool(sessionId: string) {
       'For a visual-direction choice (mood / palette / typography for something you are about to design or generate), ' +
       'set kind:"direction" and provide 2-4 `directions` cards — the user picks by looking. The answer is the chosen card id. ' +
       'When the options correspond to nodes already on the canvas (e.g. draft images you generated for the user to compare), ' +
-      'set each card\'s `nodeId` to that node id so the card shows the real thumbnail instead of a text mockup.',
+      'set each card\'s `nodeId` to that node id so the card shows the real thumbnail instead of a text mockup. ' +
+      'When you have a clear recommendation, set `recommended` on each question to the option value (or direction id) ' +
+      'you would pick — if every question has one, an unanswered card auto-resolves to your recommendations after a ' +
+      'short countdown, so low-risk asks never stall the pipeline.',
     inputSchema: z.object({
       questions: z.array(
         z.object({
@@ -336,6 +339,10 @@ export function createAskUserTool(sessionId: string) {
           options: z.array(z.string()).optional(),
           multi: z.boolean().optional(),
           kind: z.enum(['choice', 'text', 'direction']).optional(),
+          recommended: z
+            .string()
+            .optional()
+            .describe('The option value / direction id / free-text answer you would pick. Enables countdown auto-resolve when every question has one.'),
           directions: z
             .array(
               z.object({

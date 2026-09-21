@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactElement } from 'react';
 import {
   ChevronRight,
   CirclePlus,
   FolderKanban,
   LayoutGrid,
+  Pencil,
   Plus,
   Settings,
   Sparkles,
@@ -25,7 +26,16 @@ import * as projectStore from '../../state/projectStore';
 import * as uiStore from '../../state/uiStore';
 import * as api from '../../api';
 import type { DirEntry } from '../../../shared/workspace';
+import type { SessionSummary } from '../../../shared/chat';
+import type { ChatInteraction } from '../../state/chatStore';
 import ProjectDialog from './ProjectDialog';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '../motion/context-menu';
 import { openGlobalCommandPalette } from './GlobalCommandPalette';
 import { toast } from '../../lib/toast';
 import Tooltip from '../ui/Tooltip';
@@ -39,9 +49,79 @@ function isMacPlatform(): boolean {
   return /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent);
 }
 
+/**
+ * Live stream state wins over the session-list snapshot: `undefined` means the
+ * session never streamed this run (fall back to the list field), `null` means
+ * it streamed and the interaction was answered.
+ */
+function pendingKindFor(
+  session: SessionSummary,
+  interactionBySession: Record<string, ChatInteraction | null>,
+): 'ask' | 'permission' | null {
+  const live = interactionBySession[session.id];
+  if (live === undefined) return session.pendingInteraction ?? null;
+  return live ? live.kind : null;
+}
+
+function PendingInteractionBadge({ kind }: { kind: 'ask' | 'permission' }) {
+  return (
+    <span className="mt-0.5 shrink-0 self-start rounded-full bg-success-bg px-1.5 py-0.5 text-[10px] font-medium leading-none text-success">
+      {kind === 'ask' ? '待回答' : '待批准'}
+    </span>
+  );
+}
+
+function SessionContextMenu({
+  session,
+  onRename,
+  children,
+}: {
+  session: SessionSummary;
+  onRename?: () => void;
+  children: ReactElement;
+}) {
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger>{children}</ContextMenuTrigger>
+      <ContextMenuContent className="min-w-40 rounded-xl border border-line bg-paper-raised p-1 shadow-xl">
+        <ContextMenuItem
+          onSelect={() => {
+            uiStore.setMode('chat');
+            tabStore.openChatTab(session.id, session.title);
+          }}
+        >
+          <span className="flex items-center gap-2">
+            <SquarePen size={13} /> 打开
+          </span>
+        </ContextMenuItem>
+        {onRename && (
+          <ContextMenuItem onSelect={onRename}>
+            <span className="flex items-center gap-2">
+              <Pencil size={13} /> 重命名
+            </span>
+          </ContextMenuItem>
+        )}
+        <ContextMenuSeparator className="my-1 h-px bg-line" />
+        <ContextMenuItem
+          tone="destructive"
+          onSelect={() => {
+            void chatStore.deleteSession(session.id);
+            toast.info(`已删除会话「${session.title}」`);
+          }}
+        >
+          <span className="flex items-center gap-2">
+            <Trash2 size={13} /> 删除会话
+          </span>
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
 export default function Sidebar() {
   const sessions = useChatStore((s) => s.sessions);
   const loaded = useChatStore((s) => s.sessionsLoaded);
+  const interactionBySession = useChatStore((s) => s.interactionBySession);
   const workspacePath = useSettingsStore((s) => s.settings.workspacePath);
   const activeTab = useTabStore((s) => s.tabs.find((t) => t.id === s.activeTabId));
   const projects = useProjectStore((s) => s.projects);
@@ -329,22 +409,25 @@ export default function Sidebar() {
                   )}
                   {projectSessions.map((session) => {
                     const active = activeTab?.kind === 'chat' && activeTab.sessionId === session.id;
+                    const pendingKind = pendingKindFor(session, interactionBySession);
                     return (
-                      <button
-                        key={session.id}
-                        type="button"
-                        onClick={() => {
-                          uiStore.setMode('chat');
-                          tabStore.openChatTab(session.id, session.title);
-                        }}
-                        className={cn(
-                          'flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-ink-muted hover:bg-paper-inset/70 hover:text-ink',
-                          active && 'bg-paper-inset/80 text-ink',
-                        )}
-                      >
-                        <SquarePen size={14} className="shrink-0 opacity-70" />
-                        <span className="flex-1 truncate">{session.title}</span>
-                      </button>
+                      <SessionContextMenu key={session.id} session={session}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            uiStore.setMode('chat');
+                            tabStore.openChatTab(session.id, session.title);
+                          }}
+                          className={cn(
+                            'flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-ink-muted hover:bg-paper-inset/70 hover:text-ink',
+                            active && 'bg-paper-inset/80 text-ink',
+                          )}
+                        >
+                          <SquarePen size={14} className="shrink-0 opacity-70" />
+                          <span className="flex-1 truncate">{session.title}</span>
+                          {pendingKind && <PendingInteractionBadge kind={pendingKind} />}
+                        </button>
+                      </SessionContextMenu>
                     );
                   })}
                   <button
@@ -383,68 +466,78 @@ export default function Sidebar() {
               )}
               {visibleSessions.map((session) => {
                 const active = activeTab?.kind === 'chat' && activeTab.sessionId === session.id;
+                const pendingKind = pendingKindFor(session, interactionBySession);
                 return (
-                  <button
+                  <SessionContextMenu
                     key={session.id}
-                    type="button"
-                    onClick={() => {
-                      uiStore.setMode('chat');
-                      tabStore.openChatTab(session.id, session.title);
+                    session={session}
+                    onRename={() => {
+                      setRenamingId(session.id);
+                      setRenameValue(session.title);
                     }}
-                    className={cn(
-                      'group flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-ink-muted hover:bg-paper-inset/70 hover:text-ink',
-                      active && 'bg-paper-inset/80 text-ink',
-                    )}
                   >
-                    <SquarePen size={14} className="mt-0.5 shrink-0 self-start opacity-70" />
-                    {renamingId === session.id ? (
-                      <input
-                        autoFocus
-                        value={renameValue}
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={(e) => setRenameValue(e.target.value)}
-                        onBlur={() => {
-                          if (renameValue.trim()) void chatStore.renameSession(session.id, renameValue.trim());
-                          setRenamingId(null);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-                          if (e.key === 'Escape') setRenamingId(null);
-                        }}
-                        className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none"
-                      />
-                    ) : (
-                      <span
-                        className="flex min-w-0 flex-1 flex-col"
-                        onDoubleClick={(e) => {
-                          e.stopPropagation();
-                          setRenamingId(session.id);
-                          setRenameValue(session.title);
-                        }}
-                      >
-                        <span className="truncate">{session.title}</span>
-                        {session.listPreview && (
-                          <span className="truncate text-[11px] leading-tight text-ink-muted/80">
-                            {session.listPreview}
-                          </span>
-                        )}
-                      </span>
-                    )}
-                    <span
-                      role="button"
-                      tabIndex={-1}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        void chatStore.deleteSession(session.id);
-                        toast.info(`已删除会话「${session.title}」`);
+                    <button
+                      type="button"
+                      onClick={() => {
+                        uiStore.setMode('chat');
+                        tabStore.openChatTab(session.id, session.title);
                       }}
-                      className="mt-0.5 shrink-0 self-start rounded p-1 text-ink-muted opacity-0 transition-opacity duration-[140ms] hover:bg-paper hover:text-danger group-hover:opacity-100"
-                      aria-label="删除会话"
+                      className={cn(
+                        'group flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-ink-muted hover:bg-paper-inset/70 hover:text-ink',
+                        active && 'bg-paper-inset/80 text-ink',
+                      )}
                     >
-                      <Trash2 size={13} />
-                    </span>
-                  </button>
+                      <SquarePen size={14} className="mt-0.5 shrink-0 self-start opacity-70" />
+                      {renamingId === session.id ? (
+                        <input
+                          autoFocus
+                          value={renameValue}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => setRenameValue(e.target.value)}
+                          onBlur={() => {
+                            if (renameValue.trim()) void chatStore.renameSession(session.id, renameValue.trim());
+                            setRenamingId(null);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                            if (e.key === 'Escape') setRenamingId(null);
+                          }}
+                          className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none"
+                        />
+                      ) : (
+                        <span
+                          className="flex min-w-0 flex-1 flex-col"
+                          onDoubleClick={(e) => {
+                            e.stopPropagation();
+                            setRenamingId(session.id);
+                            setRenameValue(session.title);
+                          }}
+                        >
+                          <span className="truncate">{session.title}</span>
+                          {session.listPreview && (
+                            <span className="truncate text-[11px] leading-tight text-ink-muted/80">
+                              {session.listPreview}
+                            </span>
+                          )}
+                        </span>
+                      )}
+                      {pendingKind && <PendingInteractionBadge kind={pendingKind} />}
+                      <span
+                        role="button"
+                        tabIndex={-1}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          void chatStore.deleteSession(session.id);
+                          toast.info(`已删除会话「${session.title}」`);
+                        }}
+                        className="mt-0.5 shrink-0 self-start rounded p-1 text-ink-muted opacity-0 transition-opacity duration-[140ms] hover:bg-paper hover:text-danger group-hover:opacity-100"
+                        aria-label="删除会话"
+                      >
+                        <Trash2 size={13} />
+                      </span>
+                    </button>
+                  </SessionContextMenu>
                 );
               })}
               {searchOpen && fileHits.length > 0 && (

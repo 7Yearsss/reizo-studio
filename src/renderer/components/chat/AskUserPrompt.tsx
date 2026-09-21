@@ -1,8 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Timer } from 'lucide-react';
 import type { PendingAsk } from '../../state/chatStore';
+import { computeRecommendedAnswers } from '../../../shared/askAutoResolve';
 import { ApprovalCard } from '../agents/approval-card';
 import DirectionCardChoice from './DirectionCard';
 import { cn } from '../../lib/cn';
+
+/** Seconds before a fully-recommended ask resolves itself (ZCode-style autoResolution). */
+const AUTO_RESOLVE_SECONDS = 30;
 
 export default function AskUserPrompt({
   pending,
@@ -16,34 +21,86 @@ export default function AskUserPrompt({
   const hasDirections = pending.questions.some(
     (q) => q.kind === 'direction' && q.directions && q.directions.length > 0,
   );
+  const autoAnswers = useMemo(() => computeRecommendedAnswers(pending.questions), [pending.questions]);
+  const [snoozed, setSnoozed] = useState(false);
+  const [deadline, setDeadline] = useState<number | null>(null);
+  const [remaining, setRemaining] = useState(AUTO_RESOLVE_SECONDS);
+  const firedRef = useRef(false);
 
-  if (hasDirections) {
-    return <DirectionAsk pending={pending} onAnswer={onAnswer} sessionId={sessionId} />;
-  }
+  useEffect(() => {
+    firedRef.current = false;
+    setSnoozed(false);
+    setRemaining(AUTO_RESOLVE_SECONDS);
+    setDeadline(autoAnswers ? Date.now() + AUTO_RESOLVE_SECONDS * 1000 : null);
+  }, [pending.id, autoAnswers]);
+
+  useEffect(() => {
+    if (deadline === null || !autoAnswers || snoozed || firedRef.current) return;
+    const timer = setInterval(() => {
+      const left = Math.ceil((deadline - Date.now()) / 1000);
+      if (left <= 0) {
+        clearInterval(timer);
+        if (!firedRef.current) {
+          firedRef.current = true;
+          onAnswer(autoAnswers);
+        }
+        return;
+      }
+      setRemaining(left);
+    }, 500);
+    return () => clearInterval(timer);
+  }, [deadline, snoozed, autoAnswers, onAnswer]);
+
+  const snooze = () => setSnoozed(true);
 
   return (
-    <ApprovalCard
-      title="需要你选一下"
-      questions={pending.questions.map((question) => ({
-        id: question.id,
-        title: question.prompt,
-        options: (question.options ?? []).map((option) => ({ value: option, label: option })),
-        multiple: Boolean(question.multi),
-        allowCustom: true,
-        customPlaceholder: '自己写答案…',
-        autoAdvance: !question.multi,
-      }))}
-      status="pending"
-      submitLabel="提交"
-      onSubmit={(answers) => {
-        const next: Record<string, string> = {};
-        for (const [id, answer] of Object.entries(answers)) {
-          next[id] = answer.custom?.trim() || answer.selected.join(', ');
-        }
-        onAnswer(next);
-      }}
-      className="rise-in bg-paper-raised"
-    />
+    <div onPointerDownCapture={autoAnswers ? snooze : undefined}>
+      {autoAnswers && !snoozed && (
+        <div className="mb-1.5 flex items-center gap-2 rounded-full border border-line bg-paper-raised px-3 py-1 text-[11px] text-ink-muted">
+          <Timer size={11} className="shrink-0 text-success" />
+          <span className="shrink-0">{remaining}s 后自动选择推荐项</span>
+          <span className="h-0.5 min-w-0 flex-1 overflow-hidden rounded-full bg-paper-inset">
+            <span
+              className="block h-full rounded-full bg-success transition-[width] duration-500 ease-linear"
+              style={{ width: `${(remaining / AUTO_RESOLVE_SECONDS) * 100}%` }}
+            />
+          </span>
+          <button
+            type="button"
+            onClick={snooze}
+            className="shrink-0 rounded-full px-1.5 py-0.5 text-ink transition-colors hover:bg-paper-inset"
+          >
+            暂停
+          </button>
+        </div>
+      )}
+      {hasDirections ? (
+        <DirectionAsk pending={pending} onAnswer={onAnswer} sessionId={sessionId} />
+      ) : (
+        <ApprovalCard
+          title="需要你选一下"
+          questions={pending.questions.map((question) => ({
+            id: question.id,
+            title: question.prompt,
+            options: (question.options ?? []).map((option) => ({ value: option, label: option })),
+            multiple: Boolean(question.multi),
+            allowCustom: true,
+            customPlaceholder: '自己写答案…',
+            autoAdvance: !question.multi,
+          }))}
+          status="pending"
+          submitLabel="提交"
+          onSubmit={(answers) => {
+            const next: Record<string, string> = {};
+            for (const [id, answer] of Object.entries(answers)) {
+              next[id] = answer.custom?.trim() || answer.selected.join(', ');
+            }
+            onAnswer(next);
+          }}
+          className="rise-in bg-paper-raised"
+        />
+      )}
+    </div>
   );
 }
 
