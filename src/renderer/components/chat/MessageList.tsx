@@ -210,7 +210,8 @@ export default function MessageList({
         <button
           type="button"
           onClick={() => setFollowing(true)}
-          className="anim-jump absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full border border-line bg-paper-raised px-3 py-1.5 text-xs text-ink shadow-[0_8px_30px_rgba(28,22,18,0.08)]"
+          className="anim-jump absolute left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full border border-line bg-paper-raised px-3 py-1.5 text-xs text-ink shadow-[0_8px_30px_rgba(28,22,18,0.08)]"
+          style={{ bottom: (bottomInset ?? (compact ? 144 : 176)) + 12 }}
         >
           <ArrowDown size={14} />
           跳到底部
