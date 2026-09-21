@@ -38,7 +38,7 @@ export default function ComposerDock({ todos }: { todos: TodoItem[] }) {
     <div ref={rootRef} className="pointer-events-auto absolute bottom-full right-0 mb-1.5">
       {open && (
         <div className="absolute bottom-full right-0 mb-1.5 w-80 max-w-[80vw]">
-          <TodoCard items={todos} />
+          <TodoCard items={todos} defaultOpen collapseOnComplete={false} />
         </div>
       )}
       <button
