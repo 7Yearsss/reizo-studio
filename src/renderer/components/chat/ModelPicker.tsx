@@ -15,8 +15,14 @@ import type { PublicProvider } from '../../../shared/settings';
 
 type PickerTab = 'text' | 'image' | 'video';
 
+// Accepts a bare domain ("openai.com") or a full URL — websiteUrl/baseUrl
+// already carry a scheme, so wrapping blindly would produce "https://https://…".
+function siteUrl(value: string) {
+  return /^https?:\/\//.test(value) ? value : `https://${value}`;
+}
+
 function ModelIcon({ domain, className }: { domain?: string; className?: string }) {
-  const { src, ref } = useFavicon(domain ? `https://${domain}` : undefined);
+  const { src, ref } = useFavicon(domain ? siteUrl(domain) : undefined);
   if (!src) return <Bot className={cn('size-3.5 shrink-0 text-ink-muted', className)} />;
   return (
     <img
@@ -113,7 +119,6 @@ export default function ModelPicker({ compact = false }: { compact?: boolean }) 
 
   const currentModelObj = active.models.find((m) => m.id === active.model);
   const currentModelLabel = currentModelObj?.name || active.model || active.name;
-  const currentDomain = modelVendorDomain(active.model);
 
   function pickText(combined: string) {
     const [providerId, modelId] = combined.split('::');
@@ -146,7 +151,7 @@ export default function ModelPicker({ compact = false }: { compact?: boolean }) 
               compact ? 'h-7 max-w-[140px] text-[12px]' : 'h-8 max-w-52 py-0',
             )}
           >
-            <ModelIcon domain={currentDomain} />
+            <ProviderIcon provider={active} />
             <span className="truncate">{currentModelLabel}</span>
             <ChevronDown className="size-3.5 shrink-0 opacity-60" />
           </button>
