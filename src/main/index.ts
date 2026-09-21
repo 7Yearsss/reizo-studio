@@ -15,6 +15,7 @@ import { registerWindowIpc } from './windowIpc';
 import { registerWorkspaceIpc } from './workspaceIpc';
 import { createTray } from './tray';
 import { startScheduler } from './schedulerHost';
+import { drainMemoryJobs } from './memoryJobs';
 import { registerSkillIpc } from './skillsIpc';
 
 if (started) {
@@ -107,6 +108,10 @@ async function shutdown(): Promise<void> {
   freezeTurnMarkers?.();
   freezeTurnMarkers = null;
   globalShortcut.unregisterAll();
+  await Promise.race([
+    drainMemoryJobs(),
+    new Promise((r: (v: void) => void) => setTimeout(r, 8000)),
+  ]).catch((): void => undefined);
   stopScheduler?.();
   stopScheduler = null;
   if (runningServer) {
