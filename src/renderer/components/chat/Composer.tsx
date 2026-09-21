@@ -51,6 +51,7 @@ export default function Composer({
   onRetryStalled,
   onDismissInterrupt,
   compact = false,
+  onOverlayHeight,
 }: {
   sessionId?: string;
   disabled: boolean;
