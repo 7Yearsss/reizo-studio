@@ -135,16 +135,6 @@ export default function RightPanel({
       {rightSlot &&
         createPortal(
           <div className="ml-1 flex items-center gap-0.5 border-l border-line/60 pl-1.5">
-              <Tooltip content={maximized ? '还原宽度' : '最大化面板'} side="bottom">
-                <button
-                  type="button"
-                  onClick={() => uiStore.toggleRightPanelMaximized()}
-                  className="rounded-full p-1.5 text-ink-muted hover:bg-paper-inset/70 hover:text-ink transition-colors"
-                  aria-label={maximized ? '还原宽度' : '最大化面板'}
-                >
-                  {maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-                </button>
-              </Tooltip>
               <Tooltip content="关闭面板" side="bottom">
                 <button
                   type="button"
@@ -158,6 +148,17 @@ export default function RightPanel({
             </div>,
           rightSlot,
         )}
+      {/* Maximize floats inside the panel corner — the title bar only carries close */}
+      <Tooltip content={maximized ? '还原宽度' : '最大化面板'} side="left">
+        <button
+          type="button"
+          onClick={() => uiStore.toggleRightPanelMaximized()}
+          className="absolute bottom-3 right-3 z-30 rounded-full bg-paper-raised/80 p-1.5 text-ink-muted shadow-sm backdrop-blur-sm transition-colors hover:bg-paper-inset hover:text-ink"
+          aria-label={maximized ? '还原宽度' : '最大化面板'}
+        >
+          {maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+        </button>
+      </Tooltip>
       <div className="min-h-0 flex-1">
         {activeTab === 'canvas' && sessionId && <CanvasPanel key={sessionId} sessionId={sessionId} />}
         {activeTab === 'artifacts' && sessionId && <ArtifactPanel sessionId={sessionId} />}
