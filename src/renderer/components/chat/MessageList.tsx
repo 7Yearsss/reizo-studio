@@ -117,6 +117,8 @@ export default function MessageList({
         onFollowChange={setFollowing}
         busy={sending}
         label="对话"
+        navigation="rail"
+        navigationLabel="消息导航"
         className="absolute inset-0"
         viewportRef={viewportRef}
         viewportClassName={compact ? 'px-3.5 pt-3' : 'px-8 pt-4'}
@@ -140,6 +142,8 @@ export default function MessageList({
           <div
             key={m.id}
             data-message-id={m.id}
+            data-slot="message"
+            data-from={m.role}
             data-chat-search-scope=""
             // Skip layout/paint for off-screen messages — sidebar resizes and
             // scrolls otherwise reflow every rendered markdown block each frame.
@@ -193,7 +197,7 @@ export default function MessageList({
           </div>
         ))}
         {sending && (
-          <div data-message-id="streaming">
+          <div data-message-id="streaming" data-slot="message" data-from="assistant">
             <ErrorBoundary
               fallback={
                 <div className="rounded-lg border border-line bg-paper-inset px-3 py-2 text-[11px] text-ink-muted">
