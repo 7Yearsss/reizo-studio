@@ -1,4 +1,4 @@
-import type { ReplyActivity, ToolCallPart } from '../../../shared/chat';
+import type { ReasoningSegment, ReplyActivity, ToolCallPart } from '../../../shared/chat';
 import type { TurnOutcome } from '../../../shared/stream';
 import { AgentActivity, type AgentActivityItem } from '../agents/agent-activity';
 import { ThinkingShimmer } from '../agents/loading-states/thinking-shimmer';
@@ -16,10 +16,21 @@ const PERSISTENT_TOOL_NAMES = new Set([
   'generate_sheet',
 ]);
 
+/** Live thinking beats and persisted segments both render as collapsed
+ * ThinkingCard rows interleaved with the tool rows they precede. */
+function thinkingItem(id: string, props: {
+  content: string;
+  streaming?: boolean;
+  startedAt?: number;
+  durationMs?: number;
+}): AgentActivityItem {
+  return { id, type: 'text', content: <ThinkingCard {...props} /> };
+}
+
 export default function WorkGroupCard({
   reasoning,
+  reasoningSegments,
   reasoningStreaming = false,
-  reasoningStartedAt,
   reasoningMs,
   parts = [],
   streaming = false,
@@ -28,8 +39,8 @@ export default function WorkGroupCard({
   turnOutcome = null,
 }: {
   reasoning?: string;
+  reasoningSegments?: ReasoningSegment[];
   reasoningStreaming?: boolean;
-  reasoningStartedAt?: number;
   reasoningMs?: number;
   parts?: ToolCallPart[];
   streaming?: boolean;
@@ -41,7 +52,9 @@ export default function WorkGroupCard({
   // asked questions (e.g. a folded duplicate direction card) shouldn't leave
   // an empty "工作完成" shell behind.
   const visibleParts = parts.filter((part) => part.name !== 'ask_user');
-  const hasReasoning = Boolean(reasoning || reasoningStreaming);
+  const hasReasoning =
+    Boolean(reasoning || reasoningStreaming || reasoningSegments?.length) ||
+    activities.some((a) => a.kind === 'thinking' && (a.text || a.status === 'running'));
   const hasTools = visibleParts.length > 0;
   const hasActivities = activities.length > 0;
   if (!hasReasoning && !hasTools && !hasActivities) return null;
@@ -52,11 +65,9 @@ export default function WorkGroupCard({
   const items = toActivityItems({
     activities,
     parts: visibleParts,
-    reasoning,
-    reasoningStreaming,
-    // Reasoning lives in the ThinkingCard disclosure above the strip —
-    // thinking beats must not also clutter the work rows.
-    skipThinking: hasReasoning,
+    segments:
+      reasoningSegments ??
+      (reasoning ? [{ text: reasoning, durationMs: reasoningMs, beforeToolIndex: 0 }] : undefined),
     detail: !active,
   });
   const liveLabel = runningActivity?.kind === 'thinking' || reasoningStreaming
@@ -75,14 +86,6 @@ export default function WorkGroupCard({
 
   return (
     <div className="w-full">
-      {hasReasoning && (
-        <ThinkingCard
-          content={reasoning ?? ''}
-          streaming={reasoningStreaming}
-          startedAt={reasoningStartedAt}
-          durationMs={reasoningMs}
-        />
-      )}
       {(items.length > 0 || active) && (
       <AgentActivity
         items={items}
@@ -129,10 +132,8 @@ export default function WorkGroupCard({
 function toActivityItems(input: {
   activities: ReplyActivity[];
   parts: ToolCallPart[];
-  reasoning?: string;
-  reasoningStreaming: boolean;
-  /** Reasoning is shown by the ThinkingCard above — drop thinking rows. */
-  skipThinking: boolean;
+  /** Persisted reasoning beats for the parts-only (historical) path. */
+  segments?: ReasoningSegment[];
   /** Turn finished — swap plain tool rows for collapsed ToolCards so each
    * row drills into its full command/output (Claude Code's Ran-N-commands). */
   detail: boolean;
@@ -140,23 +141,18 @@ function toActivityItems(input: {
   const items: AgentActivityItem[] = [];
   if (input.activities.length > 0) {
     for (const activity of input.activities) {
-      if (activity.kind === 'thinking' && input.skipThinking) continue;
       if (activity.kind === 'thinking') {
-        const last = items[items.length - 1];
-        if (last?.type === 'trace' && last.kind === 'thinking') {
-          // Consecutive thinking beats merge into one row — '已思考' stacked
-          // back-to-back carries no extra information.
-          last.label = activity.status === 'running' ? '思考中' : '已思考';
-          if (activity.text) last.detail = activity.text.slice(0, 80);
-          continue;
-        }
-        items.push({
-          id: activity.id,
-          type: 'trace',
-          kind: 'thinking',
-          label: activity.status === 'running' ? '思考中' : '已思考',
-          detail: activity.text?.slice(0, 80) || undefined,
-        });
+        // A thinking beat with no text at all is a bare phase marker (models
+        // that emit no reasoning stream) — don't leave an empty row behind.
+        if (!activity.text && activity.status !== 'running') continue;
+        items.push(
+          thinkingItem(activity.id, {
+            content: activity.text ?? '',
+            streaming: activity.status === 'running',
+            startedAt: activity.startedAt,
+            durationMs: activity.durationMs,
+          }),
+        );
         continue;
       }
       // ask_user's real UI is the ask card under the message stream — a
@@ -178,24 +174,37 @@ function toActivityItems(input: {
       });
     }
   } else {
-    if ((input.reasoning || input.reasoningStreaming) && !input.skipThinking) {
-      items.push({
-        id: 'reasoning',
-        type: 'trace',
-        kind: 'thinking',
-        label: input.reasoningStreaming ? '思考中' : '已思考',
-        detail: input.reasoning?.slice(0, 80) || undefined,
-      });
+    const segments = input.segments ?? [];
+    // Group segments by the tool index they precede so each rendered row sits
+    // immediately ahead of the call it motivated.
+    const byIndex = new Map<number, ReasoningSegment[]>();
+    for (const seg of segments) {
+      if (!seg.text) continue;
+      const at = Math.max(0, Math.min(seg.beforeToolIndex, input.parts.length));
+      const list = byIndex.get(at) ?? [];
+      list.push(seg);
+      byIndex.set(at, list);
     }
-    for (const part of input.parts) {
-      if (part.name === 'ask_user') continue;
+    const flush = (at: number): void => {
+      for (const seg of byIndex.get(at) ?? []) {
+        items.push(
+          thinkingItem(`reasoning-${at}-${items.length}`, {
+            content: seg.text,
+            durationMs: seg.durationMs,
+          }),
+        );
+      }
+    };
+    input.parts.forEach((part, index) => {
+      flush(index);
+      if (part.name === 'ask_user') return;
       if (input.detail && !PERSISTENT_TOOL_NAMES.has(part.name)) {
         items.push({
           id: part.id,
           type: 'text',
           content: <ToolCard part={part} collapsed />,
         });
-        continue;
+        return;
       }
       items.push({
         id: part.id,
@@ -203,14 +212,15 @@ function toActivityItems(input: {
         action: toolAction(part.name),
         target: toolTarget(part) || toolLabel(part.name),
       });
-    }
+    });
+    flush(input.parts.length);
   }
 
   const hasTools =
     input.parts.length > 0 ||
     input.activities.some((a) => a.kind === 'tool' && a.tool && a.tool.name !== 'ask_user');
-  // The working header already says 正在思考. A lone 思考中 row under an
-  // empty 220px viewport is what looked like a broken blank card.
-  if (!hasTools) return [];
+  // A lone thinking row under an empty viewport reads as a broken blank card
+  // unless it actually carries reasoning text (those rows are ThinkingCards).
+  if (!hasTools && items.every((item) => item.type !== 'text')) return [];
   return items;
 }

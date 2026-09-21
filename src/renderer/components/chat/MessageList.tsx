@@ -23,7 +23,6 @@ export default function MessageList({
   streamingTools,
   streamingReasoning,
   streamingActivities,
-  reasoningStartedAt,
   sending,
   searchQuery,
   currentMatchId,
@@ -43,7 +42,6 @@ export default function MessageList({
   streamingTools?: ToolCallPart[];
   streamingReasoning?: string;
   streamingActivities?: ReplyActivity[];
-  reasoningStartedAt?: number;
   sending: boolean;
   searchQuery?: string;
   currentMatchId?: string | null;
@@ -173,6 +171,7 @@ export default function MessageList({
                   sessionId={sessionId}
                   parts={m.parts}
                   reasoning={m.reasoning}
+                  reasoningSegments={m.reasoningSegments}
                   reasoningMs={m.reasoningMs}
                   durationMs={m.durationMs}
                   currentMatch={currentMatchId === m.id}
@@ -203,7 +202,6 @@ export default function MessageList({
                 parts={streamingTools}
                 reasoning={streamingReasoning || undefined}
                 reasoningStreaming={Boolean(streamingReasoning) && !streaming}
-                reasoningStartedAt={reasoningStartedAt}
                 streaming
                 activities={streamingActivities}
               />

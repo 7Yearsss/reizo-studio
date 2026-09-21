@@ -1,5 +1,5 @@
 import { RotateCcw } from 'lucide-react';
-import type { ReplyActivity, ToolCallPart } from '../../../shared/chat';
+import type { ReasoningSegment, ReplyActivity, ToolCallPart } from '../../../shared/chat';
 import type { TurnOutcome } from '../../../shared/stream';
 import MarkdownContent, { CopyButton } from './MarkdownContent';
 import WorkGroupCard from './WorkGroupCard';
@@ -20,8 +20,8 @@ export default function AssistantMessage({
   sessionId,
   parts,
   reasoning,
+  reasoningSegments,
   reasoningStreaming = false,
-  reasoningStartedAt,
   reasoningMs,
   durationMs,
   streaming = false,
@@ -35,8 +35,8 @@ export default function AssistantMessage({
   sessionId?: string;
   parts?: ToolCallPart[];
   reasoning?: string;
+  reasoningSegments?: ReasoningSegment[];
   reasoningStreaming?: boolean;
-  reasoningStartedAt?: number;
   reasoningMs?: number;
   durationMs?: number;
   streaming?: boolean;
@@ -50,8 +50,8 @@ export default function AssistantMessage({
     <div className={`anim-msg group space-y-3 ${currentMatch ? 'chat-search-current' : ''}`}>
       <WorkGroupCard
         reasoning={reasoning}
+        reasoningSegments={reasoningSegments}
         reasoningStreaming={reasoningStreaming}
-        reasoningStartedAt={reasoningStartedAt}
         reasoningMs={reasoningMs}
         parts={parts}
         streaming={streaming}
