@@ -8,8 +8,6 @@ import Composer from '../components/chat/Composer';
 import ChatSearchPanel from '../components/chat/ChatSearchPanel';
 import TopRightToolbar from '../components/chat/TopRightToolbar';
 import { collectMessageMatches } from '../lib/highlightText';
-import type { ReplyPhase } from '../components/chat/ReplyStatusBar';
-import { liveReplyPhase } from '../state/liveReply';
 import { useTitleBarSlot } from '../components/layout/titleBarSlots';
 
 export default function ChatPage({
@@ -25,19 +23,12 @@ export default function ChatPage({
 }) {
   const session = useChatStore((s) => s.sessions.find((x) => x.id === sessionId));
   const messages = useChatStore((s) => s.messagesBySession[sessionId]) ?? [];
-  const streaming = useChatStore((s) => s.streamingBySession[sessionId]) ?? '';
-  const streamingTools = useChatStore((s) => s.streamingToolsBySession[sessionId]) ?? [];
-  const streamingReasoning = useChatStore((s) => s.streamingReasoningBySession[sessionId]) ?? '';
-  const streamingActivities = useChatStore((s) => s.replyActivitiesBySession[sessionId]) ?? [];
-  const lastTextAt = useChatStore((s) => s.lastTextAtBySession[sessionId]);
-  const turnStartedAt = useChatStore((s) => s.turnStartedAtBySession[sessionId]);
   const sending = useChatStore((s) => s.sendingBySession[sessionId]) ?? false;
   const error = useChatStore((s) => s.errorBySession[sessionId]) ?? null;
   const loopNotice = useChatStore((s) => s.loopNoticeBySession[sessionId]) ?? null;
   const turnOutcome = useChatStore((s) => s.turnOutcomeBySession[sessionId]) ?? null;
   const memoryEvents = useChatStore((s) => s.memoryEventsBySession[sessionId]) ?? [];
   const interruptRequested = useChatStore((s) => s.interruptRequestedBySession[sessionId]) ?? false;
-  const interaction = useChatStore((s) => s.interactionBySession[sessionId]) ?? null;
   const showInterruptBanner = useChatStore((s) => {
     const summary = s.sessions.find((x) => x.id === sessionId);
     if (s.sendingBySession[sessionId]) return false;
@@ -90,19 +81,6 @@ export default function ChatPage({
 
   const lastUserId = [...messages].reverse().find((m) => m.role === 'user')?.id;
   const lastAssistantId = [...messages].reverse().find((m) => m.role === 'assistant')?.id;
-  const activeToolCount = streamingTools.filter((part) => part.result === undefined && part.error === undefined).length;
-  const derivedReplyPhase: ReplyPhase | undefined = liveReplyPhase({
-    sending,
-    waitingOnUser: Boolean(interaction),
-    activeToolCount,
-    lastTextAt,
-  });
-  const replyPhase: ReplyPhase | undefined = sending
-    ? interaction
-      ? 'waiting'
-      : derivedReplyPhase
-    : undefined;
-  const replyStartedAt = turnStartedAt;
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(600);
@@ -211,10 +189,6 @@ export default function ChatPage({
         messages={messages}
         sessionId={sessionId}
         compact={isCompact}
-        streaming={streaming}
-        streamingTools={streamingTools}
-        streamingReasoning={streamingReasoning}
-        streamingActivities={streamingActivities}
         sending={sending}
         searchQuery={searchOpen ? searchQuery : ''}
         currentMatchId={searchOpen ? currentMatch?.messageId : null}
@@ -237,9 +211,6 @@ export default function ChatPage({
         onToggleTree={onToggleTree}
         treeOpen={treeOpen}
         autoFocus={active}
-        replyPhase={replyPhase}
-        replyStartedAt={replyStartedAt}
-        replyToolCount={streamingTools.length}
         interruptRequested={interruptRequested}
         turnOutcome={turnOutcome}
         turnError={error}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import { AtSign, FolderTree, Paperclip, Image as ImageIcon, Video, Type, Volume2, Bot, Sparkles, BoxSelect, Layers, Pin, Wrench } from 'lucide-react';
 import { isImeComposingEvent } from '../../lib/ime';
 import { cn } from '../../lib/cn';
@@ -9,7 +9,7 @@ import SlashPalette, { applySlashArgs, buildSlashCommands, extractSlashQuery, ty
 import PendingInteraction from './PendingInteraction';
 import QueuePanel from './QueuePanel';
 import ComposerDock from './ComposerDock';
-import ReplyStatusBar, { type ReplyPhase } from './ReplyStatusBar';
+import ReplyStatusBar from './ReplyStatusBar';
 import InterruptedTurnBanner from './InterruptedTurnBanner';
 import SelectField from '../ui/SelectField';
 import { useSettingsStore } from '../../state/useSettingsStore';
@@ -38,9 +38,6 @@ export default function Composer({
   onToggleTree,
   treeOpen,
   autoFocus = false,
-  replyPhase,
-  replyStartedAt,
-  replyToolCount = 0,
   interruptRequested = false,
   turnOutcome = null,
   turnError = null,
@@ -64,9 +61,6 @@ export default function Composer({
   onToggleTree?: () => void;
   treeOpen?: boolean;
   autoFocus?: boolean;
-  replyPhase?: ReplyPhase;
-  replyStartedAt?: number;
-  replyToolCount?: number;
   interruptRequested?: boolean;
   turnOutcome?: TurnOutcome | null;
   turnError?: string | null;
@@ -97,12 +91,6 @@ export default function Composer({
   const queue = useChatStore((s) => (sessionId ? s.queueBySession[sessionId] : undefined)) ?? [];
   const steerPending = useChatStore((s) => (sessionId ? s.steerPendingBySession[sessionId] : undefined)) ?? [];
   const todos = useChatStore((s) => (sessionId ? s.todosBySession[sessionId] : undefined)) ?? [];
-  const lastTextAt = useChatStore((s) => (sessionId ? s.lastTextAtBySession[sessionId] : undefined));
-  const lastProgressAt = useChatStore((s) => (sessionId ? s.lastProgressAtBySession[sessionId] : undefined));
-  const turnStartedAt = useChatStore((s) => (sessionId ? s.turnStartedAtBySession[sessionId] : undefined));
-  const liveToolCount = useChatStore((s) => (sessionId ? s.streamingToolsBySession[sessionId] : undefined))?.filter(
-    (part) => part.result === undefined && part.error === undefined,
-  ).length ?? 0;
   const seed = useChatStore((s) => (sessionId ? s.composerSeedBySession[sessionId] : undefined));
   const storeSkillId = useChatStore((s) => (sessionId ? s.skillBySession[sessionId] : undefined));
   // Pinned skills are session-scoped: once picked (via /, @, or the plugins page)
@@ -286,19 +274,16 @@ export default function Composer({
   }
 
   const liveStatus = sessionId && sending ? (
-    <ReplyStatusBar
-      startedAt={turnStartedAt ?? replyStartedAt}
-      toolCount={liveToolCount}
+    <LiveStatusBar
+      sessionId={sessionId}
       todos={todos}
       interaction={interaction}
       interruptRequested={interruptRequested}
       recovering={Boolean(turnError?.includes('正在恢复'))}
-      lastTextAt={lastTextAt}
-      lastProgressAt={lastProgressAt}
       // Always offer stop while a turn is live — the composer button switches to
       // queue/send once the user has typed, so this stays the persistent interrupt.
       onStop={onStop}
-      onRetry={onRetryStalled}
+      onRetryStalled={onRetryStalled}
       skillName={activeSkill?.name}
     />
   ) : null;
@@ -690,5 +675,53 @@ export default function Composer({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Live reply status subscribes to the per-token progress slices
+ * (lastTextAt / lastProgressAt) itself so stream commits don't re-render the
+ * whole composer — textarea included — 20 times a second.
+ */
+function LiveStatusBar({
+  sessionId,
+  todos,
+  interaction,
+  interruptRequested,
+  recovering,
+  onStop,
+  onRetryStalled,
+  skillName,
+}: {
+  sessionId: string;
+  todos: ComponentProps<typeof ReplyStatusBar>['todos'];
+  interaction: ComponentProps<typeof ReplyStatusBar>['interaction'];
+  interruptRequested: boolean;
+  recovering: boolean;
+  onStop?: () => void;
+  onRetryStalled?: () => void;
+  skillName?: string;
+}) {
+  const lastTextAt = useChatStore((s) => s.lastTextAtBySession[sessionId]);
+  const lastProgressAt = useChatStore((s) => s.lastProgressAtBySession[sessionId]);
+  const turnStartedAt = useChatStore((s) => s.turnStartedAtBySession[sessionId]);
+  const liveToolCount =
+    useChatStore((s) => s.streamingToolsBySession[sessionId])?.filter(
+      (part) => part.result === undefined && part.error === undefined,
+    ).length ?? 0;
+  return (
+    <ReplyStatusBar
+      startedAt={turnStartedAt}
+      toolCount={liveToolCount}
+      todos={todos}
+      interaction={interaction}
+      interruptRequested={interruptRequested}
+      recovering={recovering}
+      lastTextAt={lastTextAt}
+      lastProgressAt={lastProgressAt}
+      onStop={onStop}
+      onRetry={onRetryStalled}
+      skillName={skillName}
+    />
   );
 }

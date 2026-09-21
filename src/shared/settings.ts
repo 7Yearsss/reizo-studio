@@ -11,6 +11,14 @@ export interface StoredProvider {
   baseUrl?: string;
 }
 
+/** User-picked default generation models, chosen in the composer model picker
+ * (image / video tabs). Consumed as the fallback when a canvas node or the
+ * image tool doesn't pin its own model. */
+export interface MediaModels {
+  image?: string;
+  video?: string;
+}
+
 export interface LocalSettings {
   appearance: Appearance;
   activeProviderId: string;
@@ -20,6 +28,7 @@ export interface LocalSettings {
   busyEnter: BusyEnterBehavior;
   /** Let the agent drive the real mouse/keyboard/screen (the `computer` tool). Off by default. */
   computerUse: boolean;
+  mediaModels: MediaModels;
   providers: Record<string, StoredProvider>;
 }
 
@@ -37,6 +46,7 @@ export interface PublicSettings {
   permissionMode: PermissionMode;
   busyEnter: BusyEnterBehavior;
   computerUse: boolean;
+  mediaModels: MediaModels;
   providers: PublicProvider[];
 }
 
@@ -45,6 +55,7 @@ export interface SettingsPatch {
   permissionMode?: PermissionMode;
   busyEnter?: BusyEnterBehavior;
   computerUse?: boolean;
+  mediaModels?: MediaModels;
   activeProviderId?: string;
   workspacePath?: string | null;
   provider?: {
