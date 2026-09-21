@@ -126,7 +126,9 @@ export default function RightPanel({
     <aside
       className={cn(
         'relative flex h-full flex-col bg-sidebar',
-        maximized ? 'flex-1 w-full border-l-0' : 'shrink-0 border-l border-line',
+        maximized
+          ? 'flex-1 w-full'
+          : 'shrink-0 self-stretch my-2 mr-2 !h-auto rounded-xl border border-line/70 overflow-hidden shadow-sm',
         isDragging
           ? 'transition-none select-none'
           : 'transition-[width] duration-[var(--duration-base)] ease-[var(--ease-drawer)] motion-reduce:transition-none',

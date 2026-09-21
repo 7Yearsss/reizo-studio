@@ -192,7 +192,7 @@ export default function Sidebar() {
         isDragging
           ? 'transition-none select-none'
           : 'transition-[width] duration-[var(--duration-base)] ease-[var(--ease-drawer)] motion-reduce:transition-none',
-        collapsed ? 'border-r-0' : 'border-r border-line/70',
+        collapsed && 'border-r-0',
       )}
       style={{ width: collapsed ? 0 : sidebarWidth }}
     >
