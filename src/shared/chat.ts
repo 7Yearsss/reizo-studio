@@ -115,6 +115,8 @@ export interface SessionSummary {
   listPreview?: string | null;
   listPreviewRole?: ChatRole | null;
   listMessageCount?: number;
+  /** Unanswered interaction waiting on the user — sidebar rows badge it. */
+  pendingInteraction?: 'ask' | 'permission' | null;
 }
 
 export interface Session extends SessionSummary {

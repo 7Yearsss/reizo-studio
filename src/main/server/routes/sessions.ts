@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { SessionStore } from '../../../shared/chat';
 import type { ArtifactStore } from '../storage/artifactStore';
+import { pendingInteractionKindForSession } from '../agent/permissions';
 
 export function createSessionsRouter(sessionStore: SessionStore, artifactStore?: ArtifactStore) {
   const router = new Hono();
@@ -9,7 +10,9 @@ export function createSessionsRouter(sessionStore: SessionStore, artifactStore?:
     const projectId = c.req.query('projectId');
     let sessions = await sessionStore.list();
     if (projectId) sessions = sessions.filter((s) => s.projectId === projectId);
-    return c.json({ sessions });
+    return c.json({
+      sessions: sessions.map((s) => ({ ...s, pendingInteraction: pendingInteractionKindForSession(s.id) })),
+    });
   });
 
   router.post('/', async (c) => {

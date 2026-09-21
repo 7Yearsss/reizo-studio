@@ -16,6 +16,13 @@ export interface AskQuestion {
    */
   kind?: 'choice' | 'text' | 'direction';
   directions?: DirectionCard[];
+  /**
+   * The option the agent would pick — a value from `options`, a `directions`
+   * id, or a free-text default. When every question in an ask has one, the
+   * card auto-resolves to the recommendations after a countdown unless the
+   * user engages or snoozes it.
+   */
+  recommended?: string;
 }
 
 /** A visual-direction option the user picks by looking, not reading. */

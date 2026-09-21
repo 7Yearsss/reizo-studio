@@ -129,6 +129,21 @@ export async function initInteractionPersistence(store: InteractionPersister): P
   }
 }
 
+/**
+ * Kind of the oldest unresolved interaction for a session ('permission' wins —
+ * it blocks execution, an ask only blocks the next pass). Feeds the session
+ * list so sidebar rows can badge sessions waiting on the user.
+ */
+export function pendingInteractionKindForSession(sessionId: string): 'ask' | 'permission' | null {
+  let hasAsk = false;
+  for (const item of pending.get(sessionId) ?? []) {
+    if (item.mirrorOf || isResolved(item)) continue;
+    if (item.kind === 'permission') return 'permission';
+    hasAsk = true;
+  }
+  return hasAsk ? 'ask' : null;
+}
+
 /** Unresolved `ask` cards for a session — used to re-show the card after a restart. */
 export function pendingAsksForSession(sessionId: string): PendingInteractionInfo[] {
   return (pending.get(sessionId) ?? [])
