@@ -9,7 +9,6 @@ import {
   X,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import TabBar from './TabBar';
 import Tooltip from '../ui/Tooltip';
 import logoUrl from '../../assets/logo.png';
 import { useUiStore } from '../../state/useUiStore';
@@ -160,10 +159,7 @@ export default function CustomTitleBar() {
         </div>
       </div>
 
-      {/* Main Tabs */}
-      <TabBar />
-
-      {/* Windows Window Controls */}
+      {/* Window Controls (Windows only; on other platforms the strip stays an empty drag area) */}
       {isWindows && (
         <div className="titlebar-no-drag ml-auto flex h-full">
           <button
