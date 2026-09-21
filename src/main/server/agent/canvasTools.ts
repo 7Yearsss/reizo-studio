@@ -9,6 +9,8 @@ import { getCanvasChannel } from '../canvas/channel';
 import { broadcastDownstreamDirty, runImageNode } from '../canvas/imageExecutor';
 import { runAgentNode } from '../canvas/agentExecutor';
 import { runVideoNode } from '../canvas/videoExecutor';
+import { runAudioNode } from '../canvas/audioExecutor';
+import type { ProviderStore } from '../storage/providerStore';
 import { runGraph } from '../canvas/graphExecutor';
 import { descendants } from '../canvas/graph';
 import { watchCanvasNodeJob } from './jobWatch';
@@ -35,7 +37,7 @@ function nodeBrief(node: CanvasNode) {
   };
 }
 
-const RUNNABLE_TYPES = new Set(['image', 'agent', 'video']);
+const RUNNABLE_TYPES = new Set(['image', 'agent', 'video', 'audio']);
 const SETTLE_GRACE_MS = 5_000;
 const SETTLE_GRACE_POLL_MS = 250;
 
@@ -127,8 +129,9 @@ export function createCanvasTools(options: {
   canvasStore: CanvasStore;
   settingsStore: SettingsStore;
   dataRoot: string;
+  providerStore?: ProviderStore;
 }) {
-  const { sessionId, canvasStore, settingsStore, dataRoot } = options;
+  const { sessionId, canvasStore, settingsStore, dataRoot, providerStore } = options;
 
   return {
     open_canvas: tool({
@@ -143,9 +146,9 @@ export function createCanvasTools(options: {
 
     add_node: tool({
       description:
-        'Add a node to this session\'s canvas. type "image" generates an image from `prompt`; type "agent" is a research/critique sub-task described by `instruction`; type "video" generates video from `prompt`; type "note" is a screenplay/script sticky note; type "anchor" is a reference pin (the user drops an image onto it) whose `role`/`strength` lock a character or style across shots. In an image/video `prompt` you may embed inline references to other canvas nodes as `@[label](canvas:<nodeId>)` — at run time each becomes an ordered reference image (`<<<image 1>>>`, ...) drawn from that node\'s latest output, so you can say e.g. "把 @[主角定妆](canvas:abc123) 放进 @[雨夜街道](canvas:def456)". Returns the new node id. The canvas panel opens automatically.',
+        'Add a node to this session\'s canvas. type "image" generates an image from `prompt`; type "agent" is a research/critique sub-task described by `instruction`; type "video" generates video from `prompt`; type "note" is a screenplay/script sticky note; type "anchor" is a reference pin (the user drops an image onto it) whose `role`/`strength` lock a character or style across shots; type "audio" synthesizes a speech (TTS) track from `prompt` — the result is a standalone audio asset; wiring it into a video node\'s `audio_in` handle only marks the association (the video itself stays silent until a merge/export step exists). In an image/video `prompt` you may embed inline references to other canvas nodes as `@[label](canvas:<nodeId>)` — at run time each becomes an ordered reference image (`<<<image 1>>>`, ...) drawn from that node\'s latest output, so you can say e.g. "把 @[主角定妆](canvas:abc123) 放进 @[雨夜街道](canvas:def456)". Returns the new node id. The canvas panel opens automatically.',
       inputSchema: z.object({
-        type: z.enum(['image', 'agent', 'video', 'note', 'anchor']),
+        type: z.enum(['image', 'agent', 'video', 'note', 'anchor', 'audio']),
         prompt: z.string().optional().describe('Prompt (type "image", "video", or "note").'),
         size: z.enum(CANVAS_IMAGE_SIZES as [string, ...string[]]).optional(),
         model: z
@@ -175,7 +178,9 @@ export function createCanvasTools(options: {
                 ? { content: input.instruction ?? input.prompt ?? '', color: 'amber' }
                 : input.type === 'anchor'
                   ? { role: input.role ?? 'character', strength: input.strength ?? 'mid' }
-                  : { instruction: input.instruction ?? '' };
+                  : input.type === 'audio'
+                    ? { prompt: input.prompt ?? '', format: 'mp3' }
+                    : { instruction: input.instruction ?? '' };
         const existing = canvasStore.getSnapshot(canvas.id).nodes;
         const collides = (x: number, y: number) =>
           existing.some((n) => x < n.x + n.w && x + box.w > n.x && y < n.y + n.h && y + box.h > n.y);
@@ -374,7 +379,7 @@ export function createCanvasTools(options: {
 
     run_node: tool({
       description:
-        'Run a canvas node by id. An image or video node generates the media; an agent node runs a read-only research/critique pass. By default waits for the node to finish and returns its outcome — pass wait:false for long jobs (video, big batches): the tool returns immediately and a system notice lands in this turn when the node settles.',
+        'Run a canvas node by id. An image or video node generates the media; an audio node synthesizes its speech track; an agent node runs a read-only research/critique pass. By default waits for the node to finish and returns its outcome — pass wait:false for long jobs (video, big batches): the tool returns immediately and a system notice lands in this turn when the node settles.',
       inputSchema: z.object({
         id: z.string(),
         wait: z.boolean().optional().describe('Wait for the run to finish (default true).'),
@@ -389,7 +394,9 @@ export function createCanvasTools(options: {
             ? runAgentNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node })
             : node.type === 'video'
               ? runVideoNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node, waitForCompletion: true })
-              : runImageNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node });
+              : node.type === 'audio'
+                ? runAudioNode({ canvasStore, providerStore, dataRoot, canvasId: canvas.id, node })
+                : runImageNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node });
         if (wait === false) {
           void running.catch((): undefined => undefined);
           // Completion lands in this turn as a system note — the agent can
@@ -427,6 +434,7 @@ export function createCanvasTools(options: {
           canvasId: canvas.id,
           fromNodeId: from,
           nodeIds,
+          providerStore,
         });
         if (wait === false) {
           void running.catch((): undefined => undefined);
