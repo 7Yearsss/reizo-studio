@@ -14,6 +14,7 @@ import { getCanvasSelection } from '../canvas/selection';
 import type { CanvasStore } from '../storage/canvasStore';
 import type { CanvasImageParams } from '../../../shared/canvas';
 import { startAgentTurn, abortChatTurn } from './session';
+import { drainSteerInbox } from './steerInbox';
 import { createToolLoopGuard } from './toolLoopGuard';
 import { consumeInteractions, waitForInteractions } from './permissions';
 import { translateOpenAiChunk } from './translators/openai';
@@ -53,36 +54,12 @@ const PROVIDER_TIMEOUT = {
 
 export { abortChatTurn };
 
-export interface SteerItem {
-  /** Client-supplied id — the persisted user message reuses it. */
-  id: string;
-  /** Persisted bubble content: user text + any canvas-ref block (same shape as a normal user message). */
-  content: string;
-}
+export { pushSteer, drainSteerInbox, type SteerItem } from './steerInbox';
 
 /** Prepended to the model-facing copy so the model reads the message as mid-turn steering, not a new request. */
 const STEER_PREFIX = '(The user sent this while you were mid-turn — treat it as steering input for the current work.)';
-
-/**
- * Mid-turn steering inbox (DSH's "next-step" lane): messages the user sends
- * while a turn is live. `prepareStep` drains this at the next step boundary —
- * between tool calls — so the model sees the steer in the SAME turn instead
- * of it queueing for the next one. Anything still pending when the turn ends
- * is returned by `drainSteerInbox` for the renderer to park in its queue.
- */
-const steerInbox = new Map<string, SteerItem[]>();
-
-export function pushSteer(sessionId: string, item: SteerItem): void {
-  const list = steerInbox.get(sessionId) ?? [];
-  list.push(item);
-  steerInbox.set(sessionId, list);
-}
-
-export function drainSteerInbox(sessionId: string): SteerItem[] {
-  const list = steerInbox.get(sessionId) ?? [];
-  steerInbox.delete(sessionId);
-  return list;
-}
+/** For jobWatch notes — a background node settled; acknowledge only if relevant, never treat as a user request. */
+const STEER_SYSTEM_PREFIX = '(System notice — a watched background canvas job updated. Not a user request; reply to it only if it changes your current plan.)';
 
 interface CanvasRef {
   id: string;
@@ -480,7 +457,10 @@ export async function runChatTurn(options: {
             console.warn(`[chat] steer persist failed session=${sessionId}: ${(err as Error).message}`);
           }
           emit({ type: 'user_message', id: message.id, content: message.content, createdAt: message.createdAt });
-          const modelMessage: ModelMessage = { role: 'user', content: `${STEER_PREFIX}\n${steer.content}` };
+          const modelMessage: ModelMessage = {
+            role: 'user',
+            content: `${steer.system ? STEER_SYSTEM_PREFIX : STEER_PREFIX}\n${steer.content}`,
+          };
           // `history` feeds any later continuation pass in this same turn.
           history.push(modelMessage);
           compacted.push(modelMessage);

@@ -11,6 +11,7 @@ import { runAgentNode } from '../canvas/agentExecutor';
 import { runVideoNode } from '../canvas/videoExecutor';
 import { runGraph } from '../canvas/graphExecutor';
 import { descendants } from '../canvas/graph';
+import { watchCanvasNodeJob } from './jobWatch';
 import type { CanvasNode } from '../../../shared/canvas';
 
 function nodeBrief(node: CanvasNode) {
@@ -373,7 +374,7 @@ export function createCanvasTools(options: {
 
     run_node: tool({
       description:
-        'Run a canvas node by id. An image or video node generates the media; an agent node runs a read-only research/critique pass. By default waits for the node to finish and returns its outcome — pass wait:false to fire-and-forget.',
+        'Run a canvas node by id. An image or video node generates the media; an agent node runs a read-only research/critique pass. By default waits for the node to finish and returns its outcome — pass wait:false for long jobs (video, big batches): the tool returns immediately and a system notice lands in this turn when the node settles.',
       inputSchema: z.object({
         id: z.string(),
         wait: z.boolean().optional().describe('Wait for the run to finish (default true).'),
@@ -391,6 +392,9 @@ export function createCanvasTools(options: {
               : runImageNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node });
         if (wait === false) {
           void running.catch((): undefined => undefined);
+          // Completion lands in this turn as a system note — the agent can
+          // keep working and gets told instead of polling read_canvas.
+          watchCanvasNodeJob(sessionId, canvas.id, canvasStore, [id]);
           return { ok: true, id, status: 'running' };
         }
         const settled = await settleNodes(canvasStore, canvas.id, [id], timeoutMs ?? 300_000, running);
@@ -401,7 +405,7 @@ export function createCanvasTools(options: {
 
     run_graph: tool({
       description:
-        'Run the canvas as a pipeline. Independent nodes in the same dependency layer run in parallel; a node starts only after its inputs are done. Pass `from` to run that node and everything downstream, or `nodeIds` to run only an explicit set (e.g. the members of one group). `from` and `nodeIds` are mutually exclusive — `nodeIds` wins. By default waits for the whole run and returns every node\'s outcome — pass wait:false to fire-and-forget.',
+        'Run the canvas as a pipeline. Independent nodes in the same dependency layer run in parallel; a node starts only after its inputs are done. Pass `from` to run that node and everything downstream, or `nodeIds` to run only an explicit set (e.g. the members of one group). `from` and `nodeIds` are mutually exclusive — `nodeIds` wins. By default waits for the whole run and returns every node\'s outcome — pass wait:false for long jobs: a system notice lands in this turn as each node settles.',
       inputSchema: z.object({
         from: z.string().optional(),
         nodeIds: z
@@ -426,6 +430,7 @@ export function createCanvasTools(options: {
         });
         if (wait === false) {
           void running.catch((): undefined => undefined);
+          watchCanvasNodeJob(sessionId, canvas.id, canvasStore, runGraphScope(canvasStore, canvas.id, from, nodeIds));
           return { ok: true, status: 'running', scope: nodeIds ? 'nodeIds' : from ? 'from' : 'all' };
         }
         const scope = runGraphScope(canvasStore, canvas.id, from, nodeIds);
