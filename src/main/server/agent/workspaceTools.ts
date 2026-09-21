@@ -94,7 +94,7 @@ export function createWorkspaceTools(options: {
   todos: TodoItem[];
   onFileWritten?: (relativePath: string, content: string) => Promise<void>;
 }): WorkspaceToolset {
-  const { workspacePath, onFileWritten } = options;
+  const { workspacePath, onFileWritten, emit } = options;
 
   async function executeApproved(
     name: string,
@@ -150,6 +150,18 @@ export function createWorkspaceTools(options: {
             ? `name: ${existing.name}\ndescription: ${existing.description}\ntype: ${existing.type}\n\n${existing.body}`
             : '';
           const result = await writeMemoryEntry(workspacePath, entry);
+          emit({
+            type: 'memory',
+            action: 'wrote',
+            items: [
+              {
+                file: result.fileName,
+                name: entry.name,
+                description: entry.description,
+                type: entry.type,
+              },
+            ],
+          });
           return {
             result: JSON.stringify({
               path: result.path,
@@ -344,6 +356,13 @@ function buildTools(options: {
           type: input.type,
           body: input.body,
         });
+        emit({
+          type: 'memory',
+          action: 'wrote',
+          items: [
+            { file: result.fileName, name: input.name, description: input.description, type: input.type },
+          ],
+        });
         return { ...result, preview: buildFileDiffPreview(relPath, before, after) };
       },
     }),
@@ -360,6 +379,11 @@ function buildTools(options: {
           preview: buildFileDiffPreview(`memory/${file}`, existing.body, ''),
         });
         await deleteMemoryEntry(workspacePath, file);
+        emit({
+          type: 'memory',
+          action: 'deleted',
+          items: [{ file, name: existing.name, description: existing.description, type: existing.type }],
+        });
         return { deleted: `memory/${file}` };
       },
     }),

@@ -69,6 +69,22 @@ export function buildFileDiffPreview(
 
 export type TurnOutcome = 'completed' | 'interrupted' | 'error';
 
+/** One memory entry the user can see in a "已记住/想起了" row. */
+export interface MemoryItem {
+  file: string;
+  name: string;
+  description?: string;
+  type?: string;
+}
+
+/** Persisted memory activity shown inline in the chat timeline. */
+export interface MemoryEventRecord {
+  id: string;
+  createdAt: string;
+  action: 'recalled' | 'wrote' | 'deleted';
+  items: MemoryItem[];
+}
+
 export type ChatStreamEvent =
   | { type: 'text'; delta: string }
   | { type: 'reasoning'; delta: string }
@@ -78,6 +94,10 @@ export type ChatStreamEvent =
   | { type: 'ask'; id: string; questions: AskQuestion[] }
   | { type: 'todos'; items: TodoItem[] }
   | { type: 'tool_loop'; tier: 'warn' | 'halt'; reason: string }
+  // Memory activity surfaced to the user: files the agent recalled into this
+  // turn, wrote via extraction/tools, or deleted. Rendered inline after the
+  // message it follows (matched by createdAt at event time).
+  | { type: 'memory'; action: 'recalled' | 'wrote' | 'deleted'; items: MemoryItem[] }
   // A steered (插话) user message the agent loop injected mid-turn — persisted
   // server-side; `content` matches the stored message so canvas-ref chips work.
   | { type: 'user_message'; id: string; content: string; createdAt: string }

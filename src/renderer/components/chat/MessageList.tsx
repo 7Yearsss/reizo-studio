@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown } from 'lucide-react';
 import type { ChatMessage, ReplyActivity, ToolCallPart } from '../../../shared/chat';
-import type { TurnOutcome } from '../../../shared/stream';
+import type { MemoryEventRecord, TurnOutcome } from '../../../shared/stream';
 import {
   buildRenderItems,
   initialWindowStart,
@@ -13,6 +13,7 @@ import ErrorBoundary from '../ErrorBoundary';
 import UserMessage from './UserMessage';
 import AssistantMessage from './AssistantMessage';
 import EmptyChatHints from './EmptyChatHints';
+import MemoryEventRow from './MemoryEventRow';
 import PendingInteraction from './PendingInteraction';
 
 const GROW_TRIGGER_PX = 160;
@@ -35,8 +36,11 @@ export default function MessageList({
   compact = false,
   sessionId,
   bottomInset,
+  memoryEvents = [],
 }: {
   messages: ChatMessage[];
+  /** 已记住/想起了 rows — rendered right after the message they follow. */
+  memoryEvents?: MemoryEventRecord[];
   sessionId?: string;
   streaming: string;
   streamingTools?: ToolCallPart[];
@@ -136,7 +140,12 @@ export default function MessageList({
         {hasOlder && (
           <div className="pt-2 text-center text-[11px] text-ink-muted">向上滚动加载更早的消息…</div>
         )}
-        {shown.map(({ message: m }) => (
+        {shown.map(({ message: m }, idx) => {
+          const next = shown[idx + 1]?.message;
+          const after = memoryEvents.filter(
+            (ev) => ev.createdAt > m.createdAt && (!next || ev.createdAt <= next.createdAt),
+          );
+          return (
           <div
             key={m.id}
             data-message-id={m.id}
@@ -190,8 +199,14 @@ export default function MessageList({
                 />
               )}
             </ErrorBoundary>
+            {after.map((ev) => (
+              <div key={ev.id} className="mt-1">
+                <MemoryEventRow event={ev} sessionId={sessionId} />
+              </div>
+            ))}
           </div>
-        ))}
+          );
+        })}
         {sending && (
           <div data-message-id="streaming">
             <ErrorBoundary

@@ -35,6 +35,8 @@ import type { SettingsStore } from '../storage/settingsStore';
 import type { ArtifactStore } from '../storage/artifactStore';
 import type { ProjectStore } from '../storage/projectStore';
 import type { LargeValueStore } from '../storage/largeValueStore';
+import type { MemoryEventsStore } from '../storage/memoryEventsStore';
+import type { MemoryItem } from '../../../shared/stream';
 
 /**
  * Reverse proxies (Cloudflare 524, nginx read timeouts) often fail one
@@ -157,6 +159,7 @@ export async function runChatTurn(options: {
   largeValueStore?: LargeValueStore;
   canvasStore?: CanvasStore;
   dataRoot?: string;
+  memoryEventsStore?: MemoryEventsStore;
 }): Promise<Response> {
   const {
     sessionStore,
@@ -173,6 +176,7 @@ export async function runChatTurn(options: {
     largeValueStore,
     canvasStore,
     dataRoot,
+    memoryEventsStore,
   } = options;
 
   let session = await sessionStore.get(sessionId);
@@ -466,6 +470,14 @@ export async function runChatTurn(options: {
           const recalled = await withTimeout(recallPromise, RECALL_BUDGET.timeoutMs, []);
           if (recalled.length > 0) {
             compacted.push({ role: 'user', content: formatRecalledMemories(recalled) });
+            const items: MemoryItem[] = recalled.map((m) => ({
+              file: m.fileName,
+              name: m.name,
+              description: m.description,
+              type: m.type,
+            }));
+            emit({ type: 'memory', action: 'recalled', items });
+            void memoryEventsStore?.append(sessionId, 'recalled', items);
           }
         }
         // Steer inbox drains at every step boundary (the AI SDK carries the
@@ -546,6 +558,16 @@ export async function runChatTurn(options: {
         model,
         userText,
         assistantText: text,
+        onChanged: (wrote, deleted) => {
+          if (wrote.length > 0) {
+            emit({ type: 'memory', action: 'wrote', items: wrote });
+            void memoryEventsStore?.append(sessionId, 'wrote', wrote);
+          }
+          if (deleted.length > 0) {
+            emit({ type: 'memory', action: 'deleted', items: deleted });
+            void memoryEventsStore?.append(sessionId, 'deleted', deleted);
+          }
+        },
       });
     },
     onAwaitingInteraction: async ({ sessionId: sid, signal, emitToolResult, getAssistant }) => {

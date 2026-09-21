@@ -4,6 +4,7 @@ import type {
   AskQuestion,
   ChatStreamEvent,
   FileDiffPreview,
+  MemoryEventRecord,
   ReplyPhase,
   TodoItem,
   TurnOutcome,
@@ -96,6 +97,8 @@ export interface ChatState {
   pickingReferenceBySession: Record<string, boolean>;
   /** Sessions where the user dismissed the "interrupted turn" banner. */
   interruptDismissedBySession: Record<string, boolean>;
+  /** Memory activity (已记住/想起了 rows) shown inline in the timeline. */
+  memoryEventsBySession: Record<string, MemoryEventRecord[]>;
 }
 
 let state: ChatState = {
@@ -125,6 +128,7 @@ let state: ChatState = {
   nodeRefsBySession: {},
   pickingReferenceBySession: {},
   interruptDismissedBySession: {},
+  memoryEventsBySession: {},
 };
 
 function sameRef(a: NodeRef, b: NodeRef): boolean {
@@ -381,6 +385,14 @@ export async function ensureSessionMessages(
     turnOutcomeBySession: { ...state.turnOutcomeBySession, [id]: session.lastTurnOutcome ?? null },
     errorBySession: { ...state.errorBySession, [id]: session.lastTurnError ?? null },
   });
+  void api
+    .fetchMemoryEvents(id)
+    .then((events): void => {
+      setState({
+        memoryEventsBySession: { ...state.memoryEventsBySession, [id]: events },
+      });
+    })
+    .catch((): void => undefined);
   // A turn was in flight when we last lost the connection — try to reattach.
   // Hidden tabs must not hold a resume stream: a turn suspended on an ask card
   // keeps its socket open indefinitely, and N mounted tabs exhaust the pool.
@@ -992,6 +1004,22 @@ function makeEventFolder(
           },
         });
         break;
+      case 'memory':
+        setState({
+          memoryEventsBySession: {
+            ...state.memoryEventsBySession,
+            [sessionId]: [
+              ...(state.memoryEventsBySession[sessionId] ?? []),
+              {
+                id: `me_${Date.now().toString(36)}`,
+                createdAt: new Date().toISOString(),
+                action: event.action,
+                items: event.items,
+              },
+            ],
+          },
+        });
+        break;
       case 'done':
         getReveal(sessionId).flush();
         getReasoningReveal(sessionId).flush();
@@ -1276,6 +1304,19 @@ export async function resumeInterruptedTurn(
     if (abortBySession.get(sessionId) === abort) abortBySession.delete(sessionId);
     setState({ sendingBySession: { ...state.sendingBySession, [sessionId]: false } });
   }
+}
+
+/** Undo one saved memory — deletes the file server-side and marks it removed. */
+export async function forgetMemoryItem(sessionId: string, eventId: string, file: string): Promise<void> {
+  await api.deleteMemoryFile(file);
+  setState({
+    memoryEventsBySession: {
+      ...state.memoryEventsBySession,
+      [sessionId]: (state.memoryEventsBySession[sessionId] ?? []).map((e) =>
+        e.id === eventId ? { ...e, items: e.items.filter((i) => i.file !== file) } : e,
+      ),
+    },
+  });
 }
 
 export async function stopMessage(sessionId: string): Promise<void> {

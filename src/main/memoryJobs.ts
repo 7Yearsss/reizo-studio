@@ -1,4 +1,5 @@
 import { generateText, type LanguageModel } from 'ai';
+import type { MemoryItem } from '../shared/stream';
 import {
   deleteMemoryEntry,
   listMemoryManifest,
@@ -45,8 +46,9 @@ export function scheduleMemoryExtraction(opts: {
   model: LanguageModel;
   userText: string;
   assistantText: string;
+  onChanged?: (wrote: MemoryItem[], deleted: MemoryItem[]) => void;
 }): void {
-  const { workspaceRoot, model, userText, assistantText } = opts;
+  const { workspaceRoot, model, userText, assistantText, onChanged } = opts;
   if (!userText.trim() && !assistantText.trim()) return;
   track(
     (async () => {
@@ -66,17 +68,41 @@ export function scheduleMemoryExtraction(opts: {
         });
         const parsed = parseExtraction(result.text);
         if (!parsed) return;
+        const deleted: MemoryItem[] = [];
         for (const file of parsed.deletions.slice(0, 5)) {
+          const existing = await readMemoryEntry(workspaceRoot, file).catch((): null => null);
           await deleteMemoryEntry(workspaceRoot, file).catch((): void => undefined);
+          if (existing) {
+            deleted.push({
+              file: existing.fileName,
+              name: existing.name,
+              description: existing.description,
+              type: existing.type,
+            });
+          }
         }
+        const wrote: MemoryItem[] = [];
         for (const mem of parsed.memories.slice(0, EXTRACT_MAX_NEW)) {
           if (!mem.name || !mem.body) continue;
-          await writeMemoryEntry(workspaceRoot, {
+          const saved = await writeMemoryEntry(workspaceRoot, {
             name: mem.name,
             description: mem.description || mem.name,
             type: normalizeMemoryType(mem.type),
             body: `${mem.body}\n\n_Updated ${new Date().toISOString().slice(0, 10)}_`,
           });
+          wrote.push({
+            file: saved.fileName,
+            name: mem.name,
+            description: mem.description || mem.name,
+            type: normalizeMemoryType(mem.type),
+          });
+        }
+        if (wrote.length > 0 || deleted.length > 0) {
+          try {
+            onChanged?.(wrote, deleted);
+          } catch {
+            /* notification best-effort */
+          }
         }
       } catch (err) {
         console.warn(`[memory] extraction failed: ${(err as Error).message}`);
