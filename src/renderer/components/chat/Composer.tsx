@@ -6,6 +6,7 @@ import { PromptInput } from '../agents/prompt-input';
 import ModelPicker from './ModelPicker';
 import MentionMenu, { extractMentionQuery } from './MentionMenu';
 import SlashPalette, { applySlashArgs, buildSlashCommands, extractSlashQuery, type SlashCommand } from './SlashPalette';
+import PendingInteraction from './PendingInteraction';
 import QueuePanel from './QueuePanel';
 import TodoCard from './TodoCard';
 import NextStepStrip from './NextStepStrip';
@@ -306,6 +307,7 @@ export default function Composer({
             onPick={(prompt) => onSend(prompt, [], {})}
           />
         )}
+        {sessionId && <div className="mb-2"><PendingInteraction sessionId={sessionId} /></div>}
         {sessionId && (
           <QueuePanel
             items={queue}

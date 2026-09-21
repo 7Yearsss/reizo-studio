@@ -31,6 +31,7 @@ import {
   Play,
   Undo2,
   Redo2,
+  ListRestart,
   LayoutGrid,
   AtSign,
   Video,
@@ -2141,6 +2142,18 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
             <NavButton onClick={() => void canvasStore.redo(sessionId)} disabled={!history?.canRedo} title="重做 (Ctrl+Shift+Z)">
               <Redo2 size={14} />
             </NavButton>
+            {(history?.agentRollback ?? 0) > 0 && (
+              <NavButton
+                onClick={() => {
+                  void canvasStore.rollbackAgentTurn(sessionId).then((n) => {
+                    if (n > 0) flash(`已回滚本轮 Agent 改动（${n} 处）`);
+                  });
+                }}
+                title={`回滚本轮 Agent 画布改动（${history?.agentRollback} 处）`}
+              >
+                <ListRestart size={14} />
+              </NavButton>
+            )}
           </div>
         </Panel>
 

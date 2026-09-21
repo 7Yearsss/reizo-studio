@@ -205,7 +205,6 @@ export default function MessageList({
             </ErrorBoundary>
           </div>
         )}
-        {sessionId ? <PendingInteraction sessionId={sessionId} /> : null}
       </MessageScroller>
       {!following && (
         <button

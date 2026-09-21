@@ -39,3 +39,33 @@ export function notifyJobDone(title: string, body: string): void {
     /* ignore */
   }
 }
+
+/**
+ * Fire an OS notification when the agent suspends on a question/approval while
+ * the app isn't focused — otherwise a pending card sits invisible until the
+ * user happens to look back.
+ */
+export function notifyNeedsInput(title: string, body: string): void {
+  try {
+    if (typeof Notification === 'undefined') return;
+    if (typeof document !== 'undefined' && !document.hidden) return;
+    if (Notification.permission !== 'granted') {
+      primeNotifications();
+      return;
+    }
+    const now = Date.now();
+    if (now - lastAt < 1500) return;
+    lastAt = now;
+    const n = new Notification(title, { body, tag: 'reizo-needs-input' });
+    n.onclick = () => {
+      try {
+        window.focus();
+        n.close();
+      } catch {
+        /* ignore */
+      }
+    };
+  } catch {
+    /* ignore */
+  }
+}
