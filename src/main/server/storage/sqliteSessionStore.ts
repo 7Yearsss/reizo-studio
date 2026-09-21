@@ -3,6 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type {
   ChatMessage,
   ChatRole,
+  ReasoningSegment,
   Session,
   SessionPatch,
   SessionStore,
@@ -73,6 +74,7 @@ function decodeContent(raw: string): {
   text: string;
   parts?: ToolCallPart[];
   reasoning?: string;
+  reasoningSegments?: ReasoningSegment[];
   reasoningMs?: number;
   durationMs?: number;
   turnOutcome?: TurnOutcome;
@@ -82,6 +84,7 @@ function decodeContent(raw: string): {
       text?: unknown;
       parts?: unknown;
       reasoning?: unknown;
+      reasoningSegments?: unknown;
       reasoningMs?: unknown;
       durationMs?: unknown;
       turnOutcome?: unknown;
@@ -91,6 +94,11 @@ function decodeContent(raw: string): {
         text: typeof parsed.text === 'string' ? parsed.text : '',
         parts: Array.isArray(parsed.parts) ? (parsed.parts as ToolCallPart[]) : undefined,
         reasoning: typeof parsed.reasoning === 'string' ? parsed.reasoning : undefined,
+        reasoningSegments: Array.isArray(parsed.reasoningSegments)
+          ? (parsed.reasoningSegments as ReasoningSegment[]).filter(
+              (s) => s && typeof s.text === 'string' && typeof s.beforeToolIndex === 'number',
+            )
+          : undefined,
         reasoningMs: typeof parsed.reasoningMs === 'number' ? parsed.reasoningMs : undefined,
         durationMs: typeof parsed.durationMs === 'number' ? parsed.durationMs : undefined,
         turnOutcome:
@@ -112,6 +120,7 @@ function encodeContent(message: ChatMessage): string {
     text: message.content,
     parts: message.parts ?? null,
     reasoning: message.reasoning ?? null,
+    reasoningSegments: message.reasoningSegments ?? null,
     reasoningMs: message.reasoningMs ?? null,
     durationMs: message.durationMs ?? null,
     turnOutcome: message.turnOutcome ?? null,
@@ -119,13 +128,14 @@ function encodeContent(message: ChatMessage): string {
 }
 
 function toMessage(row: MessageRowRaw): ChatMessage {
-  const { text, parts, reasoning, reasoningMs, durationMs, turnOutcome } = decodeContent(row.content);
+  const { text, parts, reasoning, reasoningSegments, reasoningMs, durationMs, turnOutcome } = decodeContent(row.content);
   return {
     id: row.id,
     role: row.role as ChatRole,
     content: text,
     parts: parts && parts.length ? parts : undefined,
     reasoning: reasoning || undefined,
+    reasoningSegments: reasoningSegments && reasoningSegments.length ? reasoningSegments : undefined,
     reasoningMs,
     durationMs,
     turnOutcome,

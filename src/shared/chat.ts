@@ -39,6 +39,16 @@ export interface ToolCallPart {
   error?: string;
 }
 
+/** One contiguous reasoning beat. Multi-pass turns produce several — each is
+ * rendered as its own collapsed row ahead of the tool call it motivated. */
+export interface ReasoningSegment {
+  text: string;
+  durationMs?: number;
+  /** Render this segment immediately before `parts[beforeToolIndex]`; a value
+   * >= parts.length means it followed every recorded tool call. */
+  beforeToolIndex: number;
+}
+
 export interface ReplyActivity {
   id: string;
   kind: 'thinking' | 'tool';
@@ -56,6 +66,9 @@ export interface ChatMessage {
   parts?: ToolCallPart[];
   /** Model reasoning ("thinking") captured for this assistant row, if any. */
   reasoning?: string;
+  /** Ordered reasoning beats, one per think→act phase — interleaved with the
+   * tool rows at render time. Absent on rows written before this field. */
+  reasoningSegments?: ReasoningSegment[];
   /** Wall-clock ms the model spent reasoning, frozen once the turn ends. */
   reasoningMs?: number;
   /** Outcome of the turn that produced this message (completed/interrupted). */
