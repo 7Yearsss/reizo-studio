@@ -163,6 +163,12 @@ pre,
   -webkit-app-region: no-drag;
 }
 
+/* While the sidebar drag-handle is held, the titlebar's sidebar-width section
+   must track the pointer (via --sidebar-width), not lag behind a transition. */
+.sidebar-resizing .titlebar-sidebar-head {
+  transition-property: none;
+}
+
 /* Anything interactive inside the drag strip stays clickable — portal slots
    (page title, toolbars) inherit `drag` so the row remains grabbable, and only
    real controls opt out. */
