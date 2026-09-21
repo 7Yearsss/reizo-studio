@@ -679,10 +679,17 @@ function assistantTurnToModelMessages(
         toolName: part.name,
         output:
           (screenshotCtx && computerScreenshotOutput(part, screenshotCtx)) ||
-          parseToolOutput(part.result ?? part.error ?? ''),
+          parseToolOutput(sanitizeToolOutput(part.result ?? part.error ?? '')),
       })),
     } as ModelMessage,
   ];
+}
+
+/** The ApprovalRequiredError sentinel is internal — if it ever lands on a persisted part, the model must not see it (it narrates it as English reasoning text). */
+function sanitizeToolOutput(value: string): string {
+  return value.includes('REIZO_INTERACTION_REQUIRED')
+    ? '(This tool paused for user input; the answer follows.)'
+    : value;
 }
 
 function parseToolOutput(value: string): { type: 'json'; value: unknown } | { type: 'text'; value: string } {
