@@ -37,7 +37,7 @@ function nodeBrief(node: CanvasNode) {
   };
 }
 
-const RUNNABLE_TYPES = new Set(['image', 'agent', 'video']);
+const RUNNABLE_TYPES = new Set(['image', 'agent', 'video', 'audio']);
 const SETTLE_GRACE_MS = 5_000;
 const SETTLE_GRACE_POLL_MS = 250;
 
@@ -146,7 +146,7 @@ export function createCanvasTools(options: {
 
     add_node: tool({
       description:
-        'Add a node to this session\'s canvas. type "image" generates an image from `prompt`; type "agent" is a research/critique sub-task described by `instruction`; type "video" generates video from `prompt`; type "note" is a screenplay/script sticky note; type "anchor" is a reference pin (the user drops an image onto it) whose `role`/`strength` lock a character or style across shots; type "audio" synthesizes speech (TTS) from `prompt` — wire it into a video node\'s `audio_in` handle to give the shot a voiceover. In an image/video `prompt` you may embed inline references to other canvas nodes as `@[label](canvas:<nodeId>)` — at run time each becomes an ordered reference image (`<<<image 1>>>`, ...) drawn from that node\'s latest output, so you can say e.g. "把 @[主角定妆](canvas:abc123) 放进 @[雨夜街道](canvas:def456)". Returns the new node id. The canvas panel opens automatically.',
+        'Add a node to this session\'s canvas. type "image" generates an image from `prompt`; type "agent" is a research/critique sub-task described by `instruction`; type "video" generates video from `prompt`; type "note" is a screenplay/script sticky note; type "anchor" is a reference pin (the user drops an image onto it) whose `role`/`strength` lock a character or style across shots; type "audio" synthesizes a speech (TTS) track from `prompt` — the result is a standalone audio asset; wiring it into a video node\'s `audio_in` handle only marks the association (the video itself stays silent until a merge/export step exists). In an image/video `prompt` you may embed inline references to other canvas nodes as `@[label](canvas:<nodeId>)` — at run time each becomes an ordered reference image (`<<<image 1>>>`, ...) drawn from that node\'s latest output, so you can say e.g. "把 @[主角定妆](canvas:abc123) 放进 @[雨夜街道](canvas:def456)". Returns the new node id. The canvas panel opens automatically.',
       inputSchema: z.object({
         type: z.enum(['image', 'agent', 'video', 'note', 'anchor', 'audio']),
         prompt: z.string().optional().describe('Prompt (type "image", "video", or "note").'),
@@ -434,6 +434,7 @@ export function createCanvasTools(options: {
           canvasId: canvas.id,
           fromNodeId: from,
           nodeIds,
+          providerStore,
         });
         if (wait === false) {
           void running.catch((): undefined => undefined);

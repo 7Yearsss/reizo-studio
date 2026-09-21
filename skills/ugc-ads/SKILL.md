@@ -92,7 +92,7 @@ cover: cover.jpg
 - `connect_nodes` 把对应关键帧连到 `start_frame` 口；再 `connect_nodes` 把定妆/产品资产图连到 `reference` 口（kling-2.0 双图绑定：人一张、货一张）；运镜流畅优先 `kling-1.5`。
 - `ratio` 固定 `9:16`；`duration` 按分镜 5s/10s。
 - prompt 只写**运动指令**：运镜方向、手部动作、表情变化、手持微晃幅度；不重写画面内容（画面在关键帧里）。reference 已锁住人脸和包装，prompt 里不用再粘长段 Character Lock。
-- **配音轨**：每镜另建 `type:'audio'` 节点，`prompt` 写该镜口播文案，`connect_nodes` 连到视频节点的 `audio_in` 口，`run_node` 合成（CosyVoice/MiniMax，支持@上游 note 取词）。口播像说话不念稿；无台词镜跳过。
+- **配音轨**：每镜另建 `type:'audio'` 节点，`prompt` 写该镜口播文案，`connect_nodes` 连到视频节点的 `audio_in` 口，`run_node` 合成（CosyVoice/MiniMax，支持@上游 note 取词）。口播像说话不念稿；无台词镜跳过。注意：产出是**独立音轨资产**——`audio_in` 边只标记归属关系，视频本身仍无声，混流要等导出节点。汇报时说「配音轨已生成」，不要说「成片已带声音」。
 - 视频用 `run_graph` 传 `wait:false` 走后台 job（要几分钟，turn 不阻塞，完成自动通知再汇报）；配音 TTS 快，`run_node` 逐个直接跑。
 
 ## 阶段 6 — QA 清单（成片后自查，主动报结果）
