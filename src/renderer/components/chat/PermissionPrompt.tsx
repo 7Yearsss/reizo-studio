@@ -44,12 +44,15 @@ export default function PermissionPrompt({
   const isComputer = permission.name === 'computer';
   const isCanvasBudget = permission.name === CANVAS_BUDGET_TOOL;
   const executed = typeof permission.args.executed === 'number' ? permission.args.executed : null;
+  const planned = typeof permission.args.planned === 'number' ? permission.args.planned : null;
   const title = preview
     ? `允许写入 ${preview.path}？`
     : isComputer
       ? '允许 Agent 操作这台电脑？'
       : isCanvasBudget
-        ? `已生成 ${executed ?? ''} 个画布任务，继续生成更多吗？`
+        ? planned != null
+          ? `计划运行 ${planned} 个画布节点，超出本轮配额——继续吗？`
+          : `已生成 ${executed ?? ''} 个画布任务，继续生成更多吗？`
         : '允许运行这个工具？';
   const description = isComputer
     ? '同意后，本次会话中 Agent 可以截屏并控制鼠标、键盘，直到会话结束。不要让它输入密码等敏感信息。'

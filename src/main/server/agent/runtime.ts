@@ -1,7 +1,7 @@
 import { isStepCount, streamText, type ModelMessage } from 'ai';
 import { nanoid } from 'nanoid';
 import { getProviderPreset } from '../../../shared/providers';
-import type { ChatStreamEvent, TodoItem } from '../../../shared/stream';
+import { CANVAS_BUDGET_TOOL, type ChatStreamEvent, type MemoryItem, type TodoItem } from '../../../shared/stream';
 import { createOpenAiModel } from './provider/openai';
 import { createAskUserTool, createWorkspaceTools } from './workspaceTools';
 import { createCanvasTools } from './canvasTools';
@@ -38,7 +38,6 @@ import type { ArtifactStore } from '../storage/artifactStore';
 import type { ProjectStore } from '../storage/projectStore';
 import type { LargeValueStore } from '../storage/largeValueStore';
 import type { MemoryEventsStore } from '../storage/memoryEventsStore';
-import type { MemoryItem } from '../../../shared/stream';
 
 /**
  * Reverse proxies (Cloudflare 524, nginx read timeouts) often fail one
@@ -448,7 +447,7 @@ export async function runChatTurn(options: {
       ? {
           ask_user: askTool,
           ...(toolset?.tools ?? {}),
-          ...(canvasTools ?? {}),
+          ...(canvasTools?.tools ?? {}),
           ...(artifactTools ?? {}),
           ...(imageTools ?? {}),
           ...(computerTools?.tools ?? {}),
@@ -611,10 +610,15 @@ export async function runChatTurn(options: {
           });
           continue;
         }
+        // canvas_budget checkpoints aren't real tool calls — args.tool names
+        // the gated call (run_node / run_graph / pipeline) so the result lands
+        // under the name the model actually invoked.
+        const resultName =
+          item.name === CANVAS_BUDGET_TOOL && typeof item.args.tool === 'string' ? item.args.tool : item.name;
         if (item.decision === 'deny') {
           emitToolResult({
             toolCallId: item.toolCallId,
-            name: item.name,
+            name: resultName,
             args: item.args,
             error: 'User denied this tool call',
           });
@@ -625,12 +629,16 @@ export async function runChatTurn(options: {
             ? ((await computerTools?.executeApproved(item.args)) ?? {
                 error: 'Computer control is not enabled for this turn',
               })
-            : ((await toolset?.executeApproved(item.name, item.args)) ?? {
-                error: 'This turn has no workspace tools',
-              });
+            : item.name === CANVAS_BUDGET_TOOL
+              ? ((await canvasTools?.executeApproved(item.args, item.toolCallId)) ?? {
+                  error: 'This turn has no canvas tools',
+                })
+              : ((await toolset?.executeApproved(item.name, item.args)) ?? {
+                  error: 'This turn has no workspace tools',
+                });
         emitToolResult({
           toolCallId: item.toolCallId,
-          name: item.name,
+          name: resultName,
           args: item.args,
           result: outcome.result,
           error: outcome.error,

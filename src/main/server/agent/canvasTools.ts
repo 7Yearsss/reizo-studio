@@ -138,25 +138,32 @@ export function createCanvasTools(options: {
 }) {
   const { sessionId, canvasStore, settingsStore, dataRoot, providerStore, budget } = options;
 
+  /** Options the resume path passes back into a gated execute so an approved
+   * call isn't charged twice — it already consumed its slot when it threw. */
+  type GateOptions = { toolCallId?: string; approvedReplay?: boolean };
+
   /** Gate a paid canvas run (image/video/graph). Past the per-turn execute
    * ceiling this records a checkpoint prompt and unwinds the step — approving
-   * it extends the ceiling so the resumed call passes. */
-  const gateExecute = (toolCallId: string, args: Record<string, unknown>): void => {
-    if (!budget) return;
-    budget.record('execute');
+   * it extends the ceiling so the resumed call passes. `weight` is how many
+   * generations the call will burn: 1 for run_node, the runnable scope for
+   * run_graph, so a single graph call can't launder a whole batch as "one". */
+  const gateExecute = (toolOptions: GateOptions | undefined, args: Record<string, unknown>, weight = 1): void => {
+    if (!budget || toolOptions?.approvedReplay) return;
+    budget.record('execute', weight);
     if (!budget.exceeded('execute')) return;
     const { execute } = budget.counts();
+    const checkpointArgs = { ...args, executed: execute, ...(weight > 1 ? { planned: weight } : {}) };
     const ok = requestBudgetCheckpoint({
       sessionId,
-      toolCallId,
-      args: { ...args, executed: execute },
+      toolCallId: toolOptions?.toolCallId ?? '',
+      args: checkpointArgs,
       onAllow: () => budget.extendExecute(CANVAS_BUDGET_ALLOW_BATCH),
     });
     if (!ok) {
       throw new ApprovalRequiredError({
-        toolCallId,
+        toolCallId: toolOptions?.toolCallId ?? '',
         name: CANVAS_BUDGET_TOOL,
-        args: { ...args, executed: execute },
+        args: checkpointArgs,
         kind: 'permission',
       });
     }
@@ -181,8 +188,7 @@ export function createCanvasTools(options: {
     return { blocked: true };
   };
 
-
-  return {
+  const tools = {
     open_canvas: tool({
       description:
         'Open and display the canvas panel in the user interface. Call this whenever the user asks to see, open, or switch to the canvas.',
@@ -420,13 +426,18 @@ export function createCanvasTools(options: {
           total: 3,
         });
 
+        const allCreated = [noteNode.id, ...createdSceneNodeIds];
         if (input.autoRunFirstScene && imageNodes.length > 0) {
-          gateExecute(toolOptions?.toolCallId ?? '', { tool: 'create_storyboard_pipeline', scenes: input.scenes.length });
+          gateExecute(toolOptions, {
+            tool: 'create_storyboard_pipeline',
+            scenes: input.scenes.length,
+            planNodeIds: allCreated,
+            operationId: input.operationId,
+          });
           void runImageNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node: imageNodes[0] });
         }
 
         if (input.asProposal) {
-          const allCreated = [noteNode.id, ...createdSceneNodeIds];
           channel.broadcast(rNote, {
             type: 'proposal_created',
             nodeIds: allCreated,
@@ -456,7 +467,7 @@ export function createCanvasTools(options: {
         timeoutMs: z.number().optional().describe('Max wait in ms (default 300000).'),
       }),
       execute: async ({ id, wait, timeoutMs }, toolOptions) => {
-        gateExecute(toolOptions?.toolCallId ?? '', { tool: 'run_node', id });
+        gateExecute(toolOptions, { tool: 'run_node', id, wait, timeoutMs });
         const canvas = canvasStore.ensureCanvas(sessionId);
         const node = canvasStore.getNode(canvas.id, id);
         if (!node) return { error: `No canvas node "${id}"` };
@@ -505,11 +516,12 @@ export function createCanvasTools(options: {
         timeoutMs: z.number().optional().describe('Max wait in ms (default 300000).'),
       }),
       execute: async ({ from, nodeIds, wait, timeoutMs }, toolOptions) => {
-        gateExecute(toolOptions?.toolCallId ?? '', { tool: 'run_graph', ...(from ? { from } : {}), ...(nodeIds ? { nodeIds } : {}) });
         const canvas = canvasStore.ensureCanvas(sessionId);
         if (from && !canvasStore.getNode(canvas.id, from)) return { error: `No canvas node "${from}"` };
         const missing = (nodeIds ?? []).filter((id) => !canvasStore.getNode(canvas.id, id));
         if (missing.length > 0) return { error: `No canvas node(s) ${missing.join(', ')}` };
+        const scope = runGraphScope(canvasStore, canvas.id, from, nodeIds);
+        gateExecute(toolOptions, { tool: 'run_graph', from, nodeIds, wait, timeoutMs }, Math.max(scope.length, 1));
         const running = runGraph({
           canvasStore,
           settingsStore,
@@ -521,10 +533,9 @@ export function createCanvasTools(options: {
         });
         if (wait === false) {
           void running.catch((): undefined => undefined);
-          watchCanvasNodeJob(sessionId, canvas.id, canvasStore, runGraphScope(canvasStore, canvas.id, from, nodeIds));
+          watchCanvasNodeJob(sessionId, canvas.id, canvasStore, scope);
           return { ok: true, status: 'running', scope: nodeIds ? 'nodeIds' : from ? 'from' : 'all' };
         }
-        const scope = runGraphScope(canvasStore, canvas.id, from, nodeIds);
         const settled = await settleNodes(canvasStore, canvas.id, scope, timeoutMs ?? 300_000, running);
         const pending = settled.filter((n) => n.runState !== 'done' && n.runState !== 'error').length;
         return {
@@ -733,4 +744,49 @@ export function createCanvasTools(options: {
       },
     }),
   };
+
+  /** Resume a canvas_budget checkpoint after approval. The checkpoint args
+   * carry the gated call in `args.tool`: run_node / run_graph replay straight
+   * into that tool's execute (the gate sees approvedReplay and doesn't charge
+   * twice). The pipeline is the exception — its structure was already
+   * committed before the checkpoint threw, so re-running it would duplicate
+   * the whole storyboard; instead the ghosts go live and the run list is
+   * handed back for the model to execute node by node. */
+  async function executeApproved(
+    args: Record<string, unknown>,
+    toolCallId: string,
+  ): Promise<{ result?: string; error?: string }> {
+    const resumeTool = typeof args.tool === 'string' ? args.tool : '';
+    if (resumeTool === 'create_storyboard_pipeline') {
+      const canvas = canvasStore.ensureCanvas(sessionId);
+      const rev = canvasStore.getSnapshot(canvas.id)?.canvas.liveRevision ?? 0;
+      getCanvasChannel(canvas.id).broadcast(rev, {
+        type: 'proposal_accepted',
+        operationId: typeof args.operationId === 'string' ? args.operationId : undefined,
+      });
+      const planNodeIds = Array.isArray(args.planNodeIds) ? args.planNodeIds : [];
+      return {
+        result: JSON.stringify({
+          ok: true,
+          approved: true,
+          planNodeIds,
+          note: '计划已批准，提案节点已转正。被配额检查点拦下的执行现在放行——按顺序对 planNodeIds 里的关键帧/视频节点调用 run_node 逐个生成。',
+        }),
+      };
+    }
+    const def = resumeTool === 'run_node' || resumeTool === 'run_graph' ? tools[resumeTool] : undefined;
+    if (!def?.execute) {
+      return { error: `Cannot resume unknown canvas checkpoint "${resumeTool || CANVAS_BUDGET_TOOL}"` };
+    }
+    const rest = { ...args };
+    delete rest.tool;
+    delete rest.executed;
+    delete rest.planned;
+    delete rest.planNodeIds;
+    const run = def.execute as (input: Record<string, unknown>, opts: GateOptions) => Promise<unknown>;
+    const out = await run(rest, { toolCallId, approvedReplay: true });
+    return { result: JSON.stringify(out ?? null) };
+  }
+
+  return { tools, executeApproved };
 }

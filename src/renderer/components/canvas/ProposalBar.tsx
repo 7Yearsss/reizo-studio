@@ -1,6 +1,5 @@
 import React, { useEffect, useState, memo } from 'react';
 import { Sparkles, Check, X, Eye } from 'lucide-react';
-import * as api from '../../api';
 import * as canvasStore from '../../state/canvasStore';
 import * as chatStore from '../../state/chatStore';
 import { useCanvasStore } from '../../state/useCanvasStore';
@@ -22,7 +21,9 @@ function ProposalBar({ sessionId, onFocusProposals }: ProposalBarProps) {
     // the ghost nodes are the "plan", this approval is the "go".
     const pending = chatStore.getSnapshot().interactionBySession[sessionId];
     if (pending?.kind === 'permission' && pending.name === CANVAS_BUDGET_TOOL) {
-      void api.answerPermission(sessionId, pending.id, 'allow');
+      // chatStore.answerPermission clears the card optimistically — the raw
+      // api call would leave the checkpoint hanging over the composer.
+      void chatStore.answerPermission(sessionId, 'allow');
     }
   };
 
