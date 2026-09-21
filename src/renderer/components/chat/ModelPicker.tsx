@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useSettingsStore } from '../../state/useSettingsStore';
 import * as settingsStore from '../../state/settingsStore';
 import { useFavicon } from '../../lib/hooks/use-favicon';
+import { MODEL_VENDOR_ICONS } from '../../lib/modelIcons';
 import { cn } from '../../lib/cn';
 import { modelVendorDomain } from '../../../shared/providers';
 import { CANVAS_IMAGE_MODELS, CANVAS_VIDEO_MODELS } from '../../../shared/canvas';
@@ -23,6 +24,8 @@ function siteUrl(value: string) {
 
 function ModelIcon({ domain, className }: { domain?: string; className?: string }) {
   const { src, ref } = useFavicon(domain ? siteUrl(domain) : undefined);
+  const VendorIcon = domain ? MODEL_VENDOR_ICONS[domain] : undefined;
+  if (VendorIcon) return <VendorIcon size={14} className={cn('shrink-0', className)} />;
   if (!src) return <Bot className={cn('size-3.5 shrink-0 text-ink-muted', className)} />;
   return (
     <img
@@ -151,7 +154,7 @@ export default function ModelPicker({ compact = false }: { compact?: boolean }) 
               compact ? 'h-7 max-w-[140px] text-[12px]' : 'h-8 max-w-52 py-0',
             )}
           >
-            <ProviderIcon provider={active} />
+            <ModelIcon domain={modelVendorDomain(active.model) || active.websiteUrl || active.baseUrl} />
             <span className="truncate">{currentModelLabel}</span>
             <ChevronDown className="size-3.5 shrink-0 opacity-60" />
           </button>
