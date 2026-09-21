@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback, memo } from 'react';
 import { Handle, Position, type NodeProps, useStore } from '@xyflow/react';
+import { AntiZoomScale } from './AntiZoomScale';
 import { Download, FolderPlus, Loader2, Play, Video, Camera, Sparkles, RotateCw, X, Bot, Upload } from 'lucide-react';
 import type { CanvasVideoParams } from '../../../shared/canvas';
 import { getVideoModelCapabilities } from '../../../shared/canvas';
@@ -32,9 +33,7 @@ function VideoNode({ id, data, selected }: NodeProps) {
     hasUpstreamPrompt = false,
     hasUpstreamStartFrame = false,
   } = data as CanvasNodeData;
-  const canvasZoom = useStore((s) => s.transform[2]) || 1;
-  const headerScale = Math.min(8, Math.max(1, 1 / canvasZoom));
-  const isLowLOD = canvasZoom < 0.35;
+  const isLowLOD = useStore((s) => s.transform[2] < 0.35);
   const hideControls = isLowLOD;
 
   const params = (node.params as CanvasVideoParams) || { prompt: '' };
@@ -244,13 +243,7 @@ function VideoNode({ id, data, selected }: NodeProps) {
 
       {/* Floating State 1 Header Upload Button (pops up on hover or select) */}
       {!hasVideo && (selected || hovered) ? (
-        <div
-          className="nodrag cursor-default absolute bottom-[calc(100%+8px)] left-1/2 z-30 -translate-x-1/2 animate-in fade-in zoom-in-95 duration-200"
-          style={{
-            transform: `translateX(-50%) scale(${headerScale}) translateY(-28px)`,
-            transformOrigin: 'bottom center',
-          }}
-        >
+        <AntiZoomScale className="nodrag cursor-default absolute bottom-[calc(100%+8px)] left-1/2 z-30 -translate-x-1/2 animate-in fade-in zoom-in-95 duration-200">
           <Tooltip content="上传本地视频" side="top" wrapperClassName="inline-flex">
           <button
             type="button"
@@ -264,7 +257,7 @@ function VideoNode({ id, data, selected }: NodeProps) {
             <span>上传</span>
           </button>
           </Tooltip>
-        </div>
+        </AntiZoomScale>
       ) : null}
 
       {/* Floating anti-zoom header outside the card boundary (TapNow design) */}

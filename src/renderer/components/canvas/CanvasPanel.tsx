@@ -1642,6 +1642,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         edgeTypes={EDGE_TYPES}
         elevateNodesOnSelect={false}
         elevateEdgesOnSelect={true}
+        onlyRenderVisibleElements={true}
         connectionMode={ConnectionMode.Loose}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
