@@ -1308,7 +1308,7 @@ export async function resumeInterruptedTurn(
 
 /** Undo one saved memory — deletes the file server-side and marks it removed. */
 export async function forgetMemoryItem(sessionId: string, eventId: string, file: string): Promise<void> {
-  await api.deleteMemoryFile(file);
+  await api.deleteMemoryFile(file, sessionId);
   setState({
     memoryEventsBySession: {
       ...state.memoryEventsBySession,

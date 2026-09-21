@@ -135,6 +135,17 @@ const SELECT_SYSTEM = `You pick which stored memories are relevant to the user's
 /** Memories already injected for a session — each is recalled at most once. */
 const recalledBySession = new Map<string, Set<string>>();
 
+/**
+ * Mark files as delivered — called by the consumer AFTER the entries were
+ * actually injected into the turn. Files from a recall that lost the timeout
+ * race must stay eligible for the next turn.
+ */
+export function markRecalled(sessionId: string, files: string[]): void {
+  const seen = recalledBySession.get(sessionId) ?? new Set<string>();
+  for (const f of files) seen.add(f);
+  recalledBySession.set(sessionId, seen);
+}
+
 export function startMemoryRecall(opts: {
   sessionId: string;
   workspaceRoot: string;
@@ -146,7 +157,6 @@ export function startMemoryRecall(opts: {
     try {
       const manifest = await listMemoryManifest(workspaceRoot);
       const seen = recalledBySession.get(sessionId) ?? new Set<string>();
-      recalledBySession.set(sessionId, seen);
       const candidates = manifest.filter((m) => !seen.has(m.fileName));
       if (!candidates.length || !query.trim()) return [];
       const result = await generateText({
@@ -163,10 +173,7 @@ export function startMemoryRecall(opts: {
       const entries: MemoryEntry[] = [];
       for (const file of picked) {
         const entry = await readMemoryEntry(workspaceRoot, file);
-        if (entry) {
-          seen.add(file);
-          entries.push(entry);
-        }
+        if (entry) entries.push(entry);
       }
       return entries;
     } catch (err) {

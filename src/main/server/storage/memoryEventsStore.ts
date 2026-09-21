@@ -52,6 +52,18 @@ export function createMemoryEventsStore(dataRoot: string) {
       await flush();
       return record;
     },
+    /** Remove a file from prior 'wrote' records so undo survives a reload. */
+    async markDeleted(sessionId: string, file: string): Promise<void> {
+      const all = await load();
+      const list = all[sessionId];
+      if (!list) return;
+      for (const record of list) {
+        if (record.action === 'wrote') {
+          record.items = record.items.filter((i) => i.file !== file);
+        }
+      }
+      await flush();
+    },
   };
 }
 

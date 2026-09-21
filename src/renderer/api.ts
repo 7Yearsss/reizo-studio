@@ -332,8 +332,9 @@ export async function fetchMemoryEvents(sessionId: string): Promise<MemoryEventR
   return Array.isArray(body.events) ? body.events : [];
 }
 
-export async function deleteMemoryFile(file: string): Promise<void> {
-  await api(`/api/memory/${encodeURIComponent(file)}`, { method: 'DELETE' });
+export async function deleteMemoryFile(file: string, sessionId?: string): Promise<void> {
+  const q = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : '';
+  await api(`/api/memory/${encodeURIComponent(file)}${q}`, { method: 'DELETE' });
 }
 
 export async function listSkills(): Promise<{ id: string; name: string; description: string; prompt?: string; source: 'bundled' | 'user'; coverUrl?: string }[]> {

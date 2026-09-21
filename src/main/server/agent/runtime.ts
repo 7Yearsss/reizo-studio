@@ -23,6 +23,7 @@ import { CONTINUE_USER_MESSAGE, MAX_CONTINUE_PASSES, shouldContinueAgentPass } f
 import { readWorkspaceMemory } from '../../workspaceMemory';
 import {
   formatRecalledMemories,
+  markRecalled,
   scheduleMemoryExtraction,
   startMemoryRecall,
   withTimeout,
@@ -381,7 +382,14 @@ export async function runChatTurn(options: {
         sessionId,
         workspacePath,
         permissionMode: settings.permissionMode,
-        emit: (event) => emit(event),
+        emit: (event) => {
+          emit(event);
+          // Tool-path memory writes/deletes persist to the activity log the
+          // same way the recall/extraction paths do.
+          if (event.type === 'memory') {
+            void memoryEventsStore?.append(sessionId, event.action, event.items);
+          }
+        },
         todos,
         onFileWritten: artifactStore
           ? async (relativePath, content) => {
@@ -470,6 +478,12 @@ export async function runChatTurn(options: {
           const recalled = await withTimeout(recallPromise, RECALL_BUDGET.timeoutMs, []);
           if (recalled.length > 0) {
             compacted.push({ role: 'user', content: formatRecalledMemories(recalled) });
+            // Mark seen only now — a recall that lost the timeout race stays
+            // eligible for the next turn.
+            markRecalled(
+              sessionId,
+              recalled.map((m) => m.fileName),
+            );
             const items: MemoryItem[] = recalled.map((m) => ({
               file: m.fileName,
               name: m.name,
