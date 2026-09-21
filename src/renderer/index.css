@@ -163,6 +163,20 @@ pre,
   -webkit-app-region: no-drag;
 }
 
+/* Anything interactive inside the drag strip stays clickable — portal slots
+   (page title, toolbars) inherit `drag` so the row remains grabbable, and only
+   real controls opt out. */
+.titlebar button,
+.titlebar input,
+.titlebar select,
+.titlebar textarea,
+.titlebar a,
+.titlebar [role='button'],
+.titlebar [role='tab'],
+.titlebar [contenteditable='true'] {
+  -webkit-app-region: no-drag;
+}
+
 .edit-slider {
   height: 6px;
   width: 100%;
