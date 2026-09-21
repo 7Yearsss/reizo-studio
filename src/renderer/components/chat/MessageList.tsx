@@ -107,6 +107,11 @@ export default function MessageList({
 
   return (
     <div className="relative min-h-0 flex-1">
+      {/* Soft top fade — scrolled messages dissolve under the header instead of hitting a hard edge */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 z-10 h-10 bg-gradient-to-b from-paper via-paper/70 to-transparent"
+      />
       <MessageScroller
         followOutput={following}
         followThreshold={80}
