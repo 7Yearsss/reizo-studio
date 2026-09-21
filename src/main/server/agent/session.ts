@@ -387,6 +387,13 @@ class AgentSession {
               continue;
             }
 
+            // A step that raised an interaction must end here: the SDK feeds
+            // the tool's thrown error into the NEXT step verbatim, so the
+            // model would narrate the internal sentinel ("ApprovalRequiredError:
+            // REIZO_INTERACTION_REQUIRED…") as user-visible text. Sibling
+            // tool-errors in this step have already been collected above.
+            if (awaiting && (chunk.type === 'finish-step' || chunk.type === 'step-finish')) break;
+
             armStall();
             if (event.type === 'tool_use') {
               toolsInFlight += 1;
