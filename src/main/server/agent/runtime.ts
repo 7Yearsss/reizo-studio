@@ -159,6 +159,7 @@ export async function runChatTurn(options: {
   regenerate?: boolean;
   largeValueStore?: LargeValueStore;
   canvasStore?: CanvasStore;
+  canvasProviderStore?: import('../storage/providerStore').ProviderStore;
   dataRoot?: string;
   memoryEventsStore?: MemoryEventsStore;
 }): Promise<Response> {
@@ -410,7 +411,7 @@ export async function runChatTurn(options: {
 
   const canvasTools =
     canvasStore && dataRoot
-      ? createCanvasTools({ sessionId, canvasStore, settingsStore, dataRoot })
+      ? createCanvasTools({ sessionId, canvasStore, settingsStore, dataRoot, providerStore: options.canvasProviderStore })
       : undefined;
 
   const artifactTools = artifactStore
