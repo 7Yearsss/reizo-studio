@@ -21,6 +21,14 @@ import { translateOpenAiChunk } from './translators/openai';
 import { compactAssistantParts, compactModelMessages } from './modelHistory';
 import { CONTINUE_USER_MESSAGE, MAX_CONTINUE_PASSES, shouldContinueAgentPass } from './continuePass';
 import { readWorkspaceMemory } from '../../workspaceMemory';
+import {
+  formatRecalledMemories,
+  markRecalled,
+  scheduleMemoryExtraction,
+  startMemoryRecall,
+  withTimeout,
+  RECALL_BUDGET,
+} from '../../memoryJobs';
 import { redactSecrets } from '../../../shared/redactSecrets';
 import type { Skill } from '../../skills';
 import type { ChatMessage, SessionStore, ToolCallPart } from '../../../shared/chat';
@@ -28,6 +36,8 @@ import type { SettingsStore } from '../storage/settingsStore';
 import type { ArtifactStore } from '../storage/artifactStore';
 import type { ProjectStore } from '../storage/projectStore';
 import type { LargeValueStore } from '../storage/largeValueStore';
+import type { MemoryEventsStore } from '../storage/memoryEventsStore';
+import type { MemoryItem } from '../../../shared/stream';
 
 /**
  * Reverse proxies (Cloudflare 524, nginx read timeouts) often fail one
@@ -150,6 +160,7 @@ export async function runChatTurn(options: {
   largeValueStore?: LargeValueStore;
   canvasStore?: CanvasStore;
   dataRoot?: string;
+  memoryEventsStore?: MemoryEventsStore;
 }): Promise<Response> {
   const {
     sessionStore,
@@ -166,6 +177,7 @@ export async function runChatTurn(options: {
     largeValueStore,
     canvasStore,
     dataRoot,
+    memoryEventsStore,
   } = options;
 
   let session = await sessionStore.get(sessionId);
@@ -295,7 +307,7 @@ export async function runChatTurn(options: {
 
   const systemParts = [
     workspacePath
-      ? `You are Reizo Studio, a local desktop agent that finishes real work in the user's files. The workspace is at: ${workspacePath}. Prefer tools over guessing. Use list_dir/read_file/find_files/grep to inspect, edit_file/write_file to change files, run_command for tests and git, ask_user when you need a choice, todo_write for a visible plan, and memory_read/memory_write for durable notes in MEMORY.md.`
+      ? `You are Reizo Studio, a local desktop agent that finishes real work in the user's files. The workspace is at: ${workspacePath}. Prefer tools over guessing. Use list_dir/read_file/find_files/grep to inspect, edit_file/write_file to change files, run_command for tests and git, ask_user when you need a choice, todo_write for a visible plan, and memory_read/memory_write/memory_delete for durable memory files (indexed in MEMORY.md).`
       : 'You are Reizo Studio, a helpful creative assistant running locally on the user\'s desktop. Use ask_user if you need the user to choose.',
     'Image Generation Rules:\n' +
     '- When the user asks to generate, draw, or paint an image (e.g., "生图", "画一张...", "生成图片", "设计海报", "绘制插画"), ALWAYS call the `generate_image` tool directly within this chat conversation. The image will be generated and rendered inline for the user.\n' +
@@ -316,7 +328,13 @@ export async function runChatTurn(options: {
         'Workflow: call `computer {action:"screenshot"}` first, decide from the image, act with pixel coordinates from that screenshot (top-left origin), then screenshot again to verify. Work in small steps. ' +
         'The user approves once at the start of the session. Never type passwords, card numbers, or other secrets — ask the user to do that themselves.'
       : '',
-    memory ? `Workspace MEMORY.md:\n${redactSecrets(memory)}` : '',
+    memory
+      ? 'Workspace memory index (MEMORY.md — each line points at a file in memory/, read it with memory_read):\n' +
+          redactSecrets(memory)
+      : '',
+    workspacePath
+      ? 'Memory rules: when the user states a lasting preference, corrects you, or shares a non-obvious project fact, save it with memory_write (one file per fact — check the index first and update in place rather than duplicating). Delete wrong or outdated memories with memory_delete. Do NOT save anything derivable from the workspace itself: code structure, git history, existing file contents, or things already in MEMORY.md.'
+      : '',
     skill
       ? `The user invoked skill "${skill.name}". Follow this skill:\n${skill.body}\n\n` +
         'If this skill declares a "提问"/"Questions" section, collect each missing input through `ask_user` question cards (concrete options + free text) before producing output — never ask those questions as plain chat text. Ask each question at most once; an input the user already answered is never re-asked.'
@@ -364,7 +382,14 @@ export async function runChatTurn(options: {
         sessionId,
         workspacePath,
         permissionMode: settings.permissionMode,
-        emit: (event) => emit(event),
+        emit: (event) => {
+          emit(event);
+          // Tool-path memory writes/deletes persist to the activity log the
+          // same way the recall/extraction paths do.
+          if (event.type === 'memory') {
+            void memoryEventsStore?.append(sessionId, event.action, event.items);
+          }
+        },
         todos,
         onFileWritten: artifactStore
           ? async (relativePath, content) => {
@@ -424,6 +449,13 @@ export async function runChatTurn(options: {
 
   const model = createOpenAiModel({ apiKey, modelId, baseUrl });
 
+  // Semantic memory recall: kicked off in parallel with stream setup, then
+  // injected at the first step boundary so it never delays the first token.
+  const recallPromise = workspacePath
+    ? startMemoryRecall({ sessionId, workspaceRoot: workspacePath, model, query: userText })
+    : Promise.resolve([]);
+  let recallInjected = false;
+
   let lastSeenNodeCount = -1;
   const initialCanvas = canvasStore ? canvasStore.findCanvasBySession(sessionId) : null;
   const initialSnap = initialCanvas && canvasStore ? canvasStore.getSnapshot(initialCanvas.id) : null;
@@ -441,6 +473,27 @@ export async function runChatTurn(options: {
       abortSignal: signal,
       prepareStep: async ({ messages: stepMessages }) => {
         const compacted = compactModelMessages(stepMessages as ModelMessage[]);
+        if (!recallInjected) {
+          recallInjected = true;
+          const recalled = await withTimeout(recallPromise, RECALL_BUDGET.timeoutMs, []);
+          if (recalled.length > 0) {
+            compacted.push({ role: 'user', content: formatRecalledMemories(recalled) });
+            // Mark seen only now — a recall that lost the timeout race stays
+            // eligible for the next turn.
+            markRecalled(
+              sessionId,
+              recalled.map((m) => m.fileName),
+            );
+            const items: MemoryItem[] = recalled.map((m) => ({
+              file: m.fileName,
+              name: m.name,
+              description: m.description,
+              type: m.type,
+            }));
+            emit({ type: 'memory', action: 'recalled', items });
+            void memoryEventsStore?.append(sessionId, 'recalled', items);
+          }
+        }
         // Steer inbox drains at every step boundary (the AI SDK carries the
         // appended user messages forward through the rest of this pass).
         const steers = drainSteerInbox(sessionId);
@@ -512,6 +565,25 @@ export async function runChatTurn(options: {
       };
     },
     createStream: (signal) => buildStream(history, signal),
+    onTurnTerminal: ({ outcome, text }) => {
+      if (outcome !== 'completed' || !workspacePath) return;
+      scheduleMemoryExtraction({
+        workspaceRoot: workspacePath,
+        model,
+        userText,
+        assistantText: text,
+        onChanged: (wrote, deleted) => {
+          if (wrote.length > 0) {
+            emit({ type: 'memory', action: 'wrote', items: wrote });
+            void memoryEventsStore?.append(sessionId, 'wrote', wrote);
+          }
+          if (deleted.length > 0) {
+            emit({ type: 'memory', action: 'deleted', items: deleted });
+            void memoryEventsStore?.append(sessionId, 'deleted', deleted);
+          }
+        },
+      });
+    },
     onAwaitingInteraction: async ({ sessionId: sid, signal, emitToolResult, getAssistant }) => {
       // Suspended: no provider connection is open. Wait for every pending
       // permission / question, run whatever was approved, then resume with a

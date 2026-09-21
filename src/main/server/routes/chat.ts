@@ -15,6 +15,7 @@ import { answerAsk, answerPermission, pendingAsksForSession, type PermissionDeci
 import { loadSkills } from '../../skills';
 import type { LargeValueStore } from '../storage/largeValueStore';
 import type { CanvasStore } from '../storage/canvasStore';
+import type { MemoryEventsStore } from '../storage/memoryEventsStore';
 
 const DECISIONS = new Set<PermissionDecision>(['allow', 'deny', 'allow-session']);
 
@@ -26,6 +27,7 @@ export function createChatRouter(
   projectStore?: ProjectStore,
   largeValueStore?: LargeValueStore,
   canvas?: { canvasStore?: CanvasStore; dataRoot: string },
+  memoryEventsStore?: MemoryEventsStore,
 ) {
   const router = new Hono();
 
@@ -92,6 +94,7 @@ export function createChatRouter(
       largeValueStore,
       canvasStore: canvas?.canvasStore,
       dataRoot: canvas?.dataRoot,
+      memoryEventsStore,
     });
     console.info(`[chat] stream opened session=${sessionId} status=${response.status}`);
     return response;

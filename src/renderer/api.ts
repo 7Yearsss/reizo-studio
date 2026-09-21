@@ -5,7 +5,7 @@ import type { DirEntry } from '../shared/workspace';
 import type { PublicSettings, SettingsPatch } from '../shared/settings';
 import type { Schedule, Thought } from '../shared/schedule';
 import { SCHEDULE_PRESETS } from '../shared/schedule';
-import { parseStreamLine, type AskQuestion, type ChatStreamEvent } from '../shared/stream';
+import { parseStreamLine, type AskQuestion, type ChatStreamEvent, type MemoryEventRecord } from '../shared/stream';
 import { isLiveEnvelope } from '../shared/liveRevision';
 import type { CanvasSnapshot, CanvasEdge, CanvasNode, CanvasNodeParams, CanvasNodeType, CanvasNodeOutput } from '../shared/canvas';
 import { isCanvasEnvelope, type CanvasEvent } from '../shared/canvasStream';
@@ -324,6 +324,17 @@ export async function getPendingInteractions(sessionId: string): Promise<Pending
   const res = await api(`/api/sessions/${sessionId}/interactions`);
   const body = await res.json();
   return body.interactions ?? [];
+}
+
+export async function fetchMemoryEvents(sessionId: string): Promise<MemoryEventRecord[]> {
+  const res = await api(`/api/memory/events?sessionId=${encodeURIComponent(sessionId)}`);
+  const body = await res.json();
+  return Array.isArray(body.events) ? body.events : [];
+}
+
+export async function deleteMemoryFile(file: string, sessionId?: string): Promise<void> {
+  const q = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : '';
+  await api(`/api/memory/${encodeURIComponent(file)}${q}`, { method: 'DELETE' });
 }
 
 export async function listSkills(): Promise<{ id: string; name: string; description: string; prompt?: string; source: 'bundled' | 'user'; coverUrl?: string }[]> {

@@ -11,7 +11,15 @@ import {
 } from '../../../shared/stream';
 import { flattenWorkspace, listWorkspaceDir, readWorkspaceText } from '../../workspaceFs';
 import { grepWorkspace } from '../../workspaceGrep';
-import { readWorkspaceMemory, writeWorkspaceMemory } from '../../workspaceMemory';
+import { readWorkspaceMemory } from '../../workspaceMemory';
+import {
+  deleteMemoryEntry,
+  listMemoryManifest,
+  memoryFileNameFor,
+  normalizeMemoryType,
+  readMemoryEntry,
+  writeMemoryEntry,
+} from '../../workspaceMemoryDir';
 import {
   editWorkspaceFile,
   previewDiff,
@@ -86,7 +94,7 @@ export function createWorkspaceTools(options: {
   todos: TodoItem[];
   onFileWritten?: (relativePath: string, content: string) => Promise<void>;
 }): WorkspaceToolset {
-  const { workspacePath, onFileWritten } = options;
+  const { workspacePath, onFileWritten, emit } = options;
 
   async function executeApproved(
     name: string,
@@ -129,15 +137,42 @@ export function createWorkspaceTools(options: {
           };
         }
         case 'memory_write': {
-          const content = String(args.content ?? '');
-          const before = await readWorkspaceMemory(workspacePath).catch(() => '');
-          const result = await writeWorkspaceMemory(workspacePath, content);
+          const entry = {
+            name: String(args.name ?? ''),
+            description: String(args.description ?? ''),
+            type: normalizeMemoryType(args.type),
+            body: String(args.body ?? ''),
+          };
+          const fileName = memoryFileNameFor(entry.name);
+          const existing = await readMemoryEntry(workspacePath, fileName).catch((): null => null);
+          const after = `name: ${entry.name}\ndescription: ${entry.description}\ntype: ${entry.type}\n\n${entry.body}`;
+          const before = existing
+            ? `name: ${existing.name}\ndescription: ${existing.description}\ntype: ${existing.type}\n\n${existing.body}`
+            : '';
+          const result = await writeMemoryEntry(workspacePath, entry);
+          emit({
+            type: 'memory',
+            action: 'wrote',
+            items: [
+              {
+                file: result.fileName,
+                name: entry.name,
+                description: entry.description,
+                type: entry.type,
+              },
+            ],
+          });
           return {
             result: JSON.stringify({
-              ...result,
-              preview: buildFileDiffPreview('MEMORY.md', before, content),
+              path: result.path,
+              preview: buildFileDiffPreview(`memory/${fileName}`, before, after),
             }),
           };
+        }
+        case 'memory_delete': {
+          const fileName = String(args.file ?? '');
+          await deleteMemoryEntry(workspacePath, fileName);
+          return { result: JSON.stringify({ deleted: `memory/${fileName}` }) };
         }
         default:
           return { error: `Cannot resume unknown tool "${name}"` };
@@ -275,23 +310,81 @@ function buildTools(options: {
       execute: async ({ pattern, path: relativeDir }) => grepWorkspace(workspacePath, pattern, relativeDir ?? ''),
     }),
     memory_read: tool({
-      description: 'Read MEMORY.md in the workspace — durable notes the user wants you to remember.',
-      inputSchema: z.object({}),
-      execute: async () => ({ path: 'MEMORY.md', content: await readWorkspaceMemory(workspacePath) }),
+      description:
+        'Read durable memories about the user/workspace. Without `file`, returns the MEMORY.md index plus every memory entry (name, description, type). With `file`, returns that memory file\'s full content.',
+      inputSchema: z.object({
+        file: z.string().optional().describe('Memory file name inside memory/ (e.g. "brand-colors.md").'),
+      }),
+      execute: async ({ file }) => {
+        if (file) {
+          const entry = await readMemoryEntry(workspacePath, file);
+          return entry
+            ? { path: `memory/${file}`, ...entry }
+            : { error: `No memory file "${file}"` };
+        }
+        return {
+          path: 'MEMORY.md',
+          index: await readWorkspaceMemory(workspacePath),
+          entries: await listMemoryManifest(workspacePath),
+        };
+      },
     }),
     memory_write: tool({
-      description: 'Overwrite MEMORY.md with durable notes. Keep it short and factual.',
+      description:
+        'Save one durable memory as a file in memory/ and index it in MEMORY.md. Give it a short `name`, a one-line `description` (used for recall), a `type` (user preference / feedback / project fact / external reference), and the `body`. Writing the same `name` overwrites — update in place instead of duplicating. Only save what is NOT derivable from the workspace itself (no code structure, git history, file contents).',
       inputSchema: z.object({
-        content: z.string(),
+        name: z.string().describe('Short kebab-case-friendly title, e.g. "prefers-minimal-ui".'),
+        description: z.string().describe('One-line summary used to decide if this memory is relevant later.'),
+        type: z.enum(['user', 'feedback', 'project', 'reference']),
+        body: z.string().describe('The memory content. For type "feedback" include why and how to apply it.'),
       }),
       execute: async (input, toolOptions) => {
-        const before = await readWorkspaceMemory(workspacePath).catch(() => '');
-        await approve(sessionId, 'write_file', { path: 'MEMORY.md', content: input.content }, permissionMode, {
+        const fileName = memoryFileNameFor(input.name);
+        const existing = await readMemoryEntry(workspacePath, fileName).catch((): null => null);
+        const after = `name: ${input.name}\ndescription: ${input.description}\ntype: ${input.type}\n\n${input.body}`;
+        const before = existing
+          ? `name: ${existing.name}\ndescription: ${existing.description}\ntype: ${existing.type}\n\n${existing.body}`
+          : '';
+        const relPath = `memory/${fileName}`;
+        await approve(sessionId, 'write_file', { path: relPath, content: after }, permissionMode, {
           ...toolOptions,
-          preview: buildFileDiffPreview('MEMORY.md', before, input.content),
+          preview: buildFileDiffPreview(relPath, before, after),
         });
-        const result = await writeWorkspaceMemory(workspacePath, input.content);
-        return { ...result, preview: buildFileDiffPreview('MEMORY.md', before, input.content) };
+        const result = await writeMemoryEntry(workspacePath, {
+          name: input.name,
+          description: input.description,
+          type: input.type,
+          body: input.body,
+        });
+        emit({
+          type: 'memory',
+          action: 'wrote',
+          items: [
+            { file: result.fileName, name: input.name, description: input.description, type: input.type },
+          ],
+        });
+        return { ...result, preview: buildFileDiffPreview(relPath, before, after) };
+      },
+    }),
+    memory_delete: tool({
+      description: 'Delete a memory file that is wrong or outdated, and refresh the MEMORY.md index.',
+      inputSchema: z.object({
+        file: z.string().describe('Memory file name inside memory/.'),
+      }),
+      execute: async ({ file }, toolOptions) => {
+        const existing = await readMemoryEntry(workspacePath, file).catch((): null => null);
+        if (!existing) return { error: `No memory file "${file}"` };
+        await approve(sessionId, 'write_file', { path: `memory/${file}`, content: '' }, permissionMode, {
+          ...toolOptions,
+          preview: buildFileDiffPreview(`memory/${file}`, existing.body, ''),
+        });
+        await deleteMemoryEntry(workspacePath, file);
+        emit({
+          type: 'memory',
+          action: 'deleted',
+          items: [{ file, name: existing.name, description: existing.description, type: existing.type }],
+        });
+        return { deleted: `memory/${file}` };
       },
     }),
     ask_user: createAskUserTool(sessionId),
