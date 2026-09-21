@@ -35,7 +35,10 @@ export default function UserMessage({
       className={`anim-msg group flex justify-end ${currentMatch ? 'chat-search-current' : ''}`}
     >
       <div className="max-w-[75%]">
-        <div className="whitespace-pre-wrap rounded-[22px] border border-line bg-paper-raised px-4 py-2.5 text-[15px] leading-relaxed text-ink">
+        <div
+          data-slot="message-content"
+          className="whitespace-pre-wrap rounded-[22px] border border-line bg-paper-raised px-4 py-2.5 text-[15px] leading-relaxed text-ink"
+        >
           <HighlightedText text={text} query={searchQuery} />
         </div>
         <CanvasRefChips nodeIds={nodeIds} sessionId={sessionId} />
