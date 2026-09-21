@@ -74,6 +74,7 @@ import * as chatStore from '../../state/chatStore';
 import { useCanvasStore } from '../../state/useCanvasStore';
 import { useChatStore } from '../../state/useChatStore';
 import { cn } from '../../lib/cn';
+import { setCanvasInteracting } from '../../lib/canvasInteraction';
 import { layoutGraph, wouldCycle, isPortCompatible } from '../../../shared/canvasGraph';
 import { estimateGraphCost } from '../../../shared/canvasPricing';
 import { defaultNodeBox, type CanvasEdge, type CanvasGroupParams, type CanvasNode, type CanvasNodeType } from '../../../shared/canvas';
@@ -533,6 +534,12 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
   const isDraggingRef = useRef(false);
   const isPanningRef = useRef(false);
   const [isInteracting, setIsInteracting] = useState(false);
+  // Mirror the drag/pan flag for JS animators (e.g. dither fields) that pause
+  // their per-frame painting while a gesture owns the frame budget.
+  useEffect(() => {
+    setCanvasInteracting(isInteracting);
+    return () => setCanvasInteracting(false);
+  }, [isInteracting]);
   // Zoomed-out overview (many nodes at once): the same LOD treatment we give
   // an active drag/pan also applies here permanently, since backdrop-blur and
   // shadows on dozens of simultaneously-visible cards cost real frame time

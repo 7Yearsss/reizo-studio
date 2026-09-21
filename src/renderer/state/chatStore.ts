@@ -281,7 +281,7 @@ export async function createSession(title?: string, projectId?: string | null): 
       },
       ...state.sessions,
     ],
-    messagesBySession: { ...state.messagesBySession, [session.id]: session.messages },
+    messagesBySession: { ...state.messagesBySession, [session.id]: normalizeLoadedMessages(session.messages) },
     turnOutcomeBySession: { ...state.turnOutcomeBySession, [session.id]: session.lastTurnOutcome ?? null },
   });
   return session;
@@ -368,6 +368,27 @@ export function dismissInterrupt(sessionId: string): void {
   });
 }
 
+/**
+ * Messages loaded from persistence: a tool part that reached the DB with
+ * neither a result nor an error belongs to a turn that already ended — it can
+ * never finish. Marking it stops the card from rendering its pending state
+ * (which keeps per-frame animations alive) forever.
+ */
+function normalizeLoadedMessages(messages: ChatMessage[]): ChatMessage[] {
+  return messages.map((m) =>
+    m.parts?.some((p) => p.result === undefined && p.error === undefined)
+      ? {
+          ...m,
+          parts: m.parts.map((p) =>
+            p.result === undefined && p.error === undefined
+              ? { ...p, error: 'interrupted' }
+              : p,
+          ),
+        }
+      : m,
+  );
+}
+
 export async function ensureSessionMessages(
   id: string,
   opts: { resume?: boolean } = {},
@@ -380,7 +401,7 @@ export async function ensureSessionMessages(
     return;
   }
   setState({
-    messagesBySession: { ...state.messagesBySession, [id]: session.messages },
+    messagesBySession: { ...state.messagesBySession, [id]: normalizeLoadedMessages(session.messages) },
     sessions: state.sessions.map((s) => (s.id === id ? { ...s, ...summaryOf(session) } : s)),
     turnOutcomeBySession: { ...state.turnOutcomeBySession, [id]: session.lastTurnOutcome ?? null },
     errorBySession: { ...state.errorBySession, [id]: session.lastTurnError ?? null },
@@ -1040,7 +1061,7 @@ async function reconcileAfterTurn(sessionId: string, fallbackOutcome?: TurnOutco
   const session = await api.getSession(sessionId);
   setState({
     sessions: state.sessions.map((s) => (s.id === sessionId ? { ...s, ...summaryOf(session) } : s)),
-    messagesBySession: { ...state.messagesBySession, [sessionId]: session.messages },
+    messagesBySession: { ...state.messagesBySession, [sessionId]: normalizeLoadedMessages(session.messages) },
     streamingBySession: { ...state.streamingBySession, [sessionId]: '' },
     streamingReasoningBySession: { ...state.streamingReasoningBySession, [sessionId]: '' },
     reasoningStartedAtBySession: { ...state.reasoningStartedAtBySession, [sessionId]: undefined },
@@ -1185,7 +1206,7 @@ async function dispatchTurn(
     try {
       const session = await api.getSession(sessionId);
       setState({
-        messagesBySession: { ...state.messagesBySession, [sessionId]: session.messages },
+        messagesBySession: { ...state.messagesBySession, [sessionId]: normalizeLoadedMessages(session.messages) },
         streamingBySession: { ...state.streamingBySession, [sessionId]: '' },
         replyActivitiesBySession: { ...state.replyActivitiesBySession, [sessionId]: [] },
         replyPhaseBySession: { ...state.replyPhaseBySession, [sessionId]: undefined },
