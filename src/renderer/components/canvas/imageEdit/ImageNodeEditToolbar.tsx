@@ -69,7 +69,7 @@ export default function ImageNodeEditToolbar({
   return (
     <div
       className={cn(
-        'node-edit-toolbar nodrag cursor-default absolute bottom-[calc(100%+6px)] left-1/2 z-30 flex -translate-x-1/2 items-center gap-0.5 rounded-full border border-line bg-paper-raised/95 px-1.5 py-1 shadow-md backdrop-blur-sm whitespace-nowrap transition-opacity',
+        'node-edit-toolbar nodrag cursor-default absolute bottom-[calc(100%+6px)] left-1/2 z-30 flex items-center gap-0.5 rounded-full border border-line bg-paper-raised/95 px-1.5 py-1 shadow-md backdrop-blur-sm whitespace-nowrap transition-opacity',
         visible ? 'opacity-100' : 'pointer-events-none opacity-0',
       )}
       style={{ transform: `translateX(-50%) scale(${scale}) translateY(-30px)`, transformOrigin: 'bottom center' }}

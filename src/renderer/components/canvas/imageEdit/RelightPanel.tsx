@@ -166,9 +166,11 @@ export default function RelightPanel({
               <span
                 className={
                   back
-                    ? 'pointer-events-none absolute left-1/2 top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-amber-300 bg-transparent'
-                    : 'pointer-events-none absolute left-1/2 top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-amber-300 shadow-[0_0_14px_4px_rgba(252,211,77,0.55)]'
+                    ? 'pointer-events-none absolute left-1/2 top-1/2 h-4 w-4 rounded-full border-2 border-amber-300 bg-transparent'
+                    : 'pointer-events-none absolute left-1/2 top-1/2 h-4 w-4 rounded-full bg-amber-300 shadow-[0_0_14px_4px_rgba(252,211,77,0.55)]'
                 }
+                // Tailwind v4's translate-* sets the `translate` property, which
+                // would stack on top of this `transform` — keep -50% here only.
                 style={{ transform: `translate(calc(-50% + ${dotX}px), calc(-50% + ${dotY}px))` }}
               />
             </div>
