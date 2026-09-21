@@ -337,14 +337,6 @@ export default function Composer({
             ⚠ {loopNotice}
           </div>
         )}
-        {sessionId && (
-          <ComposerDock
-            sessionId={sessionId}
-            todos={todos}
-            showNext={!sending && turnOutcome === 'completed'}
-            onPick={(prompt) => onSend(prompt, [], {})}
-          />
-        )}
         {sessionId && <div className="mb-2"><PendingInteraction sessionId={sessionId} /></div>}
         {sessionId && (
           <QueuePanel
@@ -385,6 +377,7 @@ export default function Composer({
           <SlashPalette query={slash.query} args={slash.args} commands={slashCommands} onPick={pickSlash} />
         )}
         <div
+          className="relative"
           onDragOver={(e) => {
             e.preventDefault();
           }}
@@ -405,6 +398,7 @@ export default function Composer({
             if (e.dataTransfer.files.length) void addDroppedFiles(e.dataTransfer.files);
           }}
         >
+            {sessionId && <ComposerDock todos={todos} />}
             {(attachments.length > 0 || nodeRefs.length > 0 || mentions.length > 0 || unpinnedSelectionNodes.length > 0) && (
               <div className={cn("mb-2 flex flex-wrap gap-1.5", compact && "max-h-24 overflow-y-auto pr-0.5")}>
                 {sessionId && unpinnedSelectionNodes.length > 0 && (
