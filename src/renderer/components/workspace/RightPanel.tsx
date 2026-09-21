@@ -47,6 +47,8 @@ export default function RightPanel({
   const startX = useRef(0);
   const startWidth = useRef(0);
   const wasMaximizedAtStart = useRef(false);
+  const asideRef = useRef<HTMLElement>(null);
+  const dragWidth = useRef<number | null>(null);
 
   const onPointerDown = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -84,6 +86,7 @@ export default function RightPanel({
 
     // Check snap to maximize: dragging close to the left edge / remaining chat < 240px
     if (remainingChatWidth < 240 || e.clientX < currentSidebarW + 240) {
+      dragWidth.current = null;
       uiStore.setRightPanelMaximized(true);
       return;
     }
@@ -105,7 +108,15 @@ export default function RightPanel({
       return;
     }
 
-    uiStore.setRightPanelWidth(calculatedWidth);
+    // Resize by mutating the DOM node directly — committing through the store
+    // on every pointermove re-renders the panel each frame and stalls on long
+    // message lists. The store (and localStorage) sees one write on release.
+    const clamped = Math.min(
+      uiStore.getRightPanelMax(),
+      Math.max(uiStore.RIGHT_PANEL_MIN, Math.round(calculatedWidth)),
+    );
+    dragWidth.current = clamped;
+    if (asideRef.current) asideRef.current.style.width = `${clamped}px`;
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
@@ -117,6 +128,10 @@ export default function RightPanel({
     } catch {
       /* ignore */
     }
+    if (dragWidth.current !== null) {
+      uiStore.setRightPanelWidth(dragWidth.current);
+      dragWidth.current = null;
+    }
   };
 
   const meta = PANEL_METAS[activeTab];
@@ -124,6 +139,7 @@ export default function RightPanel({
 
   return (
     <aside
+      ref={asideRef}
       className={cn(
         'relative flex h-full flex-col bg-sidebar',
         maximized

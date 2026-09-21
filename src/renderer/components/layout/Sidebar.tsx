@@ -55,6 +55,8 @@ export default function Sidebar() {
   const dragging = useRef(false);
   const startX = useRef(0);
   const startWidth = useRef(0);
+  const asideRef = useRef<HTMLElement>(null);
+  const dragWidth = useRef<number | null>(null);
 
   const [query, setQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
@@ -171,7 +173,15 @@ export default function Sidebar() {
       return;
     }
 
-    uiStore.setSidebarWidth(calculatedWidth);
+    // Resize by mutating the DOM node directly — committing through the store
+    // on every pointermove re-renders the whole sidebar each frame and stalls
+    // on long message lists. The store (and localStorage) sees one write on release.
+    const clamped = Math.min(
+      uiStore.SIDEBAR_MAX_WIDTH,
+      Math.max(uiStore.SIDEBAR_MIN_WIDTH, Math.round(calculatedWidth)),
+    );
+    dragWidth.current = clamped;
+    if (asideRef.current) asideRef.current.style.width = `${clamped}px`;
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
@@ -183,10 +193,15 @@ export default function Sidebar() {
     } catch {
       /* ignore */
     }
+    if (dragWidth.current !== null) {
+      uiStore.setSidebarWidth(dragWidth.current);
+      dragWidth.current = null;
+    }
   };
 
   return (
     <aside
+      ref={asideRef}
       className={cn(
         'relative flex h-full shrink-0 flex-col overflow-hidden bg-sidebar',
         isDragging

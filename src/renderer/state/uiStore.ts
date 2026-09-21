@@ -100,16 +100,23 @@ function setState(patch: Partial<UiState>): void {
   state = { ...state, ...patch };
   if (typeof localStorage !== 'undefined') {
     try {
-      localStorage.setItem(MODE_KEY, state.mode);
-      if (state.selectedProjectId) localStorage.setItem(PROJECT_KEY, state.selectedProjectId);
-      else localStorage.removeItem(PROJECT_KEY);
-      localStorage.setItem(ARTIFACTS_KEY, state.artifactsOpen ? '1' : '0');
-      localStorage.setItem(CANVAS_KEY, state.canvasOpen ? '1' : '0');
-      if (state.rightPanelTab) localStorage.setItem(RIGHT_TAB_KEY, state.rightPanelTab);
-      else localStorage.removeItem(RIGHT_TAB_KEY);
-      localStorage.setItem(RIGHT_WIDTH_KEY, String(state.rightPanelWidth));
-      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, state.sidebarCollapsed ? '1' : '0');
-      localStorage.setItem(SIDEBAR_WIDTH_KEY, String(state.sidebarWidth));
+      // Persist only the keys that actually changed — drag handlers call this
+      // per pointermove, so writing all keys each time would serialize the
+      // whole store on every frame.
+      if ('mode' in patch) localStorage.setItem(MODE_KEY, state.mode);
+      if ('selectedProjectId' in patch) {
+        if (state.selectedProjectId) localStorage.setItem(PROJECT_KEY, state.selectedProjectId);
+        else localStorage.removeItem(PROJECT_KEY);
+      }
+      if ('artifactsOpen' in patch) localStorage.setItem(ARTIFACTS_KEY, state.artifactsOpen ? '1' : '0');
+      if ('canvasOpen' in patch) localStorage.setItem(CANVAS_KEY, state.canvasOpen ? '1' : '0');
+      if ('rightPanelTab' in patch) {
+        if (state.rightPanelTab) localStorage.setItem(RIGHT_TAB_KEY, state.rightPanelTab);
+        else localStorage.removeItem(RIGHT_TAB_KEY);
+      }
+      if ('rightPanelWidth' in patch) localStorage.setItem(RIGHT_WIDTH_KEY, String(state.rightPanelWidth));
+      if ('sidebarCollapsed' in patch) localStorage.setItem(SIDEBAR_COLLAPSED_KEY, state.sidebarCollapsed ? '1' : '0');
+      if ('sidebarWidth' in patch) localStorage.setItem(SIDEBAR_WIDTH_KEY, String(state.sidebarWidth));
     } catch {
       /* ignore */
     }
