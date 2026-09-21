@@ -14,7 +14,7 @@ export interface ProviderPreset {
 export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: 'reizo',
-    name: 'Reizo (Winlume)',
+    name: 'Reizo',
     tag: 'Reizo',
     baseUrl: 'https://v2api.top/v1',
     defaultModel: 'gpt-6-astra',
