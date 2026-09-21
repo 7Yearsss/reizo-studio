@@ -99,6 +99,8 @@ export interface ChatState {
   interruptDismissedBySession: Record<string, boolean>;
   /** Memory activity (已记住/想起了 rows) shown inline in the timeline. */
   memoryEventsBySession: Record<string, MemoryEventRecord[]>;
+  /** Turns that finished while the session wasn't on screen — drives the sidebar unread dot. */
+  unreadBySession: Record<string, boolean>;
 }
 
 let state: ChatState = {
@@ -129,6 +131,7 @@ let state: ChatState = {
   pickingReferenceBySession: {},
   interruptDismissedBySession: {},
   memoryEventsBySession: {},
+  unreadBySession: {},
 };
 
 function sameRef(a: NodeRef, b: NodeRef): boolean {
@@ -252,6 +255,25 @@ export function getSnapshot(): ChatState {
   return state;
 }
 
+/**
+ * A finished turn counts as "seen" only while its session is the active chat
+ * tab AND the window is focused — anything else earns an unread dot.
+ * 'interrupted' outcomes don't count: the user stopped the turn themselves.
+ */
+function shouldMarkUnread(sessionId: string, outcome: TurnOutcome): boolean {
+  if (outcome !== 'completed' && outcome !== 'error') return false;
+  if (typeof document === 'undefined') return false;
+  if (document.visibilityState !== 'visible' || !document.hasFocus()) return true;
+  if (uiStore.getSnapshot().mode !== 'chat') return true;
+  return tabStore.activeSessionId() !== sessionId;
+}
+
+export function markSessionRead(sessionId: string): void {
+  if (!state.unreadBySession[sessionId]) return;
+  const { [sessionId]: _dropped, ...unreadBySession } = state.unreadBySession;
+  setState({ unreadBySession });
+}
+
 export async function loadSessions(): Promise<void> {
   const sessions = await api.listSessions();
   const outcomes = Object.fromEntries(sessions.map((session) => [session.id, session.lastTurnOutcome ?? null]));
@@ -317,6 +339,7 @@ export async function deleteSession(id: string): Promise<void> {
   const { [id]: _removedOutcome, ...turnOutcomeBySession } = state.turnOutcomeBySession;
   const { [id]: _removedInterrupt, ...interruptRequestedBySession } = state.interruptRequestedBySession;
   const { [id]: _removedSteers, ...steerPendingBySession } = state.steerPendingBySession;
+  const { [id]: _removedUnread, ...unreadBySession } = state.unreadBySession;
   fenceBySession.delete(id);
   streamMetaBySession.delete(id);
   resetReveals(id);
@@ -337,6 +360,7 @@ export async function deleteSession(id: string): Promise<void> {
     turnOutcomeBySession,
     interruptRequestedBySession,
     steerPendingBySession,
+    unreadBySession,
   });
   tabStore.closeSessionTabs(id);
   artifactStore.dropSessionArtifacts(id);
@@ -1029,6 +1053,11 @@ function makeEventFolder(
           turnOutcomeBySession: { ...state.turnOutcomeBySession, [sessionId]: event.outcome },
           interruptRequestedBySession: { ...state.interruptRequestedBySession, [sessionId]: false },
           ...(event.error ? { errorBySession: { ...state.errorBySession, [sessionId]: event.error } } : {}),
+          // A turn that lands while the session isn't on screen gets an
+          // unread dot in the sidebar; cleared when the user opens it.
+          ...(shouldMarkUnread(sessionId, event.outcome)
+            ? { unreadBySession: { ...state.unreadBySession, [sessionId]: true } }
+            : {}),
         });
         break;
     }

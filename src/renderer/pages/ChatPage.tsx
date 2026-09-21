@@ -49,6 +49,7 @@ export default function ChatPage({
     // Hidden tabs skip the resume stream — it holds a socket the whole time a
     // turn is suspended, and every mounted tab pays it.
     void chatStore.ensureSessionMessages(sessionId, { resume: active });
+    if (active) chatStore.markSessionRead(sessionId);
   }, [sessionId, active]);
 
   useEffect(() => {
