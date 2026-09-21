@@ -86,11 +86,11 @@ export default function CustomTitleBar() {
   }, []);
 
   return (
-    <header className="titlebar flex h-10 shrink-0 items-center bg-sidebar border-b border-line/70 select-none">
+    <header className="titlebar flex h-10 shrink-0 items-center bg-sidebar select-none">
       {/* Claude-style top-left toolbar: Logo, Sidebar toggle, Quick search, Back/Forward */}
       <div
         className={cn(
-          'flex h-full shrink-0 items-center border-r border-line/70 px-3 bg-sidebar transition-[width] duration-[var(--duration-base)] ease-[var(--ease-drawer)] motion-reduce:transition-none',
+          'flex h-full shrink-0 items-center px-3 bg-sidebar transition-[width] duration-[var(--duration-base)] ease-[var(--ease-drawer)] motion-reduce:transition-none',
           sidebarCollapsed && 'w-auto',
         )}
         style={sidebarCollapsed ? undefined : { width: sidebarWidth }}
