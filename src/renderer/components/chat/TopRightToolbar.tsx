@@ -57,7 +57,7 @@ export default function TopRightToolbar({
   };
 
   return (
-    <div className="flex shrink-0 items-center gap-1">
+    <div className="flex shrink-0 items-center gap-1 opacity-70 transition-opacity duration-150 hover:opacity-100">
       {onSearch && (
         <button
           type="button"
@@ -83,7 +83,7 @@ export default function TopRightToolbar({
             ? 'inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors duration-150'
             : 'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors duration-150',
           rightPanelTab === 'canvas'
-            ? 'bg-accent/15 text-accent border border-accent/30'
+            ? 'bg-paper-inset text-ink shadow-sm'
             : 'text-ink-muted hover:bg-paper-inset/70 hover:text-ink',
         )}
         title="画布视窗"
