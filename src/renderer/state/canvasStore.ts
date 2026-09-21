@@ -55,7 +55,7 @@ export interface CanvasState {
   spotlightBySession: Record<string, { ids: string[]; at: number } | undefined>;
   /** Recent agent canvas writes (newest last), derived from chat tool events. */
   trailBySession: Record<string, AgentTrailEntry[]>;
-  historyBySession: Record<string, { canUndo: boolean; canRedo: boolean }>;
+  historyBySession: Record<string, { canUndo: boolean; canRedo: boolean; agentRollback: number }>;
   /** When true, canvas nodes hide form widgets and show pure media. */
   moodboardBySession: Record<string, boolean>;
   /** Node(s) currently in Agent proposal diff state (rendered with glowing dashed border). */
@@ -121,6 +121,8 @@ export function queueAgentNodesToast(sessionId: string, count: number): void {
 interface HistoryEntry {
   undo: () => Promise<void>;
   redo: () => Promise<void>;
+  /** Set on agent-driven batches; entries sharing a turn tag roll back together. */
+  agentTurn?: number;
 }
 const historyStacks = new Map<string, { undo: HistoryEntry[]; redo: HistoryEntry[] }>();
 const HISTORY_CAP = 60;
@@ -154,10 +156,15 @@ function stacksFor(sessionId: string) {
 
 function syncHistoryFlags(sessionId: string): void {
   const s = stacksFor(sessionId);
+  let agentRollback = 0;
+  const topTag = s.undo[s.undo.length - 1]?.agentTurn;
+  if (topTag !== undefined) {
+    for (let i = s.undo.length - 1; i >= 0 && s.undo[i].agentTurn === topTag; i -= 1) agentRollback += 1;
+  }
   setState({
     historyBySession: {
       ...state.historyBySession,
-      [sessionId]: { canUndo: s.undo.length > 0, canRedo: s.redo.length > 0 },
+      [sessionId]: { canUndo: s.undo.length > 0, canRedo: s.redo.length > 0, agentRollback },
     },
   });
 }
@@ -186,6 +193,23 @@ export async function redo(sessionId: string): Promise<void> {
   s.undo.push(entry);
   syncHistoryFlags(sessionId);
   await entry.redo().catch((): void => undefined);
+}
+
+/**
+ * Undo every agent batch from the newest contiguous turn — "回滚这一轮".
+ * Stops at the first non-agent (or older-turn) entry so user edits after the
+ * turn survive. Returns how many batches were rolled back.
+ */
+export async function rollbackAgentTurn(sessionId: string): Promise<number> {
+  const s = stacksFor(sessionId);
+  const tag = s.undo[s.undo.length - 1]?.agentTurn;
+  if (tag === undefined) return 0;
+  let n = 0;
+  while (s.undo.length > 0 && s.undo[s.undo.length - 1].agentTurn === tag) {
+    await undo(sessionId);
+    n += 1;
+  }
+  return n;
 }
 
 function setNodes(sessionId: string, nodes: CanvasNode[]): void {
@@ -894,7 +918,7 @@ const agentBatchRecorded = new Set<string>();
  * same pattern as `forkVariations`). The agent-trail entry then points at stale
  * ids; the activity strip greys that row rather than erroring.
  */
-export function recordAgentBatch(sessionId: string, entry: AgentTrailEntry): void {
+export function recordAgentBatch(sessionId: string, entry: AgentTrailEntry, agentTurn?: number): void {
   if (agentBatchRecorded.has(entry.id)) return;
 
   const attempt = (retriesLeft: number): void => {
@@ -932,6 +956,7 @@ export function recordAgentBatch(sessionId: string, entry: AgentTrailEntry): voi
     let liveIds = [...present];
 
     record(sessionId, {
+      agentTurn,
       undo: async () => {
         for (const id of liveIds) await _deleteNode(sessionId, id);
       },

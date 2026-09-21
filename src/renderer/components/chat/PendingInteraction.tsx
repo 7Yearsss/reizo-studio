@@ -4,8 +4,8 @@ import AskUserPrompt from './AskUserPrompt';
 import PermissionPrompt from './PermissionPrompt';
 
 /**
- * The pending ask/permission card, rendered at the bottom of the message
- * stream (not in the composer) so it reads as part of the conversation.
+ * The pending ask/permission card, docked above the composer so it stays
+ * reachable no matter where the message stream is scrolled (T3-style).
  */
 export default function PendingInteraction({ sessionId }: { sessionId: string }) {
   const interaction = useChatStore((s) => s.interactionBySession[sessionId]) ?? null;

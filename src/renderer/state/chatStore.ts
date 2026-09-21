@@ -19,6 +19,7 @@ import { isCanvasTool, trailEntryFromTool, UNDOABLE_TRAIL_VERBS } from '../../sh
 import * as artifactStore from './artifactStore';
 import { recordRecentSkill } from './skillStore';
 import { appendTerminalLine } from './terminalStore';
+import { notifyNeedsInput } from '../lib/notify';
 
 export interface PendingPermission {
   id: string;
@@ -181,6 +182,10 @@ const AUTO_RETRY_LIMIT = 2;
  * for the server's 5-minute watchdog. */
 const STALL_DETECT_MS = 90_000;
 const STALL_POLL_MS = 15_000;
+/** Per-session turn counter — regenerated/retry dispatches reuse the current
+ * value so "回滚本轮" covers the whole logical turn, not just the last pass. */
+const turnSeqBySession = new Map<string, number>();
+
 /** Non-reactive: liveRevision fence + last seen stream meta, per session. */
 const fenceBySession = new Map<string, Fence>();
 const streamMetaBySession = new Map<string, StreamMeta>();
@@ -400,6 +405,7 @@ function restorePendingAsk(id: string): void {
         [id]: { kind: 'ask', id: ask.toolCallId, questions: ask.questions ?? [] },
       },
     });
+    notifyNeedsInput('Reizo 在等你回答', (ask.questions?.[0]?.prompt ?? 'Agent 需要你的输入').slice(0, 80));
   }).catch(() => {
     /* session may not exist yet — ignore */
   });
@@ -869,7 +875,7 @@ function makeEventFolder(
             canvasStore.pushTrail(sessionId, trail);
             if (trail.nodeIds.length > 0) canvasStore.spotlight(sessionId, trail.nodeIds);
             if (trail.status === 'done' && UNDOABLE_TRAIL_VERBS.has(trail.verb)) {
-              canvasStore.recordAgentBatch(sessionId, trail);
+              canvasStore.recordAgentBatch(sessionId, trail, turnSeqBySession.get(sessionId));
               if (trail.nodeIds.length > 0) {
                 canvasStore.queueAgentNodesToast(sessionId, trail.nodeIds.length);
               }
@@ -916,6 +922,7 @@ function makeEventFolder(
             },
           },
         });
+        notifyNeedsInput('Reizo 需要你批准', `操作：${event.name}`);
         break;
       case 'ask':
         setState({
@@ -925,6 +932,10 @@ function makeEventFolder(
             [sessionId]: { kind: 'ask', id: event.id, questions: event.questions },
           },
         });
+        notifyNeedsInput(
+          'Reizo 在等你回答',
+          (event.questions?.[0]?.prompt ?? 'Agent 需要你的输入').slice(0, 80),
+        );
         break;
       case 'todos':
         setState({ todosBySession: { ...state.todosBySession, [sessionId]: event.items } });
@@ -1048,7 +1059,10 @@ async function dispatchTurn(
     const idx = current.findIndex((m) => m.id === turn.truncateAfterId);
     return idx < 0 ? current : current.slice(0, idx);
   })();
-  if (!turn.regenerate) autoRetryBySession.delete(sessionId);
+  if (!turn.regenerate) {
+    autoRetryBySession.delete(sessionId);
+    turnSeqBySession.set(sessionId, (turnSeqBySession.get(sessionId) ?? 0) + 1);
+  }
   const userMessage: ChatMessage | null = turn.regenerate
     ? null
     : {
