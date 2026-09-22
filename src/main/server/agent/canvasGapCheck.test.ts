@@ -36,6 +36,19 @@ describe('findLikelyGaps', () => {
     expect(warnings.some((w) => w.includes('音频节点'))).toBe(true);
   });
 
+  it('does not warn on the storyboard topology note → image → video', async () => {
+    const { canvasStore, sessionId } = await setup();
+    const canvas = canvasStore.ensureCanvas(sessionId);
+    const note = addNode(canvasStore, canvas.id, 'note', '分镜脚本');
+    const img = addNode(canvasStore, canvas.id, 'image', '关键帧');
+    const vid = addNode(canvasStore, canvas.id, 'video');
+    canvasStore.addEdge(canvas.id, { sourceId: note.id, targetId: img.id, sourceHandle: null, targetHandle: 'prompt' });
+    canvasStore.addEdge(canvas.id, { sourceId: img.id, targetId: vid.id, sourceHandle: null, targetHandle: 'start_frame' });
+
+    const warnings = findLikelyGaps(canvasStore, canvas.id, [img.id, vid.id], '口播广告');
+    expect(warnings.some((w) => w.includes('脚本/配音来源'))).toBe(false);
+  });
+
   it('does not warn when the video has a note or audio upstream', async () => {
     const { canvasStore, sessionId } = await setup();
     const canvas = canvasStore.ensureCanvas(sessionId);
@@ -66,6 +79,19 @@ describe('findLikelyGaps', () => {
     const a = addNode(canvasStore, canvas.id, 'image', '镜头1');
     const b = addNode(canvasStore, canvas.id, 'image', '镜头2');
     canvasStore.addEdge(canvas.id, { sourceId: anchor.id, targetId: a.id, sourceHandle: 'anchor_out', targetHandle: 'ref_1' });
+
+    const warnings = findLikelyGaps(canvasStore, canvas.id, [a.id, b.id]);
+    expect(warnings).toHaveLength(0);
+  });
+
+  it('stays quiet when an anchor node feeds an image via a default handle', async () => {
+    const { canvasStore, sessionId } = await setup();
+    const canvas = canvasStore.ensureCanvas(sessionId);
+    const anchor = addNode(canvasStore, canvas.id, 'anchor', '定妆');
+    const a = addNode(canvasStore, canvas.id, 'image', '镜头1');
+    const b = addNode(canvasStore, canvas.id, 'image', '镜头2');
+    // No ref_N/ref_N target handle — the anchor node type alone marks the reference.
+    canvasStore.addEdge(canvas.id, { sourceId: anchor.id, targetId: a.id, sourceHandle: 'anchor_out', targetHandle: null });
 
     const warnings = findLikelyGaps(canvasStore, canvas.id, [a.id, b.id]);
     expect(warnings).toHaveLength(0);

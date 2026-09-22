@@ -31,16 +31,27 @@ export function findLikelyGaps(
   const scopeNodes = snap.nodes.filter((n) => scopeSet.has(n.id));
   const wantsVoiceover = VOICEOVER_INTENT.test(intentText ?? '');
 
-  // 1) Video nodes with no script/voiceover source upstream.
+  // 1) Video nodes with no script/voiceover source upstream. Look up to two
+  // hops so the storyboard topology `note → image (keyframe) → video` counts
+  // as scripted — the note feeds the video transitively.
+  const upstreamTypes = (id: string, hops: number, seen = new Set<string>()): Set<string> => {
+    const types = new Set<string>();
+    if (hops <= 0 || seen.has(id)) return types;
+    seen.add(id);
+    for (const e of snap.edges) {
+      if (e.targetId !== id) continue;
+      const src = byId.get(e.sourceId);
+      if (!src) continue;
+      types.add(src.type);
+      for (const t of upstreamTypes(src.id, hops - 1, seen)) types.add(t);
+    }
+    return types;
+  };
   const videos = scopeNodes.filter((n) => n.type === 'video');
-  const unscripted = videos.filter(
-    (v) =>
-      !snap.edges.some((e) => {
-        if (e.targetId !== v.id) return false;
-        const src = byId.get(e.sourceId);
-        return src != null && SCRIPT_SOURCES.has(src.type);
-      }),
-  );
+  const unscripted = videos.filter((v) => {
+    const ups = upstreamTypes(v.id, 2);
+    return ![...ups].some((t) => SCRIPT_SOURCES.has(t));
+  });
   if (unscripted.length > 0 && (wantsVoiceover || unscripted.length === videos.length)) {
     warnings.push(
       `${unscripted.length} 个视频镜头未连接脚本/配音来源节点（note/agent/audio）——口播类成片可能缺台词`,
@@ -50,7 +61,11 @@ export function findLikelyGaps(
   // 2) Multi-shot image set with no consistency reference wired.
   const images = scopeNodes.filter((n) => n.type === 'image');
   const hasReference = images.some((img) =>
-    snap.edges.some((e) => e.targetId === img.id && REFERENCE_HANDLE.test(e.targetHandle ?? '')),
+    snap.edges.some(
+      (e) =>
+        e.targetId === img.id &&
+        (REFERENCE_HANDLE.test(e.targetHandle ?? '') || byId.get(e.sourceId)?.type === 'anchor'),
+    ),
   );
   if (images.length >= 2 && !hasReference) {
     warnings.push(
