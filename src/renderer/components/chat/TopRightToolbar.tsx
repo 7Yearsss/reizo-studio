@@ -80,8 +80,8 @@ export default function TopRightToolbar({
         onClick={handleCanvasClick}
         className={cn(
           compact
-            ? 'inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors duration-150'
-            : 'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors duration-150',
+            ? 'inline-flex h-7 w-7 items-center justify-center rounded-full transition-[color,transform] duration-150 active:scale-95'
+            : 'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium transition-[color,transform] duration-100 active:scale-95',
           rightPanelTab === 'canvas'
             ? 'bg-accent/15 text-accent border border-accent/30'
             : 'text-ink-muted hover:bg-paper-inset/70 hover:text-ink',

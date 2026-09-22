@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { motion } from 'motion/react';
 import { Maximize2, Minimize2, X } from 'lucide-react';
 import { cn } from '../../lib/cn';
 import { createPortal } from 'react-dom';
@@ -120,18 +121,23 @@ export default function RightPanel({
   };
 
   return (
-    <aside
+    <motion.aside
       ref={asideRef}
-      className={cn(
-        'relative flex h-full flex-col bg-sidebar',
-        maximized
-          ? 'flex-1 w-full'
-          : 'shrink-0 self-stretch my-2 mr-2 !h-auto rounded-xl border border-line/70 overflow-hidden shadow-sm',
+      initial={{ width: 0, opacity: 0, x: 24 }}
+      animate={{ width: maximized ? '100%' : storedWidth, opacity: 1, x: 0 }}
+      exit={{ width: 0, opacity: 0, x: 24 }}
+      transition={
         isDragging
-          ? 'transition-none select-none'
-          : 'transition-[width] duration-[var(--duration-base)] ease-[var(--ease-drawer)] motion-reduce:transition-none',
+          ? { duration: 0 }
+          : { type: 'spring', damping: 28, stiffness: 280, mass: 0.6 }
+      }
+      className={cn(
+        'relative flex h-full flex-col overflow-hidden bg-sidebar',
+        maximized
+          ? 'w-full'
+          : 'shrink-0 self-stretch my-2 mr-2 !h-auto rounded-xl border border-line/70 shadow-sm',
+        isDragging && 'select-none',
       )}
-      style={maximized ? undefined : { width: storedWidth }}
     >
       <div
         onPointerDown={onPointerDown}
@@ -182,6 +188,6 @@ export default function RightPanel({
         {activeTab === 'git' && <GitPanel />}
         {activeTab === 'terminal' && <TerminalPanel />}
       </div>
-    </aside>
+    </motion.aside>
   );
 }
