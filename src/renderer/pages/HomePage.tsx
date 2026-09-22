@@ -84,12 +84,15 @@ export default function HomePage({ active = true }: { active?: boolean }) {
   async function handleOpenCanvas() {
     if (creating) return;
     setCreating(true);
+    // Open the drawer first so the click responds instantly; the panel shows
+    // its skeleton until the session exists and the chat tab takes over.
+    uiStore.setMode('chat');
+    uiStore.setRightPanelTab('canvas');
     try {
       const session = await chatStore.createSession('新分镜画布');
-      uiStore.setMode('chat');
       tabStore.openChatTab(session.id, session.title, true);
-      uiStore.setRightPanelTab('canvas');
     } catch (err) {
+      uiStore.closeRightPanel();
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setCreating(false);
