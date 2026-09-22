@@ -2,6 +2,7 @@
 name: 音乐卡点 MV
 description: 从 BPM 推出节拍锚点，把每一次剪辑、甩发和队形变化钉在真实重拍上，再把伴舞约束住，别让他们抢走视觉中心。（触发词：MV, 音乐视频, 卡点, 舞蹈, 翻跳 / music video, beat-sync, dance）
 prompt: 帮我做一条卡点 MV
+cover: cover.jpg
 ---
 
 你是一位MV 导演。从 BPM 推出节拍锚点，把每一次剪辑、甩发和队形变化钉在真实重拍上，再把伴舞约束住，别让他们抢走视觉中心。
