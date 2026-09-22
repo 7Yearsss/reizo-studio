@@ -13,6 +13,7 @@ import { runAudioNode } from '../canvas/audioExecutor';
 import type { ProviderStore } from '../storage/providerStore';
 import { runGraph } from '../canvas/graphExecutor';
 import { descendants } from '../canvas/graph';
+import { findLikelyGaps } from './canvasGapCheck';
 import { watchCanvasNodeJob } from './jobWatch';
 import { CANVAS_BUDGET_ALLOW_BATCH, type CanvasBudget } from './canvasBudget';
 import { ApprovalRequiredError, CANVAS_BUDGET_TOOL, requestBudgetCheckpoint } from './permissions';
@@ -565,13 +566,18 @@ export function createCanvasTools(options: {
           .describe("Explicit whitelist of node ids to run. Pass a group node's memberIds to run just that group."),
         wait: z.boolean().optional().describe('Wait for the run to finish (default true).'),
         timeoutMs: z.number().optional().describe('Max wait in ms (default 300000).'),
+        intent: z
+          .string()
+          .optional()
+          .describe('One line on what this run should deliver (e.g. "15s 口播广告") — used for a completeness sanity check before dispatch.'),
       }),
-      execute: async ({ from, nodeIds, wait, timeoutMs }, toolOptions) => {
+      execute: async ({ from, nodeIds, wait, timeoutMs, intent }, toolOptions) => {
         const canvas = canvasStore.ensureCanvas(sessionId);
         if (from && !canvasStore.getNode(canvas.id, from)) return { error: `No canvas node "${from}"` };
         const missing = (nodeIds ?? []).filter((id) => !canvasStore.getNode(canvas.id, id));
         if (missing.length > 0) return { error: `No canvas node(s) ${missing.join(', ')}` };
         const scope = runGraphScope(canvasStore, canvas.id, from, nodeIds);
+        const warnings = findLikelyGaps(canvasStore, canvas.id, scope, intent);
         gateExecute(toolOptions, { tool: 'run_graph', from, nodeIds, wait, timeoutMs }, Math.max(scope.length, 1));
         const running = runGraph({
           canvasStore,
@@ -586,7 +592,12 @@ export function createCanvasTools(options: {
         if (wait === false) {
           void running.catch((): undefined => undefined);
           watchCanvasNodeJob(sessionId, canvas.id, canvasStore, scope);
-          return { ok: true, status: 'running', scope: nodeIds ? 'nodeIds' : from ? 'from' : 'all' };
+          return {
+            ok: true,
+            status: 'running',
+            scope: nodeIds ? 'nodeIds' : from ? 'from' : 'all',
+            ...(warnings.length > 0 ? { warnings } : {}),
+          };
         }
         const settled = await settleNodes(canvasStore, canvas.id, scope, timeoutMs ?? 300_000, running);
         const pending = settled.filter((n) => n.runState !== 'done' && n.runState !== 'error').length;
@@ -594,6 +605,7 @@ export function createCanvasTools(options: {
           ok: settled.every((n) => n.runState === 'done'),
           status: pending > 0 ? 'running' : 'done',
           results: settled.map((n) => ({ id: n.id, title: n.title, status: n.runState, error: n.output?.error })),
+          ...(warnings.length > 0 ? { warnings } : {}),
         };
       },
     }),
