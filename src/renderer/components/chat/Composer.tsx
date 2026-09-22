@@ -650,11 +650,13 @@ export default function Composer({
                         type="button"
                         title={directorOn ? '导演模式：开 —— agent 会主动在画布上规划' : '导演模式：关 —— 仅在你明确要求时才碰画布'}
                         aria-pressed={directorOn}
-                        onClick={() =>
+                        onClick={(e) => {
                           void settingsStore.patchSettings({
                             directorSession: { sessionId, enabled: !directorOn },
-                          })
-                        }
+                          });
+                          // Drop focus so Enter in the composer doesn't re-toggle it.
+                          e.currentTarget.blur();
+                        }}
                         className={cn(
                           'flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] transition-colors',
                           directorOn

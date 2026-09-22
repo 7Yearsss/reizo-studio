@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { runImageNode } from '../canvas/imageExecutor';
 import { openDb } from '../db/client';
 import { createSqliteSessionStore } from '../storage/sqliteSessionStore';
 import { createCanvasStore } from '../storage/canvasStore';
@@ -14,6 +15,20 @@ import { answerPermission, isApprovalRequiredError, type ApprovalRequiredError }
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
+
+vi.mock('../canvas/imageExecutor', () => ({
+  broadcastDownstreamDirty: vi.fn(),
+  // Default: a run that never settles — the execute charge sticks and no
+  // refund can race the assertions. Tests that need a settled failure
+  // re-implement this per-case.
+  runImageNode: vi.fn(() => new Promise<void>((): undefined => undefined)),
+}));
+
+const runImageMock = vi.mocked(runImageNode);
+
+afterEach(() => {
+  runImageMock.mockImplementation(() => new Promise<void>((): undefined => undefined));
+});
 
 async function setup() {
   const handle = openDb(':memory:');
@@ -55,15 +70,27 @@ describe('canvasBudget', () => {
   });
 
   it('checkpoints the 5th canvas run, then lets an allow resume through without recounting', async () => {
-    const { tools, budget, nodeId } = await setup();
-    const run = (n: number) =>
-      (tools.run_node as never as { execute: (a: unknown, o: unknown) => Promise<unknown> }).execute(
-        { id: nodeId, wait: false, timeoutMs: 50 },
+    const { tools, budget, canvasStore, sessionId } = await setup();
+    const canvas = canvasStore.ensureCanvas(sessionId);
+    // Fresh node per call — the same-params fuse must not intercept what the
+    // budget gate is being exercised for.
+    const run = (n: number) => {
+      const node = canvasStore.addNode(canvas.id, {
+        type: 'image',
+        x: n * 300,
+        y: 0,
+        w: 100,
+        h: 100,
+        params: { prompt: `p${n}` },
+      }).node;
+      return (tools.run_node as never as { execute: (a: unknown, o: unknown) => Promise<unknown> }).execute(
+        { id: node.id, wait: false, timeoutMs: 50 },
         { toolCallId: `tc${n}` },
       );
+    };
 
-    // Runs 1..4 fit the default quota (they fail fast downstream — no provider
-    // key — but the budget gate must not be what stops them).
+    // Runs 1..4 fit the default quota (the mocked executor never settles —
+    // the charge sticks, no refund races).
     for (let i = 1; i <= CANVAS_BUDGET_EXECUTE_LIMIT; i++) {
       await run(i);
     }
@@ -89,13 +116,70 @@ describe('canvasBudget', () => {
     expect(counts).toBeLessThanOrEqual(CANVAS_BUDGET_EXECUTE_LIMIT + 1 + CANVAS_BUDGET_ALLOW_BATCH);
   });
 
-  it('keeps the ceiling after a deny', async () => {
-    const { tools, nodeId } = await setup();
-    const run = (n: number) =>
+  it('refunds generations that settle to error instead of burning the quota', async () => {
+    const { tools, budget, canvasStore, sessionId } = await setup();
+    const canvas = canvasStore.ensureCanvas(sessionId);
+    // Real-world failure mode: the executor resolves with the node in error
+    // state (e.g. model not served by the provider).
+    runImageMock.mockImplementation(async (options) => {
+      options.canvasStore.updateNode(options.canvasId, options.node.id, {
+        runState: 'error',
+        output: { error: 'model not available' },
+      });
+    });
+    for (let i = 1; i <= CANVAS_BUDGET_EXECUTE_LIMIT; i++) {
+      const node = canvasStore.addNode(canvas.id, {
+        type: 'image',
+        x: i * 300,
+        y: 0,
+        w: 100,
+        h: 100,
+        params: { prompt: `p${i}` },
+      }).node;
+      await (tools.run_node as never as { execute: (a: unknown, o: unknown) => Promise<unknown> }).execute(
+        { id: node.id, wait: false, timeoutMs: 50 },
+        { toolCallId: `tfail${i}` },
+      );
+    }
+    // Let the settle-tap refunds land, then every failed run was given back.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(budget.counts().execute).toBe(0);
+    // …so a fifth failure must not trip the checkpoint — nothing ran.
+    const node = canvasStore.addNode(canvas.id, {
+      type: 'image',
+      x: 2000,
+      y: 0,
+      w: 100,
+      h: 100,
+      params: { prompt: 'p5' },
+    }).node;
+    await expect(
       (tools.run_node as never as { execute: (a: unknown, o: unknown) => Promise<unknown> }).execute(
-        { id: nodeId, wait: false, timeoutMs: 50 },
+        { id: node.id, wait: false, timeoutMs: 50 },
+        { toolCallId: 'tfail5' },
+      ),
+    ).resolves.toMatchObject({ ok: true, status: 'running' });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(budget.counts().execute).toBe(0);
+  });
+
+  it('keeps the ceiling after a deny', async () => {
+    const { tools, canvasStore, sessionId } = await setup();
+    const canvas = canvasStore.ensureCanvas(sessionId);
+    const run = (n: number) => {
+      const node = canvasStore.addNode(canvas.id, {
+        type: 'image',
+        x: n * 300,
+        y: 0,
+        w: 100,
+        h: 100,
+        params: { prompt: `d${n}` },
+      }).node;
+      return (tools.run_node as never as { execute: (a: unknown, o: unknown) => Promise<unknown> }).execute(
+        { id: node.id, wait: false, timeoutMs: 50 },
         { toolCallId: `td${n}` },
       );
+    };
     for (let i = 1; i <= CANVAS_BUDGET_EXECUTE_LIMIT; i++) await run(i);
     await expect(run(5)).rejects.toMatchObject({ name: 'ApprovalRequiredError' });
     answerPermission('td5', 'deny');
@@ -105,16 +189,25 @@ describe('canvasBudget', () => {
   });
 
   it('resume: an approved run_node checkpoint replays the gated call without recounting', async () => {
-    const { tools, executeApproved, budget, nodeId, canvasStore, sessionId } = await setup();
-    const run = (n: number) =>
-      (tools.run_node as never as { execute: (a: unknown, o: unknown) => Promise<unknown> }).execute(
-        { id: nodeId, wait: false, timeoutMs: 50 },
+    const { tools, executeApproved, budget, canvasStore, sessionId } = await setup();
+    const canvas = canvasStore.ensureCanvas(sessionId);
+    const run = (n: number) => {
+      const node = canvasStore.addNode(canvas.id, {
+        type: 'image',
+        x: n * 300,
+        y: 0,
+        w: 100,
+        h: 100,
+        params: { prompt: `r${n}` },
+      }).node;
+      return (tools.run_node as never as { execute: (a: unknown, o: unknown) => Promise<unknown> }).execute(
+        { id: node.id, wait: false, timeoutMs: 50 },
         { toolCallId: `tr${n}` },
       );
+    };
     for (let i = 1; i <= CANVAS_BUDGET_EXECUTE_LIMIT; i++) await run(i);
     // The gated call targets a fresh node so the same-params fuse can't
     // intercept it — we want to observe the budget resume, not the fuse.
-    const canvas = canvasStore.ensureCanvas(sessionId);
     const fresh = canvasStore.addNode(canvas.id, { type: 'image', x: 999, y: 0, w: 100, h: 100, params: {} }).node;
     let err: unknown;
     try {
@@ -170,14 +263,22 @@ describe('canvasBudget', () => {
   });
 
   it('resume: an approved pipeline checkpoint goes live without duplicating the storyboard', async () => {
-    const { tools, executeApproved, nodeId, canvasStore, sessionId } = await setup();
+    const { tools, executeApproved, canvasStore, sessionId } = await setup();
+    const canvas = canvasStore.ensureCanvas(sessionId);
     for (let i = 1; i <= CANVAS_BUDGET_EXECUTE_LIMIT; i++) {
+      const node = canvasStore.addNode(canvas.id, {
+        type: 'image',
+        x: i * 300,
+        y: 600,
+        w: 100,
+        h: 100,
+        params: { prompt: `pp${i}` },
+      }).node;
       await (tools.run_node as never as { execute: (a: unknown, o: unknown) => Promise<unknown> }).execute(
-        { id: nodeId, wait: false, timeoutMs: 50 },
+        { id: node.id, wait: false, timeoutMs: 50 },
         { toolCallId: `tp${i}` },
       );
     }
-    const canvas = canvasStore.ensureCanvas(sessionId);
     const scene = { title: 'a', script: 's', keyframePrompt: 'p', videoPrompt: 'v', cameraMotion: 'pan' as const, duration: '5s' as const };
     let err: unknown;
     try {
@@ -202,6 +303,34 @@ describe('canvasBudget', () => {
     expect(res.planNodeIds?.length).toBe(1 + 2 * 2);
     // Resume must not rebuild — same node count, no duplicated storyboard.
     expect(canvasStore.getSnapshot(canvas.id)!.nodes.length).toBe(before);
+  });
+
+  it('dedup: a re-issued storyboard returns the existing plan instead of rebuilding', async () => {
+    const { tools, canvasStore, sessionId } = await setup();
+    const canvas = canvasStore.ensureCanvas(sessionId);
+    const input = {
+      storyTitle: 'T',
+      ratio: '16:9' as const,
+      autoRunFirstScene: false,
+      asProposal: true,
+      scenes: [
+        { title: 's1', script: 'x', imagePrompt: 'a', videoPrompt: 'b', camera: 'none' as const, duration: '5s' as const },
+        { title: 's2', script: 'y', imagePrompt: 'c', videoPrompt: 'd', camera: 'none' as const, duration: '5s' as const },
+      ],
+    };
+    const exec = tools.create_storyboard_pipeline as never as {
+      execute: (a: unknown, o: unknown) => Promise<Record<string, unknown>>;
+    };
+    const first = await exec.execute(input, { toolCallId: 'pd1' });
+    const nodeCount = canvasStore.getSnapshot(canvas.id)!.nodes.length;
+    const second = await exec.execute(input, { toolCallId: 'pd2' });
+    expect(second.deduped).toBe(true);
+    expect(second.planNodeIds).toEqual([first.noteId, ...(first.createdNodeIds as string[])]);
+    expect(canvasStore.getSnapshot(canvas.id)!.nodes.length).toBe(nodeCount);
+    // A different story is not deduped.
+    const third = await exec.execute({ ...input, storyTitle: 'Other' }, { toolCallId: 'pd3' });
+    expect(third.deduped).toBeUndefined();
+    expect(canvasStore.getSnapshot(canvas.id)!.nodes.length).toBeGreaterThan(nodeCount);
   });
 
   it('fuse: warns on a same-params re-run, refuses from the third', async () => {

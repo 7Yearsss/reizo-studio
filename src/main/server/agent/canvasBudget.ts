@@ -8,10 +8,12 @@
 export type CanvasBudgetKind = 'structural' | 'execute';
 
 export interface CanvasBudget {
-  /** Count `count` actions of the given kind (default 1 — a run_graph call counts its whole scope). */
+  /** Count `count` actions of the given kind (default 1 — a run_graph call counts its whole scope; negative refunds). */
   record(kind: CanvasBudgetKind, count?: number): void;
   /** True once `record` has pushed the kind past its ceiling. */
   exceeded(kind: CanvasBudgetKind): boolean;
+  /** Pre-dispatch check: true if `count` more of the kind would pass the ceiling (doesn't record). */
+  wouldExceed(kind: CanvasBudgetKind, count?: number): boolean;
   /** Current counts, for checkpoint messaging and tests. */
   counts(): Record<CanvasBudgetKind, number>;
   /** Extend the execute ceiling — called after the user approves a checkpoint. */
@@ -34,11 +36,14 @@ export function createCanvasBudget(limits?: { execute?: number; structural?: num
     exceeded(kind) {
       return kind === 'execute' ? counts.execute > executeLimit : counts.structural > structuralLimit;
     },
+    wouldExceed(kind, count = 1) {
+      return kind === 'execute' ? counts.execute + count > executeLimit : counts.structural + count > structuralLimit;
+    },
     counts() {
       return { ...counts };
     },
     extendExecute(by) {
-      executeLimit = Math.max(executeLimit, counts.execute - 1 + by);
+      executeLimit = Math.max(executeLimit, counts.execute + by);
     },
   };
 }
