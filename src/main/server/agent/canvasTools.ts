@@ -36,6 +36,8 @@ function nodeBrief(node: CanvasNode) {
     role: typeof params.role === 'string' ? params.role : undefined,
     strength: typeof params.strength === 'string' ? params.strength : undefined,
     assets: node.output?.assets ?? [],
+    activeAssetIndex: node.output?.activeAssetIndex ?? 0,
+    versionCount: node.output?.assets?.length ?? 0,
     error: node.output?.error,
   };
 }
@@ -716,6 +718,73 @@ export function createCanvasTools(options: {
         channel.broadcast(res.rev, { type: 'node_updated', node: res.node, operationId });
         broadcastDownstreamDirty(canvasStore, canvas.id, id, res.rev);
         return { id, params: res.node.params, operationId };
+      },
+    }),
+
+    select_node_version: tool({
+      description:
+        'Switch which generated version a media node displays, or roll back to the previous version — e.g. "把镜头 3 换回上一版". Pure index switch: no re-run, no cost. Optionally also restore the prompt recorded for that version.',
+      inputSchema: z.object({
+        nodeId: z.string(),
+        versionIndex: z
+          .number()
+          .optional()
+          .describe('0-based index of the version to activate (0 is latest, 1 is previous).'),
+        rollbackToPrevious: z
+          .boolean()
+          .optional()
+          .describe('If true, switch to the immediately previous version (activeAssetIndex + 1).'),
+        restorePrompt: z
+          .boolean()
+          .optional()
+          .describe('If true and the selected version recorded a prompt in resultSet, restore params.prompt as well.'),
+      }),
+      execute: async ({ nodeId, versionIndex, rollbackToPrevious, restorePrompt }) => {
+        const canvas = canvasStore.ensureCanvas(sessionId);
+        const node = canvasStore.getNode(canvas.id, nodeId);
+        if (!node) return { error: `No canvas node "${nodeId}"` };
+        const assets = node.output?.assets ?? [];
+        if (assets.length === 0) return { error: '该节点还没有已生成的版本可切换' };
+        const current = node.output?.activeAssetIndex ?? 0;
+        const idx = rollbackToPrevious ? current + 1 : (versionIndex ?? 0);
+        if (idx < 0 || idx >= assets.length) {
+          return { error: `版本索引越界：该节点共 ${assets.length} 个版本（0-${assets.length - 1}），当前在第 ${current} 版` };
+        }
+
+        let restoredPrompt: string | undefined;
+        const params = { ...(node.params as Record<string, unknown>) };
+        if (restorePrompt) {
+          const recorded = node.output?.resultSet?.[idx]?.prompt;
+          if (typeof recorded === 'string' && recorded.length > 0) {
+            params.prompt = recorded;
+            restoredPrompt = recorded;
+          }
+        }
+
+        const nextOutput = { ...(node.output ?? {}), activeAssetIndex: idx };
+        const res = canvasStore.updateNode(canvas.id, nodeId, {
+          output: nextOutput,
+          ...(restoredPrompt !== undefined ? { params } : {}),
+        });
+        if (!res) return { error: `No canvas node "${nodeId}"` };
+        const channel = getCanvasChannel(canvas.id);
+        channel.broadcast(res.rev, {
+          type: 'node_output',
+          id: nodeId,
+          output: res.node.output ?? nextOutput,
+          runState: res.node.runState,
+        });
+        if (restoredPrompt !== undefined) {
+          channel.broadcast(res.rev, { type: 'node_updated', node: res.node });
+        }
+        return {
+          ok: true,
+          nodeId,
+          activeAssetIndex: idx,
+          versionCount: assets.length,
+          asset: assets[idx],
+          ...(restoredPrompt !== undefined ? { restoredPrompt } : {}),
+        };
       },
     }),
 
