@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import * as chatStore from '../state/chatStore';
 import * as tabStore from '../state/tabStore';
@@ -10,7 +10,11 @@ import TopRightToolbar from '../components/chat/TopRightToolbar';
 import { collectMessageMatches } from '../lib/highlightText';
 import { useTitleBarSlot } from '../components/layout/titleBarSlots';
 
-export default function ChatPage({
+// Memoized so MainLayout re-renders (e.g. the right panel opening) don't
+// re-render the whole message list synchronously.
+export default memo(ChatPage);
+
+function ChatPage({
   sessionId,
   active = true,
   onToggleTree,

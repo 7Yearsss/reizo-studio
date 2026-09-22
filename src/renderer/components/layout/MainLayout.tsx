@@ -15,6 +15,8 @@ import ArtifactsPage from '../../pages/ArtifactsPage';
 import ToastContainer from '../ui/ToastContainer';
 import GlobalCommandPalette from './GlobalCommandPalette';
 
+const toggleFilesPanel = () => uiStore.toggleRightPanelTab('files');
+
 /**
  * The full app shell: title bar, sidebar, and tab-switched main stage.
  */
@@ -54,7 +56,7 @@ export default function MainLayout() {
                     <ChatPage
                       sessionId={tab.sessionId}
                       active={active}
-                      onToggleTree={() => uiStore.toggleRightPanelTab('files')}
+                      onToggleTree={toggleFilesPanel}
                       treeOpen={rightPanelTab === 'files'}
                     />
                   )}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { motion, useIsPresent } from 'motion/react';
 import { Maximize2, Minimize2, X } from 'lucide-react';
 import { cn } from '../../lib/cn';
@@ -9,9 +9,12 @@ import { useUiStore } from '../../state/useUiStore';
 import DirectoryPanel from './DirectoryPanel';
 import GitPanel from './GitPanel';
 import TerminalPanel from './TerminalPanel';
-import ArtifactPanel from './ArtifactPanel';
-import CanvasPanel from '../canvas/CanvasPanel';
 import Tooltip from '../ui/Tooltip';
+import CanvasSkeleton from '../canvas/CanvasSkeleton';
+
+// Heavy panels are code-split so the drawer shell never waits on their bundle.
+const CanvasPanel = lazy(() => import('../canvas/CanvasPanel'));
+const ArtifactPanel = lazy(() => import('./ArtifactPanel'));
 
 const PANEL_DURATION = 0.22;
 const PANEL_EASE: [number, number, number, number] = [0.16, 1, 0.3, 1];
@@ -143,6 +146,7 @@ export default function RightPanel({
           : { duration: PANEL_DURATION, ease: PANEL_EASE }
       }
       onAnimationComplete={() => setContentReady(true)}
+      style={{ willChange: isDragging ? undefined : 'width, transform, opacity' }}
       className={cn(
         'relative flex h-full flex-col overflow-hidden bg-sidebar',
         maximized
@@ -194,10 +198,23 @@ export default function RightPanel({
         </button>
       </Tooltip>
       <div className="min-h-0 flex-1 bg-sidebar">
+        {activeTab === 'canvas' &&
+          (showContent && sessionId ? (
+            <Suspense fallback={<CanvasSkeleton />}>
+              <div key={sessionId} className="h-full w-full animate-[fade-in_180ms_var(--ease-out)]">
+                <CanvasPanel sessionId={sessionId} />
+              </div>
+            </Suspense>
+          ) : (
+            <CanvasSkeleton />
+          ))}
         {showContent && (
           <>
-            {activeTab === 'canvas' && sessionId && <CanvasPanel key={sessionId} sessionId={sessionId} />}
-            {activeTab === 'artifacts' && sessionId && <ArtifactPanel sessionId={sessionId} />}
+            {activeTab === 'artifacts' && sessionId && (
+              <Suspense fallback={null}>
+                <ArtifactPanel sessionId={sessionId} />
+              </Suspense>
+            )}
             {activeTab === 'files' && <DirectoryPanel embedded />}
             {activeTab === 'git' && <GitPanel />}
             {activeTab === 'terminal' && <TerminalPanel />}
