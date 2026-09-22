@@ -1,4 +1,5 @@
 import { cn } from '../../lib/cn';
+import { AnimatePresence } from 'motion/react';
 import CustomTitleBar from './CustomTitleBar';
 import Sidebar from './Sidebar';
 import RightPanel from '../workspace/RightPanel';
@@ -70,12 +71,15 @@ export default function MainLayout() {
             </div>
           )}
         </main>
-        {showRight && rightPanelTab && (
-          <RightPanel
-            sessionId={activeTab?.kind === 'chat' ? activeTab.sessionId : undefined}
-            activeTab={rightPanelTab}
-          />
-        )}
+        <AnimatePresence initial={false}>
+          {showRight && rightPanelTab && (
+            <RightPanel
+              key="right-panel"
+              sessionId={activeTab?.kind === 'chat' ? activeTab.sessionId : undefined}
+              activeTab={rightPanelTab}
+            />
+          )}
+        </AnimatePresence>
       </div>
       <ToastContainer />
       <GlobalCommandPalette />
