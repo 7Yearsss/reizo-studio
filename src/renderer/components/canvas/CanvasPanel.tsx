@@ -534,7 +534,17 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
   const isDraggingRef = useRef(false);
   const isPanningRef = useRef(false);
   // Inertia pan: sample viewport positions while panning, glide with decay on release.
-  const panSamplesRef = useRef<{ t: number; x: number; y: number }[]>([]);
+  const panSamplesRef = useRef<{ t: number; x: number; y: number; z: number }[]>([]);
+  const gestureZoomRef = useRef(1);
+  const pointerDownRef = useRef(false);
+  const pannedRef = useRef(false);
+  const coastingRef = useRef(false);
+  // True only while a coast step is inside setViewport. That call reuses the
+  // still-active drag gesture, so its move event carries the real mouse
+  // event — treating it as a new pan cancels the glide on the first frame.
+  const applyingCoastRef = useRef(false);
+  const inertiaRafRef = useRef(0);
+  const coastTimerRef = useRef(0);
   const [isInteracting, setIsInteracting] = useState(false);
   // Mirror the drag/pan flag for JS animators (e.g. dither fields) that pause
   // their per-frame painting while a gesture owns the frame budget.
@@ -542,6 +552,126 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     setCanvasInteracting(isInteracting);
     return () => setCanvasInteracting(false);
   }, [isInteracting]);
+
+  const stopInertia = useCallback(() => {
+    coastingRef.current = false;
+    if (inertiaRafRef.current) cancelAnimationFrame(inertiaRafRef.current);
+    inertiaRafRef.current = 0;
+    if (coastTimerRef.current) {
+      window.clearTimeout(coastTimerRef.current);
+      coastTimerRef.current = 0;
+    }
+  }, []);
+
+  const settleInteraction = useCallback(() => {
+    if (!isDraggingRef.current && !pointerDownRef.current && !isPanningRef.current) {
+      setIsInteracting(false);
+    }
+  }, []);
+
+  // Release velocity continues on the same frame the gesture ends. A single
+  // d3 setViewport({duration}) waits out React Flow's deferred onMoveEnd
+  // (150ms while pan-on-scroll) and then another frame before its first tick,
+  // which reads as a freeze before the glide. Zoom is excluded: zooming
+  // around the cursor also moves x/y, so a zoom flick would otherwise coast.
+  const startCoast = useCallback(() => {
+    if (coastingRef.current) return;
+    const s = panSamplesRef.current;
+    const last = s[s.length - 1];
+    if (!last || s.length < 2 || performance.now() - last.t > 100) {
+      settleInteraction();
+      return;
+    }
+    if (Math.abs(last.z - gestureZoomRef.current) > 0.002) {
+      panSamplesRef.current = [];
+      settleInteraction();
+      return;
+    }
+    let i = s.length - 2;
+    while (i > 0 && last.t - s[i - 1].t <= 120) i -= 1;
+    const base = s[i];
+    const dt = Math.max(last.t - base.t, 1);
+    let vx = ((last.x - base.x) / dt) * 16.7;
+    let vy = ((last.y - base.y) / dt) * 16.7;
+    panSamplesRef.current = [];
+    if (Math.hypot(vx, vy) < 3) {
+      settleInteraction();
+      return;
+    }
+    const zoom = last.z;
+    const startedAt = performance.now();
+    coastingRef.current = true;
+    const finish = () => {
+      if (!coastingRef.current) return;
+      coastingRef.current = false;
+      inertiaRafRef.current = 0;
+      settleInteraction();
+      try {
+        localStorage.setItem(VIEWPORT_KEY(sessionId), JSON.stringify(rf.getViewport()));
+      } catch {
+        /* ignore */
+      }
+    };
+    const apply = (decay: boolean): boolean => {
+      if (!coastingRef.current) return false;
+      if (decay) {
+        vx *= 0.92;
+        vy *= 0.92;
+      }
+      if (Math.hypot(vx, vy) < 0.5 || performance.now() - startedAt > 1200) {
+        finish();
+        return false;
+      }
+      const vp = rf.getViewport();
+      applyingCoastRef.current = true;
+      try {
+        void rf.setViewport({ x: vp.x + vx, y: vp.y + vy, zoom }, { duration: 0 });
+      } finally {
+        applyingCoastRef.current = false;
+      }
+      return true;
+    };
+    if (!apply(false)) return;
+    const step = () => {
+      if (!apply(true)) return;
+      inertiaRafRef.current = requestAnimationFrame(step);
+    };
+    inertiaRafRef.current = requestAnimationFrame(step);
+  }, [rf, sessionId, settleInteraction]);
+
+  const armCoast = useCallback(() => {
+    if (coastTimerRef.current) window.clearTimeout(coastTimerRef.current);
+    coastTimerRef.current = window.setTimeout(() => {
+      coastTimerRef.current = 0;
+      if (pointerDownRef.current) return;
+      startCoast();
+    }, 32);
+  }, [startCoast]);
+
+  useEffect(() => {
+    const onDown = () => {
+      pointerDownRef.current = true;
+      pannedRef.current = false;
+      stopInertia();
+    };
+    const onUp = () => {
+      if (!pointerDownRef.current) return;
+      pointerDownRef.current = false;
+      if (pannedRef.current) startCoast();
+      else settleInteraction();
+    };
+    // pointerdown is capture so the button state is set before the pan samples.
+    // pointerup stays bubble so d3-zoom's window mouseup (capture) ends first.
+    window.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    return () => {
+      window.removeEventListener('pointerdown', onDown, true);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      stopInertia();
+    };
+  }, [settleInteraction, startCoast, stopInertia]);
   // Zoomed-out overview (many nodes at once): the same LOD treatment we give
   // an active drag/pan also applies here permanently, since backdrop-blur and
   // shadows on dozens of simultaneously-visible cards cost real frame time
@@ -1777,68 +1907,39 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           }
         }}
         onInit={restoreViewport}
-        onMoveStart={() => {
+        onMoveStart={(event, v) => {
+          if (!event || applyingCoastRef.current) return;
+          stopInertia();
           isPanningRef.current = true;
           setIsInteracting(true);
           panSamplesRef.current = [];
+          gestureZoomRef.current = v.zoom;
+          pannedRef.current = false;
         }}
-        onMove={(_, v) => {
-          // Track the pan trajectory so a flick release can glide. Zoom-only
-          // moves (x/y unchanged) also land here but contribute no velocity.
+        onMove={(event, v) => {
+          if (!event || applyingCoastRef.current) return;
+          if (coastingRef.current) stopInertia();
+          pannedRef.current = true;
           const s = panSamplesRef.current;
-          s.push({ t: performance.now(), x: v.x, y: v.y });
+          s.push({ t: performance.now(), x: v.x, y: v.y, z: v.zoom });
           if (s.length > 6) s.shift();
+          // Wheel / trackpad has no pointerup. Arm a short coast instead of
+          // waiting for onMoveEnd, which React Flow defers 150ms when
+          // pan-on-scroll is on. Zoom never coasts.
+          if (!pointerDownRef.current && Math.abs(v.zoom - gestureZoomRef.current) <= 0.002) {
+            armCoast();
+          }
         }}
-        onMoveEnd={(_, v) => {
+        onMoveEnd={(event, v) => {
+          if (!event || applyingCoastRef.current) return;
           isPanningRef.current = false;
           try {
             localStorage.setItem(VIEWPORT_KEY(sessionId), JSON.stringify(v));
           } catch {
             /* ignore */
           }
-          // Inertia: take the release velocity from the last ~120ms of panning.
-          // Only the viewport transform animates — same per-frame cost as the
-          // drag itself — and the glide stops under ~1.2s or on any new gesture.
-          const s = panSamplesRef.current;
-          panSamplesRef.current = [];
-          const last = s[s.length - 1];
-          if (!last || s.length < 2) {
-            if (!isDraggingRef.current) setIsInteracting(false);
-            return;
-          }
-          let i = s.length - 2;
-          while (i > 0 && last.t - s[i - 1].t <= 120) i -= 1;
-          const base = s[i];
-          const dt = Math.max(last.t - base.t, 1);
-          const vx = ((last.x - base.x) / dt) * 16.7;
-          const vy = ((last.y - base.y) / dt) * 16.7;
-          const speed = Math.hypot(vx, vy);
-          const MIN_FLICK = 3;
-          if (speed < MIN_FLICK) {
-            if (!isDraggingRef.current) setIsInteracting(false);
-            return;
-          }
-          // One declarative transition: d3 animates the transform smoothly and
-          // a fresh pan/zoom gesture interrupts it natively. Total travel ≈
-          // release velocity (px/frame) × GLIDE_FACTOR — tuned so a fast flick
-          // sails a few hundred px and a slow push barely drifts.
-          const GLIDE_FACTOR = 10;
-          const GLIDE_MS = 700;
-          const target = {
-            x: v.x + vx * GLIDE_FACTOR,
-            y: v.y + vy * GLIDE_FACTOR,
-            zoom: v.zoom,
-          };
-          void rf
-            .setViewport(target, { duration: GLIDE_MS, ease: (t) => 1 - Math.pow(1 - t, 3) })
-            .then(() => {
-              if (!isDraggingRef.current) setIsInteracting(false);
-              try {
-                localStorage.setItem(VIEWPORT_KEY(sessionId), JSON.stringify(target));
-              } catch {
-                /* ignore */
-              }
-            });
+          if (coastingRef.current) return;
+          startCoast();
         }}
         onNodeContextMenu={(e, node) => {
           e.preventDefault();
