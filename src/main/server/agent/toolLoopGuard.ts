@@ -8,6 +8,14 @@
  *   2. The same (tool, args-shape) signature errored K times. Reset only by a
  *      *successful mutating* call — a stuck agent re-reads the same file and
  *      retries the same wrong assumption, so a successful read is not progress.
+ *   3. The same *tool* errored K times within the recent window, regardless of
+ *      args. Catches the "vary the file name / size / format and retry" loop
+ *      (an agent trying to read_file a PNG 80+ times through ever-different
+ *      converted copies), which dodges both (1) — interleaved successful
+ *      write_file/run_command reset the streak — and (2) — every signature is
+ *      new. Reset only by a successful *mutating* call of that same tool;
+ *      other tools' successes don't count, and old entries slide out of the
+ *      window.
  *
  * Two tiers: `warn` surfaces a banner ("this run may be stuck"); `halt` means
  * the caller should abort the turn / fail the node.
@@ -31,6 +39,10 @@ export interface ToolLoopThresholds {
   consecutiveHalt: number;
   signatureWarn: number;
   signatureHalt: number;
+  toolWarn: number;
+  toolHalt: number;
+  /** How many recent outcomes count toward the per-tool failure tally. */
+  toolWindow: number;
 }
 
 export const DEFAULT_TOOL_LOOP_THRESHOLDS: ToolLoopThresholds = {
@@ -38,6 +50,9 @@ export const DEFAULT_TOOL_LOOP_THRESHOLDS: ToolLoopThresholds = {
   consecutiveHalt: 6,
   signatureWarn: 3,
   signatureHalt: 5,
+  toolWarn: 3,
+  toolHalt: 5,
+  toolWindow: 20,
 };
 
 const MUTATING_TOOL_NAMES = new Set([
@@ -117,11 +132,22 @@ export function inspectToolStream(
   const worstSig = [...sigErrors.entries()].sort((a, b) => b[1] - a[1])[0];
   const sigCount = worstSig?.[1] ?? 0;
 
+  const toolErrors = new Map<string, number>();
+  for (const o of outcomes.slice(-thresholds.toolWindow)) {
+    if (!o.ok) toolErrors.set(o.name, (toolErrors.get(o.name) ?? 0) + 1);
+    else if (isMutating(o)) toolErrors.delete(o.name);
+  }
+  const worstTool = [...toolErrors.entries()].sort((a, b) => b[1] - a[1])[0];
+  const toolCount = worstTool?.[1] ?? 0;
+
   if (consecutiveErrors >= thresholds.consecutiveHalt) {
     return { tier: 'halt', reason: `${consecutiveErrors} 次工具调用连续失败` };
   }
   if (sigCount >= thresholds.signatureHalt) {
     return { tier: 'halt', reason: `同一操作 ${shortName(worstSig[0])} 失败 ${sigCount} 次` };
+  }
+  if (toolCount >= thresholds.toolHalt) {
+    return { tier: 'halt', reason: `工具 ${worstTool[0]} 换参数反复失败 ${toolCount} 次` };
   }
 
   // L2 / L3: fingerprint-diversity collapse over the recent window.
@@ -140,6 +166,9 @@ export function inspectToolStream(
   }
   if (sigCount >= thresholds.signatureWarn) {
     return { tier: 'warn', reason: `同一操作 ${shortName(worstSig[0])} 反复失败 ${sigCount} 次` };
+  }
+  if (toolCount >= thresholds.toolWarn) {
+    return { tier: 'warn', reason: `工具 ${worstTool[0]} 换参数反复失败 ${toolCount} 次` };
   }
   return { tier: 'ok', reason: '' };
 }

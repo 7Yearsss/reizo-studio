@@ -91,6 +91,52 @@ describe('inspectToolStream', () => {
     expect(inspectToolStream(stream).tier).toBe('halt');
   });
 
+  it('tool-level: warns then halts when one tool keeps failing with different args, even with mutating successes between', () => {
+    // The real incident: read_file on ever-different converted PNG copies,
+    // interleaved with successful write_file/run_command (which reset the
+    // consecutive streak and never share a signature).
+    const stream: ToolOutcome[] = [];
+    const pushRound = (i: number) => {
+      stream.push(ok('write_file', { path: `_qa_${i}.py`, content: 'x' }));
+      stream.push(ok('run_command', { command: `python _qa_${i}.py` }));
+      stream.push(err('read_file', { path: `thumb_${i}.png` }));
+    };
+    pushRound(0);
+    pushRound(1);
+    expect(inspectToolStream(stream).tier).toBe('ok');
+    pushRound(2);
+    const warn = inspectToolStream(stream);
+    expect(warn.tier).toBe('warn');
+    expect(warn.reason).toContain('read_file');
+    pushRound(3);
+    expect(inspectToolStream(stream).tier).toBe('warn');
+    pushRound(4);
+    const halt = inspectToolStream(stream);
+    expect(halt.tier).toBe('halt');
+    expect(halt.reason).toContain('read_file');
+  });
+
+  it('tool-level: a successful call of the same tool does not clear its failure tally', () => {
+    const stream: ToolOutcome[] = [
+      err('read_file', { path: 'a.png' }),
+      ok('read_file', { path: 'notes.md' }),
+      err('read_file', { path: 'b.png' }),
+      ok('read_file', { path: 'notes.md' }),
+      err('read_file', { path: 'c.png' }),
+    ];
+    expect(inspectToolStream(stream).tier).toBe('warn');
+  });
+
+  it('tool-level: old failures slide out of the window', () => {
+    const stream: ToolOutcome[] = [
+      err('read_file', { path: 'a.png' }),
+      err('read_file', { path: 'b.png' }),
+      ...Array.from({ length: 20 }, (_, i) => ok(`tool_${i}`, { n: i })),
+      err('read_file', { path: 'c.png' }),
+    ];
+    expect(inspectToolStream(stream).tier).toBe('ok');
+  });
+
   it('does not flag a genuinely varied run', () => {
     const stream: ToolOutcome[] = Array.from({ length: 16 }, (_, i) =>
       ok(`tool_${i}`, { n: i }),
