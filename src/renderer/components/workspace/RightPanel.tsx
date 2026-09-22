@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react';
-import { motion } from 'motion/react';
+import { useEffect, useRef, useState } from 'react';
+import { motion, useIsPresent } from 'motion/react';
 import { Maximize2, Minimize2, X } from 'lucide-react';
 import { cn } from '../../lib/cn';
 import { createPortal } from 'react-dom';
@@ -13,6 +13,10 @@ import ArtifactPanel from './ArtifactPanel';
 import CanvasPanel from '../canvas/CanvasPanel';
 import Tooltip from '../ui/Tooltip';
 
+const PANEL_DURATION = 0.22;
+const PANEL_EASE: [number, number, number, number] = [0.16, 1, 0.3, 1];
+// Fallback in case onAnimationComplete never fires (e.g. AnimatePresence initial={false}).
+const CONTENT_READY_FALLBACK_MS = PANEL_DURATION * 1000 + 40;
 
 
 export default function RightPanel({
@@ -28,6 +32,13 @@ export default function RightPanel({
   const sidebarWidth = useUiStore((s) => s.sidebarWidth);
 
   const [isDragging, setIsDragging] = useState(false);
+  const [contentReady, setContentReady] = useState(false);
+  const isPresent = useIsPresent();
+  useEffect(() => {
+    const t = window.setTimeout(() => setContentReady(true), CONTENT_READY_FALLBACK_MS);
+    return () => window.clearTimeout(t);
+  }, []);
+  const showContent = contentReady && isPresent;
   const rightSlot = useTitleBarSlot('right');
   const dragging = useRef(false);
   const startX = useRef(0);
@@ -129,8 +140,9 @@ export default function RightPanel({
       transition={
         isDragging
           ? { duration: 0 }
-          : { type: 'spring', damping: 28, stiffness: 280, mass: 0.6 }
+          : { duration: PANEL_DURATION, ease: PANEL_EASE }
       }
+      onAnimationComplete={() => setContentReady(true)}
       className={cn(
         'relative flex h-full flex-col overflow-hidden bg-sidebar',
         maximized
@@ -181,12 +193,16 @@ export default function RightPanel({
           {maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
         </button>
       </Tooltip>
-      <div className="min-h-0 flex-1">
-        {activeTab === 'canvas' && sessionId && <CanvasPanel key={sessionId} sessionId={sessionId} />}
-        {activeTab === 'artifacts' && sessionId && <ArtifactPanel sessionId={sessionId} />}
-        {activeTab === 'files' && <DirectoryPanel embedded />}
-        {activeTab === 'git' && <GitPanel />}
-        {activeTab === 'terminal' && <TerminalPanel />}
+      <div className="min-h-0 flex-1 bg-sidebar">
+        {showContent && (
+          <>
+            {activeTab === 'canvas' && sessionId && <CanvasPanel key={sessionId} sessionId={sessionId} />}
+            {activeTab === 'artifacts' && sessionId && <ArtifactPanel sessionId={sessionId} />}
+            {activeTab === 'files' && <DirectoryPanel embedded />}
+            {activeTab === 'git' && <GitPanel />}
+            {activeTab === 'terminal' && <TerminalPanel />}
+          </>
+        )}
       </div>
     </motion.aside>
   );
