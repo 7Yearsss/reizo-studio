@@ -32,6 +32,24 @@ export async function listWorkspaceDir(workspaceRoot: string, relativePath = '')
   });
 }
 
+const BINARY_MEDIA_EXTENSIONS = new Set([
+  '.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.ico', '.tiff', '.tif', '.svgz', '.psd',
+  '.mp4', '.mov', '.webm', '.avi', '.mkv',
+  '.mp3', '.wav', '.ogg', '.flac', '.m4a', '.aac',
+  '.zip', '.gz', '.tar', '.7z', '.rar', '.pdf',
+]);
+
+export const BINARY_MEDIA_READ_ERROR =
+  'Cannot read binary media file: read_file only supports UTF-8 text files. ' +
+  'Canvas and image outputs are rendered directly on the user interface; ' +
+  'do not attempt to read or convert binary files.';
+
+export function binaryReadErrorMessage(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  if (BINARY_MEDIA_EXTENSIONS.has(ext)) return BINARY_MEDIA_READ_ERROR;
+  return 'Binary file: read_file only supports UTF-8 text files. Do not attempt to read or convert binary files.';
+}
+
 export async function readWorkspaceText(
   workspaceRoot: string,
   relativePath: string,
@@ -41,7 +59,7 @@ export async function readWorkspaceText(
   const info = await stat(abs);
   if (!info.isFile()) throw new Error('Not a file');
   const buf = await readFile(abs);
-  if (buf.includes(0)) throw new Error('Binary file');
+  if (buf.includes(0)) throw new Error(binaryReadErrorMessage(abs));
   const truncated = buf.byteLength > maxBytes;
   const slice = truncated ? buf.subarray(0, maxBytes) : buf;
   return {

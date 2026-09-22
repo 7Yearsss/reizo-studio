@@ -207,7 +207,8 @@ function buildTools(options: {
       },
     }),
     read_file: tool({
-      description: 'Read a UTF-8 text file from the bound workspace. Path is relative to the workspace root.',
+      description:
+        'Read a UTF-8 text file from the bound workspace. Only works for text files (code, markdown, json, etc.). CANNOT read binary files (images, audio, video, zip). Do not call read_file on images — canvas/image outputs are already rendered to the user. Path is relative to the workspace root.',
       inputSchema: z.object({
         path: z.string().describe('Relative file path inside the workspace.'),
       }),
