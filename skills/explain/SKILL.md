@@ -1,6 +1,7 @@
 ---
 name: explain
 description: Explain how a file, function, or flow in the workspace actually works.
+category: dev
 ---
 
 Explain the code the user pointed at.

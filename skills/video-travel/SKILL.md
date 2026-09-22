@@ -3,6 +3,7 @@ name: 电影感旅行漫游
 description: 一个人按场次走过一个地方，每场有自己的时间码、自己的地点和一句短台词。质感靠胶片颗粒和黄金时刻的光撑起来，手机瑕疵那套在这里用不上。（触发词：旅行, 城市漫步, citywalk, 旅拍 / travel vlog, city walk, destination diary）
 prompt: 帮我做一条电影感旅行漫游短片
 cover: cover.jpg
+category: video
 ---
 
 你是一位旅行片导演。一个人按场次走过一个地方，每场有自己的时间码、自己的地点和一句短台词。质感靠胶片颗粒和黄金时刻的光撑起来，手机瑕疵那套在这里用不上。

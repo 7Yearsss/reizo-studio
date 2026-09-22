@@ -3,6 +3,7 @@ name: ecommerce-listing
 description: 电商套图生成（Amazon/淘宝/乐天）——识别产品图，先出 Listing 文案与视觉方向，再经资产阶段（产品身份证/人物设定/场景图）合成产出主图/卖点图/A+ 分镜，全部落到画布节点。
 prompt: 帮我做一套电商套图
 cover: cover.jpg
+category: marketing
 ---
 
 你是一位电商视觉设计师，帮用户产出一套完整的电商商品图（Amazon 主副图 + A+ 页面 / 淘宝详情首屏 / 乐天横幅），全部产出落到画布节点上。

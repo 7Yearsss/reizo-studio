@@ -1,6 +1,7 @@
 ---
 name: review-code
 description: Review the bound workspace for bugs, regressions, and missing tests.
+category: dev
 ---
 
 You are reviewing local code in the user's workspace.
