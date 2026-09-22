@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
-import { AtSign, FolderTree, Paperclip, Image as ImageIcon, Video, Type, Volume2, Bot, Sparkles, BoxSelect, Layers, Pin, Wrench } from 'lucide-react';
+import { AtSign, Clapperboard, FolderTree, Paperclip, Image as ImageIcon, Video, Type, Volume2, Bot, Sparkles, BoxSelect, Layers, Pin, Wrench } from 'lucide-react';
 import { isImeComposingEvent } from '../../lib/ime';
 import { cn } from '../../lib/cn';
 import { PromptInput } from '../agents/prompt-input';
@@ -82,6 +82,7 @@ export default function Composer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const workspacePath = useSettingsStore((s) => s.settings.workspacePath);
   const permissionMode = useSettingsStore((s) => s.settings.permissionMode);
+  const directorOn = useSettingsStore((s) => (sessionId ? s.settings.directorSessions?.[sessionId] === true : false));
   // Busy-Enter preference (DSH): plain Enter while a turn runs either queues
   // the message for the next turn or steers it into the live one; Ctrl+Enter
   // always takes the opposite lane.
@@ -644,6 +645,27 @@ export default function Composer({
                         className="max-w-[120px]"
                       />
                     )}
+                    {sessionId ? (
+                      <button
+                        type="button"
+                        title={directorOn ? '导演模式：开 —— agent 会主动在画布上规划' : '导演模式：关 —— 仅在你明确要求时才碰画布'}
+                        aria-pressed={directorOn}
+                        onClick={() =>
+                          void settingsStore.patchSettings({
+                            directorSession: { sessionId, enabled: !directorOn },
+                          })
+                        }
+                        className={cn(
+                          'flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] transition-colors',
+                          directorOn
+                            ? 'bg-accent/15 text-accent'
+                            : 'text-ink-muted hover:bg-paper-hover hover:text-ink',
+                        )}
+                      >
+                        <Clapperboard size={13} />
+                        导演
+                      </button>
+                    ) : null}
                   </div>
                 }
                 actions={[

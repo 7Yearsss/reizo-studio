@@ -21,6 +21,7 @@ let state: SettingsState = {
     busyEnter: DEFAULT_BUSY_ENTER,
     computerUse: DEFAULT_COMPUTER_USE,
     mediaModels: {},
+    directorSessions: {},
     activeProviderId: DEFAULT_PROVIDER_ID,
     workspacePath: null,
     providers: [],

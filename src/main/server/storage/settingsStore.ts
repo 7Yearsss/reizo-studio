@@ -24,6 +24,7 @@ interface DiskSettings {
   busyEnter?: BusyEnterBehavior;
   computerUse?: boolean;
   mediaModels?: { image?: string; video?: string };
+  directorSessions?: Record<string, boolean>;
   activeProviderId?: string;
   workspacePath?: string | null;
   providers?: Record<string, { apiKey?: string; model?: string; baseUrl?: string }>;
@@ -80,6 +81,7 @@ export function createSettingsStore(root: string) {
       busyEnter: disk.busyEnter ?? DEFAULT_BUSY_ENTER,
       computerUse: disk.computerUse ?? DEFAULT_COMPUTER_USE,
       mediaModels: disk.mediaModels ?? {},
+      directorSessions: disk.directorSessions ?? {},
       activeProviderId: disk.activeProviderId ?? DEFAULT_PROVIDER_ID,
       workspacePath: disk.workspacePath ?? null,
       providers,
@@ -106,6 +108,8 @@ export function createSettingsStore(root: string) {
       permissionMode: settings.permissionMode,
       busyEnter: settings.busyEnter,
       computerUse: settings.computerUse,
+      mediaModels: settings.mediaModels,
+      directorSessions: settings.directorSessions,
       activeProviderId: settings.activeProviderId,
       workspacePath: settings.workspacePath,
       providers,
@@ -141,6 +145,7 @@ export function createSettingsStore(root: string) {
       busyEnter: settings.busyEnter,
       computerUse: settings.computerUse,
       mediaModels: settings.mediaModels,
+      directorSessions: settings.directorSessions,
       activeProviderId: settings.activeProviderId,
       workspacePath: settings.workspacePath,
       providers,
@@ -156,6 +161,10 @@ export function createSettingsStore(root: string) {
     if (patch.computerUse !== undefined) settings.computerUse = patch.computerUse;
     if (patch.mediaModels) {
       settings.mediaModels = { ...settings.mediaModels, ...patch.mediaModels };
+    }
+    if (patch.directorSession) {
+      const { sessionId, enabled } = patch.directorSession;
+      settings.directorSessions = { ...settings.directorSessions, [sessionId]: enabled };
     }
     if (patch.activeProviderId) {
       if (!PROVIDER_PRESETS.some((p) => p.id === patch.activeProviderId)) {

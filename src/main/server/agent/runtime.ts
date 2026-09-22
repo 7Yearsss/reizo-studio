@@ -1,7 +1,7 @@
 import { isStepCount, streamText, type ModelMessage } from 'ai';
 import { nanoid } from 'nanoid';
 import { getProviderPreset } from '../../../shared/providers';
-import type { ChatStreamEvent, TodoItem } from '../../../shared/stream';
+import { CANVAS_BUDGET_TOOL, type ChatStreamEvent, type MemoryItem, type TodoItem } from '../../../shared/stream';
 import { createOpenAiModel } from './provider/openai';
 import { createAskUserTool, createWorkspaceTools } from './workspaceTools';
 import { createCanvasTools } from './canvasTools';
@@ -16,6 +16,7 @@ import type { CanvasImageParams } from '../../../shared/canvas';
 import { startAgentTurn, abortChatTurn } from './session';
 import { drainSteerInbox } from './steerInbox';
 import { createToolLoopGuard } from './toolLoopGuard';
+import { createCanvasBudget } from './canvasBudget';
 import { consumeInteractions, waitForInteractions } from './permissions';
 import { translateOpenAiChunk } from './translators/openai';
 import { compactAssistantParts, compactModelMessages } from './modelHistory';
@@ -37,7 +38,6 @@ import type { ArtifactStore } from '../storage/artifactStore';
 import type { ProjectStore } from '../storage/projectStore';
 import type { LargeValueStore } from '../storage/largeValueStore';
 import type { MemoryEventsStore } from '../storage/memoryEventsStore';
-import type { MemoryItem } from '../../../shared/stream';
 
 /**
  * Reverse proxies (Cloudflare 524, nginx read timeouts) often fail one
@@ -314,7 +314,9 @@ export async function runChatTurn(options: {
     '- When the user asks to generate, draw, or paint an image (e.g., "生图", "画一张...", "生成图片", "设计海报", "绘制插画"), ALWAYS call the `generate_image` tool directly within this chat conversation. The image will be generated and rendered inline for the user.\n' +
     '- The `generate_image` tool automatically uses the configured provider (such as Reizo key with gpt-image-2). Never refuse or tell the user that OpenAI API Key is missing. Just invoke `generate_image` directly.\n' +
     '- DO NOT touch the canvas or call `add_node(type: "image")` or `open_canvas` for standard image generation requests. Standard image generation belongs 100% in this chat conversation.\n' +
-    '- Canvas Rules: The canvas is for complex multi-step node graphs and workflows. Only call canvas tools (`add_node`, `run_node`, `open_canvas`, etc.) when the user explicitly asks to build or edit a canvas node workflow, wire nodes, or explicitly mentions "在画布上" / "工作流节点". Otherwise, leave the canvas alone so the user can open it manually without distraction.\n' +
+    (settings.directorSessions?.[sessionId]
+      ? '- Canvas Rules (导演模式 ON): You are the director of the session canvas. When a request implies producing multiple assets, a series, or a multi-step creative workflow (e.g. 一套物料, 分镜, 系列图, A/B 方向), proactively plan it on the canvas: lay out the whole plan first using `add_node`/`create_storyboard_pipeline` with `asProposal: true` so the user sees ghost nodes before anything generates. After the user accepts the proposal, run nodes — prefer batching several per pass. For single one-off images, `generate_image` in chat is still correct.\n'
+      : '- Canvas Rules: The canvas is for complex multi-step node graphs and workflows. Only call canvas tools (`add_node`, `run_node`, `open_canvas`, etc.) when the user explicitly asks to build or edit a canvas node workflow, wire nodes, or explicitly mentions "在画布上" / "工作流节点". Otherwise, leave the canvas alone so the user can open it manually without distraction.\n') +
     '- Never expose internal identifiers in user-facing text — no node ids, `canvas:<id>` strings, or tool names. Refer to canvas items by their title/label (e.g. "水彩那张", "方向 B") so the conversation reads naturally.\n' +
     '- Keep reply text concise — never narrate polling, retries, waiting, or tool mechanics ("我会再检查一次", "继续等待结果", "重新提交"). Live status is already shown by the UI; your reply carries only the outcome and facts the user needs.\n' +
     '- ask_user cards already render the question and every option to the user — never restate the question or enumerate the options in your reply, before or after they answer. Respond directly to what they picked (e.g. "好的，扩展画布边缘 —— 我来处理"). When a card collected several answers at once, a single short recap clause is enough.',
@@ -409,9 +411,13 @@ export async function runChatTurn(options: {
       })
     : undefined;
 
+  // One budget per product turn — lives on the stack of this runChatTurn
+  // call, so a permission suspension + resumed pass share the same counters
+  // (the resume happens inside session.startTurn, inside this call).
+  const canvasBudget = createCanvasBudget();
   const canvasTools =
     canvasStore && dataRoot
-      ? createCanvasTools({ sessionId, canvasStore, settingsStore, dataRoot, providerStore: options.canvasProviderStore })
+      ? createCanvasTools({ sessionId, canvasStore, settingsStore, dataRoot, providerStore: options.canvasProviderStore, budget: canvasBudget })
       : undefined;
 
   const artifactTools = artifactStore
@@ -441,7 +447,7 @@ export async function runChatTurn(options: {
       ? {
           ask_user: askTool,
           ...(toolset?.tools ?? {}),
-          ...(canvasTools ?? {}),
+          ...(canvasTools?.tools ?? {}),
           ...(artifactTools ?? {}),
           ...(imageTools ?? {}),
           ...(computerTools?.tools ?? {}),
@@ -604,10 +610,15 @@ export async function runChatTurn(options: {
           });
           continue;
         }
+        // canvas_budget checkpoints aren't real tool calls — args.tool names
+        // the gated call (run_node / run_graph / pipeline) so the result lands
+        // under the name the model actually invoked.
+        const resultName =
+          item.name === CANVAS_BUDGET_TOOL && typeof item.args.tool === 'string' ? item.args.tool : item.name;
         if (item.decision === 'deny') {
           emitToolResult({
             toolCallId: item.toolCallId,
-            name: item.name,
+            name: resultName,
             args: item.args,
             error: 'User denied this tool call',
           });
@@ -618,12 +629,16 @@ export async function runChatTurn(options: {
             ? ((await computerTools?.executeApproved(item.args)) ?? {
                 error: 'Computer control is not enabled for this turn',
               })
-            : ((await toolset?.executeApproved(item.name, item.args)) ?? {
-                error: 'This turn has no workspace tools',
-              });
+            : item.name === CANVAS_BUDGET_TOOL
+              ? ((await canvasTools?.executeApproved(item.args, item.toolCallId)) ?? {
+                  error: 'This turn has no canvas tools',
+                })
+              : ((await toolset?.executeApproved(item.name, item.args)) ?? {
+                  error: 'This turn has no workspace tools',
+                });
         emitToolResult({
           toolCallId: item.toolCallId,
-          name: item.name,
+          name: resultName,
           args: item.args,
           result: outcome.result,
           error: outcome.error,

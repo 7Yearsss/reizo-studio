@@ -1,4 +1,5 @@
 import type { PermissionMode } from '../../../shared/settings';
+import { CANVAS_BUDGET_TOOL } from '../../../shared/stream';
 import type { AskQuestion, ChatStreamEvent, FileDiffPreview } from '../../../shared/stream';
 
 export type PermissionDecision = 'allow' | 'deny' | 'allow-session';
@@ -89,6 +90,10 @@ interface PendingInteraction extends PendingInteractionInfo {
   /** Restored from disk after an app restart — the turn that raised it is
    * gone, so answering it cannot resume the original tool call. */
   restored?: boolean;
+  /** Server-side hook fired when the user answers (canvas budget checkpoint
+   * uses it to raise the execute ceiling — the tool is re-invoked by the model
+   * after resume, so the limit must already be relaxed). Never persisted. */
+  onDecision?: (decision: PermissionDecision) => void;
 }
 
 /** Disk persistence for unanswered `ask` cards (wired by `initInteractionPersistence`). */
@@ -265,6 +270,41 @@ export async function requestPermission(options: {
     return true;
   }
   recordPending({ sessionId, toolCallId, name, args, kind: 'permission', preview });
+  persistPending();
+  return false;
+}
+
+/** Re-exported so callers don't reach into shared/stream for the name. */
+export { CANVAS_BUDGET_TOOL };
+
+/**
+ * Budget gate for canvas executions (director mode). Unlike `requestPermission`
+ * it does not consult `needsApproval` — the checkpoint is a hard ceiling, not a
+ * mode decision. Returns true when the tool may run (under quota, or the user
+ * previously picked allow-session); returns false after recording the pending
+ * checkpoint — caller must then throw `ApprovalRequiredError`. On `allow`, the
+ * caller's `onAllow` raises the ceiling so the retried call passes; `deny`
+ * leaves the ceiling untouched.
+ */
+export function requestBudgetCheckpoint(options: {
+  sessionId: string;
+  toolCallId: string;
+  args: Record<string, unknown>;
+  onAllow: () => void;
+}): boolean {
+  const { sessionId, toolCallId, args, onAllow } = options;
+  if (sessionAllow.get(sessionId)?.has(CANVAS_BUDGET_TOOL)) return true;
+  recordPending({
+    sessionId,
+    toolCallId,
+    name: CANVAS_BUDGET_TOOL,
+    args,
+    kind: 'permission',
+    onDecision: (decision) => {
+      if (decision === 'allow') onAllow();
+      else if (decision === 'allow-session') onAllow();
+    },
+  });
   persistPending();
   return false;
 }
@@ -447,6 +487,11 @@ export function answerPermission(toolCallId: string, decision: PermissionDecisio
     if (!item) continue;
     if (item.decision !== undefined) return true; // idempotent
     item.decision = decision;
+    try {
+      item.onDecision?.(decision);
+    } catch (err) {
+      console.warn('[chat] permission onDecision hook failed', err);
+    }
     if (visibleInteraction.get(sessionId) === toolCallId) visibleInteraction.delete(sessionId);
     console.info(`[chat] permission answered session=${sessionId} id=${toolCallId} decision=${decision}`);
     if (decision === 'allow-session') {

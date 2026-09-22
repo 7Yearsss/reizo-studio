@@ -72,6 +72,14 @@ export function createSettingsRouter(settingsStore: SettingsStore) {
       patch.workspacePath = body.workspacePath;
     }
 
+    if (body.directorSession !== undefined) {
+      const ds = body.directorSession;
+      if (!ds || typeof ds.sessionId !== 'string' || typeof ds.enabled !== 'boolean') {
+        return c.json({ error: 'directorSession must be { sessionId: string, enabled: boolean }' }, 400);
+      }
+      patch.directorSession = { sessionId: ds.sessionId, enabled: ds.enabled };
+    }
+
     if (body.provider !== undefined) {
       if (!body.provider || typeof body.provider.id !== 'string') {
         return c.json({ error: 'provider.id is required' }, 400);

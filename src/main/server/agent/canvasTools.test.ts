@@ -16,7 +16,7 @@ async function setup() {
   const canvasStore = createCanvasStore(handle);
   const settingsStore = createSettingsStore(tmpDir);
   const session = await sessions.create('test-session', null, null);
-  const tools = createCanvasTools({
+  const { tools } = createCanvasTools({
     sessionId: session.id,
     canvasStore,
     settingsStore,

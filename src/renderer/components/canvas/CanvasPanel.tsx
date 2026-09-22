@@ -1914,14 +1914,17 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           }}
         />
 
-        {/* Agent Proposal Diff Review Bar */}
+        {/* Agent Proposal Diff Review Bar + director phase note */}
         <Panel position="top-center" className="mt-3 pointer-events-none z-30">
-          <ProposalBar
-            sessionId={sessionId}
-            onFocusProposals={(ids) => {
-              rf.fitView({ nodes: ids.map((id) => ({ id })), padding: 0.35, duration: 250 });
-            }}
-          />
+          <div className="flex flex-col items-center gap-2">
+            <ProposalBar
+              sessionId={sessionId}
+              onFocusProposals={(ids) => {
+                rf.fitView({ nodes: ids.map((id) => ({ id })), padding: 0.35, duration: 250 });
+              }}
+            />
+            <DirectorPhasePill sessionId={sessionId} />
+          </div>
         </Panel>
 
         {storeNodes.length === 0 ? (
@@ -2872,6 +2875,24 @@ function MenuItem({
       {icon}
       {label}
     </button>
+  );
+}
+
+/** Small progress pill under the ProposalBar while the director is laying out
+ * ghost nodes — the text rhythm between "planning" and "awaiting approval". */
+function DirectorPhasePill({ sessionId }: { sessionId: string }) {
+  const phase = useCanvasStore((s) => s.phaseBySession[sessionId]);
+  if (!phase) return null;
+  return (
+    <div className="flex items-center gap-1.5 rounded-full border border-line/70 bg-paper-raised/90 px-3 py-1 text-[11px] text-ink-muted shadow-lg backdrop-blur">
+      <span className="size-1.5 rounded-full bg-accent animate-pulse" />
+      {phase.label}
+      {phase.step && phase.total ? (
+        <span className="text-ink-faint">
+          {phase.step}/{phase.total}
+        </span>
+      ) : null}
+    </div>
   );
 }
 
