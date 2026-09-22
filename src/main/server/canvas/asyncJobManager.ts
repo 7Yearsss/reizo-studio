@@ -6,6 +6,7 @@ import { getCanvasChannel } from './channel';
 import { broadcastDownstreamDirty, canvasAssetsDir } from './imageExecutor';
 import { getVideoDriver, type VideoGenerateParams } from './videoDrivers';
 import { inputHash } from './graph';
+import type { CanvasNodeOutput } from '../../../shared/canvas';
 
 interface ActiveJob {
   taskId: string;
@@ -83,31 +84,36 @@ export async function submitVideoJob(options: {
 
   cancelVideoJob(canvasId, nodeId);
 
-  // Set running immediately
+  // Set running immediately — merge into the existing output so prior
+  // assets/resultSet survive the rerun (frontend replaces output wholesale
+  // on node_output, so always broadcast the full merged payload).
+  const startOutput: CanvasNodeOutput = { ...(canvasStore.getNode(canvasId, nodeId)?.output ?? {}), progress: 5 };
+  delete startOutput.error;
   const initialUpdate = canvasStore.updateNode(canvasId, nodeId, {
     runState: 'running',
-    output: { progress: 5 },
+    output: startOutput,
   });
   if (initialUpdate) {
     channel.broadcast(initialUpdate.rev, {
       type: 'node_output',
       id: nodeId,
-      output: { progress: 5 },
+      output: startOutput,
       runState: 'running',
     });
   }
 
   const fail = (errorMsg: string) => {
     cancelVideoJob(canvasId, nodeId);
+    const merged = { ...(canvasStore.getNode(canvasId, nodeId)?.output ?? {}), error: errorMsg };
     const res = canvasStore.updateNode(canvasId, nodeId, {
       runState: 'error',
-      output: { error: errorMsg },
+      output: merged,
     });
     if (res) {
       channel.broadcast(res.rev, {
         type: 'node_output',
         id: nodeId,
-        output: { error: errorMsg },
+        output: res.node.output ?? merged,
         runState: 'error',
       });
       broadcastDownstreamDirty(canvasStore, canvasId, nodeId, res.rev);
@@ -148,15 +154,16 @@ export async function submitVideoJob(options: {
 
         if (pollRes.status === 'pending' || pollRes.status === 'processing') {
           const progress = Math.max(10, Math.min(98, pollRes.progress ?? 30));
+          const merged = { ...(canvasStore.getNode(canvasId, nodeId)?.output ?? {}), progress };
           const updated = canvasStore.updateNode(canvasId, nodeId, {
             runState: 'running',
-            output: { progress },
+            output: merged,
           });
           if (updated) {
             channel.broadcast(updated.rev, {
               type: 'node_output',
               id: nodeId,
-              output: { progress },
+              output: merged,
               runState: 'running',
             });
           }
@@ -191,6 +198,17 @@ export async function submitVideoJob(options: {
           const existingNode = canvasStore.getNode(canvasId, nodeId);
           const prevAssets = existingNode?.output?.assets ?? [];
           const combinedAssets = [relPath, ...prevAssets.filter((p) => p !== relPath)].slice(0, 10);
+          const prevResultSet = existingNode?.output?.resultSet ?? [];
+          const combinedResultSet = [
+            { asset: relPath, createdAt: new Date().toISOString(), prompt: params.prompt, model: driverId },
+            ...prevResultSet.filter((it) => it.asset !== relPath),
+          ].slice(0, 10);
+          const doneOutput = {
+            assets: combinedAssets,
+            resultSet: combinedResultSet,
+            activeAssetIndex: 0,
+            progress: 100,
+          };
 
           const snap = canvasStore.getSnapshot(canvasId);
           const incoming = snap ? snap.edges.filter((e) => e.targetId === nodeId).map((e) => e.sourceId) : [];
@@ -201,7 +219,7 @@ export async function submitVideoJob(options: {
 
           const done = canvasStore.updateNode(canvasId, nodeId, {
             runState: 'done',
-            output: { assets: combinedAssets, progress: 100 },
+            output: doneOutput,
             paramsHash,
           });
 
@@ -209,7 +227,7 @@ export async function submitVideoJob(options: {
             channel.broadcast(done.rev, {
               type: 'node_output',
               id: nodeId,
-              output: { assets: combinedAssets, progress: 100 },
+              output: done.node.output ?? doneOutput,
               runState: 'done',
             });
             broadcastDownstreamDirty(canvasStore, canvasId, nodeId, done.rev, false);

@@ -180,6 +180,7 @@ export interface CanvasNodeOutput {
     createdAt?: string;
     seed?: number;
     prompt?: string;
+    model?: string;
   }>;
   activeAssetIndex?: number;
 }

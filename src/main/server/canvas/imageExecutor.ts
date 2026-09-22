@@ -270,19 +270,22 @@ export async function runImageNode(options: {
   const { canvasStore, settingsStore, dataRoot, canvasId, node } = options;
   const channel = getCanvasChannel(canvasId);
 
-  const running = canvasStore.updateNode(canvasId, node.id, { runState: 'running', output: null });
+  // Keep the existing output so previous versions' assets/resultSet survive
+  // the rerun — output is replaced wholesale on write, not merged.
+  const running = canvasStore.updateNode(canvasId, node.id, { runState: 'running' });
   if (running) channel.broadcast(running.rev, { type: 'run_state', id: node.id, runState: 'running' });
 
   const fail = (message: string) => {
+    const merged = { ...(canvasStore.getNode(canvasId, node.id)?.output ?? {}), error: message };
     const res = canvasStore.updateNode(canvasId, node.id, {
       runState: 'error',
-      output: { error: message },
+      output: merged,
     });
     if (res) {
       channel.broadcast(res.rev, {
         type: 'node_output',
         id: node.id,
-        output: res.node.output ?? { error: message },
+        output: res.node.output ?? merged,
         runState: 'error',
       });
       broadcastDownstreamDirty(canvasStore, canvasId, node.id, res.rev);
