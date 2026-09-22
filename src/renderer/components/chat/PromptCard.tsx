@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react';
-import { Send, Square } from 'lucide-react';
+import { FileText, Send, Square, X } from 'lucide-react';
 import { cn } from '../../lib/cn';
 import { isImeComposingEvent } from '../../lib/ime';
 
@@ -18,6 +18,8 @@ export default function PromptCard({
   onKeyDown,
   hint,
   status,
+  canSubmit,
+  files,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -33,8 +35,10 @@ export default function PromptCard({
   onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   hint?: string;
   status?: ReactNode;
+  canSubmit?: boolean;
+  files?: { key: string; name: string; imageUrl?: string; onRemove: () => void }[];
 }) {
-  const canSend = !disabled && Boolean(value.trim());
+  const canSend = !disabled && (canSubmit ?? Boolean(value.trim()));
   const composingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -66,6 +70,31 @@ export default function PromptCard({
       {status ? (
         <div className="mb-3 border-b border-line/70 pb-3">
           {status}
+        </div>
+      ) : null}
+      {files && files.length > 0 ? (
+        <div className="mb-3 flex flex-wrap gap-2">
+          {files.map((f) => (
+            <span
+              key={f.key}
+              className="group/file inline-flex max-w-55 items-center gap-1.5 rounded-lg bg-paper-inset py-1 pl-1.5 pr-2 text-[11px] text-ink"
+            >
+              {f.imageUrl ? (
+                <img src={f.imageUrl} alt="" className="h-6 w-6 rounded object-cover" />
+              ) : (
+                <FileText size={14} className="mx-1 shrink-0 text-ink-muted" />
+              )}
+              <span className="truncate">{f.name}</span>
+              <button
+                type="button"
+                onClick={f.onRemove}
+                className="rounded p-0.5 text-ink-muted opacity-0 transition-opacity hover:bg-line/50 group-hover/file:opacity-100"
+                aria-label="移除文件"
+              >
+                <X size={11} />
+              </button>
+            </span>
+          ))}
         </div>
       ) : null}
       <textarea
