@@ -1,15 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BadgeCheck,
+  Clapperboard,
+  Code2,
   Download,
+  LayoutGrid,
   Loader2,
+  Megaphone,
+  Palette,
   Plug,
   Plus,
   RefreshCw,
   Search,
+  Share2,
   Sparkles,
   Star,
   Trash2,
+  type LucideIcon,
 } from 'lucide-react';
 import { useSkillStore } from '../state/useSkillStore';
 import * as skillStore from '../state/skillStore';
@@ -50,19 +57,131 @@ function coverSrc(coverUrl: string): string | null {
   return coverUrl.startsWith('http') ? coverUrl : `${origin}${coverUrl}`;
 }
 
-function SkillCover({ skill }: { skill: SkillSummary }) {
+const CATEGORY_META: Record<string, { label: string; icon: LucideIcon }> = {
+  video: { label: '视频片型', icon: Clapperboard },
+  marketing: { label: '电商与广告', icon: Megaphone },
+  design: { label: '品牌与设计', icon: Palette },
+  social: { label: '社媒套图', icon: Share2 },
+  dev: { label: '开发工具', icon: Code2 },
+};
+const CATEGORY_ORDER = ['video', 'marketing', 'design', 'social', 'dev'];
+const UNCATEGORIZED = '__other__';
+
+function categoryKeyOf(skill: SkillSummary): string {
+  return skill.category && CATEGORY_META[skill.category] ? skill.category : UNCATEGORIZED;
+}
+
+interface SkillGroup {
+  key: string;
+  label: string;
+  icon: LucideIcon;
+  items: SkillSummary[];
+}
+
+function groupSkills(skills: SkillSummary[]): SkillGroup[] {
+  const byKey = new Map<string, SkillSummary[]>();
+  for (const skill of skills) {
+    const key = categoryKeyOf(skill);
+    const list = byKey.get(key) ?? [];
+    list.push(skill);
+    byKey.set(key, list);
+  }
+  const ordered = [...CATEGORY_ORDER, UNCATEGORIZED];
+  return ordered
+    .filter((key) => byKey.has(key))
+    .map((key) => {
+      const meta = CATEGORY_META[key];
+      return {
+        key,
+        label: meta?.label ?? '其他',
+        icon: meta?.icon ?? LayoutGrid,
+        items: byKey.get(key) ?? [],
+      };
+    });
+}
+
+function InstalledSkillCard({
+  skill,
+  onOpen,
+  onUse,
+  onUninstall,
+}: {
+  skill: SkillSummary;
+  onOpen: () => void;
+  onUse: () => void;
+  onUninstall: () => void;
+}) {
   const [failed, setFailed] = useState(false);
-  const src = skill.coverUrl ? coverSrc(skill.coverUrl) : null;
-  if (!src || failed) return null;
+  const src = skill.coverUrl && !failed ? coverSrc(skill.coverUrl) : null;
+  const sourceLabel = skill.source === 'user' ? '用户' : '内置';
   return (
-    <div className="-mx-5 -mt-5 mb-3 overflow-hidden rounded-t-2xl">
-      <img
-        src={src}
-        alt=""
-        className="aspect-[16/10] w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
-        loading="lazy"
-        onError={() => setFailed(true)}
-      />
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => e.key === 'Enter' && onOpen()}
+      className="group cursor-pointer overflow-hidden rounded-2xl border border-line bg-paper-raised transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg"
+    >
+      {src ? (
+        <div className="relative aspect-[3/2] overflow-hidden bg-paper-inset">
+          <img
+            src={src}
+            alt=""
+            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
+            loading="lazy"
+            onError={() => setFailed(true)}
+          />
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/70 to-transparent" />
+          <span className="absolute left-2.5 top-2.5 rounded-md bg-black/45 px-1.5 py-0.5 text-[10px] font-medium text-white/90 backdrop-blur-sm">
+            {sourceLabel}
+          </span>
+          <h3 className="absolute inset-x-3 bottom-2.5 truncate text-[15px] font-semibold text-white drop-shadow">
+            {skill.name}
+          </h3>
+        </div>
+      ) : (
+        <div className="flex items-center gap-3 bg-paper-inset px-4 py-3.5">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-paper-raised text-ink-muted">
+            <Plug size={16} />
+          </div>
+          <h3 className="min-w-0 truncate font-semibold">{skill.name}</h3>
+          <span className="ml-auto shrink-0 rounded bg-paper-raised px-1.5 py-0.5 text-[10px] text-ink-muted">
+            {sourceLabel}
+          </span>
+        </div>
+      )}
+      <div className="p-4">
+        <p className="line-clamp-2 min-h-[2.5rem] text-[13px] leading-5 text-ink-muted">
+          {skill.description || `/${skill.id}`}
+        </p>
+        <div className="mt-3 flex justify-end gap-3">
+          <button
+            type="button"
+            className="text-xs text-accent hover:underline"
+            onClick={(e) => {
+              e.stopPropagation();
+              onUse();
+            }}
+          >
+            使用
+          </button>
+          {skill.source === 'user' && (
+            <button
+              type="button"
+              className="text-xs text-danger hover:underline"
+              onClick={(e) => {
+                e.stopPropagation();
+                onUninstall();
+              }}
+            >
+              <span className="inline-flex items-center gap-1">
+                <Trash2 size={12} />
+                卸载
+              </span>
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -104,6 +223,7 @@ export default function PluginsPage() {
   const requestSeq = useRef(0);
 
   const installedIds = useMemo(() => new Set(skills.map((s) => s.id)), [skills]);
+  const skillGroups = useMemo(() => groupSkills(skills), [skills]);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedKeyword(keyword.trim()), 350);
@@ -198,54 +318,31 @@ export default function PluginsPage() {
             还没有安装技能 —— 从下方市场挑一个试试。
           </p>
         ) : (
-          <div className="grid max-w-4xl grid-cols-1 gap-4 md:grid-cols-2">
-            {[...skills].sort((a, b) => Number(Boolean(b.coverUrl)) - Number(Boolean(a.coverUrl))).map((skill) => (
-              <div
-                key={skill.id}
-                role="button"
-                tabIndex={0}
-                onClick={() => setDetail({ kind: 'installed', skill })}
-                onKeyDown={(e) => e.key === 'Enter' && setDetail({ kind: 'installed', skill })}
-                className="group cursor-pointer rounded-2xl border border-line bg-paper-raised p-5 transition-shadow hover:shadow-md"
-              >
-                <SkillCover skill={skill} />
-                <div className="mb-2 flex items-center gap-2">
-                  {!skill.coverUrl && <Plug size={16} className="text-ink-muted" />}
-                  <h3 className="font-semibold">{skill.name}</h3>
-                  <span className="rounded bg-paper-inset px-1.5 py-0.5 text-[11px] text-ink-muted">
-                    {skill.source === 'user' ? '用户' : '内置'}
+          <div className="space-y-8">
+            {skillGroups.map((group) => (
+              <div key={group.key}>
+                <div className="mb-3 flex items-center gap-2">
+                  <group.icon size={15} className="text-ink-muted" />
+                  <h3 className="text-sm font-semibold text-ink">{group.label}</h3>
+                  <span className="rounded-full bg-paper-inset px-1.5 py-0.5 text-[10px] text-ink-muted">
+                    {group.items.length}
                   </span>
                 </div>
-                <p className="line-clamp-2 min-h-[2.5rem] text-sm text-ink-muted">
-                  {skill.description || `/${skill.id}`}
-                </p>
-                <div className="mt-4 flex justify-end gap-3">
-                  <button
-                    type="button"
-                    className="text-xs text-accent hover:underline"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void handleUse(skill);
-                    }}
-                  >
-                    使用
-                  </button>
-                  {skill.source === 'user' && (
-                    <button
-                      type="button"
-                      className="text-xs text-danger hover:underline"
-                      onClick={async (e) => {
-                        e.stopPropagation();
-                        await window.reizo.uninstallSkill(skill.id);
-                        await skillStore.loadSkills();
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {group.items.map((skill) => (
+                    <InstalledSkillCard
+                      key={skill.id}
+                      skill={skill}
+                      onOpen={() => setDetail({ kind: 'installed', skill })}
+                      onUse={() => void handleUse(skill)}
+                      onUninstall={() => {
+                        void (async () => {
+                          await window.reizo.uninstallSkill(skill.id);
+                          await skillStore.loadSkills();
+                        })();
                       }}
-                    >
-                      <span className="inline-flex items-center gap-1">
-                        <Trash2 size={12} />
-                        卸载
-                      </span>
-                    </button>
-                  )}
+                    />
+                  ))}
                 </div>
               </div>
             ))}

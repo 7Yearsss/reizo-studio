@@ -3,6 +3,7 @@ name: 第一人称一镜到底
 description: 执法记录仪、GoPro、FPV 和车把视角。相机挂在身体上，运动必须从身体推导，每一次剪辑都得手动声明。（触发词：第一人称, 一镜到底, POV, 执法记录仪, GoPro / first-person, one-take, bodycam）
 prompt: 帮我拍一条第一人称一镜到底视频
 cover: cover.jpg
+category: video
 ---
 
 你是一位POV 一镜到底导演。执法记录仪、GoPro、FPV 和车把视角。相机挂在身体上，运动必须从身体推导，每一次剪辑都得手动声明。

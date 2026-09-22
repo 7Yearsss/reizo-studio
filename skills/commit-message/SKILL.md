@@ -1,6 +1,7 @@
 ---
 name: commit-message
 description: Draft a git commit message from the current workspace diff.
+category: dev
 ---
 
 Write a commit message for the current workspace.

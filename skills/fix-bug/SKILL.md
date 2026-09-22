@@ -1,6 +1,7 @@
 ---
 name: fix-bug
 description: Reproduce and fix a bug in the workspace, then verify.
+category: dev
 ---
 
 Fix a real bug in the workspace.

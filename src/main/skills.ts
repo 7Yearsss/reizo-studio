@@ -10,12 +10,14 @@ export interface Skill {
   prompt?: string;
   /** Optional cover image inside `assets/` — shown as the skill card thumbnail. */
   cover?: string;
+  /** Optional category slug used to group skills on the plugins page. */
+  category?: string;
   source: 'bundled' | 'user';
   /** Directory the skill file lives in — used to serve `skill-asset:` URLs. */
   dir: string;
 }
 
-function parseFrontmatter(raw: string): { name?: string; description?: string; prompt?: string; cover?: string; body: string } {
+function parseFrontmatter(raw: string): { name?: string; description?: string; prompt?: string; cover?: string; category?: string; body: string } {
   if (!raw.startsWith('---')) return { body: raw.trim() };
   const end = raw.indexOf('\n---', 3);
   if (end < 0) return { body: raw.trim() };
@@ -27,7 +29,7 @@ function parseFrontmatter(raw: string): { name?: string; description?: string; p
     if (idx < 0) continue;
     fields[line.slice(0, idx).trim()] = line.slice(idx + 1).trim().replace(/^["']|["']$/g, '');
   }
-  return { name: fields.name, description: fields.description, prompt: fields.prompt, cover: fields.cover, body };
+  return { name: fields.name, description: fields.description, prompt: fields.prompt, cover: fields.cover, category: fields.category, body };
 }
 
 async function loadSkillFile(file: string, source: Skill['source']): Promise<Skill | null> {
@@ -44,6 +46,7 @@ async function loadSkillFile(file: string, source: Skill['source']): Promise<Ski
       description: parsed.description || '',
       prompt: parsed.prompt,
       cover: parsed.cover,
+      category: parsed.category,
       body: parsed.body,
       source,
       dir: path.dirname(file),

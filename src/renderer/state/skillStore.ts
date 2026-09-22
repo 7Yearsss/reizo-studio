@@ -5,6 +5,8 @@ export interface SkillSummary {
   name: string;
   description: string;
   prompt?: string;
+  /** Category slug used to group skills on the plugins page (frontmatter `category`). */
+  category?: string;
   source: 'bundled' | 'user';
   /** Resolved cover image URL for visual skills (set by the server). */
   coverUrl?: string;

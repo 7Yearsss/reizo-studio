@@ -3,6 +3,7 @@ name: 打斗编排片
 description: 打斗要成立，靠的是生物力学、接触点和连招链。写 epic fight 只会得到两个人互相挥空。（触发词：打斗, 武术, 剑戟, 格斗, 动作戏 / combat, fight scene, martial arts）
 prompt: 帮我拍一条打斗动作短片
 cover: cover.jpg
+category: video
 ---
 
 你是一位打斗动作导演。打斗要成立，靠的是生物力学、接触点和连招链。写 epic fight 只会得到两个人互相挥空。
