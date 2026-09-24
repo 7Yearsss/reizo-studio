@@ -1,7 +1,8 @@
 import { Notification } from 'electron';
+import type { SessionStore } from '../shared/chat';
 import { loadSkills } from './skills';
+import { markHeadlessSession, unmarkHeadlessSession } from './server/agent/permissions';
 import { runChatTurn } from './server/agent/runtime';
-import { createFileSessionStore } from './server/storage/fileSessionStore';
 import type { ScheduleStore } from './server/storage/scheduleStore';
 import type { SettingsStore } from './server/storage/settingsStore';
 import type { Schedule } from '../shared/schedule';
@@ -11,14 +12,17 @@ export function startScheduler(options: {
   scheduleStore: ScheduleStore;
   settingsStore: SettingsStore;
   skillsDirs: string[];
+  sessionStore: SessionStore;
 }): () => void {
-  const sessionStore = createFileSessionStore(options.dataRoot);
-  let running = false;
+  const sessionStore = options.sessionStore;
+  /** Schedules currently mid-fire — one stuck run can never starve the rest. */
+  const inflight = new Set<string>();
 
   async function fire(schedule: Schedule): Promise<void> {
+    const settings = await options.settingsStore.get();
+    const session = await sessionStore.create(schedule.name, settings.workspacePath);
+    markHeadlessSession(session.id);
     try {
-      const settings = await options.settingsStore.get();
-      const session = await sessionStore.create(schedule.name, settings.workspacePath);
       const skills = await loadSkills(options.skillsDirs);
       const skill = schedule.skillId ? skills.find((item) => item.id === schedule.skillId) ?? null : null;
       const response = await runChatTurn({
@@ -49,17 +53,17 @@ export function startScheduler(options: {
       } else {
         await options.scheduleStore.markRun(schedule.id, err instanceof Error ? err.message : String(err));
       }
+    } finally {
+      unmarkHeadlessSession(session.id);
     }
   }
 
   async function tick(): Promise<void> {
-    if (running) return;
-    running = true;
-    try {
-      const due = await options.scheduleStore.due();
-      for (const schedule of due) await fire(schedule);
-    } finally {
-      running = false;
+    const due = await options.scheduleStore.due();
+    for (const schedule of due) {
+      if (inflight.has(schedule.id)) continue;
+      inflight.add(schedule.id);
+      void fire(schedule).finally(() => inflight.delete(schedule.id));
     }
   }
 

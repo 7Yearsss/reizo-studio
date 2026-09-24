@@ -173,6 +173,24 @@ export interface ResolvedInteraction {
 
 const sessionAllow = new Map<string, Set<string>>();
 const sinks = new Map<string, (event: ChatStreamEvent) => void>();
+/**
+ * Sessions with no user on the other end (scheduled/heartbeat turns). Any
+ * interaction they raise resolves instantly — a permission reads as `deny`,
+ * an ask reads as the unattended marker — so a headless turn never parks
+ * waiting for a human who cannot exist.
+ */
+const headlessSessions = new Set<string>();
+
+/** Answer every question with a marker the model reads as 'keep going on your own'. */
+const HEADLESS_ASK_ANSWER = '（无人值守的定时任务：没有可用的回答，请按你的最佳判断继续，不要再提问。）';
+
+export function markHeadlessSession(sessionId: string): void {
+  headlessSessions.add(sessionId);
+}
+
+export function unmarkHeadlessSession(sessionId: string): void {
+  headlessSessions.delete(sessionId);
+}
 /** Per-session map of normalized prompt → {question, answer}, for asks already
  * answered this turn. A model that re-asks the same question within the turn
  * gets the earlier answer back instantly instead of surfacing another card. */
@@ -193,6 +211,7 @@ export function clearPermissionSink(sessionId: string): void {
   visibleInteraction.delete(sessionId);
   pending.delete(sessionId);
   answeredAskHistory.delete(sessionId);
+  headlessSessions.delete(sessionId);
   waiters.get(sessionId)?.resolve();
   waiters.delete(sessionId);
   persistPending();
@@ -213,6 +232,13 @@ function recordPending(item: PendingInteraction): void {
   if (!list.some((p) => p.toolCallId === item.toolCallId)) {
     list.push(item);
     pending.set(item.sessionId, list);
+  }
+  if (headlessSessions.has(item.sessionId)) {
+    if (item.kind === 'permission') {
+      item.decision = 'deny';
+    } else if (item.answers === undefined) {
+      item.answers = Object.fromEntries((item.questions ?? []).map((q) => [q.id, HEADLESS_ASK_ANSWER]));
+    }
   }
   emitNextInteraction(item.sessionId);
   // Items can arrive already resolved (answer replayed from history).
@@ -602,6 +628,7 @@ export function consumeInteractions(sessionId: string): ResolvedInteraction[] {
 export function resetPermissionsForTests(): void {
   sessionAllow.clear();
   sinks.clear();
+  headlessSessions.clear();
   visibleInteraction.clear();
   pending.clear();
   answeredAskHistory.clear();

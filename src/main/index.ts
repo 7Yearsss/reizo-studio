@@ -80,7 +80,7 @@ async function bootstrap(): Promise<void> {
     db: dbHandle,
     devServerOrigin: devServerOrigin(),
   });
-  stopScheduler = startScheduler({ dataRoot, scheduleStore, settingsStore, skillsDirs });
+  stopScheduler = startScheduler({ dataRoot, scheduleStore, settingsStore, skillsDirs, sessionStore });
 
   ipcMain.handle(IPC.GET_API_ORIGIN, () => runningServer?.origin);
   ipcMain.handle(IPC.EXPORT_PDF, async (_e, html: string) => {
