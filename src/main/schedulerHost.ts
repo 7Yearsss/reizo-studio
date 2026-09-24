@@ -33,14 +33,22 @@ export function startScheduler(options: {
         throw new Error((body as { error?: string }).error ?? `HTTP ${response.status}`);
       }
       await response.arrayBuffer();
-      await options.scheduleStore.markRun(schedule.id, null);
+      if (schedule.once) {
+        await options.scheduleStore.remove(schedule.id);
+      } else {
+        await options.scheduleStore.markRun(schedule.id, null);
+      }
       try {
         new Notification({ title: 'Reizo 自动化', body: schedule.name }).show();
       } catch {
         /* ignore */
       }
     } catch (err) {
-      await options.scheduleStore.markRun(schedule.id, err instanceof Error ? err.message : String(err));
+      if (schedule.once) {
+        await options.scheduleStore.remove(schedule.id);
+      } else {
+        await options.scheduleStore.markRun(schedule.id, err instanceof Error ? err.message : String(err));
+      }
     }
   }
 

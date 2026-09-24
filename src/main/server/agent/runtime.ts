@@ -4,6 +4,7 @@ import { getProviderPreset } from '../../../shared/providers';
 import { CANVAS_BUDGET_TOOL, type ChatStreamEvent, type MemoryItem, type TodoItem } from '../../../shared/stream';
 import { createOpenAiModel } from './provider/openai';
 import { createAskUserTool, createWorkspaceTools } from './workspaceTools';
+import { createScheduleTools } from './scheduleTools';
 import { createCanvasTools } from './canvasTools';
 import { createArtifactTools } from './artifactTools';
 import { createImageTools } from './imageTools';
@@ -162,6 +163,7 @@ export async function runChatTurn(options: {
   canvasProviderStore?: import('../storage/providerStore').ProviderStore;
   dataRoot?: string;
   memoryEventsStore?: MemoryEventsStore;
+  scheduleStore?: import('../storage/scheduleStore').ScheduleStore;
 }): Promise<Response> {
   const {
     sessionStore,
@@ -179,6 +181,7 @@ export async function runChatTurn(options: {
     canvasStore,
     dataRoot,
     memoryEventsStore,
+    scheduleStore,
   } = options;
 
   let session = await sessionStore.get(sessionId);
@@ -444,8 +447,12 @@ export async function runChatTurn(options: {
   // when no workspace is configured so the agent can always ask questions.
   const askTool = createAskUserTool(sessionId);
 
+  // Automations live outside any workspace — the agent can always schedule
+  // recurring or one-shot follow-up work (paseo-style heartbeat).
+  const scheduleTools = scheduleStore ? createScheduleTools({ scheduleStore }) : undefined;
+
   const tools =
-    toolset?.tools || canvasTools || artifactTools || imageTools || computerTools || askTool
+    toolset?.tools || canvasTools || artifactTools || imageTools || computerTools || scheduleTools || askTool
       ? {
           ask_user: askTool,
           ...(toolset?.tools ?? {}),
@@ -453,6 +460,7 @@ export async function runChatTurn(options: {
           ...(artifactTools ?? {}),
           ...(imageTools ?? {}),
           ...(computerTools?.tools ?? {}),
+          ...(scheduleTools ?? {}),
         }
       : undefined;
 
