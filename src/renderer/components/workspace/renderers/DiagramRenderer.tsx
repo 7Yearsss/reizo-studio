@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertCircle, Download, LoaderCircle, RefreshCw } from 'lucide-react';
 import type { ExcalidrawInitialDataState, ExcalidrawProps } from '@excalidraw/excalidraw/types';
 import type { ArtifactRenderProps } from './types';
+import { lazyWithRetry } from '../../../lib/lazyWithRetry';
 import {
   mergeCanvasElements,
   needsCanvasConversion,
@@ -15,7 +16,7 @@ import {
 // eslint-disable-next-line import/no-unresolved
 import '@excalidraw/excalidraw/index.css';
 
-const Excalidraw = React.lazy(async () => {
+const Excalidraw = lazyWithRetry(async () => {
   const mod = await import('@excalidraw/excalidraw');
   return { default: mod.Excalidraw };
 });
