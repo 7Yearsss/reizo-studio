@@ -31,7 +31,14 @@ async function session(): Promise<import('onnxruntime-web').InferenceSession> {
       graphOptimizationLevel: 'all',
     });
   })();
-  return sessionPromise;
+  try {
+    return await sessionPromise;
+  } catch (e) {
+    // A transient failure (model download, wasm init) must not permanently
+    // disable local matting — clear the cache so the next call retries.
+    sessionPromise = null;
+    throw e;
+  }
 }
 
 function letterboxToInput(src: CanvasImageSource, w: number, h: number): HTMLCanvasElement {
@@ -155,14 +162,19 @@ export async function segmentImageBlob(imageUrl: string): Promise<Blob> {
 export async function runMatting(sessionId: string, node: CanvasNode): Promise<void> {
   const rel = node.output?.assets?.[node.output.activeAssetIndex ?? 0] ?? node.output?.assets?.[0];
   const url = rel ? canvasAssetUrlSync(rel) : null;
+  let blob: Blob | null = null;
   if (url) {
     try {
-      const blob = await segmentImageBlob(url);
-      await canvasStore.deriveImageEdit(sessionId, node.id, { kind: 'matting' }, { localResultBlob: blob });
-      return;
+      blob = await segmentImageBlob(url);
     } catch {
-      // fall through to the remote path
+      blob = null;
     }
+  }
+  if (blob) {
+    // Derivation failures (node created but upload failed) must not silently
+    // fall through to the paid path — the caller sees the error instead.
+    await canvasStore.deriveImageEdit(sessionId, node.id, { kind: 'matting' }, { localResultBlob: blob });
+    return;
   }
   await canvasStore.deriveImageEdit(sessionId, node.id, { kind: 'matting' });
 }

@@ -26,6 +26,7 @@ export default function MosaicOverlay({
   const previewRef = useRef<HTMLCanvasElement>(null);
   const tintRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef<{ x: number; y: number } | null>(null);
+  const previewRev = useRef(0);
 
   const [imgSize, setImgSize] = useState({ w: 0, h: 0 });
   const [tool, setTool] = useState<'brush' | 'erase'>('brush');
@@ -56,14 +57,20 @@ export default function MosaicOverlay({
     };
   }, [imageUrl]);
 
-  const repaintPreview = async () => {
+  const repaintPreview = async (blockPx: number) => {
     const preview = previewRef.current;
     const mask = maskRef.current;
     if (!preview || !mask) return;
-    const blob = await mosaicImageBlob(imageUrl, mask, Math.max(4, block) / Math.min(imgSize.w, imgSize.h));
+    const rev = ++previewRev.current;
+    const blob = await mosaicImageBlob(imageUrl, mask, Math.max(4, blockPx) / Math.min(imgSize.w, imgSize.h));
     const bmp = await createImageBitmap(blob);
     const ctx = preview.getContext('2d');
     if (!ctx) return;
+    if (rev !== previewRev.current) {
+      // a newer repaint or a clear superseded this render
+      bmp.close();
+      return;
+    }
     ctx.clearRect(0, 0, preview.width, preview.height);
     ctx.drawImage(bmp, 0, 0);
     bmp.close();
@@ -126,10 +133,11 @@ export default function MosaicOverlay({
   const onPointerUp = () => {
     if (!drawing.current) return;
     drawing.current = null;
-    void repaintPreview();
+    void repaintPreview(block);
   };
 
   const clearMask = () => {
+    previewRev.current += 1;
     for (const c of [maskRef.current, tintRef.current, previewRef.current]) {
       const ctx = c?.getContext('2d');
       ctx?.clearRect(0, 0, c?.width ?? 0, c?.height ?? 0);
@@ -197,7 +205,7 @@ export default function MosaicOverlay({
             max={120}
             onChange={(v) => {
               setBlock(v);
-              if (hasInk) void repaintPreview();
+              if (hasInk) void repaintPreview(v);
             }}
           />
           <p className="text-[11px] leading-relaxed text-ink-muted">在图上涂抹需要打码的区域，松开即可预览效果。</p>

@@ -16,11 +16,16 @@ const ORT_FILE_RE = /^[\w.-]+\.(wasm|mjs)$/;
 function ortDistDir(): string | null {
   const candidates = [
     process.env.REIZO_ORT_DIR,
-    process.resourcesPath ? path.join(process.resourcesPath, 'onnxruntime-web') : undefined,
+    // Packaged builds: forge copies the needed ort-wasm-* files flat into
+    // resources/ (see extraResource in forge.config.ts).
+    process.resourcesPath,
+    // Dev: served straight out of node_modules.
     path.resolve(process.cwd(), 'node_modules/onnxruntime-web/dist'),
   ].filter((p): p is string => Boolean(p));
   for (const dir of candidates) {
-    if (existsSync(dir)) return dir;
+    // Probe for an actual wasm file — under Electron dev, process.resourcesPath
+    // exists (Electron's own resources dir) but contains none of ours.
+    if (dir && existsSync(path.join(dir, 'ort-wasm-simd-threaded.wasm'))) return dir;
   }
   return null;
 }
