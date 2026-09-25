@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { motion, useIsPresent } from 'motion/react';
 import { Maximize2, Minimize2, X } from 'lucide-react';
 import { cn } from '../../lib/cn';
@@ -11,10 +11,11 @@ import GitPanel from './GitPanel';
 import TerminalPanel from './TerminalPanel';
 import Tooltip from '../ui/Tooltip';
 import CanvasSkeleton from '../canvas/CanvasSkeleton';
+import { lazyWithRetry } from '../../lib/lazyWithRetry';
 
 // Heavy panels are code-split so the drawer shell never waits on their bundle.
-const CanvasPanel = lazy(() => import('../canvas/CanvasPanel'));
-const ArtifactPanel = lazy(() => import('./ArtifactPanel'));
+const CanvasPanel = lazyWithRetry(() => import('../canvas/CanvasPanel'));
+const ArtifactPanel = lazyWithRetry(() => import('./ArtifactPanel'));
 
 const PANEL_DURATION = 0.22;
 const PANEL_EASE: [number, number, number, number] = [0.16, 1, 0.3, 1];
