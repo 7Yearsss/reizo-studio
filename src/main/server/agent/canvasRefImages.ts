@@ -1,4 +1,4 @@
-import type { ImagePart, ModelMessage, TextPart } from 'ai';
+import type { FilePart, ModelMessage, TextPart } from 'ai';
 import type { CanvasStore } from '../storage/canvasStore';
 import { readCanvasAsset } from '../canvas/imageExecutor';
 
@@ -52,7 +52,7 @@ export async function inlineCanvasRefImages(
   const canvas = canvasStore.findCanvasBySession(sessionId);
   if (!canvas) return;
 
-  const parts: Array<TextPart | ImagePart> = [];
+  const parts: Array<TextPart | FilePart> = [];
   for (const id of ids) {
     const node = canvasStore.getNode(canvas.id, id);
     const assets = node?.output?.assets ?? [];
@@ -62,7 +62,7 @@ export async function inlineCanvasRefImages(
       const bytes = await readCanvasAsset(dataRoot, rel);
       if (bytes.byteLength > MAX_INLINE_BYTES) continue;
       parts.push({ type: 'text', text: `Image of canvas node ${id} (${node.title || 'untitled'}):` });
-      parts.push({ type: 'image', image: new Uint8Array(bytes), mediaType: mediaTypeOf(rel) });
+      parts.push({ type: 'file', data: new Uint8Array(bytes), mediaType: mediaTypeOf(rel) });
     } catch {
       /* skip unreadable asset */
     }

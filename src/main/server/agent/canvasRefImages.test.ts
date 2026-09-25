@@ -55,10 +55,10 @@ describe('inlineCanvasRefImages', () => {
     expect(history[0].content).toBe('earlier');
     const last = history[2];
     expect(Array.isArray(last.content)).toBe(true);
-    const parts = last.content as Array<{ type: string; text?: string; image?: Uint8Array; mediaType?: string }>;
+    const parts = last.content as Array<{ type: string; text?: string; data?: Uint8Array; mediaType?: string }>;
     expect(parts[0]).toEqual({ type: 'text', text });
-    const image = parts.find((p) => p.type === 'image');
+    const image = parts.find((p) => p.type === 'file');
     expect(image?.mediaType).toBe('image/png');
-    expect(Array.from(image?.image ?? [])).toEqual([1, 2, 3]);
+    expect(Array.from(image?.data ?? [])).toEqual([1, 2, 3]);
   });
 });

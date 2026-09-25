@@ -72,6 +72,21 @@ function runGraphScope(
  * Returns the latest node snapshots — callers report per-node status instead
  * of the agent polling read_canvas in a loop and spamming the message stream.
  */
+/**
+ * Longest a waiting run_node/run_graph blocks the tool call. The provider
+ * stream's chunk timeout (runtime PROVIDER_TIMEOUT.chunkMs, 3 min) keeps
+ * ticking while a tool executes, so a wait past it aborts the whole turn.
+ * Nodes still running at the deadline are handed to jobWatch instead.
+ */
+export const MAX_TOOL_WAIT_MS = 150_000;
+
+const STILL_RUNNING_NOTE =
+  'Some nodes are still rendering. Do not poll or re-run them — a system notice lands in this turn as each one settles.';
+
+function waitBudget(timeoutMs: number | undefined): number {
+  return Math.min(timeoutMs ?? MAX_TOOL_WAIT_MS, MAX_TOOL_WAIT_MS);
+}
+
 async function settleNodes(
   canvasStore: CanvasStore,
   canvasId: string,
@@ -526,7 +541,7 @@ export function createCanvasTools(options: {
       inputSchema: z.object({
         id: z.string(),
         wait: z.boolean().optional().describe('Wait for the run to finish (default true).'),
-        timeoutMs: z.number().optional().describe('Max wait in ms (default 300000).'),
+        timeoutMs: z.number().optional().describe(`Max wait in ms (default and cap ${MAX_TOOL_WAIT_MS}); nodes still running then report back via a system notice.`),
       }),
       execute: async ({ id, wait, timeoutMs }, toolOptions) => {
         const canvas = canvasStore.ensureCanvas(sessionId);
@@ -563,9 +578,17 @@ export function createCanvasTools(options: {
           watchCanvasNodeJob(sessionId, canvas.id, canvasStore, [id]);
           return { ok: true, id, status: 'running', ...(repeatNote ? { note: repeatNote } : {}) };
         }
-        const settled = await settleNodes(canvasStore, canvas.id, [id], timeoutMs ?? 300_000, running);
+        const settled = await settleNodes(canvasStore, canvas.id, [id], waitBudget(timeoutMs), running);
         const n = settled[0];
-        return { ok: n?.runState !== 'error', id, status: n?.runState ?? 'running', error: n?.output?.error, ...(repeatNote ? { note: repeatNote } : {}) };
+        const stillRunning = !n || n.runState === 'running';
+        if (stillRunning) watchCanvasNodeJob(sessionId, canvas.id, canvasStore, [id]);
+        return {
+          ok: n?.runState !== 'error',
+          id,
+          status: n?.runState ?? 'running',
+          error: n?.output?.error,
+          ...(stillRunning ? { note: STILL_RUNNING_NOTE } : repeatNote ? { note: repeatNote } : {}),
+        };
       },
     }),
 
@@ -579,7 +602,7 @@ export function createCanvasTools(options: {
           .optional()
           .describe("Explicit whitelist of node ids to run. Pass a group node's memberIds to run just that group."),
         wait: z.boolean().optional().describe('Wait for the run to finish (default true).'),
-        timeoutMs: z.number().optional().describe('Max wait in ms (default 300000).'),
+        timeoutMs: z.number().optional().describe(`Max wait in ms (default and cap ${MAX_TOOL_WAIT_MS}); nodes still running then report back via a system notice.`),
         intent: z
           .string()
           .optional()
@@ -613,11 +636,13 @@ export function createCanvasTools(options: {
             ...(warnings.length > 0 ? { warnings } : {}),
           };
         }
-        const settled = await settleNodes(canvasStore, canvas.id, scope, timeoutMs ?? 300_000, running);
-        const pending = settled.filter((n) => n.runState !== 'done' && n.runState !== 'error').length;
+        const settled = await settleNodes(canvasStore, canvas.id, scope, waitBudget(timeoutMs), running);
+        const pendingIds = settled.filter((n) => n.runState !== 'done' && n.runState !== 'error').map((n) => n.id);
+        if (pendingIds.length > 0) watchCanvasNodeJob(sessionId, canvas.id, canvasStore, pendingIds);
         return {
           ok: settled.every((n) => n.runState === 'done'),
-          status: pending > 0 ? 'running' : 'done',
+          status: pendingIds.length > 0 ? 'running' : 'done',
+          ...(pendingIds.length > 0 ? { note: STILL_RUNNING_NOTE } : {}),
           results: settled.map((n) => ({ id: n.id, title: n.title, status: n.runState, error: n.output?.error })),
           ...(warnings.length > 0 ? { warnings } : {}),
         };
