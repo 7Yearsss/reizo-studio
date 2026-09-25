@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { generateImage } from 'ai';
+import { DEFAULT_DRAFT_IMAGE_MODEL } from '../../../shared/canvas';
 import type { AnchorRole, AnchorStrength, CanvasImageParams, CanvasNode } from '../../../shared/canvas';
 import { buildEditPrompt } from '../../../shared/canvasImageEdit';
 import { getProviderPreset } from '../../../shared/providers';
@@ -163,7 +164,9 @@ async function resolveImageProvider(
   }
   const baseUrl = stored.baseUrl || preset.baseUrl;
   const isOfficial = !baseUrl || baseUrl.includes('api.openai.com');
-  const modelId = params.model || settings.mediaModels?.image || (isOfficial ? 'dall-e-3' : 'gpt-image-2');
+  const modelId = params.draft
+    ? settings.mediaModels?.draft || DEFAULT_DRAFT_IMAGE_MODEL
+    : params.model || settings.mediaModels?.image || (isOfficial ? 'dall-e-3' : 'gpt-image-2');
   const provider = createOpenAiProvider({ apiKey: stored.apiKey, baseUrl });
   return { provider, modelId, apiKey: stored.apiKey, baseUrl };
 }

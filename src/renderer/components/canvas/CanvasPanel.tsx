@@ -2013,6 +2013,23 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
             }
             flash(`已删除 ${selectedNodes.length} 个节点`);
           }}
+          draftCount={
+            selectedNodes.filter(
+              (n) => n.type === 'image' && (n.params as { draft?: boolean }).draft === true,
+            ).length
+          }
+          onRefineDrafts={() => {
+            const drafts = selectedNodes.filter(
+              (n) => n.type === 'image' && (n.params as { draft?: boolean }).draft === true,
+            );
+            for (const n of drafts) {
+              const params = { ...(n.params as Record<string, unknown>), draft: false };
+              void canvasStore
+                .updateNodeParams(sessionId, n.id, params)
+                .then(() => canvasStore.runNode(sessionId, n.id));
+            }
+            flash(`已启动精渲 ${drafts.length} 张草稿`);
+          }}
         />
 
         {/* Agent Proposal Diff Review Bar + director phase note */}

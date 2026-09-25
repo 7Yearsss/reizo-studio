@@ -17,6 +17,9 @@ export interface StoredProvider {
 export interface MediaModels {
   image?: string;
   video?: string;
+  /** Draft-tier image model for `draft` canvas nodes (fast previews). Falls back
+   * to `DEFAULT_DRAFT_IMAGE_MODEL` when unset. */
+  draft?: string;
 }
 
 export interface LocalSettings {

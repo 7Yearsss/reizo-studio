@@ -30,6 +30,9 @@ export interface CanvasImageParams {
   prompt: string;
   size: '1024x1024' | '1024x1536' | '1536x1024';
   model?: string;
+  /** Draft tier: run on the fast draft model (settings.mediaModels.draft) for quick
+   * preview passes. Cleared when the user hits 精渲 to re-render on the quality model. */
+  draft?: boolean;
   count?: 1 | 2 | 4;
   /** Palette of canvas nodes available to @ from this composer. Wires follow inline @, not this list. */
   refNodeIds?: string[];
@@ -231,6 +234,10 @@ export const CANVAS_IMAGE_MODELS: readonly { id: string; name: string; badge?: s
   { id: 'gemini-3-pro-image-preview', name: 'Gemini 3 Pro Image Preview', description: '预览版' },
   { id: 'mj_imagine', name: 'Midjourney Imagine', description: '风格化插画' },
 ];
+
+/** Fallback draft-tier image model when `mediaModels.draft` is unset — used by
+ * nodes with `params.draft` for quick preview passes before 精渲. */
+export const DEFAULT_DRAFT_IMAGE_MODEL = 'gemini-3.1-flash-image';
 
 export interface VideoModelCapabilities {
   startFrame: boolean;
