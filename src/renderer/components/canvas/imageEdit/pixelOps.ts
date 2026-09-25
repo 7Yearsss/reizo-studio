@@ -68,6 +68,89 @@ export async function compositeOverlayBlob(src: string, overlay: HTMLCanvasEleme
   return canvasToPngBlob(canvas);
 }
 
+/** 翻转 + 90° 倍数旋转。rotateDeg 归一化到 [0,360)。 */
+export async function transformImageBlob(
+  src: string,
+  opts: { flipH?: boolean; flipV?: boolean; rotateDeg?: number },
+): Promise<Blob> {
+  const img = await loadHtmlImage(src);
+  const deg = ((opts.rotateDeg ?? 0) % 360 + 360) % 360;
+  const swap = deg === 90 || deg === 270;
+  const canvas = makeCanvas(swap ? img.naturalHeight : img.naturalWidth, swap ? img.naturalWidth : img.naturalHeight);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('无法创建画布');
+  ctx.save();
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.rotate((deg * Math.PI) / 180);
+  ctx.scale(opts.flipH ? -1 : 1, opts.flipV ? -1 : 1);
+  ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+  ctx.restore();
+  return canvasToPngBlob(canvas);
+}
+
+export interface AdjustSpec {
+  brightness?: number;
+  contrast?: number;
+  saturation?: number;
+  /** 0..1，映射为 sepia 暖调强度。 */
+  warmth?: number;
+  hueDeg?: number;
+}
+
+export function adjustCssFilter(spec: AdjustSpec): string {
+  const parts: string[] = [];
+  if (spec.brightness !== undefined && spec.brightness !== 1) parts.push(`brightness(${spec.brightness})`);
+  if (spec.contrast !== undefined && spec.contrast !== 1) parts.push(`contrast(${spec.contrast})`);
+  if (spec.saturation !== undefined && spec.saturation !== 1) parts.push(`saturate(${spec.saturation})`);
+  if (spec.warmth) parts.push(`sepia(${Math.min(0.4, spec.warmth * 0.4)})`);
+  if (spec.hueDeg) parts.push(`hue-rotate(${spec.hueDeg}deg)`);
+  return parts.join(' ') || 'none';
+}
+
+export async function adjustImageBlob(src: string, spec: AdjustSpec): Promise<Blob> {
+  const img = await loadHtmlImage(src);
+  const canvas = makeCanvas(img.naturalWidth, img.naturalHeight);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('无法创建画布');
+  ctx.filter = adjustCssFilter(spec);
+  ctx.drawImage(img, 0, 0);
+  return canvasToPngBlob(canvas);
+}
+
+/**
+ * 马赛克：mask 白区（不透明）内的像素块化，其余逐像素保留。
+ * blockRatio 为块边长占最短边的比例。
+ */
+export async function mosaicImageBlob(src: string, mask: HTMLCanvasElement, blockRatio = 0.02): Promise<Blob> {
+  const img = await loadHtmlImage(src);
+  const w = img.naturalWidth;
+  const h = img.naturalHeight;
+  const block = Math.max(2, Math.round(Math.min(w, h) * blockRatio));
+
+  const small = makeCanvas(Math.ceil(w / block), Math.ceil(h / block));
+  const sctx = small.getContext('2d');
+  if (!sctx) throw new Error('无法创建画布');
+  sctx.imageSmoothingEnabled = true;
+  sctx.drawImage(img, 0, 0, small.width, small.height);
+
+  const pixelated = makeCanvas(w, h);
+  const pctx = pixelated.getContext('2d');
+  if (!pctx) throw new Error('无法创建画布');
+  pctx.imageSmoothingEnabled = false;
+  pctx.drawImage(small, 0, 0, w, h);
+  // 仅保留 mask 不透明区
+  pctx.globalCompositeOperation = 'destination-in';
+  pctx.drawImage(mask, 0, 0, w, h);
+  pctx.globalCompositeOperation = 'source-over';
+
+  const canvas = makeCanvas(w, h);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('无法创建画布');
+  ctx.drawImage(img, 0, 0);
+  ctx.drawImage(pixelated, 0, 0);
+  return canvasToPngBlob(canvas);
+}
+
 /**
  * A transparent-background scratch canvas for painting a selection. Selected
  * pixels are drawn opaque white; unselected stay transparent (so the coloured

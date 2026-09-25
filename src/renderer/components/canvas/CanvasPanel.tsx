@@ -1955,7 +1955,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         }}
         proOptions={{ hideAttribution: true }}
         deleteKeyCode={['Backspace', 'Delete']}
-        multiSelectionKeyCode={pickingCanvasRefs ? null : undefined}
+        multiSelectionKeyCode={pickingCanvasRefs ? null : ['Meta', 'Control', 'Shift']}
         panActivationKeyCode="Space"
         panOnDrag={mode === 'pan' ? true : [1]}
         selectionOnDrag={mode === 'select'}

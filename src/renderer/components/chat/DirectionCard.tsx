@@ -18,11 +18,13 @@ function resolveImageUrl(url: string): string | null {
 export default function DirectionCardChoice({
   direction,
   selected,
+  recommended,
   onPick,
   sessionId,
 }: {
   direction: Direction;
   selected: boolean;
+  recommended?: boolean;
   onPick: () => void;
   sessionId?: string;
 }) {
@@ -45,22 +47,28 @@ export default function DirectionCardChoice({
       ].join(' ')}
     >
       {thumbnail && (
-        <div
-          className="group/thumb relative aspect-[4/3] w-full cursor-zoom-in overflow-hidden rounded-md border border-line/50"
-          onClick={(e) => {
-            e.stopPropagation();
-            setZoom(thumbnail);
-          }}
-        >
+        <div className="group/thumb relative aspect-[4/3] w-full overflow-hidden rounded-md border border-line/50">
           <img src={thumbnail} alt={direction.title} className="h-full w-full object-cover" />
-          <span className="absolute right-1.5 top-1.5 rounded-full bg-black/50 p-1 text-white opacity-0 transition-opacity group-hover/thumb:opacity-100">
+          <button
+            type="button"
+            title="放大预览"
+            onClick={(e) => {
+              e.stopPropagation();
+              setZoom(thumbnail);
+            }}
+            className="absolute right-1.5 top-1.5 cursor-zoom-in rounded-full bg-black/50 p-1 text-white opacity-0 transition-opacity hover:bg-black/70 group-hover/thumb:opacity-100"
+          >
             <ZoomIn size={12} />
-          </span>
+          </button>
         </div>
       )}
       <div className="flex items-center justify-between">
         <span className="text-xs font-semibold">{direction.title}</span>
-        {selected && <span className="text-[10px] text-accent">已选</span>}
+        {selected ? (
+          <span className="text-[10px] text-accent">已选</span>
+        ) : recommended ? (
+          <span className="text-[10px] text-success">推荐</span>
+        ) : null}
       </div>
       {zoom ? (
         <div onClick={(e) => e.stopPropagation()}>

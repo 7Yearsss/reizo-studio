@@ -113,7 +113,19 @@ function DirectionAsk({
   onAnswer: (answers: Record<string, string>) => void;
   sessionId?: string;
 }) {
-  const [picks, setPicks] = useState<Record<string, string>>({});
+  // Preselect each question's recommended answer so the auto-resolve countdown
+  // submits choices the user can actually see (and override) instead of
+  // silently picking invisible recommendations.
+  const [picks, setPicks] = useState<Record<string, string>>(() => {
+    const init: Record<string, string> = {};
+    for (const q of pending.questions) {
+      const rec = q.recommended?.trim();
+      if (!rec) continue;
+      if (q.kind === 'direction' && q.directions?.some((d) => d.id === rec)) init[q.id] = rec;
+      else if (q.options?.includes(rec)) init[q.id] = rec;
+    }
+    return init;
+  });
   const [freeText, setFreeText] = useState<Record<string, string>>({});
 
   const complete = pending.questions.every((q) => {
@@ -144,6 +156,7 @@ function DirectionAsk({
                   key={d.id}
                   direction={d}
                   selected={picks[q.id] === d.id}
+                  recommended={q.recommended?.trim() === d.id}
                   onPick={() => setPicks((p) => ({ ...p, [q.id]: d.id }))}
                   sessionId={sessionId}
                 />
@@ -151,19 +164,26 @@ function DirectionAsk({
             </div>
           ) : q.options && q.options.length > 0 ? (
             <div className="flex flex-wrap gap-1.5">
-              {q.options.map((opt) => (
-                <button
-                  key={opt}
-                  type="button"
-                  onClick={() => setPicks((p) => ({ ...p, [q.id]: opt }))}
-                  className={[
-                    'rounded-full px-2.5 py-1 text-[11px]',
-                    picks[q.id] === opt ? 'bg-accent text-white' : 'bg-paper-inset text-ink',
-                  ].join(' ')}
-                >
-                  {opt}
-                </button>
-              ))}
+              {q.options.map((opt) => {
+                const isRec = q.recommended?.trim() === opt;
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => setPicks((p) => ({ ...p, [q.id]: opt }))}
+                    className={[
+                      'rounded-full px-2.5 py-1 text-[11px]',
+                      picks[q.id] === opt
+                        ? 'bg-accent text-white'
+                        : isRec
+                          ? 'bg-paper-inset text-ink ring-1 ring-success/60'
+                          : 'bg-paper-inset text-ink',
+                    ].join(' ')}
+                  >
+                    {opt}
+                  </button>
+                );
+              })}
             </div>
           ) : (
             <input
