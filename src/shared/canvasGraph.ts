@@ -1,5 +1,16 @@
 import type { CanvasEdge, CanvasNode } from './canvas';
 
+/**
+ * An image/video node holding media but no prompt — an upload or import.
+ * It is a pipeline source, not something a graph run can regenerate.
+ */
+export function isImportedMedia(node: CanvasNode): boolean {
+  if (node.type !== 'image' && node.type !== 'video') return false;
+  const prompt = (node.params as { prompt?: unknown } | undefined)?.prompt;
+  const hasPrompt = typeof prompt === 'string' && prompt.trim().length > 0;
+  return !hasPrompt && (node.output?.assets?.length ?? 0) > 0;
+}
+
 /** Direct predecessors of `nodeId` (nodes with an edge into it). */
 export function directUpstream(edges: CanvasEdge[], nodeId: string): string[] {
   return edges.filter((e) => e.targetId === nodeId).map((e) => e.sourceId);

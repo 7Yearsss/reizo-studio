@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CanvasEdge, CanvasNode } from '../../../shared/canvas';
-import { buildPipelineWaves, descendants, directUpstream, inputHash, layoutGraph, topoOrder, wouldCycle } from './graph';
+import { buildPipelineWaves, descendants, directUpstream, inputHash, isImportedMedia, layoutGraph, topoOrder, wouldCycle } from './graph';
 
 function node(id: string): CanvasNode {
   return {
@@ -108,5 +108,15 @@ describe('canvas graph helpers', () => {
       expect(waves[0]).toEqual(['b']);
       expect(waves[1]).toEqual(['c']);
     });
+  });
+
+  it('isImportedMedia flags prompt-less image nodes that already hold media', () => {
+    const upload = { ...node('u'), params: {}, runState: 'done' as const, output: { assets: ['u.png'] } };
+    const generated = { ...node('g'), runState: 'done' as const, output: { assets: ['g.png'] } };
+    const emptyDraft = { ...node('d'), params: { prompt: '  ' } };
+    expect(isImportedMedia(upload)).toBe(true);
+    expect(isImportedMedia(generated)).toBe(false);
+    expect(isImportedMedia(emptyDraft)).toBe(false);
+    expect(isImportedMedia({ ...upload, type: 'note' })).toBe(false);
   });
 });

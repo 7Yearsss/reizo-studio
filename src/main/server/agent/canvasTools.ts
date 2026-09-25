@@ -12,7 +12,7 @@ import { runVideoNode } from '../canvas/videoExecutor';
 import { runAudioNode } from '../canvas/audioExecutor';
 import type { ProviderStore } from '../storage/providerStore';
 import { runGraph } from '../canvas/graphExecutor';
-import { descendants } from '../canvas/graph';
+import { descendants, isImportedMedia } from '../canvas/graph';
 import { findLikelyGaps } from './canvasGapCheck';
 import { watchCanvasNodeJob } from './jobWatch';
 import { CANVAS_BUDGET_ALLOW_BATCH, type CanvasBudget } from './canvasBudget';
@@ -64,7 +64,9 @@ function runGraphScope(
   } else {
     keep = new Set(snap.nodes.map((n) => n.id));
   }
-  return snap.nodes.filter((n) => keep.has(n.id) && RUNNABLE_TYPES.has(n.type)).map((n) => n.id);
+  return snap.nodes
+    .filter((n) => keep.has(n.id) && RUNNABLE_TYPES.has(n.type) && !isImportedMedia(n))
+    .map((n) => n.id);
 }
 
 /**
