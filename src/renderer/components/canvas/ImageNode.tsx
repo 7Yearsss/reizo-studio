@@ -26,6 +26,13 @@ import MultiAnglePanel from './imageEdit/MultiAnglePanel';
 import RelightPanel from './imageEdit/RelightPanel';
 import OutpaintOverlay from './imageEdit/OutpaintOverlay';
 import SplitOverlay from './imageEdit/SplitOverlay';
+import FlipRotateOverlay from './imageEdit/FlipRotateOverlay';
+import AdjustOverlay from './imageEdit/AdjustOverlay';
+import MosaicOverlay from './imageEdit/MosaicOverlay';
+import { runMatting } from './imageEdit/localMatting';
+import EditTextOverlay from './imageEdit/EditTextOverlay';
+import AnimatePanel from './imageEdit/AnimatePanel';
+import { OPEN_ANIMATE_EVENT, type OpenAnimateDetail } from './imageEdit/openAnimate';
 import ImageGenerationPending from './imageEdit/ImageGenerationPending';
 import ParamPopover from './imageEdit/ParamPopover';
 import EditParamsPanel from './imageEdit/EditParamsPanel';
@@ -137,6 +144,18 @@ function ImageEditOverlay({
       />
     );
   }
+  if (kind === 'flip') {
+    return <FlipRotateOverlay sessionId={sessionId} node={node} imageUrl={imageUrl} commitMode={commitMode} onClose={onClose} />;
+  }
+  if (kind === 'adjust') {
+    return <AdjustOverlay sessionId={sessionId} node={node} imageUrl={imageUrl} commitMode={commitMode} onClose={onClose} />;
+  }
+  if (kind === 'mosaic') {
+    return <MosaicOverlay sessionId={sessionId} node={node} imageUrl={imageUrl} commitMode={commitMode} onClose={onClose} />;
+  }
+  if (kind === 'textEdit') {
+    return <EditTextOverlay sessionId={sessionId} node={node} imageUrl={imageUrl} commitMode={commitMode} onClose={onClose} />;
+  }
   return null;
 }
 
@@ -223,6 +242,7 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
   const [activeOverlay, setActiveOverlay] = useState<ImageEditKind | null>(null);
   const [overlayCommitMode, setOverlayCommitMode] = useState<EditCommitMode>('derive');
   const [regionMarkOpen, setRegionMarkOpen] = useState(false);
+  const [animateOpen, setAnimateOpen] = useState(false);
   const [assetIdx, setAssetIdx] = useState(node.output?.activeAssetIndex ?? 0);
   const [variationsCount, setVariationsCount] = useState<1 | 2 | 4>(
     params.count === 4 ? 4 : params.count === 2 ? 2 : 1,
@@ -274,7 +294,7 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
       const detail = (e as CustomEvent<OpenImageEditDetail>).detail;
       if (!detail || detail.sessionId !== sessionId || detail.nodeId !== node.id) return;
       if (detail.kind === 'matting') {
-        void canvasStore.deriveImageEdit(sessionId, node.id, { kind: 'matting' });
+        void runMatting(sessionId, node);
         return;
       }
       setOverlayCommitMode(detail.commitMode ?? 'derive');
@@ -292,6 +312,16 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
     };
     window.addEventListener(OPEN_REGION_MARK_EVENT, onOpen);
     return () => window.removeEventListener(OPEN_REGION_MARK_EVENT, onOpen);
+  }, [sessionId, node.id]);
+
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const detail = (e as CustomEvent<OpenAnimateDetail>).detail;
+      if (!detail || detail.sessionId !== sessionId || detail.nodeId !== node.id) return;
+      setAnimateOpen(true);
+    };
+    window.addEventListener(OPEN_ANIMATE_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_ANIMATE_EVENT, onOpen);
   }, [sessionId, node.id]);
 
   const promptDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -760,6 +790,14 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
           node={node}
           imageUrl={assetUrl}
           onClose={() => setRegionMarkOpen(false)}
+        />
+      ) : null}
+      {animateOpen && assetUrl ? (
+        <AnimatePanel
+          sessionId={sessionId}
+          node={node}
+          imageUrl={assetUrl}
+          onClose={() => setAnimateOpen(false)}
         />
       ) : null}
       {activeOverlay && (overlayCommitMode === 'revise' ? sourceUrl || assetUrl : assetUrl) ? (

@@ -1,15 +1,16 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
-import { Ellipsis, ScanSearch } from 'lucide-react';
+import { Clapperboard, Ellipsis, Loader2, ScanSearch } from 'lucide-react';
 import { useStore } from '@xyflow/react';
 import type { CanvasNode } from '../../../../shared/canvas';
 import { EDIT_META, IMAGE_EDIT_KINDS, type ImageEditKind } from '../../../../shared/canvasImageEdit';
 import { estimateNodeCost } from '../../../../shared/canvasPricing';
 import { cn } from '../../../lib/cn';
 import Tooltip from '../../ui/Tooltip';
-import * as canvasStore from '../../../state/canvasStore';
 import { EditKindIcon } from './editIcons';
 import { openImageEdit } from './openImageEdit';
 import { openRegionMark } from './openRegionMark';
+import { openAnimate } from './openAnimate';
+import { runMatting } from './localMatting';
 import { chromeScale } from '../chromeScale';
 
 const PRIMARY = IMAGE_EDIT_KINDS.filter((k) => EDIT_META[k].primary);
@@ -27,6 +28,7 @@ export default function ImageNodeEditToolbar({
   const zoom = useStore((s) => s.transform[2]) || 1;
   const scale = chromeScale(zoom);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [mattingBusy, setMattingBusy] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -50,7 +52,11 @@ export default function ImageNodeEditToolbar({
   const activate = (kind: ImageEditKind) => {
     setMoreOpen(false);
     if (kind === 'matting') {
-      void canvasStore.deriveImageEdit(sessionId, node.id, { kind: 'matting' });
+      if (mattingBusy) return;
+      // Local ONNX matting is free and ~2s; falls back to the remote AI edit
+      // inside runMatting when the model can't load.
+      setMattingBusy(true);
+      void runMatting(sessionId, node).finally(() => setMattingBusy(false));
       return;
     }
     openImageEdit({ sessionId, nodeId: node.id, kind, commitMode: 'derive' });
@@ -58,7 +64,8 @@ export default function ImageNodeEditToolbar({
 
   const titleFor = (kind: ImageEditKind) => {
     const meta = EDIT_META[kind];
-    if (meta.local) return meta.label;
+    // matting tries the free local ONNX path first, so no cost hint either.
+    if (meta.local || kind === 'matting') return meta.label;
     const cost = estimateNodeCost({
       type: 'image',
       params: { prompt: '', size: '1024x1024', ...(node.params as object), edit: { kind, sourceNodeId: node.id } },
@@ -78,7 +85,12 @@ export default function ImageNodeEditToolbar({
       {PRIMARY.map((kind, i) => (
         <Fragment key={kind}>
           {i > 0 ? <span className="mx-0.5 h-3.5 w-px bg-line" /> : null}
-          <ToolbarBtn kind={kind} title={titleFor(kind)} onClick={() => activate(kind)} />
+          <ToolbarBtn
+            kind={kind}
+            title={titleFor(kind)}
+            busy={kind === 'matting' && mattingBusy}
+            onClick={() => activate(kind)}
+          />
         </Fragment>
       ))}
       <span className="mx-0.5 h-3.5 w-px bg-line" />
@@ -116,6 +128,19 @@ export default function ImageNodeEditToolbar({
                 {EDIT_META[kind].label}
               </button>
             ))}
+            <div className="my-1 h-px bg-line" />
+            <button
+              type="button"
+              title="动态图片 · 生成图生视频"
+              onClick={() => {
+                setMoreOpen(false);
+                openAnimate({ sessionId, nodeId: node.id });
+              }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-ink hover:bg-paper-inset"
+            >
+              <Clapperboard size={13} />
+              动态图片
+            </button>
           </div>
         ) : null}
       </div>
@@ -123,15 +148,26 @@ export default function ImageNodeEditToolbar({
   );
 }
 
-function ToolbarBtn({ kind, title, onClick }: { kind: ImageEditKind; title: string; onClick: () => void }) {
+function ToolbarBtn({
+  kind,
+  title,
+  busy,
+  onClick,
+}: {
+  kind: ImageEditKind;
+  title: string;
+  busy?: boolean;
+  onClick: () => void;
+}) {
   return (
     <Tooltip content={title} side="top" wrapperClassName="inline-flex">
       <button
         type="button"
         onClick={onClick}
-        className="inline-flex h-7 w-7 items-center justify-center rounded-full text-ink hover:bg-paper-inset"
+        disabled={busy}
+        className="inline-flex h-7 w-7 items-center justify-center rounded-full text-ink hover:bg-paper-inset disabled:opacity-60"
       >
-        <EditKindIcon kind={kind} size={14} />
+        {busy ? <Loader2 size={14} className="animate-spin" /> : <EditKindIcon kind={kind} size={14} />}
       </button>
     </Tooltip>
   );

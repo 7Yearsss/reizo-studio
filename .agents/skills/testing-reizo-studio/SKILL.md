@@ -182,3 +182,32 @@ model reply end-to-end.
   focus re-activates the button — click the textarea before Enter-to-send.
 - Fixtures: `POST /api/sessions` creates a session; `GET /api/canvas/<sessionId>` dumps
   node runState/assets — use it to verify generations landed instead of pixel-peeping.
+## Socket pool starvation (fixed in PR #72, keep the diagnostics)
+
+- Chromium caps HTTP/1.1 at 6 sockets per origin (127.0.0.1:47100). Historically every
+  mounted chat tab held persistent streams (canvas live stream per tab + resume streams
+  for suspended turns), starving ALL other renderer fetches — POST /steer, ask answers,
+  /stop would hang 40s+ while curl returned instantly.
+- Since #72: chips/strips use snapshot-only loads, resume streams attach only for the
+  active tab, the canvas stream belongs to the mounted CanvasPanel. If fetches mysteriously
+  hang again during a live turn, diagnose with `ss -tn | grep -c 47100` (renderer-pid
+  sockets) and an in-page `fetch('/api/sessions')` probe vs curl.
+- When testing steer/ask/stop flows, keep extra chat tabs closed to stay well under the cap.
+
+## Composer textareas & renderer freeze pattern
+
+- Multiple hidden textareas exist (one per mounted chat tab — tabs stay mounted,
+  `display:none`). Filter by `getBoundingClientRect().width > 0` to find the
+  visible composer; `insertText`/`focus` on a hidden one silently goes nowhere.
+  Earlier `type` output can linger and double — clear the field before re-inserting.
+- Renderer freeze: process alive but `Runtime.evaluate` times out (~30s) and the
+  window shows a stale painted frame — distinct from the blank-window case.
+  Recovery is an app restart, NOT `Page.reload` (reload is what triggered it).
+- Persisted-vs-live UI state: for features claiming event persistence, check the
+  backing file exists (e.g. <userData>/data/memory-events.json) AND reload before
+  declaring pass — live stream rows render fine while the persist path no-ops.
+- Queued chat messages do NOT survive Page.reload (client-state only) — re-send
+  after reload rather than waiting for auto-drain.
+- opacity-0 hover-only buttons (e.g. memory undo ↩): compute center via
+  getBoundingClientRect, apply DOM→screen scale (≈×0.64 for 1600px viewport),
+  fall back to el.click() when real clicks miss — handler/route still exercised.

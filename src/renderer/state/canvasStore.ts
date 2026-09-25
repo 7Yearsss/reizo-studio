@@ -2479,7 +2479,7 @@ export async function deriveImageEdit(
   );
   if (!newId) return null;
 
-  if (isLocalEdit(spec.kind)) {
+  if (isLocalEdit(spec.kind) || opts?.localResultBlob) {
     if (opts?.localResultBlob) {
       await uploadAssetToNode(
         sessionId,
