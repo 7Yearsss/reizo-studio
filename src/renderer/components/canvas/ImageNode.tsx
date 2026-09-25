@@ -26,6 +26,9 @@ import MultiAnglePanel from './imageEdit/MultiAnglePanel';
 import RelightPanel from './imageEdit/RelightPanel';
 import OutpaintOverlay from './imageEdit/OutpaintOverlay';
 import SplitOverlay from './imageEdit/SplitOverlay';
+import FlipRotateOverlay from './imageEdit/FlipRotateOverlay';
+import AdjustOverlay from './imageEdit/AdjustOverlay';
+import MosaicOverlay from './imageEdit/MosaicOverlay';
 import ImageGenerationPending from './imageEdit/ImageGenerationPending';
 import ParamPopover from './imageEdit/ParamPopover';
 import EditParamsPanel from './imageEdit/EditParamsPanel';
@@ -136,6 +139,15 @@ function ImageEditOverlay({
         onClose={onClose}
       />
     );
+  }
+  if (kind === 'flip') {
+    return <FlipRotateOverlay sessionId={sessionId} node={node} imageUrl={imageUrl} commitMode={commitMode} onClose={onClose} />;
+  }
+  if (kind === 'adjust') {
+    return <AdjustOverlay sessionId={sessionId} node={node} imageUrl={imageUrl} commitMode={commitMode} onClose={onClose} />;
+  }
+  if (kind === 'mosaic') {
+    return <MosaicOverlay sessionId={sessionId} node={node} imageUrl={imageUrl} commitMode={commitMode} onClose={onClose} />;
   }
   return null;
 }

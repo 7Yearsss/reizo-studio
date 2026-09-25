@@ -11,7 +11,10 @@ export type ImageEditKind =
   | 'relight'
   | 'outpaint'
   | 'enhance'
-  | 'matting';
+  | 'matting'
+  | 'flip'
+  | 'adjust'
+  | 'mosaic';
 
 /** 挂在派生 image 节点 params.edit 上的编辑描述符。 */
 export interface ImageEditSpec {
@@ -64,6 +67,16 @@ export interface ImageEditParams {
   targetW?: number;
   targetH?: number;
   grid?: '2x2' | '3x3' | '4x4';
+  /** flip：水平/垂直翻转；rotateDeg 复用上面字段的 90° 倍数语义。 */
+  flipH?: boolean;
+  flipV?: boolean;
+  /** adjust：0..2 增益，1 = 原样；warmth 0..1 偏暖；hueDeg -180..180。 */
+  contrast?: number;
+  saturation?: number;
+  warmth?: number;
+  hueDeg?: number;
+  /** mosaic：像素块边长（相对最短边的比例 0..1）。 */
+  mosaicSize?: number;
 }
 
 export const EDIT_META: Record<
@@ -88,6 +101,9 @@ export const EDIT_META: Record<
   resize: { label: '调整像素', icon: 'Ruler', local: true, needsMask: false, needsCrop: false, primary: false },
   matting: { label: '抠图', icon: 'Scissors', local: false, needsMask: false, needsCrop: false, primary: false },
   split: { label: '切图', icon: 'Grid3x3', local: true, needsMask: false, needsCrop: false, primary: true },
+  flip: { label: '翻转/旋转', icon: 'FlipHorizontal2', local: true, needsMask: false, needsCrop: false, primary: false },
+  adjust: { label: '调色', icon: 'SlidersHorizontal', local: true, needsMask: false, needsCrop: false, primary: true },
+  mosaic: { label: '马赛克', icon: 'Grid2x2', local: true, needsMask: false, needsCrop: false, primary: false },
 };
 
 export const IMAGE_EDIT_KINDS = Object.keys(EDIT_META) as ImageEditKind[];

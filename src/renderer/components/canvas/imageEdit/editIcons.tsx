@@ -4,11 +4,14 @@ import {
   Crop,
   Eraser,
   Expand,
+  FlipHorizontal2,
+  Grid2x2,
   Grid3x3,
   Lightbulb,
   PenLine,
   Ruler,
   Scissors,
+  SlidersHorizontal,
   Sparkles,
   type LucideIcon,
 } from 'lucide-react';
@@ -26,6 +29,9 @@ export const EDIT_ICONS: Record<ImageEditKind, LucideIcon> = {
   resize: Ruler,
   matting: Scissors,
   split: Grid3x3,
+  flip: FlipHorizontal2,
+  adjust: SlidersHorizontal,
+  mosaic: Grid2x2,
 };
 
 export function EditKindIcon({ kind, size = 14 }: { kind: ImageEditKind; size?: number }) {
