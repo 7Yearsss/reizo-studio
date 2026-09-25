@@ -14,7 +14,8 @@ export type ImageEditKind =
   | 'matting'
   | 'flip'
   | 'adjust'
-  | 'mosaic';
+  | 'mosaic'
+  | 'textEdit';
 
 /** 挂在派生 image 节点 params.edit 上的编辑描述符。 */
 export interface ImageEditSpec {
@@ -104,6 +105,7 @@ export const EDIT_META: Record<
   flip: { label: '翻转/旋转', icon: 'FlipHorizontal2', local: true, needsMask: false, needsCrop: false, primary: false },
   adjust: { label: '调色', icon: 'SlidersHorizontal', local: true, needsMask: false, needsCrop: false, primary: true },
   mosaic: { label: '马赛克', icon: 'Grid2x2', local: true, needsMask: false, needsCrop: false, primary: false },
+  textEdit: { label: '编辑文字', icon: 'Type', local: false, needsMask: true, needsCrop: false, primary: false },
 };
 
 export const IMAGE_EDIT_KINDS = Object.keys(EDIT_META) as ImageEditKind[];
@@ -190,6 +192,19 @@ export function buildEditPrompt(spec: ImageEditSpec): string {
       return `提升清晰度与细节,放大约 ${p.scale ?? 2} 倍,${(p.strength ?? 50) > 60 ? '较强' : '适度'}锐化与去噪,不改变内容、构图与色调。`;
     case 'matting':
       return `精确抠出主体,移除背景并输出透明背景(alpha 通道)。发丝、边缘保留细节,不带白边。`;
+    case 'textEdit': {
+      const regions = spec.regions ?? [];
+      const lines = regions.map((r) => {
+        const name = maskColorName(r.color);
+        return `· ${name}区域:${r.instruction.trim() || '把该区域中的文字按描述替换'}`;
+      });
+      return [
+        '第二张图是彩色蒙版,每一种颜色框出图中一处需要修改的文字区域,未着色的部分必须与原图逐像素一致。',
+        '按颜色分别处理:',
+        ...lines,
+        '替换文字时保持原图的字体风格、字号、颜色与排版一致,区域外不做任何改动,边缘无痕。',
+      ].join('\n');
+    }
     default:
       return spec.instruction || '按描述编辑图片。';
   }

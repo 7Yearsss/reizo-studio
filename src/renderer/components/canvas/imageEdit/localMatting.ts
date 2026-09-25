@@ -1,4 +1,6 @@
-import { getResolvedApiOrigin } from '../../../api';
+import { getResolvedApiOrigin, canvasAssetUrlSync } from '../../../api';
+import * as canvasStore from '../../../state/canvasStore';
+import type { CanvasNode } from '../../../../shared/canvas';
 
 // Local background removal: u2netp (ISNet-lite, ~4.7MB) run through
 // onnxruntime-web in the renderer. Both the model and the WASM binaries are
@@ -143,4 +145,24 @@ export async function segmentImageBlob(imageUrl: string): Promise<Blob> {
   return new Promise<Blob>((resolve, reject) => {
     out2.toBlob((b) => (b ? resolve(b) : reject(new Error('encode failed'))), 'image/png');
   });
+}
+
+/**
+ * Run matting for an image node: local ONNX first (free, ~seconds), remote AI
+ * edit as fallback when the model can't load. Used by every entry point that
+ * triggers 抠图 so they all get the same local-first behavior.
+ */
+export async function runMatting(sessionId: string, node: CanvasNode): Promise<void> {
+  const rel = node.output?.assets?.[node.output.activeAssetIndex ?? 0] ?? node.output?.assets?.[0];
+  const url = rel ? canvasAssetUrlSync(rel) : null;
+  if (url) {
+    try {
+      const blob = await segmentImageBlob(url);
+      await canvasStore.deriveImageEdit(sessionId, node.id, { kind: 'matting' }, { localResultBlob: blob });
+      return;
+    } catch {
+      // fall through to the remote path
+    }
+  }
+  await canvasStore.deriveImageEdit(sessionId, node.id, { kind: 'matting' });
 }

@@ -13,6 +13,7 @@ import {
   Scissors,
   SlidersHorizontal,
   Sparkles,
+  Type,
   type LucideIcon,
 } from 'lucide-react';
 import type { ImageEditKind } from '../../../../shared/canvasImageEdit';
@@ -32,6 +33,7 @@ export const EDIT_ICONS: Record<ImageEditKind, LucideIcon> = {
   flip: FlipHorizontal2,
   adjust: SlidersHorizontal,
   mosaic: Grid2x2,
+  textEdit: Type,
 };
 
 export function EditKindIcon({ kind, size = 14 }: { kind: ImageEditKind; size?: number }) {

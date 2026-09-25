@@ -1,17 +1,16 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
-import { Ellipsis, Loader2, ScanSearch } from 'lucide-react';
+import { Clapperboard, Ellipsis, Loader2, ScanSearch } from 'lucide-react';
 import { useStore } from '@xyflow/react';
 import type { CanvasNode } from '../../../../shared/canvas';
 import { EDIT_META, IMAGE_EDIT_KINDS, type ImageEditKind } from '../../../../shared/canvasImageEdit';
 import { estimateNodeCost } from '../../../../shared/canvasPricing';
-import { canvasAssetUrlSync } from '../../../api';
 import { cn } from '../../../lib/cn';
 import Tooltip from '../../ui/Tooltip';
-import * as canvasStore from '../../../state/canvasStore';
 import { EditKindIcon } from './editIcons';
 import { openImageEdit } from './openImageEdit';
 import { openRegionMark } from './openRegionMark';
-import { segmentImageBlob } from './localMatting';
+import { openAnimate } from './openAnimate';
+import { runMatting } from './localMatting';
 import { chromeScale } from '../chromeScale';
 
 const PRIMARY = IMAGE_EDIT_KINDS.filter((k) => EDIT_META[k].primary);
@@ -53,21 +52,11 @@ export default function ImageNodeEditToolbar({
   const activate = (kind: ImageEditKind) => {
     setMoreOpen(false);
     if (kind === 'matting') {
-      const rel = node.output?.assets?.[node.output.activeAssetIndex ?? 0] ?? node.output?.assets?.[0];
-      const url = rel ? canvasAssetUrlSync(rel) : null;
-      // Local ONNX matting is free and ~2s; fall back to the AI edit if the
-      // model can't load (first-run download failure, wasm unsupported, …).
-      if (url && !mattingBusy) {
-        setMattingBusy(true);
-        void segmentImageBlob(url)
-          .then((blob) =>
-            canvasStore.deriveImageEdit(sessionId, node.id, { kind: 'matting' }, { localResultBlob: blob }),
-          )
-          .catch(() => canvasStore.deriveImageEdit(sessionId, node.id, { kind: 'matting' }))
-          .finally(() => setMattingBusy(false));
-        return;
-      }
-      void canvasStore.deriveImageEdit(sessionId, node.id, { kind: 'matting' });
+      if (mattingBusy) return;
+      // Local ONNX matting is free and ~2s; falls back to the remote AI edit
+      // inside runMatting when the model can't load.
+      setMattingBusy(true);
+      void runMatting(sessionId, node).finally(() => setMattingBusy(false));
       return;
     }
     openImageEdit({ sessionId, nodeId: node.id, kind, commitMode: 'derive' });
@@ -139,6 +128,19 @@ export default function ImageNodeEditToolbar({
                 {EDIT_META[kind].label}
               </button>
             ))}
+            <div className="my-1 h-px bg-line" />
+            <button
+              type="button"
+              title="动态图片 · 生成图生视频"
+              onClick={() => {
+                setMoreOpen(false);
+                openAnimate({ sessionId, nodeId: node.id });
+              }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-ink hover:bg-paper-inset"
+            >
+              <Clapperboard size={13} />
+              动态图片
+            </button>
           </div>
         ) : null}
       </div>
