@@ -182,3 +182,23 @@ model reply end-to-end.
   focus re-activates the button — click the textarea before Enter-to-send.
 - Fixtures: `POST /api/sessions` creates a session; `GET /api/canvas/<sessionId>` dumps
   node runState/assets — use it to verify generations landed instead of pixel-peeping.
+
+## Canvas image-node testing
+
+- One `.node-edit-toolbar` exists per mounted image node — pick the one with
+  computed `opacity: '1'` (the hovered/selected node's). Toolbar buttons follow
+  the node, so DOM `.click()` on the visible toolbar is more reliable than
+  screen coordinates; the same handlers still run.
+- Canvas viewport persists in `localStorage["reizo:canvas-viewport:<sessionId>"]`
+  — a stale viewport can render ZERO nodes after reload
+  (`onlyRenderVisibleElements` culls everything off-screen). Clear the key or
+  use 适应全景/F; `0` `.react-flow__node` elements ≠ missing data — check
+  `/api/canvas` fetches and the canvas stream instead.
+- Canvas assets live on disk at `<userData>/data/canvas/<canvasId>/<file>` —
+  verify derived pixels directly with PIL (diff vs expected transform, check
+  alpha channel for matting) instead of eyeballing screenshots.
+- Local matting: `/api/matting/model` downloads u2netp.onnx from GitHub
+  release-assets and caches to `<userData>/data/models/`; wasm binaries come
+  from `/api/matting/ort/*` (served out of node_modules). First run pays the
+  ~4.7MB download once; watch devtools network to confirm the local path ran
+  instead of the AI fallback (seconds, not a model job).
