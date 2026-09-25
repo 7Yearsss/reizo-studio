@@ -2,7 +2,7 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { CANVAS_IMAGE_MODELS, CANVAS_IMAGE_SIZES, defaultNodeBox } from '../../../shared/canvas';
 import { cameraFromPreset } from '../../../shared/cameraMotion';
-import { serializeMention } from '../../../shared/resolveMentions';
+import { canvasMentionIds, serializeMention } from '../../../shared/resolveMentions';
 import type { SettingsStore } from '../storage/settingsStore';
 import type { CanvasStore } from '../storage/canvasStore';
 import { getCanvasChannel } from '../canvas/channel';
@@ -228,7 +228,7 @@ export function createCanvasTools(options: {
 
     add_node: tool({
       description:
-        'Add a node to this session\'s canvas. type "image" generates an image from `prompt`; type "agent" is a research/critique sub-task described by `instruction`; type "video" generates video from `prompt`; type "note" is a screenplay/script sticky note; type "anchor" is a reference pin (the user drops an image onto it) whose `role`/`strength` lock a character or style across shots; type "audio" synthesizes a speech (TTS) track from `prompt` — the result is a standalone audio asset; wiring it into a video node\'s `audio_in` handle only marks the association (the video itself stays silent until a merge/export step exists). In an image/video `prompt` you may embed inline references to other canvas nodes as `@[label](canvas:<nodeId>)` — at run time each becomes an ordered reference image (`<<<image 1>>>`, ...) drawn from that node\'s latest output, so you can say e.g. "把 @[主角定妆](canvas:abc123) 放进 @[雨夜街道](canvas:def456)". Returns the new node id. The canvas panel opens automatically.',
+        'Add a node to this session\'s canvas. type "image" generates an image from `prompt`; type "agent" is a research/critique sub-task described by `instruction`; type "video" generates video from `prompt`; type "note" is a screenplay/script sticky note; type "anchor" is a reference pin (the user drops an image onto it) whose `role`/`strength` lock a character or style across shots; type "audio" synthesizes a speech (TTS) track from `prompt` — the result is a standalone audio asset; wiring it into a video node\'s `audio_in` handle only marks the association (the video itself stays silent until a merge/export step exists). In an image/video `prompt` you may embed inline references to other canvas nodes as `@[label](canvas:<nodeId>)` — at run time each becomes an ordered reference image (`<<<image 1>>>`, ...) drawn from that node\'s latest output, so you can say e.g. "把 @[主角定妆](canvas:abc123) 放进 @[雨夜街道](canvas:def456)". Each referenced node is also wired in as an upstream edge automatically (returned as `wiredFrom`), so `run_graph` renders it first — no `connect_nodes` needed for those. Returns the new node id. The canvas panel opens automatically.',
       inputSchema: z.object({
         type: z.enum(['image', 'agent', 'video', 'note', 'anchor', 'audio']),
         prompt: z.string().optional().describe('Prompt (type "image", "video", or "note").'),
@@ -282,6 +282,17 @@ export function createCanvasTools(options: {
         });
         const channel = getCanvasChannel(canvas.id);
         channel.broadcast(rev, { type: 'node_added', node, operationId: input.operationId });
+        const wiredFrom: string[] = [];
+        if (input.type === 'image' || input.type === 'video') {
+          for (const sourceId of canvasMentionIds(input.prompt ?? '')) {
+            if (!existing.some((n) => n.id === sourceId)) continue;
+            const res = canvasStore.addEdge(canvas.id, { sourceId, targetId: node.id });
+            if (res.edge && res.rev !== undefined) {
+              channel.broadcast(res.rev, { type: 'edge_added', edge: res.edge, operationId: input.operationId });
+              wiredFrom.push(sourceId);
+            }
+          }
+        }
         if (input.asProposal) {
           channel.broadcast(rev, {
             type: 'proposal_created',
@@ -295,6 +306,7 @@ export function createCanvasTools(options: {
           type: node.type,
           asProposal: Boolean(input.asProposal),
           operationId: input.operationId,
+          ...(wiredFrom.length > 0 ? { wiredFrom } : {}),
         };
       },
     }),

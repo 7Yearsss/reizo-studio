@@ -70,6 +70,19 @@ describe('canvasTools', () => {
     expect(res.operationId).toBe('op-add-node');
   });
 
+  it('add_node auto-wires upstream edges from inline canvas mentions', async () => {
+    const { tools, canvasStore, sessionId } = await setup();
+    const canvas = canvasStore.ensureCanvas(sessionId);
+    const product = canvasStore.addNode(canvas.id, { type: 'image', x: 0, y: 0, w: 100, h: 100, params: {} }).node;
+    const res = (await (tools.add_node as any).execute({
+      type: 'image',
+      prompt: `hero shot of @[产品图](canvas:${product.id}) and @[ghost](canvas:missing123)`,
+    })) as { id: string; wiredFrom?: string[] };
+    expect(res.wiredFrom).toEqual([product.id]);
+    const edges = canvasStore.getSnapshot(canvas.id).edges.filter((e) => e.targetId === res.id);
+    expect(edges.map((e) => e.sourceId)).toEqual([product.id]);
+  });
+
   it('creates full storyboard pipeline with asProposal and operationId', async () => {
     const { tools } = await setup();
     const res = (await (tools.create_storyboard_pipeline as any).execute({

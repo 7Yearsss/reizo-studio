@@ -235,7 +235,7 @@ describe('canvasBudget', () => {
   it('run_graph counts its runnable scope, not one call', async () => {
     const { tools, canvasStore, sessionId } = await setup();
     const canvas = canvasStore.ensureCanvas(sessionId);
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < CANVAS_BUDGET_EXECUTE_LIMIT + 1; i++) {
       canvasStore.addNode(canvas.id, {
         type: 'image',
         x: i * 320,
@@ -254,12 +254,12 @@ describe('canvasBudget', () => {
     } catch (e) {
       err = e;
     }
-    // 6 runnable nodes > the limit of 4 — a single call can no longer launder
+    // More runnable nodes than the limit — a single call can no longer launder
     // a whole batch as "one" execution.
     expect(isApprovalRequiredError(err)).toBe(true);
     const args = (err as ApprovalRequiredError).interaction.args;
     expect(args.tool).toBe('run_graph');
-    expect(args.planned).toBe(6);
+    expect(args.planned).toBe(CANVAS_BUDGET_EXECUTE_LIMIT + 2);
   });
 
   it('resume: an approved pipeline checkpoint goes live without duplicating the storyboard', async () => {

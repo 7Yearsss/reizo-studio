@@ -1,4 +1,5 @@
 import type { CanvasStore } from '../storage/canvasStore';
+import { canvasMentionIds } from '../../../shared/resolveMentions';
 
 /**
  * Lightweight, non-blocking heuristics that flag likely-missing pieces of a
@@ -60,16 +61,18 @@ export function findLikelyGaps(
 
   // 2) Multi-shot image set with no consistency reference wired.
   const images = scopeNodes.filter((n) => n.type === 'image');
-  const hasReference = images.some((img) =>
-    snap.edges.some(
+  const hasReference = images.some(
+    (img) =>
+      canvasMentionIds(String((img.params as { prompt?: unknown } | undefined)?.prompt ?? '')).length > 0 ||
+      snap.edges.some(
       (e) =>
         e.targetId === img.id &&
-        (REFERENCE_HANDLE.test(e.targetHandle ?? '') || byId.get(e.sourceId)?.type === 'anchor'),
-    ),
+          (REFERENCE_HANDLE.test(e.targetHandle ?? '') || byId.get(e.sourceId)?.type === 'anchor'),
+      ),
   );
   if (images.length >= 2 && !hasReference) {
     warnings.push(
-      `${images.length} 张镜头图未绑定角色/风格参考（reference/ref_N 边）——跨镜主体一致性可能漂移`,
+      `${images.length} 张镜头图未绑定角色/风格参考（reference 边或 @[](canvas:) 引用）——跨镜主体一致性可能漂移`,
     );
   }
 
