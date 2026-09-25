@@ -645,36 +645,21 @@ export default function Composer({
                         className="max-w-[120px]"
                       />
                     )}
-                    {sessionId ? (
-                      <button
-                        type="button"
-                        title={directorOn ? '导演模式：开 —— agent 会主动在画布上规划' : '导演模式：关 —— 仅在你明确要求时才碰画布'}
-                        aria-pressed={directorOn}
-                        onClick={(e) => {
-                          void settingsStore.patchSettings({
-                            directorSession: { sessionId, enabled: !directorOn },
-                          });
-                          // Drop focus so Enter in the composer doesn't re-toggle it.
-                          e.currentTarget.blur();
-                        }}
-                        className={cn(
-                          'flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] transition-colors',
-                          directorOn
-                            ? 'bg-accent/15 text-accent'
-                            : 'text-ink-muted hover:bg-paper-hover hover:text-ink',
-                        )}
-                      >
-                        <Clapperboard size={13} />
-                        导演
-                      </button>
-                    ) : null}
                   </div>
                 }
                 actions={[
                   { value: 'attach', label: '上传附件', icon: <Paperclip size={14} /> },
                   { value: 'skill', label: '使用技能', description: '等同输入 /', icon: <Wrench size={14} /> },
                   ...(sessionId
-                    ? [{ value: 'canvas-pick', label: '从画布引用 (Insert from canvas)', description: '点击画布节点加入引用', icon: <Layers size={14} /> }]
+                    ? [
+                        { value: 'canvas-pick', label: '从画布引用 (Insert from canvas)', description: '点击画布节点加入引用', icon: <Layers size={14} /> },
+                        {
+                          value: 'director',
+                          label: '导演模式',
+                          description: directorOn ? '已开 —— agent 会主动在画布上规划' : '已关 —— 仅在你明确要求时才碰画布',
+                          icon: <Clapperboard size={14} />,
+                        },
+                      ]
                     : []),
                   ...(workspacePath
                     ? [{ value: 'mention', label: '引用文件', description: '插入 @ 路径', icon: <AtSign size={14} /> }]
@@ -690,6 +675,11 @@ export default function Composer({
                     window.setTimeout(focusComposer, 0);
                   }
                   if (action === 'canvas-pick' && sessionId) chatStore.setPickingReference(sessionId, true);
+                  if (action === 'director' && sessionId) {
+                    void settingsStore.patchSettings({
+                      directorSession: { sessionId, enabled: !directorOn },
+                    });
+                  }
                   if (action === 'mention') setDraft((d) => (d.endsWith('@') ? d : `${d}@`));
                   if (action === 'tree') onToggleTree?.();
                 }}
