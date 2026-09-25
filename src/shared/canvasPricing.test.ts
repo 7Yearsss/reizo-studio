@@ -70,4 +70,14 @@ describe('canvasPricing', () => {
     expect(estimate.runnableCount).toBe(1);
     expect(estimate.totalPoints).toBe(20); // 10s video = 20 pts
   });
+
+  it('does not count uploaded image nodes as runnable', () => {
+    const upload = {
+      id: 'u', canvasId: 'c', type: 'image', x: 0, y: 0, w: 1, h: 1, title: '',
+      params: {}, paramsHash: null, runState: 'done', output: { assets: ['u.png'] }, updatedAt: '',
+    } as unknown as CanvasNode;
+    const estimate = estimateGraphCost([upload], []);
+    expect(estimate.runnableCount).toBe(0);
+    expect(estimate.cachedCount).toBe(0);
+  });
 });

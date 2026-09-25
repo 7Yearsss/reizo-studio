@@ -1,6 +1,6 @@
 import type { CanvasEdge, CanvasImageParams, CanvasNode, CanvasVideoParams } from './canvas';
 import { isLocalEdit } from './canvasImageEdit';
-import { inputHash } from './canvasGraph';
+import { inputHash, isImportedMedia } from './canvasGraph';
 
 /**
  * Estimates the credit/point cost for executing a single canvas node based on its
@@ -58,6 +58,7 @@ export function estimateGraphCost(
   for (const node of nodes) {
     if (inScope && !inScope.has(node.id)) continue;
     if (node.type !== 'image' && node.type !== 'video' && node.type !== 'agent') continue;
+    if (isImportedMedia(node)) continue;
 
     const upEdges = edges.filter((e) => e.targetId === node.id);
     const upstreamNodes = upEdges

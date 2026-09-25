@@ -118,5 +118,7 @@ describe('canvas graph helpers', () => {
     expect(isImportedMedia(generated)).toBe(false);
     expect(isImportedMedia(emptyDraft)).toBe(false);
     expect(isImportedMedia({ ...upload, type: 'note' })).toBe(false);
+    const cropEdit = { ...upload, params: { prompt: '', edit: { kind: 'crop', sourceNodeId: 'u' } } } as unknown as CanvasNode;
+    expect(isImportedMedia(cropEdit)).toBe(false);
   });
 });
