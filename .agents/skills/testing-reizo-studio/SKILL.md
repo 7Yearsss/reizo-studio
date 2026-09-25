@@ -142,3 +142,43 @@ model reply end-to-end.
 - A vite "page reload" mid-turn (any commit touching index.ts while app runs) drops the
   rendered pending card even though the server presented the ask — Page.reload restores it
   via ask persistence.
+- Direction-card clicks: clicking the style IMAGE opens a preview lightbox only
+  (stopPropagation — does NOT select). Click the card's title/label area to pick it;
+  until a direction is picked, 确定 stays disabled with no hint why (complete requires
+  picks[q.id]).
+- Ask cards AUTO-RESOLVE: when every question has a model-recommended answer, the card
+  self-submits after AUTO_RESOLVE_SECONDS (pointer-down anywhere on it snoozes). To
+  answer manually, interact immediately — and match question text loosely when polling
+  (model phrases questions itself, e.g. '请选择投放平台' not '哪个平台').
+- Canvas multi-select: Ctrl+click adds nodes (React Flow default multiSelectionKeyCode);
+  Shift+click does NOT. Drag-select boxes only work in 'select' mode (selectionOnDrag).
+- Draft-tier nodes: verify via GET /api/canvas/<sid> params.draft — 精渲 paths are
+  updateNodeParams(draft:false) + runNode (UI button, MultiSelectToolbar batch, or agent
+  update_node tool). Draft model comes from settings.mediaModels.draft or
+  DEFAULT_DRAFT_IMAGE_MODEL=gemini-3.1-flash-image.
+- Process cleanup: never `pkill -f '<pattern that appears in your own command line>'`
+  (e.g. 'electron-forge start') — it kills your own shell. Kill by PID from pgrep/ss.
+- composer "+" → 从画布引用 enters node-pick mode: click a canvas node to insert its
+  canvas:<id> reference chip into the draft (the ecommerce-listing skill consumes it).
+- Verify skill turns via persisted messages parts (tool names in order) +
+  GET /api/canvas/<sid> node params (size/refs/word-count of prompts) — don't trust
+  screenshots alone.
+
+## Provider key & model fixtures (director-mode / image-gen E2E)
+
+- Configure the provider via `PUT /api/settings` (not PATCH):
+  `{"provider":{"id":"reizo","apiKey":"$REIZO_API_KEY"},"activeProviderId":"reizo"}` —
+  the REIZO_API_KEY secret covers both chat and image-gen paths. Then CDP `Page.reload`.
+- `GET /api/settings/providers/<id>/models` lists the models the token actually serves —
+  the default gpt-5.4 may not exist on the token; pick a served one (e.g. gpt-5.6-sol)
+  and a served image model (e.g. gpt-image-2.5, not flux-schnell if that group is off).
+- Canvas budget + loop-guard `runSigs` are per-turn: identical-params repeats only count
+  within one turn, and *failed* generations still consume the execution budget.
+- `create_storyboard_pipeline(asProposal)` lays ghosts without executing; its budget
+  gate only fires via `autoRunFirstScene` (weight 1 — needs count≥4 already to trip).
+- The renderer canvas stream tails from the snapshot's liveRevision — a `proposal_created`
+  broadcast emitted while no client is attached is never replayed to the review bar.
+- Pressing Enter while a composer action button (e.g. the 🎬 director toggle) still has
+  focus re-activates the button — click the textarea before Enter-to-send.
+- Fixtures: `POST /api/sessions` creates a session; `GET /api/canvas/<sessionId>` dumps
+  node runState/assets — use it to verify generations landed instead of pixel-peeping.
