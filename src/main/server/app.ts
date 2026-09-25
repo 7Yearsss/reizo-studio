@@ -7,6 +7,7 @@ import { createChatRouter } from './routes/chat';
 import { createSettingsRouter } from './routes/settings';
 import { createSkillsRouter } from './routes/skills';
 import { createSchedulesRouter } from './routes/schedules';
+import { createMattingRouter } from './routes/matting';
 import { createScheduleStore } from './storage/scheduleStore';
 import { createThoughtStore } from './storage/thoughtStore';
 import { createProjectStore } from './storage/projectStore';
@@ -185,6 +186,7 @@ export function createApp(options: CreateAppOptions) {
   app.route('/api/skills', createSkillsRouter(skillsDirs));
   app.route('/api/computer-use', createComputerUseRouter(options.dataRoot, settingsStore));
   app.route('/api/schedules', createSchedulesRouter(scheduleStore, thoughtStore));
+  app.route('/api/matting', createMattingRouter(options.dataRoot));
 
   if (canvasStore) {
     app.route(
