@@ -29,7 +29,7 @@ export function createScheduleStore(root: string) {
   return {
     list: read,
 
-    async create(input: { name: string; prompt: string; intervalMs: number; skillId?: string }): Promise<Schedule> {
+    async create(input: { name: string; prompt: string; intervalMs: number; skillId?: string; once?: boolean }): Promise<Schedule> {
       const now = Date.now();
       const schedule: Schedule = {
         id: nanoid(),
@@ -37,6 +37,7 @@ export function createScheduleStore(root: string) {
         prompt: input.prompt,
         skillId: input.skillId,
         intervalMs: input.intervalMs,
+        once: input.once === true || undefined,
         enabled: true,
         lastRunAt: null,
         nextRunAt: new Date(now + input.intervalMs).toISOString(),

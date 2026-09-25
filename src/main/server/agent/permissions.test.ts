@@ -6,11 +6,13 @@ import {
   consumeInteractions,
   initInteractionPersistence,
   isReadOnlyShellCommand,
+  markHeadlessSession,
   pendingAsksForSession,
   registerPendingAsk,
   requestPermission,
   resetPermissionsForTests,
   setPermissionSink,
+  unmarkHeadlessSession,
   waitForInteractions,
   type PersistedInteraction,
 } from './permissions';
@@ -133,6 +135,47 @@ describe('interaction gate', () => {
     expect(consumeInteractions('s1')).toEqual([
       { toolCallId: 'a', name: 'run_command', args: { command: 'rm x' }, kind: 'permission', decision: 'deny', answers: undefined },
     ]);
+  });
+
+  it('auto-denies permissions in a headless session so the turn never suspends', async () => {
+    const events: ChatStreamEvent[] = [];
+    setPermissionSink('s1', (event) => events.push(event));
+    markHeadlessSession('s1');
+    const ok = await requestPermission({
+      sessionId: 's1',
+      toolCallId: 'a',
+      name: 'write_file',
+      args: { path: 'x.txt', content: 'hi' },
+      mode: 'ask',
+    });
+    expect(ok).toBe(false);
+    // Nothing surfaced — there is no human to prompt.
+    expect(ids(events, 'permission')).toEqual([]);
+    // The suspended turn resumes instantly with a deny result.
+    await expect(waitForInteractions('s1')).resolves.toBeUndefined();
+    expect(consumeInteractions('s1')).toEqual([
+      { toolCallId: 'a', name: 'write_file', args: { path: 'x.txt', content: 'hi' }, kind: 'permission', decision: 'deny', answers: undefined },
+    ]);
+    unmarkHeadlessSession('s1');
+  });
+
+  it('auto-answers asks in a headless session with the unattended marker', async () => {
+    const events: ChatStreamEvent[] = [];
+    setPermissionSink('s1', (event) => events.push(event));
+    markHeadlessSession('s1');
+    registerPendingAsk({
+      sessionId: 's1',
+      toolCallId: 'q1',
+      name: 'ask_user',
+      questions: [{ id: 'vibe', prompt: '什么气质?' }],
+    });
+    expect(ids(events, 'ask')).toEqual([]);
+    await expect(waitForInteractions('s1')).resolves.toBeUndefined();
+    const resolved = consumeInteractions('s1');
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0]?.kind).toBe('ask');
+    expect(resolved[0]?.answers?.vibe).toContain('无人值守');
+    unmarkHeadlessSession('s1');
   });
 
   it('routes ask questions through the same gate', async () => {

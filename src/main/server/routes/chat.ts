@@ -17,6 +17,7 @@ import type { LargeValueStore } from '../storage/largeValueStore';
 import type { CanvasStore } from '../storage/canvasStore';
 import type { ProviderStore } from '../storage/providerStore';
 import type { MemoryEventsStore } from '../storage/memoryEventsStore';
+import type { ScheduleStore } from '../storage/scheduleStore';
 
 const DECISIONS = new Set<PermissionDecision>(['allow', 'deny', 'allow-session']);
 
@@ -29,6 +30,7 @@ export function createChatRouter(
   largeValueStore?: LargeValueStore,
   canvas?: { canvasStore?: CanvasStore; dataRoot: string; providerStore?: ProviderStore },
   memoryEventsStore?: MemoryEventsStore,
+  scheduleStore?: ScheduleStore,
 ) {
   const router = new Hono();
 
@@ -97,6 +99,7 @@ export function createChatRouter(
       canvasProviderStore: canvas?.providerStore,
       dataRoot: canvas?.dataRoot,
       memoryEventsStore,
+      scheduleStore,
     });
     console.info(`[chat] stream opened session=${sessionId} status=${response.status}`);
     return response;

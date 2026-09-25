@@ -153,6 +153,8 @@ export function createApp(options: CreateAppOptions) {
   app.get('/api/health', (c) => c.json({ ok: true }));
   const skillsDirs = options.skillsDirs ?? [];
   const memoryEventsStore = createMemoryEventsStore(options.dataRoot);
+  const scheduleStore = options.scheduleStore ?? createScheduleStore(options.dataRoot);
+  const thoughtStore = options.thoughtStore ?? createThoughtStore(options.dataRoot);
   app.route('/api/sessions', createSessionsRouter(sessionStore, artifactStore));
   app.route(
     '/api/sessions',
@@ -169,6 +171,7 @@ export function createApp(options: CreateAppOptions) {
         providerStore,
       },
       memoryEventsStore,
+      scheduleStore,
     ),
   );
   app.route('/api/memory', createMemoryRouter(memoryEventsStore, settingsStore));
@@ -176,8 +179,6 @@ export function createApp(options: CreateAppOptions) {
   app.route('/api/artifacts', createArtifactsRouter(artifactStore));
   app.route('/api/refs', createRefsRouter(largeValueStore));
   app.route('/api/projects', createProjectsRouter(projectStore, sessionStore));
-  const scheduleStore = options.scheduleStore ?? createScheduleStore(options.dataRoot);
-  const thoughtStore = options.thoughtStore ?? createThoughtStore(options.dataRoot);
   app.route('/api/settings', createSettingsRouter(settingsStore));
   app.route('/api/admin/providers', createAdminProvidersRouter(providerStore));
   app.route('/api/providers', createPublicProvidersRouter(providerStore));

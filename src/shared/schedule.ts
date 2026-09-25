@@ -12,6 +12,8 @@ export interface Schedule {
   prompt: string;
   skillId?: string;
   intervalMs: number;
+  /** One-shot schedules delete themselves after their first fire. */
+  once?: boolean;
   enabled: boolean;
   lastRunAt: string | null;
   nextRunAt: string;
