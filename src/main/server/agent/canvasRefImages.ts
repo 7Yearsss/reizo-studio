@@ -1,3 +1,4 @@
+import { nativeImage } from 'electron';
 import type { FilePart, ModelMessage, TextPart } from 'ai';
 import type { CanvasStore } from '../storage/canvasStore';
 import { readCanvasAsset } from '../canvas/imageExecutor';
@@ -6,6 +7,9 @@ import { readCanvasAsset } from '../canvas/imageExecutor';
 const MAX_INLINE_IMAGES = 4;
 /** Skip oversized files rather than blowing the request body. */
 const MAX_INLINE_BYTES = 6 * 1024 * 1024;
+/** Long-edge cap for inlined refs — a 2MB PNG becomes a ~300KB JPEG. The bytes
+ * ship inside every provider request of the turn, so smaller is real latency. */
+const INLINE_MAX_DIM = 1024;
 
 const REF_LINE_RE = /^- ([A-Za-z0-9_-]+) \[image, done\]/gm;
 
@@ -18,6 +22,25 @@ export function referencedImageNodeIds(content: string): string[] {
     if (!ids.includes(m[1])) ids.push(m[1]);
   }
   return ids.slice(0, MAX_INLINE_IMAGES);
+}
+
+/** Downscale+re-encode an inlined ref to JPEG when the Electron image codec is
+ * available (plain-node test runs keep the original bytes). No-op when the
+ * result wouldn't actually be smaller — e.g. an already-tiny JPEG. */
+function shrinkInlineImage(bytes: Buffer, mediaType: string): { data: Buffer; mediaType: string } {
+  if (typeof nativeImage === 'undefined' || !nativeImage?.createFromBuffer) return { data: bytes, mediaType };
+  try {
+    const img = nativeImage.createFromBuffer(bytes);
+    if (img.isEmpty()) return { data: bytes, mediaType };
+    const { width, height } = img.getSize();
+    const scale = Math.min(1, INLINE_MAX_DIM / Math.max(width, height));
+    const resized = scale < 1 ? img.resize({ width: Math.round(width * scale), height: Math.round(height * scale) }) : img;
+    const jpeg = resized.toJPEG(82);
+    if (jpeg.byteLength >= bytes.byteLength) return { data: bytes, mediaType };
+    return { data: jpeg, mediaType: 'image/jpeg' };
+  } catch {
+    return { data: bytes, mediaType };
+  }
 }
 
 function mediaTypeOf(rel: string): string {
@@ -61,8 +84,9 @@ export async function inlineCanvasRefImages(
     try {
       const bytes = await readCanvasAsset(dataRoot, rel);
       if (bytes.byteLength > MAX_INLINE_BYTES) continue;
+      const shrunk = shrinkInlineImage(bytes, mediaTypeOf(rel));
       parts.push({ type: 'text', text: `Image of canvas node ${id} (${node.title || 'untitled'}):` });
-      parts.push({ type: 'file', data: new Uint8Array(bytes), mediaType: mediaTypeOf(rel) });
+      parts.push({ type: 'file', data: new Uint8Array(shrunk.data), mediaType: shrunk.mediaType });
     } catch {
       /* skip unreadable asset */
     }

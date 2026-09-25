@@ -97,7 +97,7 @@ export default function AskUserPrompt({
             }
             onAnswer(next);
           }}
-          className="rise-in bg-paper-raised"
+          className="rise-in max-h-[70vh] overflow-y-auto bg-paper-raised"
         />
       )}
     </div>
@@ -122,8 +122,13 @@ function DirectionAsk({
   });
 
   return (
-    <div className="rise-in flex flex-col gap-3 rounded-xl border border-line bg-paper-raised p-3">
+    // Long asks (e.g. an 8-question skill card) used to grow the composer overlay
+    // past the viewport — everything above the fold became unreachable. Cap the
+    // card and scroll the question list so every question stays clickable, while
+    // the title and submit stay pinned.
+    <div className="rise-in flex max-h-[70vh] flex-col gap-3 rounded-xl border border-line bg-paper-raised p-3">
       <span className="text-xs font-semibold">选一个方向</span>
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
       {pending.questions.map((q) => (
         <div key={q.id} className="flex flex-col gap-2">
           <span className="text-[12px] text-ink">{q.prompt}</span>
@@ -173,6 +178,7 @@ function DirectionAsk({
           )}
         </div>
       ))}
+      </div>
       <button
         type="button"
         disabled={!complete}
