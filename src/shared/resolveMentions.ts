@@ -170,3 +170,12 @@ export function resolveMentions(
 
   return { resolvedPrompt, orderedAssetRefs };
 }
+
+/** Distinct node ids referenced as `@[label](canvas:<id>)`, in first-seen order. */
+export function canvasMentionIds(text: string): string[] {
+  const ids: string[] = [];
+  for (const m of text.matchAll(new RegExp(CANONICAL_MENTION_RE.source, 'g'))) {
+    if (!ids.includes(m[2])) ids.push(m[2]);
+  }
+  return ids;
+}

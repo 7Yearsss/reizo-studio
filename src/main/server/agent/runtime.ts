@@ -18,6 +18,7 @@ import { startAgentTurn, abortChatTurn } from './session';
 import { drainSteerInbox } from './steerInbox';
 import { createToolLoopGuard } from './toolLoopGuard';
 import { createCanvasBudget } from './canvasBudget';
+import { inlineCanvasRefImages } from './canvasRefImages';
 import { consumeInteractions, waitForInteractions } from './permissions';
 import { translateOpenAiChunk } from './translators/openai';
 import { compactAssistantParts, compactModelMessages } from './modelHistory';
@@ -378,6 +379,7 @@ export async function runChatTurn(options: {
       ...assistantTurnToModelMessages(message.content, compactAssistantParts(parts), screenshotCtx),
     );
   }
+  await inlineCanvasRefImages(history, { canvasStore, sessionId, dataRoot });
 
   // `emit` is bound to the live stream once `startAgentTurn` opens it; tools
   // created here need the reference up front (todos / permission side-channel).

@@ -2,7 +2,7 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { CANVAS_IMAGE_MODELS, CANVAS_IMAGE_SIZES, defaultNodeBox } from '../../../shared/canvas';
 import { cameraFromPreset } from '../../../shared/cameraMotion';
-import { serializeMention } from '../../../shared/resolveMentions';
+import { canvasMentionIds, serializeMention } from '../../../shared/resolveMentions';
 import type { SettingsStore } from '../storage/settingsStore';
 import type { CanvasStore } from '../storage/canvasStore';
 import { getCanvasChannel } from '../canvas/channel';
@@ -12,7 +12,7 @@ import { runVideoNode } from '../canvas/videoExecutor';
 import { runAudioNode } from '../canvas/audioExecutor';
 import type { ProviderStore } from '../storage/providerStore';
 import { runGraph } from '../canvas/graphExecutor';
-import { descendants } from '../canvas/graph';
+import { descendants, isImportedMedia } from '../canvas/graph';
 import { findLikelyGaps } from './canvasGapCheck';
 import { watchCanvasNodeJob } from './jobWatch';
 import { CANVAS_BUDGET_ALLOW_BATCH, type CanvasBudget } from './canvasBudget';
@@ -64,7 +64,9 @@ function runGraphScope(
   } else {
     keep = new Set(snap.nodes.map((n) => n.id));
   }
-  return snap.nodes.filter((n) => keep.has(n.id) && RUNNABLE_TYPES.has(n.type)).map((n) => n.id);
+  return snap.nodes
+    .filter((n) => keep.has(n.id) && RUNNABLE_TYPES.has(n.type) && !isImportedMedia(n))
+    .map((n) => n.id);
 }
 
 /**
@@ -72,6 +74,21 @@ function runGraphScope(
  * Returns the latest node snapshots — callers report per-node status instead
  * of the agent polling read_canvas in a loop and spamming the message stream.
  */
+/**
+ * Longest a waiting run_node/run_graph blocks the tool call. The provider
+ * stream's chunk timeout (runtime PROVIDER_TIMEOUT.chunkMs, 3 min) keeps
+ * ticking while a tool executes, so a wait past it aborts the whole turn.
+ * Nodes still running at the deadline are handed to jobWatch instead.
+ */
+export const MAX_TOOL_WAIT_MS = 150_000;
+
+const STILL_RUNNING_NOTE =
+  'Some nodes are still rendering. Do not poll or re-run them — a system notice lands in this turn as each one settles.';
+
+function waitBudget(timeoutMs: number | undefined): number {
+  return Math.min(timeoutMs ?? MAX_TOOL_WAIT_MS, MAX_TOOL_WAIT_MS);
+}
+
 async function settleNodes(
   canvasStore: CanvasStore,
   canvasId: string,
@@ -228,7 +245,7 @@ export function createCanvasTools(options: {
 
     add_node: tool({
       description:
-        'Add a node to this session\'s canvas. type "image" generates an image from `prompt`; type "agent" is a research/critique sub-task described by `instruction`; type "video" generates video from `prompt`; type "note" is a screenplay/script sticky note; type "anchor" is a reference pin (the user drops an image onto it) whose `role`/`strength` lock a character or style across shots; type "audio" synthesizes a speech (TTS) track from `prompt` — the result is a standalone audio asset; wiring it into a video node\'s `audio_in` handle only marks the association (the video itself stays silent until a merge/export step exists). In an image/video `prompt` you may embed inline references to other canvas nodes as `@[label](canvas:<nodeId>)` — at run time each becomes an ordered reference image (`<<<image 1>>>`, ...) drawn from that node\'s latest output, so you can say e.g. "把 @[主角定妆](canvas:abc123) 放进 @[雨夜街道](canvas:def456)". Returns the new node id. The canvas panel opens automatically.',
+        'Add a node to this session\'s canvas. type "image" generates an image from `prompt`; type "agent" is a research/critique sub-task described by `instruction`; type "video" generates video from `prompt`; type "note" is a screenplay/script sticky note; type "anchor" is a reference pin (the user drops an image onto it) whose `role`/`strength` lock a character or style across shots; type "audio" synthesizes a speech (TTS) track from `prompt` — the result is a standalone audio asset; wiring it into a video node\'s `audio_in` handle only marks the association (the video itself stays silent until a merge/export step exists). In an image/video `prompt` you may embed inline references to other canvas nodes as `@[label](canvas:<nodeId>)` — at run time each becomes an ordered reference image (`<<<image 1>>>`, ...) drawn from that node\'s latest output, so you can say e.g. "把 @[主角定妆](canvas:abc123) 放进 @[雨夜街道](canvas:def456)". Each referenced node is also wired in as an upstream edge automatically (returned as `wiredFrom`), so `run_graph` renders it first — no `connect_nodes` needed for those. Returns the new node id. The canvas panel opens automatically.',
       inputSchema: z.object({
         type: z.enum(['image', 'agent', 'video', 'note', 'anchor', 'audio']),
         prompt: z.string().optional().describe('Prompt (type "image", "video", or "note").'),
@@ -282,6 +299,17 @@ export function createCanvasTools(options: {
         });
         const channel = getCanvasChannel(canvas.id);
         channel.broadcast(rev, { type: 'node_added', node, operationId: input.operationId });
+        const wiredFrom: string[] = [];
+        if (input.type === 'image' || input.type === 'video') {
+          for (const sourceId of canvasMentionIds(input.prompt ?? '')) {
+            if (!existing.some((n) => n.id === sourceId)) continue;
+            const res = canvasStore.addEdge(canvas.id, { sourceId, targetId: node.id });
+            if (res.edge && res.rev !== undefined) {
+              channel.broadcast(res.rev, { type: 'edge_added', edge: res.edge, operationId: input.operationId });
+              wiredFrom.push(sourceId);
+            }
+          }
+        }
         if (input.asProposal) {
           channel.broadcast(rev, {
             type: 'proposal_created',
@@ -295,6 +323,7 @@ export function createCanvasTools(options: {
           type: node.type,
           asProposal: Boolean(input.asProposal),
           operationId: input.operationId,
+          ...(wiredFrom.length > 0 ? { wiredFrom } : {}),
         };
       },
     }),
@@ -514,7 +543,7 @@ export function createCanvasTools(options: {
       inputSchema: z.object({
         id: z.string(),
         wait: z.boolean().optional().describe('Wait for the run to finish (default true).'),
-        timeoutMs: z.number().optional().describe('Max wait in ms (default 300000).'),
+        timeoutMs: z.number().optional().describe(`Max wait in ms (default and cap ${MAX_TOOL_WAIT_MS}); nodes still running then report back via a system notice.`),
       }),
       execute: async ({ id, wait, timeoutMs }, toolOptions) => {
         const canvas = canvasStore.ensureCanvas(sessionId);
@@ -551,9 +580,17 @@ export function createCanvasTools(options: {
           watchCanvasNodeJob(sessionId, canvas.id, canvasStore, [id]);
           return { ok: true, id, status: 'running', ...(repeatNote ? { note: repeatNote } : {}) };
         }
-        const settled = await settleNodes(canvasStore, canvas.id, [id], timeoutMs ?? 300_000, running);
+        const settled = await settleNodes(canvasStore, canvas.id, [id], waitBudget(timeoutMs), running);
         const n = settled[0];
-        return { ok: n?.runState !== 'error', id, status: n?.runState ?? 'running', error: n?.output?.error, ...(repeatNote ? { note: repeatNote } : {}) };
+        const stillRunning = !n || n.runState === 'running';
+        if (stillRunning) watchCanvasNodeJob(sessionId, canvas.id, canvasStore, [id]);
+        return {
+          ok: n?.runState !== 'error',
+          id,
+          status: n?.runState ?? 'running',
+          error: n?.output?.error,
+          ...(stillRunning ? { note: STILL_RUNNING_NOTE } : repeatNote ? { note: repeatNote } : {}),
+        };
       },
     }),
 
@@ -567,7 +604,7 @@ export function createCanvasTools(options: {
           .optional()
           .describe("Explicit whitelist of node ids to run. Pass a group node's memberIds to run just that group."),
         wait: z.boolean().optional().describe('Wait for the run to finish (default true).'),
-        timeoutMs: z.number().optional().describe('Max wait in ms (default 300000).'),
+        timeoutMs: z.number().optional().describe(`Max wait in ms (default and cap ${MAX_TOOL_WAIT_MS}); nodes still running then report back via a system notice.`),
         intent: z
           .string()
           .optional()
@@ -601,11 +638,13 @@ export function createCanvasTools(options: {
             ...(warnings.length > 0 ? { warnings } : {}),
           };
         }
-        const settled = await settleNodes(canvasStore, canvas.id, scope, timeoutMs ?? 300_000, running);
-        const pending = settled.filter((n) => n.runState !== 'done' && n.runState !== 'error').length;
+        const settled = await settleNodes(canvasStore, canvas.id, scope, waitBudget(timeoutMs), running);
+        const pendingIds = settled.filter((n) => n.runState !== 'done' && n.runState !== 'error').map((n) => n.id);
+        if (pendingIds.length > 0) watchCanvasNodeJob(sessionId, canvas.id, canvasStore, pendingIds);
         return {
           ok: settled.every((n) => n.runState === 'done'),
-          status: pending > 0 ? 'running' : 'done',
+          status: pendingIds.length > 0 ? 'running' : 'done',
+          ...(pendingIds.length > 0 ? { note: STILL_RUNNING_NOTE } : {}),
           results: settled.map((n) => ({ id: n.id, title: n.title, status: n.runState, error: n.output?.error })),
           ...(warnings.length > 0 ? { warnings } : {}),
         };

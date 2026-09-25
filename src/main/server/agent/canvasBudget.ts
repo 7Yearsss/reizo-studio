@@ -20,7 +20,7 @@ export interface CanvasBudget {
   extendExecute(by: number): void;
 }
 
-export const CANVAS_BUDGET_EXECUTE_LIMIT = 4;
+export const CANVAS_BUDGET_EXECUTE_LIMIT = 12;
 export const CANVAS_BUDGET_STRUCTURAL_LIMIT = 50;
 /** How many more executions a single "allow" grants past the current count. */
 export const CANVAS_BUDGET_ALLOW_BATCH = 8;

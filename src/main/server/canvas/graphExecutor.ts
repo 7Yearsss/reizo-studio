@@ -6,7 +6,7 @@ import { runAgentNode } from './agentExecutor';
 import { runVideoNode } from './videoExecutor';
 import { runAudioNode } from './audioExecutor';
 import type { ProviderStore } from '../storage/providerStore';
-import { descendants, directUpstream, topoOrder, buildPipelineWaves, inputHash } from './graph';
+import { descendants, directUpstream, topoOrder, buildPipelineWaves, inputHash, isImportedMedia } from './graph';
 
 /** Node types the executor knows how to run. */
 // `note` / `group` / `anchor` are inert: `anchor` is a reference pin consumed
@@ -125,6 +125,11 @@ export async function runGraph(options: {
       // `runImageNode` / `runVideoNode` re-reads the node so re-read fresh snapshot
       const fresh = canvasStore.getNode(canvasId, id);
       if (!fresh) return;
+      if (isImportedMedia(fresh)) {
+        done += 1;
+        channel.broadcast(rev(), { type: 'graph_run', running: true, done, total });
+        return;
+      }
 
       // Cache-hit skip: if node is already completed and inputs haven't drifted, skip re-running!
       const upIds = directUpstream(edges, id);

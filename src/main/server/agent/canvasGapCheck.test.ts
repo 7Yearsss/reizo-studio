@@ -123,4 +123,24 @@ describe('run_graph warnings', () => {
     expect(res.status).toBe('running');
     expect(res.warnings && res.warnings.length > 0).toBe(true);
   });
+
+  it('counts inline @[](canvas:) prompt references as a consistency reference', async () => {
+    const { canvasStore, sessionId } = await setup();
+    const canvas = canvasStore.ensureCanvas(sessionId);
+    const product = addNode(canvasStore, canvas.id, 'image', '产品图');
+    const shots = [1, 2].map(
+      (i) =>
+        canvasStore.addNode(canvas.id, {
+          type: 'image',
+          x: 0,
+          y: 0,
+          w: 100,
+          h: 100,
+          title: `镜头${i}`,
+          params: { prompt: `shot ${i} of @[产品图](canvas:${product.id})` },
+        }).node,
+    );
+    const warnings = findLikelyGaps(canvasStore, canvas.id, shots.map((n) => n.id));
+    expect(warnings.some((w) => w.includes('一致性'))).toBe(false);
+  });
 });
