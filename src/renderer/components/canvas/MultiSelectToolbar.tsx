@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { ViewportPortal, useStore } from '@xyflow/react';
-import { CheckSquare, MessageSquarePlus, FolderPlus, Play, Trash2 } from 'lucide-react';
+import { CheckSquare, MessageSquarePlus, FolderPlus, Play, Sparkles, Trash2 } from 'lucide-react';
 import type { CanvasNode } from '../../../shared/canvas';
 import { chromeScale } from './chromeScale';
 import Tooltip from '../ui/Tooltip';
@@ -12,6 +12,9 @@ export interface MultiSelectToolbarProps {
   onGroup: () => void;
   onRunSelected: () => void;
   onDelete: () => void;
+  /** Number of selected draft-tier image nodes; shown when > 0. */
+  draftCount?: number;
+  onRefineDrafts?: () => void;
 }
 
 /**
@@ -27,6 +30,8 @@ export default function MultiSelectToolbar({
   onGroup,
   onRunSelected,
   onDelete,
+  draftCount = 0,
+  onRefineDrafts,
 }: MultiSelectToolbarProps) {
   const ty = useStore((s) => s.transform[1]);
   const zoom = useStore((s) => s.transform[2]) || 1;
@@ -109,6 +114,18 @@ export default function MultiSelectToolbar({
             <span>运行选区</span>
           </button>
         </Tooltip>
+        {draftCount > 0 && onRefineDrafts ? (
+          <Tooltip content="用精渲模型重渲染选区内的草稿节点" side="top" wrapperClassName="inline-flex">
+            <button
+              type="button"
+              onClick={onRefineDrafts}
+              className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium hover:bg-indigo-500/20 text-indigo-300 cursor-pointer transition-colors"
+            >
+              <Sparkles size={12} />
+              <span>精渲 {draftCount}</span>
+            </button>
+          </Tooltip>
+        ) : null}
         <Tooltip content="删除选中节点 (Delete / Backspace)" side="top" wrapperClassName="inline-flex">
           <button
             type="button"

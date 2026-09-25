@@ -217,6 +217,7 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
 
   const params = node.params as CanvasImageParams;
   const edit = params.edit;
+  const isDraft = params.draft === true;
   const [prompt, setPrompt] = useState(params.prompt ?? '');
   const [showConfig, setShowConfig] = useState(false);
   const [zoom, setZoom] = useState<string | null>(null);
@@ -517,6 +518,11 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
             {!running && readiness.some((m) => m.includes('已删除') || m.includes('尚未生成')) ? (
               <MissingInputWarning messages={readiness} />
             ) : null}
+            {isDraft ? (
+              <span className="rounded-full bg-sky-500/10 px-1.5 py-0.5 text-[9px] text-sky-500">
+                草稿
+              </span>
+            ) : null}
             {node.dirty && !running ? (
               <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[9px] text-amber-600 dark:text-amber-400">
                 待更新
@@ -640,6 +646,26 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
               </div>
             ) : null}
 
+            {/* Top Left 精渲 upgrade on draft nodes */}
+            {isDraft && !running ? (
+              <Tooltip content="用精渲模型重渲染这张草稿" side="bottom" wrapperClassName="absolute left-2.5 top-2.5 z-20 inline-flex">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const freshNode = canvasStore.nodeById(sessionId, node.id);
+                    const freshParams = (freshNode?.params as Record<string, unknown>) ?? {};
+                    void canvasStore
+                      .updateNodeParams(sessionId, node.id, { ...freshParams, draft: false })
+                      .then(() => canvasStore.runNode(sessionId, node.id));
+                  }}
+                  className="nodrag flex items-center gap-1.5 rounded-lg bg-indigo-500/80 px-2.5 py-1 text-[11px] font-medium text-white backdrop-blur-md border border-white/20 hover:bg-indigo-500 transition-all shadow-xs cursor-pointer"
+                >
+                  <Sparkles size={11} className="stroke-[2.2]" />
+                  <span>精渲</span>
+                </button>
+              </Tooltip>
+            ) : null}
             {/* Top Right Replace button (Matching pure reference design) */}
             <Tooltip content="替换图片" side="bottom" wrapperClassName="absolute right-2.5 top-2.5 z-20 inline-flex">
               <button
