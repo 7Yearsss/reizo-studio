@@ -12,6 +12,7 @@ import TerminalPanel from './TerminalPanel';
 import Tooltip from '../ui/Tooltip';
 import CanvasSkeleton from '../canvas/CanvasSkeleton';
 import { lazyWithRetry } from '../../lib/lazyWithRetry';
+import { setPanelResizing } from '../../lib/panelResize';
 
 // Heavy panels are code-split so the drawer shell never waits on their bundle.
 const CanvasPanel = lazyWithRetry(() => import('../canvas/CanvasPanel'));
@@ -50,6 +51,14 @@ export default function RightPanel({
   const wasMaximizedAtStart = useRef(false);
   const asideRef = useRef<HTMLElement>(null);
   const dragWidth = useRef<number | null>(null);
+  // Drag writes style.width behind motion's back, so its width value is still
+  // the pre-drag one. The release commit must land instantly — animating it
+  // would snap the edge back to the old width and slide forward again.
+  const instantCommit = useRef(false);
+  useEffect(() => {
+    instantCommit.current = false;
+  });
+  useEffect(() => () => setPanelResizing(false), []);
 
   const onPointerDown = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -59,6 +68,7 @@ export default function RightPanel({
     const currentSidebarW = sidebarCollapsed ? 0 : sidebarWidth;
     const maxAvailable = window.innerWidth - currentSidebarW;
     startWidth.current = maximized ? maxAvailable : storedWidth;
+    setPanelResizing(true);
     setIsDragging(true);
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
   };
@@ -98,6 +108,7 @@ export default function RightPanel({
 
     // Check snap to close: dragging far right
     if (calculatedWidth < 180) {
+      setPanelResizing(false);
       uiStore.closeRightPanel();
       dragging.current = false;
       setIsDragging(false);
@@ -130,9 +141,11 @@ export default function RightPanel({
       /* ignore */
     }
     if (dragWidth.current !== null) {
+      instantCommit.current = true;
       uiStore.setRightPanelWidth(dragWidth.current);
       dragWidth.current = null;
     }
+    setPanelResizing(false);
   };
 
   return (
@@ -142,7 +155,7 @@ export default function RightPanel({
       animate={{ width: maximized ? '100%' : storedWidth, opacity: 1, x: 0 }}
       exit={{ width: 0, opacity: 0, x: 24 }}
       transition={
-        isDragging
+        isDragging || instantCommit.current
           ? { duration: 0 }
           : { duration: PANEL_DURATION, ease: PANEL_EASE }
       }
@@ -160,6 +173,7 @@ export default function RightPanel({
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
         className="group absolute -left-1.5 top-0 z-30 flex h-full w-3 cursor-col-resize items-center justify-center select-none"
         title={maximized ? '向右拖动还原' : '拖动调整宽度（向左滑到底可最大化）'}
       >

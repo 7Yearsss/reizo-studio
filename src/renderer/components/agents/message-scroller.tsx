@@ -16,6 +16,7 @@ import {
   type PreviewRailItem,
 } from "@/renderer/components/motion/preview-rail";
 import { cn } from "@/renderer/lib/cn";
+import { isPanelResizing, onPanelResizeEnd } from "@/renderer/lib/panelResize";
 
 const PREVIEW_TITLE_LENGTH = 56;
 const PREVIEW_DESCRIPTION_LENGTH = 88;
@@ -314,9 +315,13 @@ export function MessageScroller({
     if (!content || typeof ResizeObserver === "undefined") return;
 
     const observer = new ResizeObserver(() => {
-      scheduleRailSync();
+      // Mid panel-drag the content height changes every frame from re-wrapping:
+      // pin to the end instantly (a smooth scroll restarted each frame judders)
+      // and leave the rail scan for the release.
+      const resizing = isPanelResizing();
+      if (!resizing) scheduleRailSync();
       if (!followOutput || !followingRef.current) return;
-      scrollToEnd(reduce || !smooth ? "auto" : "smooth");
+      scrollToEnd(resizing || reduce || !smooth ? "auto" : "smooth");
     });
     observer.observe(content);
 
@@ -346,16 +351,22 @@ export function MessageScroller({
       subtree: true,
     });
 
+    // The rail scan reads every message's rect; skip it while a panel edge is
+    // being dragged and run it once on release.
     const resizeObserver =
       typeof ResizeObserver === "undefined"
         ? null
-        : new ResizeObserver(scheduleRailSync);
+        : new ResizeObserver(() => {
+            if (!isPanelResizing()) scheduleRailSync();
+          });
     resizeObserver?.observe(content);
     resizeObserver?.observe(viewport);
+    const offResizeEnd = onPanelResizeEnd(scheduleRailSync);
 
     return () => {
       mutationObserver?.disconnect();
       resizeObserver?.disconnect();
+      offResizeEnd();
     };
   }, [navigation, scheduleRailSync]);
 

@@ -88,21 +88,22 @@ function ChatPage({
   const lastAssistantId = [...messages].reverse().find((m) => m.role === 'assistant')?.id;
 
   const containerRef = useRef<HTMLDivElement>(null);
-  const [containerWidth, setContainerWidth] = useState(600);
+  // Only the 460px breakpoint matters to the layout — store the boolean so a
+  // width change that doesn't cross it bails out instead of re-rendering the page.
+  const [isCompact, setIsCompact] = useState(false);
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        setContainerWidth(entry.contentRect.width);
+        setIsCompact(entry.contentRect.width < 460);
       }
     });
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
 
-  const isCompact = containerWidth < 460;
   const titleBarSlot = useTitleBarSlot('center');
   const titleBarRight = useTitleBarSlot('right');
   // Composer floats over the stream; its rendered height (docked plan / ask /

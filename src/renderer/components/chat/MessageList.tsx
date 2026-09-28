@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import type { ChatMessage } from '../../../shared/chat';
 import type { MemoryEventRecord, TurnOutcome } from '../../../shared/stream';
 import {
@@ -17,6 +18,10 @@ import EmptyChatHints from './EmptyChatHints';
 import MemoryEventRow from './MemoryEventRow';
 
 const GROW_TRIGGER_PX = 160;
+// The composer overlay pads this much transparent-to-paper fade above its card
+// (Composer.tsx `pt-16` / `pt-8`); the jump button sits inside that band so it
+// never covers message text.
+const COMPOSER_FADE_PX = { regular: 64, compact: 32 } as const;
 
 export default function MessageList({
   messages,
@@ -205,17 +210,32 @@ export default function MessageList({
         })}
         {sending && sessionId && <StreamingAssistant sessionId={sessionId} />}
       </MessageScroller>
-      {!following && (
-        <button
-          type="button"
-          onClick={() => setFollowing(true)}
-          className="anim-jump absolute left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full border border-line bg-paper-raised px-3 py-1.5 text-xs text-ink shadow-[0_8px_30px_rgba(28,22,18,0.08)]"
-          style={{ bottom: (bottomInset ?? (compact ? 144 : 176)) + 12 }}
-        >
-          <ArrowDown size={14} />
-          跳到底部
-        </button>
-      )}
+      <AnimatePresence>
+        {!following && (
+          <motion.button
+            key="jump-to-end"
+            type="button"
+            onClick={() => setFollowing(true)}
+            aria-label="跳到底部"
+            title="跳到底部"
+            initial={{ opacity: 0, y: 8, scale: 0.85 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8, scale: 0.85 }}
+            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            whileHover={{ y: 2 }}
+            whileTap={{ scale: 0.92 }}
+            className="absolute left-1/2 z-10 -ml-4 flex size-8 items-center justify-center rounded-full border border-line bg-paper-raised text-ink-muted shadow-[0_8px_30px_rgba(28,22,18,0.08)] transition-colors hover:text-ink"
+            style={{
+              bottom:
+                (bottomInset ?? (compact ? 144 : 176)) -
+                (compact ? COMPOSER_FADE_PX.compact : COMPOSER_FADE_PX.regular) +
+                (compact ? 2 : 16),
+            }}
+          >
+            <ArrowDown size={15} />
+          </motion.button>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
