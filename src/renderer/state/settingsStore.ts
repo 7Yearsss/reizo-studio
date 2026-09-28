@@ -6,6 +6,7 @@ import {
   DEFAULT_COMPUTER_USE,
   DEFAULT_PERMISSION_MODE,
   DEFAULT_PROVIDER_ID,
+  DEFAULT_REASONING_EFFORT,
 } from '../../shared/settings';
 
 export interface SettingsState {
@@ -22,6 +23,7 @@ let state: SettingsState = {
     computerUse: DEFAULT_COMPUTER_USE,
     mediaModels: {},
     directorSessions: {},
+    reasoningEffort: DEFAULT_REASONING_EFFORT,
     activeProviderId: DEFAULT_PROVIDER_ID,
     workspacePath: null,
     providers: [],

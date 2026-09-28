@@ -26,7 +26,7 @@ function describeBody(body: unknown): string {
   }
 }
 
-function isOfficialOpenAi(baseUrl?: string): boolean {
+export function isOfficialOpenAi(baseUrl?: string): boolean {
   if (!baseUrl) return true;
   try {
     return new URL(baseUrl).hostname === 'api.openai.com';
