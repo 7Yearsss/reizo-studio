@@ -24,6 +24,7 @@ import { translateOpenAiChunk } from './translators/openai';
 import { compactAssistantParts, compactModelMessages } from './modelHistory';
 import { CONTINUE_USER_MESSAGE, MAX_CONTINUE_PASSES, shouldContinueAgentPass } from './continuePass';
 import { readWorkspaceMemory } from '../../workspaceMemory';
+import type { MemoryEntry } from '../../workspaceMemoryDir';
 import {
   formatRecalledMemories,
   markRecalled,
@@ -312,7 +313,7 @@ export async function runChatTurn(options: {
 
   const systemParts = [
     workspacePath
-      ? `You are Reizo Studio, a local desktop agent that finishes real work in the user's files. The workspace is at: ${workspacePath}. Prefer tools over guessing. Use list_dir/read_file/find_files/grep to inspect, edit_file/write_file to change files, run_command for tests and git, ask_user when you need a choice, todo_write for a visible plan, and memory_read/memory_write/memory_delete for durable memory files (indexed in MEMORY.md).`
+      ? `You are Reizo Studio, a local desktop agent that finishes real work in the user's files. The workspace is at: ${workspacePath}. For workspace tasks prefer tools over guessing: use list_dir/read_file/find_files/grep to inspect, edit_file/write_file to change files, run_command for tests and git, ask_user when you need a choice, todo_write for a visible plan, and memory_read/memory_write/memory_delete for durable memory files (indexed in MEMORY.md). Greetings, small talk, and questions you can answer from this prompt get a direct reply with no tool calls; the memory index below is already loaded, so only memory_read a file whose description matters for the current task.`
       : 'You are Reizo Studio, a helpful creative assistant running locally on the user\'s desktop. Use ask_user if you need the user to choose.',
     'Image Generation Rules:\n' +
     '- When the user asks to generate, draw, or paint an image (e.g., "生图", "画一张...", "生成图片", "设计海报", "绘制插画"), ALWAYS call the `generate_image` tool directly within this chat conversation. The image will be generated and rendered inline for the user.\n' +
@@ -474,6 +475,10 @@ export async function runChatTurn(options: {
     ? startMemoryRecall({ sessionId, workspaceRoot: workspacePath, model, query: userText })
     : Promise.resolve([]);
   let recallInjected = false;
+  let recallSettled: MemoryEntry[] | null = null;
+  void withTimeout(recallPromise, RECALL_BUDGET.timeoutMs, []).then((entries) => {
+    recallSettled = entries;
+  });
 
   let lastSeenNodeCount = -1;
   const initialCanvas = canvasStore ? canvasStore.findCanvasBySession(sessionId) : null;
@@ -490,11 +495,17 @@ export async function runChatTurn(options: {
       maxRetries: PROVIDER_MAX_RETRIES,
       timeout: PROVIDER_TIMEOUT,
       abortSignal: signal,
-      prepareStep: async ({ messages: stepMessages }) => {
+      prepareStep: async ({ messages: stepMessages, stepNumber }) => {
         const compacted = compactModelMessages(stepMessages as ModelMessage[]);
-        if (!recallInjected) {
+        // Recall never holds the first token hostage: the first step waits a
+        // short grace, later steps pick it up once it has settled.
+        if (!recallInjected && recallSettled === null && stepNumber === 0) {
+          const early = await withTimeout<MemoryEntry[] | null>(recallPromise, RECALL_BUDGET.firstStepGraceMs, null);
+          if (early) recallSettled = early;
+        }
+        if (!recallInjected && recallSettled !== null) {
           recallInjected = true;
-          const recalled = await withTimeout(recallPromise, RECALL_BUDGET.timeoutMs, []);
+          const recalled: MemoryEntry[] = recallSettled;
           if (recalled.length > 0) {
             compacted.push({ role: 'user', content: formatRecalledMemories(recalled) });
             // Mark seen only now — a recall that lost the timeout race stays

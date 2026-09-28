@@ -17,6 +17,8 @@ import {
 const EXTRACT_MAX_NEW = 3;
 const RECALL_TOP_K = 5;
 const RECALL_TIMEOUT_MS = 10_000;
+/** How long the first provider step waits for recall before it starts without it. */
+const RECALL_FIRST_STEP_GRACE_MS = 1_500;
 
 const pendingJobs = new Set<Promise<void>>();
 
@@ -159,6 +161,14 @@ export function startMemoryRecall(opts: {
       const seen = recalledBySession.get(sessionId) ?? new Set<string>();
       const candidates = manifest.filter((m) => !seen.has(m.fileName));
       if (!candidates.length || !query.trim()) return [];
+      if (candidates.length <= RECALL_TOP_K) {
+        const all: MemoryEntry[] = [];
+        for (const m of candidates) {
+          const entry = await readMemoryEntry(workspaceRoot, m.fileName);
+          if (entry) all.push(entry);
+        }
+        return all;
+      }
       const result = await generateText({
         model,
         system: SELECT_SYSTEM,
@@ -205,4 +215,4 @@ export function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Pr
   return Promise.race([promise, new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms))]);
 }
 
-export const RECALL_BUDGET = { timeoutMs: RECALL_TIMEOUT_MS };
+export const RECALL_BUDGET = { timeoutMs: RECALL_TIMEOUT_MS, firstStepGraceMs: RECALL_FIRST_STEP_GRACE_MS };
