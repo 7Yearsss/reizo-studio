@@ -262,6 +262,12 @@ export function createCanvasTools(options: {
         title: z.string().optional(),
         x: z.number().optional(),
         y: z.number().optional(),
+        draft: z
+          .boolean()
+          .optional()
+          .describe(
+            'type "image": run on the fast draft model for a quick preview the user can upgrade with 精渲. Leave unset for final-quality nodes and consistency anchors (identity sheets, character refs, scenes).',
+          ),
         asProposal: z.boolean().optional().describe('When true, marks the node as a Ghost Proposal awaiting user review in ProposalBar.'),
         operationId: z.string().optional().describe('Idempotent operation ID for tracking and batched undo.'),
       }),
@@ -271,7 +277,12 @@ export function createCanvasTools(options: {
         const box = defaultNodeBox(input.type);
         const params =
           input.type === 'image'
-            ? { prompt: input.prompt ?? '', size: input.size ?? '1024x1024', ...(input.model ? { model: input.model } : {}) }
+            ? {
+                prompt: input.prompt ?? '',
+                size: input.size ?? '1024x1024',
+                ...(input.model ? { model: input.model } : {}),
+                ...(input.draft ? { draft: true } : {}),
+              }
             : input.type === 'video'
               ? { prompt: input.prompt ?? '', duration: '5s', ratio: '16:9', cameraMotion: 'none' }
               : input.type === 'note'
@@ -723,6 +734,10 @@ export function createCanvasTools(options: {
           .describe(
             `type "image": model id. Available: ${CANVAS_IMAGE_MODELS.map((m) => m.id).join(', ')}.`,
           ),
+        draft: z
+          .boolean()
+          .optional()
+          .describe('type "image": true = draft model preview tier; false = back to the quality model (精渲).'),
         instruction: z.string().optional(),
         title: z.string().optional(),
         camera: z
@@ -738,7 +753,7 @@ export function createCanvasTools(options: {
           .describe('Video node only. Camera motion by axis; negative = left/down/out/ccw, positive = right/up/in/cw.'),
         operationId: z.string().optional().describe('Idempotent operation ID.'),
       }),
-      execute: async ({ id, prompt, size, model, instruction, title, camera, operationId }) => {
+      execute: async ({ id, prompt, size, model, draft, instruction, title, camera, operationId }) => {
         const canvas = canvasStore.ensureCanvas(sessionId);
         const node = canvasStore.getNode(canvas.id, id);
         if (!node) return { error: `No canvas node "${id}"` };
@@ -746,6 +761,7 @@ export function createCanvasTools(options: {
         if (prompt !== undefined) params.prompt = prompt;
         if (size !== undefined) params.size = size;
         if (model !== undefined) params.model = model;
+        if (draft !== undefined) params.draft = draft;
         if (instruction !== undefined) params.instruction = instruction;
         if (camera !== undefined) params.camera = camera;
         const res = canvasStore.updateNode(canvas.id, id, {
