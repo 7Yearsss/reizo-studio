@@ -8,12 +8,14 @@ import {
   DEFAULT_COMPUTER_USE,
   DEFAULT_PERMISSION_MODE,
   DEFAULT_PROVIDER_ID,
+  DEFAULT_REASONING_EFFORT,
   type Appearance,
   type BusyEnterBehavior,
   type LocalSettings,
   type PermissionMode,
   type PublicProvider,
   type PublicSettings,
+  type ReasoningEffort,
   type SettingsPatch,
   type StoredProvider,
 } from '../../../shared/settings';
@@ -23,8 +25,9 @@ interface DiskSettings {
   permissionMode?: PermissionMode;
   busyEnter?: BusyEnterBehavior;
   computerUse?: boolean;
-  mediaModels?: { image?: string; video?: string };
+  mediaModels?: { image?: string; video?: string; draft?: string };
   directorSessions?: Record<string, boolean>;
+  reasoningEffort?: ReasoningEffort | null;
   activeProviderId?: string;
   workspacePath?: string | null;
   providers?: Record<string, { apiKey?: string; model?: string; baseUrl?: string }>;
@@ -82,6 +85,7 @@ export function createSettingsStore(root: string) {
       computerUse: disk.computerUse ?? DEFAULT_COMPUTER_USE,
       mediaModels: disk.mediaModels ?? {},
       directorSessions: disk.directorSessions ?? {},
+      reasoningEffort: disk.reasoningEffort === undefined ? DEFAULT_REASONING_EFFORT : disk.reasoningEffort,
       activeProviderId: disk.activeProviderId ?? DEFAULT_PROVIDER_ID,
       workspacePath: disk.workspacePath ?? null,
       providers,
@@ -110,6 +114,7 @@ export function createSettingsStore(root: string) {
       computerUse: settings.computerUse,
       mediaModels: settings.mediaModels,
       directorSessions: settings.directorSessions,
+      reasoningEffort: settings.reasoningEffort,
       activeProviderId: settings.activeProviderId,
       workspacePath: settings.workspacePath,
       providers,
@@ -146,6 +151,7 @@ export function createSettingsStore(root: string) {
       computerUse: settings.computerUse,
       mediaModels: settings.mediaModels,
       directorSessions: settings.directorSessions,
+      reasoningEffort: settings.reasoningEffort,
       activeProviderId: settings.activeProviderId,
       workspacePath: settings.workspacePath,
       providers,
@@ -162,6 +168,7 @@ export function createSettingsStore(root: string) {
     if (patch.mediaModels) {
       settings.mediaModels = { ...settings.mediaModels, ...patch.mediaModels };
     }
+    if (patch.reasoningEffort !== undefined) settings.reasoningEffort = patch.reasoningEffort;
     if (patch.directorSession) {
       const { sessionId, enabled } = patch.directorSession;
       settings.directorSessions = { ...settings.directorSessions, [sessionId]: enabled };

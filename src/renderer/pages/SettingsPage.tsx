@@ -3,7 +3,7 @@ import { Check, FolderOpen, KeyRound } from 'lucide-react';
 import { motion } from 'motion/react';
 import { cn } from '../lib/cn';
 import { APP_NAME, APP_VERSION } from '../../shared/constants';
-import type { Appearance, BusyEnterBehavior, PermissionMode, PublicProvider } from '../../shared/settings';
+import type { Appearance, BusyEnterBehavior, PermissionMode, PublicProvider, ReasoningEffort } from '../../shared/settings';
 import { useSettingsStore } from '../state/useSettingsStore';
 import * as settingsStore from '../state/settingsStore';
 import * as api from '../api';
@@ -193,6 +193,40 @@ function GeneralSection() {
               {active && (
                 <motion.span
                   layoutId="busy-enter-active"
+                  className="absolute inset-0 rounded-full bg-ink"
+                  transition={{ type: 'spring', stiffness: 450, damping: 35 }}
+                />
+              )}
+              <span className="relative z-10">{label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <h2 className="mb-3 text-sm font-medium">思考力度</h2>
+      <p className="mb-3 text-xs text-ink-muted">
+        推理模型回答前“想”多少——低档一句话问题 ~3s 出答，高档适合复杂任务但更慢（默认档最慢可达 90s）。
+      </p>
+      <div className="mb-8 flex flex-wrap gap-2">
+        {([
+          ['low', '低 · 快'],
+          ['medium', '中'],
+          ['high', '高'],
+          [null, '模型默认'],
+        ] as [ReasoningEffort | null, string][]).map(([id, label]) => {
+          const active = settings.reasoningEffort === id;
+          return (
+            <button
+              key={id ?? 'auto'}
+              onClick={() => void settingsStore.patchSettings({ reasoningEffort: id })}
+              className={cn(
+                'relative rounded-full px-4 py-1.5 text-sm transition-colors duration-150',
+                active ? 'font-medium text-paper-raised' : 'text-ink hover:bg-paper-inset/80',
+              )}
+            >
+              {active && (
+                <motion.span
+                  layoutId="reasoning-effort-active"
                   className="absolute inset-0 rounded-full bg-ink"
                   transition={{ type: 'spring', stiffness: 450, damping: 35 }}
                 />

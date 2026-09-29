@@ -2,7 +2,7 @@ import { isStepCount, streamText, type ModelMessage } from 'ai';
 import { nanoid } from 'nanoid';
 import { getProviderPreset } from '../../../shared/providers';
 import { CANVAS_BUDGET_TOOL, type ChatStreamEvent, type MemoryItem, type TodoItem } from '../../../shared/stream';
-import { createOpenAiModel } from './provider/openai';
+import { createOpenAiModel, isOfficialOpenAi } from './provider/openai';
 import { createAskUserTool, createWorkspaceTools } from './workspaceTools';
 import { createScheduleTools } from './scheduleTools';
 import { createCanvasTools } from './canvasTools';
@@ -469,6 +469,20 @@ export async function runChatTurn(options: {
 
   const model = createOpenAiModel({ apiKey, modelId, baseUrl });
 
+  // Reasoning models on gateways can burn 10-90s "thinking" before the first
+  // token (measured: gpt-5.6-sol 12-98s default vs ~3s at effort=low). Send the
+  // user-set effort; skip models that reject the param (official non-reasoning
+  // gpt-4o/3.5 family 400s on unknown fields — gateways pass it through safely).
+  const effort = settings.reasoningEffort;
+  const official = isOfficialOpenAi(baseUrl);
+  const reasoningUnsafe = /^gpt-(4o|4\.|3)/i.test(modelId);
+  const providerOptions =
+    effort && !(official && reasoningUnsafe)
+      ? official
+        ? { openai: { reasoningEffort: effort } }
+        : { openaiCompatible: { reasoningEffort: effort } }
+      : undefined;
+
   // Semantic memory recall: kicked off in parallel with stream setup, then
   // injected at the first step boundary so it never delays the first token.
   const recallPromise = workspacePath
@@ -494,6 +508,7 @@ export async function runChatTurn(options: {
       stopWhen: tools ? isStepCount(64) : undefined,
       maxRetries: PROVIDER_MAX_RETRIES,
       timeout: PROVIDER_TIMEOUT,
+      providerOptions,
       abortSignal: signal,
       prepareStep: async ({ messages: stepMessages, stepNumber }) => {
         const compacted = compactModelMessages(stepMessages as ModelMessage[]);
