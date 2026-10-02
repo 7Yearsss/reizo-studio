@@ -1,5 +1,7 @@
 import { cameraFromPreset, cameraToKlingConfig } from '../../../../shared/cameraMotion';
-import type { VideoDriver, VideoGenerateParams, VideoJobStatus } from './types';
+import type { VideoDriver, VideoDriverOptions, VideoGenerateParams, VideoJobStatus, VideoSubmission } from './types';
+import { klingRemoteContextValid, providerUrl } from './remoteEndpoints';
+import { VideoPollError } from './types';
 
 /**
  * 可灵 (Kling) 官方 API 视频生成驱动
@@ -8,24 +10,25 @@ import type { VideoDriver, VideoGenerateParams, VideoJobStatus } from './types';
 export const klingDriver: VideoDriver = {
   id: 'kling',
   name: '可灵 AI (Kling 官方)',
+  supportsRecovery: true,
+  defaultModel: 'kling-v1',
+  validateRemoteContext: klingRemoteContextValid,
 
   async submit(
     params: VideoGenerateParams,
-    options: { apiKey?: string; baseUrl?: string },
-  ): Promise<{ taskId: string }> {
+    options: VideoDriverOptions,
+  ): Promise<VideoSubmission> {
     const apiKey = options.apiKey;
     if (!apiKey) throw new Error('Kling API key is missing');
 
-    const baseUrl = (options.baseUrl || 'https://api.klingai.com').replace(/\/$/, '');
-    const isImageToVideo = Boolean(params.startImageBytes);
-    const endpoint = isImageToVideo
-      ? `${baseUrl}/v1/videos/image2video`
-      : `${baseUrl}/v1/videos/text2video`;
+    const baseUrl = providerUrl(options.baseUrl || 'https://api.klingai.com').href.replace(/\/$/, '');
+    const queryPath = params.startImageBytes || params.referenceImages?.length ? '/v1/videos/image2video' : '/v1/videos/text2video';
+    const endpoint = `${baseUrl}${queryPath}`;
 
     const body: Record<string, unknown> = {
-      model: 'kling-v1',
+      model_name: params.model || 'kling-v1',
       prompt: params.prompt,
-      duration: params.duration === '10s' ? 10 : 5,
+      duration: params.duration === '10s' ? '10' : '5',
       aspect_ratio: params.ratio || '16:9',
     };
 
@@ -59,6 +62,8 @@ export const klingDriver: VideoDriver = {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
+      signal: options.signal,
+      redirect: 'error',
     });
 
     if (!res.ok) {
@@ -72,26 +77,30 @@ export const klingDriver: VideoDriver = {
       throw new Error(`Kling API error: ${data.message || 'No task_id returned'}`);
     }
 
-    return { taskId };
+    return { taskId, context: { baseUrl, queryPath } };
   },
 
   async poll(
     taskId: string,
-    options: { apiKey?: string; baseUrl?: string },
+    options: VideoDriverOptions,
   ): Promise<VideoJobStatus> {
     const apiKey = options.apiKey;
     if (!apiKey) throw new Error('Kling API key is missing');
 
-    const baseUrl = (options.baseUrl || 'https://api.klingai.com').replace(/\/$/, '');
-    const endpoint = `${baseUrl}/v1/videos/text2video/${taskId}`;
+    const context = options.context ?? { baseUrl: options.baseUrl || 'https://api.klingai.com', queryPath: '/v1/videos/text2video' };
+    if (!klingRemoteContextValid(taskId, context)) throw new Error('Invalid saved Kling task context');
+    const baseUrl = String(context.baseUrl).replace(/\/$/, '');
+    const endpoint = `${baseUrl}${context.queryPath}/${encodeURIComponent(taskId)}`;
 
     const res = await fetch(endpoint, {
       headers: { Authorization: `Bearer ${apiKey}` },
+      signal: options.signal,
+      redirect: 'error',
     });
 
     if (!res.ok) {
       const err = await res.text();
-      return { status: 'failed', error: `Kling poll error (${res.status}): ${err.slice(0, 200)}` };
+      throw new VideoPollError(`Kling query error (${res.status}): ${err.slice(0, 200)}`, res.status === 429 || res.status >= 500);
     }
 
     const data = (await res.json()) as {
@@ -106,7 +115,7 @@ export const klingDriver: VideoDriver = {
 
     const taskData = data.data;
     if (!taskData) {
-      return { status: 'failed', error: 'Invalid Kling poll response' };
+      throw new VideoPollError('Invalid Kling query response', false);
     }
 
     if (taskData.task_status === 'submitted') {
@@ -120,10 +129,10 @@ export const klingDriver: VideoDriver = {
     }
     if (taskData.task_status === 'succeed') {
       const videoUrl = taskData.task_result?.videos?.[0]?.url;
-      if (!videoUrl) return { status: 'failed', error: 'Kling succeeded but returned no video url' };
+      if (!videoUrl) throw new VideoPollError('Kling completed but returned no video url', false);
       return { status: 'succeed', progress: 100, videoUrl };
     }
 
-    return { status: 'processing', progress: 40 };
+    throw new VideoPollError('Kling returned an unknown task status', false);
   },
 };

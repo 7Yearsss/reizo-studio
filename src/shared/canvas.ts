@@ -87,6 +87,8 @@ export type AnchorRole = 'character' | 'style' | 'content';
 export type AnchorStrength = 'low' | 'mid' | 'high';
 
 export interface CanvasAnchorParams {
+  /** Registered immutable image identity; independent of its original producer. */
+  assetId?: string;
   role: AnchorRole;
   strength: AnchorStrength;
   /** Free note, e.g. 「女主 · 红色风衣」; folded into the prompt prefix. */
@@ -180,6 +182,11 @@ export interface CanvasNodeOutput {
   /** For multi-variation results (1x/2x/4x), tracking item list and active selection. */
   resultSet?: Array<{
     asset: string;
+    assetId?: string;
+    jobId?: string;
+    generation?: number;
+    providerId?: string;
+    inputHash?: string;
     createdAt?: string;
     seed?: number;
     prompt?: string;

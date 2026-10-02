@@ -16,13 +16,28 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 
-vi.mock('../canvas/imageExecutor', () => ({
-  broadcastDownstreamDirty: vi.fn(),
+vi.mock('../canvas/imageExecutor', () => {
   // Default: a run that never settles — the execute charge sticks and no
   // refund can race the assertions. Tests that need a settled failure
   // re-implement this per-case.
-  runImageNode: vi.fn(() => new Promise<void>((): undefined => undefined)),
-}));
+  const runImageNode = vi.fn((_options: Parameters<typeof import('../canvas/imageExecutor').startImageNode>[0]) => new Promise<void>((): undefined => undefined));
+  return {
+    broadcastDownstreamDirty: vi.fn(), runImageNode,
+    startImageNode: vi.fn((options: Parameters<typeof import('../canvas/imageExecutor').startImageNode>[0]) => {
+      const { canvasStore: store, canvasId, node, operationId } = options;
+      const job = store.jobs.enqueue({ canvasId, nodeId: node.id, nodeType: 'image', operationId,
+        input: { request: {}, node: { title: node.title, params: node.params } } });
+      store.updateNode(canvasId, node.id, { runState: 'running' });
+      store.jobs.markSubmitted(job.id, { providerId: 'test', model: 'test-image' });
+      const completion = Promise.resolve(runImageNode(options)).then(() => {
+        const saved = store.getNode(canvasId, node.id);
+        store.jobs.finish(job.id, saved?.runState === 'done' ? 'succeeded' : 'failed',
+          { error: saved?.output?.error });
+      });
+      return { job, completion };
+    }),
+  };
+});
 
 const runImageMock = vi.mocked(runImageNode);
 
@@ -69,7 +84,7 @@ describe('canvasBudget', () => {
     expect(b.exceeded('execute')).toBe(false);
   });
 
-  it('checkpoints the 5th canvas run, then lets an allow resume through without recounting', async () => {
+  it('checkpoints the first canvas run past the quota, then lets an allow resume through without recounting', async () => {
     const { tools, budget, canvasStore, sessionId } = await setup();
     const canvas = canvasStore.ensureCanvas(sessionId);
     // Fresh node per call — the same-params fuse must not intercept what the
@@ -96,10 +111,11 @@ describe('canvasBudget', () => {
     }
     expect(budget.counts().execute).toBe(CANVAS_BUDGET_EXECUTE_LIMIT);
 
-    // The 5th run unwinds the step instead of silently executing.
+    const overflow = CANVAS_BUDGET_EXECUTE_LIMIT + 1;
+    // The first run above the limit unwinds instead of silently executing.
     let threw = false;
     try {
-      await run(5);
+      await run(overflow);
     } catch (err) {
       threw = isApprovalRequiredError(err);
     }
@@ -107,8 +123,8 @@ describe('canvasBudget', () => {
 
     // User approves the checkpoint → ceiling extends, the resumed call and the
     // rest of the batch proceed without re-asking.
-    expect(answerPermission('tc5', 'allow')).toBe(true);
-    for (let i = 5; i <= 5 + 3; i++) {
+    expect(answerPermission(`tc${overflow}`, 'allow')).toBe(true);
+    for (let i = overflow; i <= overflow + 3; i++) {
       await expect(run(i)).resolves.toBeTruthy();
     }
     const counts = budget.counts().execute;
@@ -156,7 +172,7 @@ describe('canvasBudget', () => {
     await expect(
       (tools.run_node as never as { execute: (a: unknown, o: unknown) => Promise<unknown> }).execute(
         { id: node.id, wait: false, timeoutMs: 50 },
-        { toolCallId: 'tfail5' },
+        { toolCallId: 'tfail-after-limit' },
       ),
     ).resolves.toMatchObject({ ok: true, status: 'running' });
     await new Promise((r) => setTimeout(r, 0));
@@ -181,11 +197,12 @@ describe('canvasBudget', () => {
       );
     };
     for (let i = 1; i <= CANVAS_BUDGET_EXECUTE_LIMIT; i++) await run(i);
-    await expect(run(5)).rejects.toMatchObject({ name: 'ApprovalRequiredError' });
-    answerPermission('td5', 'deny');
+    const overflow = CANVAS_BUDGET_EXECUTE_LIMIT + 1;
+    await expect(run(overflow)).rejects.toMatchObject({ name: 'ApprovalRequiredError' });
+    answerPermission(`td${overflow}`, 'deny');
     // A retried run still trips the checkpoint.
-    await expect(run(6)).rejects.toMatchObject({ name: 'ApprovalRequiredError' });
-    answerPermission('td6', 'deny');
+    await expect(run(overflow + 1)).rejects.toMatchObject({ name: 'ApprovalRequiredError' });
+    answerPermission(`td${overflow + 1}`, 'deny');
   });
 
   it('resume: an approved run_node checkpoint replays the gated call without recounting', async () => {
@@ -213,7 +230,7 @@ describe('canvasBudget', () => {
     try {
       await (tools.run_node as never as { execute: (a: unknown, o: unknown) => Promise<unknown> }).execute(
         { id: fresh.id, wait: false, timeoutMs: 50 },
-        { toolCallId: 'tr5' },
+        { toolCallId: 'tr-overflow' },
       );
     } catch (e) {
       err = e;
@@ -221,10 +238,10 @@ describe('canvasBudget', () => {
     expect(isApprovalRequiredError(err)).toBe(true);
     const interaction = (err as ApprovalRequiredError).interaction;
     expect(interaction.args.tool).toBe('run_node');
-    expect(answerPermission('tr5', 'allow')).toBe(true);
+    expect(answerPermission('tr-overflow', 'allow')).toBe(true);
     // The resume path must actually run the gated call, not bounce off a
     // "Cannot resume unknown tool" default — and must not charge it twice.
-    const out = await executeApproved(interaction.args, 'tr5');
+    const out = await executeApproved(interaction.args, 'tr-overflow');
     expect(out.error).toBeUndefined();
     const res = JSON.parse(out.result ?? '{}') as { ok?: boolean; status?: string; id?: string };
     expect(res.ok).toBe(true);

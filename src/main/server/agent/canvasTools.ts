@@ -1,4 +1,6 @@
 import { tool } from 'ai';
+import { createHash } from 'node:crypto';
+import { createCanvasApplication } from '../canvas/application';
 import { z } from 'zod';
 import { CANVAS_IMAGE_MODELS, CANVAS_IMAGE_SIZES, defaultNodeBox } from '../../../shared/canvas';
 import { cameraFromPreset } from '../../../shared/cameraMotion';
@@ -6,13 +8,18 @@ import { canvasMentionIds, serializeMention } from '../../../shared/resolveMenti
 import type { SettingsStore } from '../storage/settingsStore';
 import type { CanvasStore } from '../storage/canvasStore';
 import { getCanvasChannel } from '../canvas/channel';
-import { broadcastDownstreamDirty, runImageNode } from '../canvas/imageExecutor';
+import { startImageNode } from '../canvas/imageExecutor';
+import { nodeJobsFor, NodeJobsClosedError, type NodeJobSubmission } from '../canvas/nodeJobs';
+import { canvasWorkSignal, canvasWorkStopped } from '../canvas/workLifecycle';
+import { isCanvasJobTerminal, type CanvasJob } from '../../../shared/canvasJobs';
 import { runAgentNode } from '../canvas/agentExecutor';
-import { runVideoNode } from '../canvas/videoExecutor';
-import { runAudioNode } from '../canvas/audioExecutor';
+import { startVideoNode, replayVideoJob } from '../canvas/videoExecutor';
+import { startAudioNode, replayAudioJob } from '../canvas/audioExecutor';
+import { CanvasJobStoreError } from '../storage/canvasJobStore';
 import type { ProviderStore } from '../storage/providerStore';
 import { runGraph } from '../canvas/graphExecutor';
 import { descendants, isImportedMedia } from '../canvas/graph';
+import { readCanvasAsset } from '../canvas/assets';
 import { findLikelyGaps } from './canvasGapCheck';
 import { watchCanvasNodeJob } from './jobWatch';
 import { CANVAS_BUDGET_ALLOW_BATCH, type CanvasBudget } from './canvasBudget';
@@ -86,7 +93,23 @@ const STILL_RUNNING_NOTE =
   'Some nodes are still rendering. Do not poll or re-run them — a system notice lands in this turn as each one settles.';
 
 function waitBudget(timeoutMs: number | undefined): number {
-  return Math.min(timeoutMs ?? MAX_TOOL_WAIT_MS, MAX_TOOL_WAIT_MS);
+  return Math.max(0, Math.min(timeoutMs ?? MAX_TOOL_WAIT_MS, MAX_TOOL_WAIT_MS));
+}
+
+/** A completed or aborted wait owns no deadline timer or host listener. */
+function waitForWork(work: Promise<unknown>, timeoutMs: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const finish = () => { clearTimeout(timer); signal.removeEventListener('abort', finish); resolve(); };
+    if (signal.aborted) { resolve(); return; }
+    const timer = setTimeout(finish, timeoutMs);
+    signal.addEventListener('abort', finish, { once: true });
+    void work.then(finish, finish);
+  });
+}
+
+function storyboardImageOperation(base: string, nodeId: string): string {
+  const id = `${base}:image:${nodeId}`;
+  return id.length <= 256 ? id : `storyboard-image:${createHash('sha256').update(id).digest('hex')}`;
 }
 
 async function settleNodes(
@@ -97,6 +120,7 @@ async function settleNodes(
   work: Promise<unknown>,
 ): Promise<CanvasNode[]> {
   const read = (): CanvasNode[] => {
+    if (canvasWorkStopped(canvasStore)) return [];
     const snap = canvasStore.getSnapshot(canvasId);
     const byId = new Map((snap?.nodes ?? []).map((n) => [n.id, n] as const));
     return ids.map((id) => byId.get(id)).filter((n): n is CanvasNode => Boolean(n));
@@ -107,17 +131,16 @@ async function settleNodes(
     () => true,
     () => true,
   );
-  const timedOut = await Promise.race([
-    workSettled.then(() => false),
-    new Promise<boolean>((r) => setTimeout(() => r(true), timeoutMs)),
-  ]);
+  let completed = false;
+  await waitForWork(workSettled.then(() => { completed = true; }), timeoutMs, canvasWorkSignal(canvasStore));
+  const timedOut = !completed;
   if (!timedOut) {
     // Brief grace: a node whose promise just resolved may need a tick for the
     // store write (and any rerun's fresh 'running' state) to land.
     const graceDeadline = Date.now() + SETTLE_GRACE_MS;
     let nodes = read();
     while (nodes.some((n) => n.runState === 'running') && Date.now() < graceDeadline) {
-      await new Promise((r) => setTimeout(r, SETTLE_GRACE_POLL_MS));
+      await waitForWork(new Promise<void>(() => undefined), SETTLE_GRACE_POLL_MS, canvasWorkSignal(canvasStore));
       nodes = read();
     }
     return nodes;
@@ -157,6 +180,11 @@ export function createCanvasTools(options: {
   budget?: CanvasBudget;
 }) {
   const { sessionId, canvasStore, settingsStore, dataRoot, providerStore, budget } = options;
+  const canvasApp = createCanvasApplication(canvasStore);
+  const sessionCanvas = () => {
+    if (canvasWorkStopped(canvasStore)) throw new NodeJobsClosedError();
+    return canvasStore.ensureCanvas(sessionId);
+  };
 
   /** Options the resume path passes back into a gated execute so an approved
    * call isn't charged twice — it already consumed its slot when it threw. */
@@ -194,18 +222,65 @@ export function createCanvasTools(options: {
    * every node that settles to `error` (rejected promise = whole weight back).
    * Failed generations must not eat the quota — a checkpoint should only fire
    * for work that actually ran. */
-  const chargeExecute = (canvasId: string, scopeIds: string[], weight: number, running: Promise<unknown>): void => {
+  const chargeExecute = (canvasId: string, scopeIds: string[], weight: number, running: Promise<unknown>, jobIds?: Map<string, string>): void => {
     if (!budget) return;
     budget.record('execute', weight);
     void running.then(
       () => {
-        const errs = scopeIds.filter((id) => canvasStore.getNode(canvasId, id)?.runState === 'error').length;
+        if (canvasWorkStopped(canvasStore)) return;
+        const errs = scopeIds.filter((id) => {
+          const jobId = jobIds?.get(id);
+          if (!jobId) return canvasStore.getNode(canvasId, id)?.runState === 'error';
+          const job = canvasStore.jobs.get(jobId);
+          return job?.status === 'failed' || job && !job.submittedAt &&
+            (job.status === 'cancelled' || job.status === 'interrupted');
+        }).length;
         if (errs > 0) budget.record('execute', -errs);
       },
       () => {
         budget.record('execute', -weight);
       },
     );
+  };
+
+  const chargeJob = (submission: NodeJobSubmission): void => {
+    if (!budget) return;
+    budget.record('execute');
+    void submission.completion.then(() => {
+      if (canvasWorkStopped(canvasStore)) return;
+      const job = canvasStore.jobs.get(submission.job.id);
+      if (job?.status === 'failed' || job && !job.submittedAt &&
+        (job.status === 'cancelled' || job.status === 'interrupted')) budget.record('execute', -1);
+    }, () => { budget.record('execute', -1); });
+  };
+
+  const jobOutcome = async (submission: NodeJobSubmission, wait: boolean | undefined, timeoutMs: number | undefined,
+    replayed: boolean, repeatNote?: string) => {
+    if (wait !== false && !isCanvasJobTerminal(submission.job.status)) {
+      await waitForWork(submission.completion, waitBudget(timeoutMs), canvasWorkSignal(canvasStore));
+    }
+    if (canvasWorkStopped(canvasStore)) {
+      return { ok: false, id: submission.job.nodeId, status: 'error', jobId: submission.job.id,
+        jobStatus: 'interrupted', error: 'Canvas work stopped' };
+    }
+    const job: CanvasJob = canvasStore.jobs.get(submission.job.id) ?? submission.job;
+    const pending = !isCanvasJobTerminal(job.status);
+    if (!replayed && pending && canvasStore.jobs.isCurrent(job.id)) {
+      watchCanvasNodeJob(sessionId, job.canvasId, canvasStore, [job.nodeId], job.id);
+    }
+    const label = job.nodeType === 'video' ? 'Video' : job.nodeType === 'audio' ? 'Audio' : 'Image';
+    const error = job.error ?? (job.status === 'cancelled'
+      ? job.cancelReason === 'superseded' ? `${label} job was superseded by a newer run.` : `${label} job was cancelled.`
+      : job.status === 'interrupted' ? `${label} job was interrupted; check it before retrying.` : undefined);
+    const note = pending && replayed ? 'This saved media job is still pending; it was not submitted again.'
+      : pending && wait !== false ? STILL_RUNNING_NOTE : repeatNote;
+    return {
+      ok: pending || job.status === 'succeeded', id: job.nodeId,
+      status: pending ? 'running' : job.status === 'succeeded' ? 'done' : 'error',
+      jobId: job.id, jobStatus: job.status, error,
+      ...(job.result ? { output: job.result } : {}),
+      ...(note ? { note } : {}),
+    };
   };
 
   /** Per-turn pipeline dedup: a director model that re-issues the same
@@ -233,12 +308,43 @@ export function createCanvasTools(options: {
   };
 
   const tools = {
+    list_assets: tool({
+      description: 'List saved image, video or audio versions available for reuse across canvases. Reuse does not generate new media; choose a specific assetId.',
+      inputSchema: z.object({ kind: z.enum(['image', 'video', 'audio']).optional(), limit: z.number().int().min(1).max(100).optional() }),
+      execute: async (input) => {
+        sessionCanvas();
+        return { assets: canvasStore.assets.recent({ kind: input.kind, limit: input.limit ?? 20 }).map((asset) => ({
+          assetId: asset.id, kind: asset.kind, source: asset.source, model: asset.model, createdAt: asset.createdAt,
+          label: asset.nodeId ? canvasStore.getNode(asset.canvasId, asset.nodeId)?.title || asset.kind : asset.kind,
+        })) };
+      },
+    }),
+    reuse_asset: tool({
+      description: 'Reuse a saved assetId in this canvas without generation. asReference:true creates a fixed image anchor independent of its original producer; connect it to image/video nodes. Otherwise adds editable imported image/video/audio media.',
+      inputSchema: z.object({ assetId: z.string().min(1), asReference: z.boolean().optional(), title: z.string().optional(),
+        x: z.number().finite().optional(), y: z.number().finite().optional(), operationId: z.string().optional() }),
+      execute: async (input, toolOptions) => {
+        const canvas = sessionCanvas();
+        const { operationId: explicit, ...placement } = input;
+        const operationId = explicit ?? toolOptions?.toolCallId;
+        const request = { kind: 'reuse_asset', input: placement };
+        const receipt = canvasApp.replay<ReturnType<typeof canvasApp.reuseAsset>>(canvas.id, request, operationId);
+        if (receipt) return { ok: true, id: receipt.node.id, canvasId: canvas.id, type: receipt.node.type, assetId: receipt.asset.id };
+        const asset = canvasStore.assets.get(input.assetId);
+        if (!asset) throw new CanvasJobStoreError('素材不存在，请重新选择', 404);
+        const bytes = await readCanvasAsset(dataRoot, asset.path);
+        if (createHash('sha256').update(bytes).digest('hex') !== asset.contentHash) throw new CanvasJobStoreError('素材文件已发生变化，请重新导入', 409);
+        const result = canvasApp.reuseAsset(canvas.id, placement, operationId);
+        budget?.record('structural');
+        return { ok: true, id: result.node.id, canvasId: canvas.id, type: result.node.type, assetId: result.asset.id };
+      },
+    }),
     open_canvas: tool({
       description:
         'Open and display the canvas panel in the user interface. Call this whenever the user asks to see, open, or switch to the canvas.',
       inputSchema: z.object({}),
       execute: async () => {
-        const canvas = canvasStore.ensureCanvas(sessionId);
+        const canvas = sessionCanvas();
         return { ok: true, canvasId: canvas.id };
       },
     }),
@@ -273,69 +379,67 @@ export function createCanvasTools(options: {
       }),
       execute: async (input) => {
         budget?.record('structural');
-        const canvas = canvasStore.ensureCanvas(sessionId);
-        const box = defaultNodeBox(input.type);
-        const params =
-          input.type === 'image'
-            ? {
-                prompt: input.prompt ?? '',
-                size: input.size ?? '1024x1024',
-                ...(input.model ? { model: input.model } : {}),
-                ...(input.draft ? { draft: true } : {}),
+        const canvas = sessionCanvas();
+        const result = canvasApp.batch(canvas.id, { kind: 'agent_add_node', input }, () => {
+          const box = defaultNodeBox(input.type);
+          const params =
+            input.type === 'image'
+              ? {
+                  prompt: input.prompt ?? '',
+                  size: input.size ?? '1024x1024',
+                  ...(input.model ? { model: input.model } : {}),
+                  ...(input.draft ? { draft: true } : {}),
+                }
+              : input.type === 'video'
+                ? { prompt: input.prompt ?? '', duration: '5s', ratio: '16:9', cameraMotion: 'none' }
+                : input.type === 'note'
+                  ? { content: input.instruction ?? input.prompt ?? '', color: 'amber' }
+                  : input.type === 'anchor'
+                    ? { role: input.role ?? 'character', strength: input.strength ?? 'mid' }
+                    : input.type === 'audio'
+                      ? { prompt: input.prompt ?? '', format: 'mp3' }
+                      : { instruction: input.instruction ?? '' };
+          const existing = canvasStore.getSnapshot(canvas.id).nodes;
+          const collides = (x: number, y: number) =>
+            existing.some((n) => x < n.x + n.w && x + box.w > n.x && y < n.y + n.h && y + box.h > n.y);
+          const spot =
+            typeof input.x === 'number' && typeof input.y === 'number' && !collides(input.x, input.y)
+              ? { x: input.x, y: input.y }
+              : nextFreeSpot(existing);
+          const { node } = canvasApp.addNode(canvas.id, {
+            type: input.type,
+            x: spot.x,
+            y: spot.y,
+            w: box.w,
+            h: box.h,
+            title: input.title ?? '',
+            params,
+          });
+          const wiredFrom: string[] = [];
+          if (input.type === 'image' || input.type === 'video') {
+            for (const sourceId of canvasMentionIds(input.prompt ?? '')) {
+              if (!existing.some((n) => n.id === sourceId)) continue;
+              const res = canvasApp.addEdge(canvas.id, { sourceId, targetId: node.id });
+              if (res.edge && res.rev !== undefined) {
+                wiredFrom.push(sourceId);
               }
-            : input.type === 'video'
-              ? { prompt: input.prompt ?? '', duration: '5s', ratio: '16:9', cameraMotion: 'none' }
-              : input.type === 'note'
-                ? { content: input.instruction ?? input.prompt ?? '', color: 'amber' }
-                : input.type === 'anchor'
-                  ? { role: input.role ?? 'character', strength: input.strength ?? 'mid' }
-                  : input.type === 'audio'
-                    ? { prompt: input.prompt ?? '', format: 'mp3' }
-                    : { instruction: input.instruction ?? '' };
-        const existing = canvasStore.getSnapshot(canvas.id).nodes;
-        const collides = (x: number, y: number) =>
-          existing.some((n) => x < n.x + n.w && x + box.w > n.x && y < n.y + n.h && y + box.h > n.y);
-        const spot =
-          typeof input.x === 'number' && typeof input.y === 'number' && !collides(input.x, input.y)
-            ? { x: input.x, y: input.y }
-            : nextFreeSpot(existing);
-        const { rev, node } = canvasStore.addNode(canvas.id, {
-          type: input.type,
-          x: spot.x,
-          y: spot.y,
-          w: box.w,
-          h: box.h,
-          title: input.title ?? '',
-          params,
-        });
-        const channel = getCanvasChannel(canvas.id);
-        channel.broadcast(rev, { type: 'node_added', node, operationId: input.operationId });
-        const wiredFrom: string[] = [];
-        if (input.type === 'image' || input.type === 'video') {
-          for (const sourceId of canvasMentionIds(input.prompt ?? '')) {
-            if (!existing.some((n) => n.id === sourceId)) continue;
-            const res = canvasStore.addEdge(canvas.id, { sourceId, targetId: node.id });
-            if (res.edge && res.rev !== undefined) {
-              channel.broadcast(res.rev, { type: 'edge_added', edge: res.edge, operationId: input.operationId });
-              wiredFrom.push(sourceId);
             }
           }
-        }
-        if (input.asProposal) {
-          channel.broadcast(rev, {
-            type: 'proposal_created',
-            nodeIds: [node.id],
+          return {
+            id: node.id,
+            canvasId: canvas.id,
+            type: node.type,
+            asProposal: Boolean(input.asProposal),
             operationId: input.operationId,
+            ...(wiredFrom.length > 0 ? { wiredFrom } : {}),
+          };
+        }, input.operationId);
+        if (input.asProposal) {
+          getCanvasChannel(canvas.id).broadcast(canvasStore.getCanvas(canvas.id).liveRevision, {
+            type: 'proposal_created', nodeIds: [result.id], operationId: input.operationId,
           });
         }
-        return {
-          id: node.id,
-          canvasId: canvas.id,
-          type: node.type,
-          asProposal: Boolean(input.asProposal),
-          operationId: input.operationId,
-          ...(wiredFrom.length > 0 ? { wiredFrom } : {}),
-        };
+        return result;
       },
     }),
 
@@ -373,7 +477,7 @@ export function createCanvasTools(options: {
         operationId: z.string().optional().describe('Idempotent operation ID for tracking and batched undo.'),
       }),
       execute: async (input, toolOptions) => {
-        const canvas = canvasStore.ensureCanvas(sessionId);
+        const canvas = sessionCanvas();
         const channel = getCanvasChannel(canvas.id);
         // Same-storyboard re-issue (typically the model retrying right after a
         // checkpoint resume) — don't rebuild; hand back what's already there.
@@ -398,133 +502,124 @@ export function createCanvasTools(options: {
         // structural cap so a runaway planner still trips the breaker.
         for (let i = 0; i < input.scenes.length * 2 + 1; i++) budget?.record('structural');
         const mediaModels = (await settingsStore.get()).mediaModels;
+        if (canvasWorkStopped(canvasStore)) throw new NodeJobsClosedError();
 
-        // 1. Create Overview Note card
-        const scriptOverview = `# ${input.storyTitle}\n\n画幅比例: ${input.ratio}\n分镜总数: ${input.scenes.length}\n\n${input.scenes
-          .map((s, idx) => `### 分镜 ${idx + 1}: ${s.title}\n${s.script}`)
-          .join('\n\n')}`;
+        const replayed = Boolean(input.operationId && canvasStore.getReceipt(canvas.id, input.operationId));
+        const { noteNode, imageNodes, createdSceneNodeIds, allCreated, rNote } = canvasApp.batch(canvas.id, { kind: 'storyboard', input }, () => {
+          // 1. Create Overview Note card
+          const scriptOverview = `# ${input.storyTitle}\n\n画幅比例: ${input.ratio}\n分镜总数: ${input.scenes.length}\n\n${input.scenes
+            .map((s, idx) => `### 分镜 ${idx + 1}: ${s.title}\n${s.script}`)
+            .join('\n\n')}`;
 
-        const { rev: rNote, node: noteNode } = canvasStore.addNode(canvas.id, {
-          type: 'note',
-          x: 40,
-          y: 60,
-          w: 300,
-          h: 420,
-          title: `${input.storyTitle} (剧本大纲)`,
-          params: { content: scriptOverview, color: 'amber' },
-        });
-        channel.broadcast(rNote, { type: 'node_added', node: noteNode });
-        channel.broadcast(rNote, { type: 'phase', label: '规划剧本骨架', step: 1, total: 3 });
-
-        const createdSceneNodeIds: string[] = [];
-        let lastRev = rNote;
-        const imageNodes: CanvasNode[] = [];
-        const videoNodes: CanvasNode[] = [];
-
-        // 2. Create sequential scenes
-        for (let i = 0; i < input.scenes.length; i++) {
-          const sc = input.scenes[i];
-          const colX = 380 + i * 360;
-
-          // Character / style continuity: point later shots back at shot 1's keyframe.
-          const continuity =
-            input.carryReference && i > 0 && imageNodes[0]
-              ? ` 保持 ${serializeMention('镜头1关键帧', imageNodes[0].id)} 中主体的外形、服装与风格一致。`
-              : '';
-
-          // Image Node (Keyframe)
-          const imgBox = defaultNodeBox('image');
-          const { rev: rImg, node: imgNode } = canvasStore.addNode(canvas.id, {
-            type: 'image',
-            x: colX,
+          const { rev: rNote, node: noteNode } = canvasApp.addNode(canvas.id, {
+            type: 'note',
+            x: 40,
             y: 60,
-            w: imgBox.w,
-            h: imgBox.h,
-            title: `镜头 ${i + 1} · 关键帧`,
-            params: {
-              prompt: sc.imagePrompt + continuity,
-              size: input.ratio === '9:16' ? '1024x1536' : '1536x1024',
-              ...(mediaModels?.image ? { model: mediaModels.image } : {}),
-            },
+            w: 300,
+            h: 420,
+            title: `${input.storyTitle} (剧本大纲)`,
+            params: { content: scriptOverview, color: 'amber' },
           });
-          channel.broadcast(rImg, { type: 'node_added', node: imgNode });
-          imageNodes.push(imgNode);
-          createdSceneNodeIds.push(imgNode.id);
 
-          // Video Node (Motion)
-          const vidBox = defaultNodeBox('video');
-          const { rev: rVid, node: vidNode } = canvasStore.addNode(canvas.id, {
-            type: 'video',
-            x: colX,
-            y: 480,
-            w: vidBox.w,
-            h: vidBox.h,
-            title: `镜头 ${i + 1} · 运镜`,
-            params: {
-              prompt: sc.videoPrompt + continuity,
-              duration: sc.duration,
-              ratio: input.ratio,
-              cameraMotion: sc.camera,
-              camera: cameraFromPreset(sc.camera),
-              ...(mediaModels?.video ? { model: mediaModels.video } : {}),
-            },
-          });
-          channel.broadcast(rVid, { type: 'node_added', node: vidNode });
-          channel.broadcast(rVid, {
-            type: 'phase',
-            label: `铺设分镜节点 ${i + 1}/${input.scenes.length}`,
-            step: 2,
-            total: 3,
-          });
-          lastRev = rVid;
-          videoNodes.push(vidNode);
-          createdSceneNodeIds.push(vidNode.id);
 
-          // Edge: Image -> Video (start_frame)
-          const { rev: rEdge, edge } = canvasStore.addEdge(canvas.id, {
-            sourceId: imgNode.id,
-            targetId: vidNode.id,
-            targetHandle: 'start_frame',
-          });
-          channel.broadcast(rEdge, { type: 'edge_added', edge });
+          const createdSceneNodeIds: string[] = [];
+          const imageNodes: CanvasNode[] = [];
+          const videoNodes: CanvasNode[] = [];
 
-          // If note is next to scene 1, connect note to image 1
-          if (i === 0) {
-            const { rev: rNoteEdge, edge: noteEdge } = canvasStore.addEdge(canvas.id, {
-              sourceId: noteNode.id,
-              targetId: imgNode.id,
+          // 2. Create sequential scenes
+          for (let i = 0; i < input.scenes.length; i++) {
+            const sc = input.scenes[i];
+            const colX = 380 + i * 360;
+
+            // Character / style continuity: point later shots back at shot 1's keyframe.
+            const continuity =
+              input.carryReference && i > 0 && imageNodes[0]
+                ? ` 保持 ${serializeMention('镜头1关键帧', imageNodes[0].id)} 中主体的外形、服装与风格一致。`
+                : '';
+
+            // Image Node (Keyframe)
+            const imgBox = defaultNodeBox('image');
+            const { node: imgNode } = canvasApp.addNode(canvas.id, {
+              type: 'image',
+              x: colX,
+              y: 60,
+              w: imgBox.w,
+              h: imgBox.h,
+              title: `镜头 ${i + 1} · 关键帧`,
+              params: {
+                prompt: sc.imagePrompt + continuity,
+                size: input.ratio === '9:16' ? '1024x1536' : '1536x1024',
+                ...(mediaModels?.image ? { model: mediaModels.image } : {}),
+              },
             });
-            channel.broadcast(rNoteEdge, { type: 'edge_added', edge: noteEdge });
-          } else {
-            // Connect previous video to current image for visual continuity
-            const prevVid = videoNodes[i - 1];
-            const { rev: rSeqEdge, edge: seqEdge } = canvasStore.addEdge(canvas.id, {
-              sourceId: prevVid.id,
-              targetId: imgNode.id,
+            imageNodes.push(imgNode);
+            createdSceneNodeIds.push(imgNode.id);
+
+            // Video Node (Motion)
+            const vidBox = defaultNodeBox('video');
+            const { node: vidNode } = canvasApp.addNode(canvas.id, {
+              type: 'video',
+              x: colX,
+              y: 480,
+              w: vidBox.w,
+              h: vidBox.h,
+              title: `镜头 ${i + 1} · 运镜`,
+              params: {
+                prompt: sc.videoPrompt + continuity,
+                duration: sc.duration,
+                ratio: input.ratio,
+                cameraMotion: sc.camera,
+                camera: cameraFromPreset(sc.camera),
+                ...(mediaModels?.video ? { model: mediaModels.video } : {}),
+              },
             });
-            channel.broadcast(rSeqEdge, { type: 'edge_added', edge: seqEdge });
+            videoNodes.push(vidNode);
+            createdSceneNodeIds.push(vidNode.id);
+
+            // Edge: Image -> Video (start_frame)
+            const { edge } = canvasApp.addEdge(canvas.id, {
+              sourceId: imgNode.id,
+              targetId: vidNode.id,
+              targetHandle: 'start_frame',
+            });
+            if (!edge) throw new Error('Storyboard frame connection failed');
+
+            // If note is next to scene 1, connect note to image 1
+            if (i === 0) {
+              const noteEdgeResult = canvasApp.addEdge(canvas.id, {
+                sourceId: noteNode.id,
+                targetId: imgNode.id,
+              });
+              if (noteEdgeResult.error) throw new Error(`Storyboard connection failed: ${noteEdgeResult.error}`);
+            } else {
+              // Connect previous video to current image for visual continuity
+              const prevVid = videoNodes[i - 1];
+              const seqEdgeResult = canvasApp.addEdge(canvas.id, {
+                sourceId: prevVid.id,
+                targetId: imgNode.id,
+              });
+              if (seqEdgeResult.error) throw new Error(`Storyboard connection failed: ${seqEdgeResult.error}`);
+            }
           }
-        }
 
-        channel.broadcast(lastRev, {
-          type: 'phase',
-          label: input.asProposal ? '编排完成，待确认' : '编排完成',
-          step: 3,
-          total: 3,
-        });
-
-        const allCreated = [noteNode.id, ...createdSceneNodeIds];
+          const allCreated = [noteNode.id, ...createdSceneNodeIds];
+          return { noteNode, imageNodes, createdSceneNodeIds, allCreated, rNote };
+        }, input.operationId);
+        channel.broadcast(canvasStore.getCanvas(canvas.id).liveRevision, { type: 'phase', label: '编排完成', step: 3, total: 3 });
         planSigs.set(planSig, { noteId: noteNode.id, planNodeIds: allCreated });
-        if (input.autoRunFirstScene && imageNodes.length > 0) {
-          gateExecute(toolOptions, {
+        if (!replayed && input.autoRunFirstScene && imageNodes.length > 0) {
+          const operationId = storyboardImageOperation(input.operationId ?? toolOptions?.toolCallId ?? noteNode.id, imageNodes[0].id);
+          const saved = nodeJobsFor(canvasStore).replay(canvas.id, imageNodes[0].id, operationId);
+          if (!saved) gateExecute(toolOptions, {
             tool: 'create_storyboard_pipeline',
             scenes: input.scenes.length,
             planNodeIds: allCreated,
             operationId: input.operationId,
           });
-          const running = runImageNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node: imageNodes[0] });
-          void running.catch((): undefined => undefined);
-          chargeExecute(canvas.id, [imageNodes[0].id], 1, running);
+          if (!saved) {
+            const accepted = startImageNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node: imageNodes[0], operationId });
+            chargeJob(accepted);
+          }
         }
 
         if (input.asProposal) {
@@ -553,13 +648,24 @@ export function createCanvasTools(options: {
         'Run a canvas node by id. An image or video node generates the media; an audio node synthesizes its speech track; an agent node runs a read-only research/critique pass. By default waits for the node to finish and returns its outcome — pass wait:false for long jobs (video, big batches): the tool returns immediately and a system notice lands in this turn when the node settles.',
       inputSchema: z.object({
         id: z.string(),
+        operationId: z.string().optional().describe('Reuse this id only when retrying the same image, video or audio request.'),
         wait: z.boolean().optional().describe('Wait for the run to finish (default true).'),
         timeoutMs: z.number().optional().describe(`Max wait in ms (default and cap ${MAX_TOOL_WAIT_MS}); nodes still running then report back via a system notice.`),
       }),
-      execute: async ({ id, wait, timeoutMs }, toolOptions) => {
-        const canvas = canvasStore.ensureCanvas(sessionId);
+      execute: async ({ id, wait, timeoutMs, operationId }, toolOptions) => {
+        const canvas = sessionCanvas();
+        const mediaOperationId = operationId ?? toolOptions?.toolCallId;
+        const existing = mediaOperationId ? canvasStore.jobs.findByOperationId(canvas.id, mediaOperationId) : null;
+        const saved = existing?.nodeType === 'video'
+          ? replayVideoJob(canvasStore, canvas.id, id, mediaOperationId)
+          : existing?.nodeType === 'audio' ? replayAudioJob(canvasStore, canvas.id, id, mediaOperationId)
+            : nodeJobsFor(canvasStore).replay(canvas.id, id, mediaOperationId);
+        if (saved) return jobOutcome(saved, wait, timeoutMs, true);
         const node = canvasStore.getNode(canvas.id, id);
         if (!node) return { error: `No canvas node "${id}"` };
+        if (!RUNNABLE_TYPES.has(node.type)) return { ok: false, id, status: node.runState, error: `Node type "${node.type}" cannot run` };
+        if (isImportedMedia(node)) return { ok: true, id, status: 'done', output: node.output, note: '已有素材可以直接引用；填写提示词后可生成新版本。' };
+        if (node.type === 'audio' && !providerStore) throw new CanvasJobStoreError('Audio provider store is unavailable');
         // A user-approved replay explicitly wants this run — the fuse would
         // refuse an already-twice-seen params set and silently eat the approval.
         const fuse = (toolOptions as GateOptions | undefined)?.approvedReplay ? {} : unchangedRunVerdict(node);
@@ -574,15 +680,14 @@ export function createCanvasTools(options: {
         }
         const repeatNote = fuse.note;
         // Gate after validation + fuse: a refused call must not trip a checkpoint.
-        gateExecute(toolOptions, { tool: 'run_node', id, wait, timeoutMs });
-        const running =
-          node.type === 'agent'
-            ? runAgentNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node })
-            : node.type === 'video'
-              ? runVideoNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node, waitForCompletion: true })
-              : node.type === 'audio'
-                ? runAudioNode({ canvasStore, providerStore, dataRoot, canvasId: canvas.id, node })
-                : runImageNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node });
+        gateExecute(toolOptions, { tool: 'run_node', id, wait, timeoutMs, ...(operationId ? { operationId } : {}) });
+        if (node.type === 'image' || node.type === 'video' || node.type === 'audio') {
+          const start = node.type === 'image' ? startImageNode : node.type === 'video' ? startVideoNode : startAudioNode;
+          const accepted = start({ canvasStore, settingsStore, providerStore, dataRoot, canvasId: canvas.id, node, operationId: mediaOperationId });
+          chargeJob(accepted);
+          return jobOutcome(accepted, wait, timeoutMs, false, repeatNote);
+        }
+        const running = runAgentNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node });
         chargeExecute(canvas.id, [id], 1, running);
         if (wait === false) {
           void running.catch((): undefined => undefined);
@@ -592,6 +697,7 @@ export function createCanvasTools(options: {
           return { ok: true, id, status: 'running', ...(repeatNote ? { note: repeatNote } : {}) };
         }
         const settled = await settleNodes(canvasStore, canvas.id, [id], waitBudget(timeoutMs), running);
+        if (canvasWorkStopped(canvasStore)) return { ok: false, id, status: 'error', error: 'Canvas work stopped' };
         const n = settled[0];
         const stillRunning = !n || n.runState === 'running';
         if (stillRunning) watchCanvasNodeJob(sessionId, canvas.id, canvasStore, [id]);
@@ -622,13 +728,15 @@ export function createCanvasTools(options: {
           .describe('One line on what this run should deliver (e.g. "15s 口播广告") — used for a completeness sanity check before dispatch.'),
       }),
       execute: async ({ from, nodeIds, wait, timeoutMs, intent }, toolOptions) => {
-        const canvas = canvasStore.ensureCanvas(sessionId);
+        const canvas = sessionCanvas();
         if (from && !canvasStore.getNode(canvas.id, from)) return { error: `No canvas node "${from}"` };
         const missing = (nodeIds ?? []).filter((id) => !canvasStore.getNode(canvas.id, id));
         if (missing.length > 0) return { error: `No canvas node(s) ${missing.join(', ')}` };
         const scope = runGraphScope(canvasStore, canvas.id, from, nodeIds);
         const warnings = findLikelyGaps(canvasStore, canvas.id, scope, intent);
         gateExecute(toolOptions, { tool: 'run_graph', from, nodeIds, wait, timeoutMs }, Math.max(scope.length, 1));
+        const jobIds = new Map<string, string>();
+        let background = wait === false;
         const running = runGraph({
           canvasStore,
           settingsStore,
@@ -637,11 +745,19 @@ export function createCanvasTools(options: {
           fromNodeId: from,
           nodeIds,
           providerStore,
+          onJob: ({ job }) => {
+            jobIds.set(job.nodeId, job.id);
+            if (background) watchCanvasNodeJob(sessionId, canvas.id, canvasStore, [job.nodeId], job.id);
+          },
         });
-        if (scope.length > 0) chargeExecute(canvas.id, scope, scope.length, running);
+        if (scope.length > 0) chargeExecute(canvas.id, scope, scope.length, running, jobIds);
         if (wait === false) {
           void running.catch((): undefined => undefined);
-          watchCanvasNodeJob(sessionId, canvas.id, canvasStore, scope);
+          const legacy = scope.filter((id) => {
+            const type = canvasStore.getNode(canvas.id, id)?.type;
+            return type === 'agent';
+          });
+          watchCanvasNodeJob(sessionId, canvas.id, canvasStore, legacy);
           return {
             ok: true,
             status: 'running',
@@ -649,14 +765,26 @@ export function createCanvasTools(options: {
             ...(warnings.length > 0 ? { warnings } : {}),
           };
         }
-        const settled = await settleNodes(canvasStore, canvas.id, scope, waitBudget(timeoutMs), running);
-        const pendingIds = settled.filter((n) => n.runState !== 'done' && n.runState !== 'error').map((n) => n.id);
-        if (pendingIds.length > 0) watchCanvasNodeJob(sessionId, canvas.id, canvasStore, pendingIds);
+        await waitForWork(running, waitBudget(timeoutMs), canvasWorkSignal(canvasStore));
+        if (canvasWorkStopped(canvasStore)) return { ok: false, status: 'error', error: 'Canvas work stopped' };
+        background = true;
+        const settled = scope.map((id) => {
+          const node = canvasStore.getNode(canvas.id, id);
+          const jobId = jobIds.get(id);
+          const job = jobId ? canvasStore.jobs.get(jobId) : null;
+          if (job && !isCanvasJobTerminal(job.status)) watchCanvasNodeJob(sessionId, canvas.id, canvasStore, [id], job.id);
+          return { id, title: (job?.input.node as { title?: string } | undefined)?.title ?? node?.title,
+            status: job ? !isCanvasJobTerminal(job.status) ? 'running' : job.status === 'succeeded' ? 'done' : 'error' : node?.runState ?? 'error',
+            error: job ? job.error ?? (job.status === 'cancelled' ? 'Media job was cancelled or superseded.' : undefined) : node?.output?.error,
+            ...(job ? { jobId: job.id, jobStatus: job.status } : {}) };
+        });
+        const pendingIds = settled.filter((n) => n.status !== 'done' && n.status !== 'error').map((n) => n.id);
+        watchCanvasNodeJob(sessionId, canvas.id, canvasStore, pendingIds.filter((id) => !jobIds.has(id)));
         return {
-          ok: settled.every((n) => n.runState === 'done'),
+          ok: settled.every((n) => n.status === 'done'),
           status: pendingIds.length > 0 ? 'running' : 'done',
           ...(pendingIds.length > 0 ? { note: STILL_RUNNING_NOTE } : {}),
-          results: settled.map((n) => ({ id: n.id, title: n.title, status: n.runState, error: n.output?.error })),
+          results: settled,
           ...(warnings.length > 0 ? { warnings } : {}),
         };
       },
@@ -671,7 +799,7 @@ export function createCanvasTools(options: {
         color: z.string().optional().describe('Hex colour for the container, e.g. "#3b82f6".'),
       }),
       execute: async ({ nodeIds, title, color }) => {
-        const canvas = canvasStore.ensureCanvas(sessionId);
+        const canvas = sessionCanvas();
         const members = nodeIds
           .map((id) => canvasStore.getNode(canvas.id, id))
           .filter((n): n is CanvasNode => Boolean(n) && n!.type !== 'group');
@@ -684,7 +812,7 @@ export function createCanvasTools(options: {
         const maxX = Math.max(...members.map((n) => n.x + n.w));
         const maxY = Math.max(...members.map((n) => n.y + n.h));
 
-        const { rev, node } = canvasStore.addNode(canvas.id, {
+        const { node } = canvasApp.addNode(canvas.id, {
           type: 'group',
           x: Math.round(minX - padding),
           y: Math.round(minY - header),
@@ -693,7 +821,6 @@ export function createCanvasTools(options: {
           title: title ?? '分镜组',
           params: { memberIds: members.map((n) => n.id), color: color ?? '#3b82f6', locked: false },
         });
-        getCanvasChannel(canvas.id).broadcast(rev, { type: 'node_added', node });
         return { id: node.id, memberIds: members.map((n) => n.id) };
       },
     }),
@@ -754,25 +881,24 @@ export function createCanvasTools(options: {
         operationId: z.string().optional().describe('Idempotent operation ID.'),
       }),
       execute: async ({ id, prompt, size, model, draft, instruction, title, camera, operationId }) => {
-        const canvas = canvasStore.ensureCanvas(sessionId);
-        const node = canvasStore.getNode(canvas.id, id);
-        if (!node) return { error: `No canvas node "${id}"` };
-        const params = { ...(node.params as Record<string, unknown>) };
-        if (prompt !== undefined) params.prompt = prompt;
-        if (size !== undefined) params.size = size;
-        if (model !== undefined) params.model = model;
-        if (draft !== undefined) params.draft = draft;
-        if (instruction !== undefined) params.instruction = instruction;
-        if (camera !== undefined) params.camera = camera;
-        const res = canvasStore.updateNode(canvas.id, id, {
-          params,
-          ...(title !== undefined ? { title } : {}),
-        });
-        if (!res) return { error: `No canvas node "${id}"` };
-        const channel = getCanvasChannel(canvas.id);
-        channel.broadcast(res.rev, { type: 'node_updated', node: res.node, operationId });
-        broadcastDownstreamDirty(canvasStore, canvas.id, id, res.rev);
-        return { id, params: res.node.params, operationId };
+        const canvas = sessionCanvas();
+        return canvasApp.batch(canvas.id, { kind: 'agent_update_node', id, prompt, size, model, draft, instruction, title, camera }, () => {
+          const node = canvasStore.getNode(canvas.id, id);
+          if (!node) return { error: `No canvas node "${id}"` };
+          const params = { ...(node.params as Record<string, unknown>) };
+          if (prompt !== undefined) params.prompt = prompt;
+          if (size !== undefined) params.size = size;
+          if (model !== undefined) params.model = model;
+          if (draft !== undefined) params.draft = draft;
+          if (instruction !== undefined) params.instruction = instruction;
+          if (camera !== undefined) params.camera = camera;
+          const res = canvasApp.updateNode(canvas.id, id, {
+            params,
+            ...(title !== undefined ? { title } : {}),
+          });
+          if (!res) return { error: `No canvas node "${id}"` };
+          return { id, params: res.node.params, operationId };
+        }, operationId);
       },
     }),
 
@@ -795,7 +921,7 @@ export function createCanvasTools(options: {
           .describe('If true and the selected version recorded a prompt in resultSet, restore params.prompt as well.'),
       }),
       execute: async ({ nodeId, versionIndex, rollbackToPrevious, restorePrompt }) => {
-        const canvas = canvasStore.ensureCanvas(sessionId);
+        const canvas = sessionCanvas();
         const node = canvasStore.getNode(canvas.id, nodeId);
         if (!node) return { error: `No canvas node "${nodeId}"` };
         const assets = node.output?.assets ?? [];
@@ -817,21 +943,11 @@ export function createCanvasTools(options: {
         }
 
         const nextOutput = { ...(node.output ?? {}), activeAssetIndex: idx };
-        const res = canvasStore.updateNode(canvas.id, nodeId, {
+        const res = canvasApp.updateNode(canvas.id, nodeId, {
           output: nextOutput,
           ...(restoredPrompt !== undefined ? { params } : {}),
         });
         if (!res) return { error: `No canvas node "${nodeId}"` };
-        const channel = getCanvasChannel(canvas.id);
-        channel.broadcast(res.rev, {
-          type: 'node_output',
-          id: nodeId,
-          output: res.node.output ?? nextOutput,
-          runState: res.node.runState,
-        });
-        if (restoredPrompt !== undefined) {
-          channel.broadcast(res.rev, { type: 'node_updated', node: res.node });
-        }
         return {
           ok: true,
           nodeId,
@@ -854,13 +970,13 @@ export function createCanvasTools(options: {
         operationId: z.string().optional().describe('Idempotent operation ID.'),
       }),
       execute: async ({ source, target, sourceHandle, targetHandle, operationId }) => {
-        const canvas = canvasStore.ensureCanvas(sessionId);
-        const res = canvasStore.addEdge(canvas.id, {
+        const canvas = sessionCanvas();
+        const res = canvasApp.addEdge(canvas.id, {
           sourceId: source,
           targetId: target,
           sourceHandle: sourceHandle ?? null,
           targetHandle: targetHandle ?? null,
-        });
+        }, operationId);
         if (res.error === 'incompatible') {
           return {
             error: `Port incompatible: cannot connect "${source}" (${sourceHandle ?? 'default'}) to "${target}" (${targetHandle ?? 'default'})`,
@@ -868,9 +984,6 @@ export function createCanvasTools(options: {
         }
         if (res.error === 'cycle') return { error: 'That connection would create a cycle' };
         if (res.error || !res.edge || res.rev === undefined) return { error: 'source or target node not found' };
-        const channel = getCanvasChannel(canvas.id);
-        channel.broadcast(res.rev, { type: 'edge_added', edge: res.edge, operationId });
-        broadcastDownstreamDirty(canvasStore, canvas.id, source, res.rev);
         return { edgeId: res.edge.id, operationId };
       },
     }),
@@ -884,10 +997,9 @@ export function createCanvasTools(options: {
         operationId: z.string().optional().describe('Idempotent operation ID.'),
       }),
       execute: async ({ anchorId, targetIds, operationId }) => {
-        const canvas = canvasStore.ensureCanvas(sessionId);
+        const canvas = sessionCanvas();
         const anchor = canvasStore.getNode(canvas.id, anchorId);
         if (!anchor || anchor.type !== 'anchor') return { error: `No anchor node "${anchorId}"` };
-        const channel = getCanvasChannel(canvas.id);
         const existing = new Set(
           (canvasStore.getSnapshot(canvas.id)?.edges ?? [])
             .filter((e) => e.sourceId === anchorId)
@@ -903,14 +1015,12 @@ export function createCanvasTools(options: {
           if (!target || (target.type !== 'image' && target.type !== 'video') || existing.has(targetId)) continue;
           const slot = refSlotCount(targetId) + 1;
           if (slot > 3) continue;
-          const res = canvasStore.addEdge(canvas.id, {
+          const res = canvasApp.addEdge(canvas.id, {
             sourceId: anchorId,
             targetId,
             targetHandle: `ref_${slot}`,
           });
           if (res.error || !res.edge || res.rev === undefined) continue;
-          channel.broadcast(res.rev, { type: 'edge_added', edge: res.edge, operationId });
-          broadcastDownstreamDirty(canvasStore, canvas.id, targetId, res.rev);
           attached += 1;
         }
         return { attached, operationId };
@@ -924,10 +1034,9 @@ export function createCanvasTools(options: {
         operationId: z.string().optional().describe('Idempotent operation ID.'),
       }),
       execute: async ({ id, operationId }) => {
-        const canvas = canvasStore.ensureCanvas(sessionId);
-        const res = canvasStore.deleteNode(canvas.id, id);
+        const canvas = sessionCanvas();
+        const res = canvasApp.deleteNode(canvas.id, id, operationId);
         if (!res) return { error: `No canvas node "${id}"` };
-        getCanvasChannel(canvas.id).broadcast(res.rev, { type: 'node_deleted', id, operationId });
         return { ok: true, operationId };
       },
     }),
@@ -946,7 +1055,7 @@ export function createCanvasTools(options: {
   ): Promise<{ result?: string; error?: string }> {
     const resumeTool = typeof args.tool === 'string' ? args.tool : '';
     if (resumeTool === 'create_storyboard_pipeline') {
-      const canvas = canvasStore.ensureCanvas(sessionId);
+      const canvas = sessionCanvas();
       const rev = canvasStore.getSnapshot(canvas.id)?.canvas.liveRevision ?? 0;
       getCanvasChannel(canvas.id).broadcast(rev, {
         type: 'proposal_accepted',

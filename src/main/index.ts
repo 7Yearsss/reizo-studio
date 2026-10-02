@@ -50,6 +50,12 @@ let dbHandle: DbHandle | null = null;
 let freezeTurnMarkers: (() => void) | null = null;
 let stopScheduler: (() => void) | null = null;
 let shuttingDown = false;
+// Recovery assumes exclusive ownership of this data directory.
+const primaryInstance = !started && app.requestSingleInstanceLock();
+if (!primaryInstance) app.quit();
+app.on('second-instance', () => {
+  if (runningServer) createMainWindow();
+});
 
 function devServerOrigin(): string | undefined {
   if (!MAIN_WINDOW_VITE_DEV_SERVER_URL) return undefined;
@@ -107,13 +113,14 @@ async function shutdown(): Promise<void> {
   // interrupted by this quit.
   freezeTurnMarkers?.();
   freezeTurnMarkers = null;
+  runningServer?.stopCanvasJobs();
+  stopScheduler?.();
+  stopScheduler = null;
   globalShortcut.unregisterAll();
   await Promise.race([
     drainMemoryJobs(),
     new Promise((r: (v: void) => void) => setTimeout(r, 8000)),
   ]).catch((): void => undefined);
-  stopScheduler?.();
-  stopScheduler = null;
   if (runningServer) {
     await stopLocalServer(runningServer);
     runningServer = null;
@@ -125,6 +132,7 @@ async function shutdown(): Promise<void> {
 }
 
 app.on('ready', () => {
+  if (!primaryInstance) return;
   bootstrap().catch((err) => {
     console.error('[main] failed to start', err);
     app.quit();
@@ -137,6 +145,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('activate', () => {
+  if (!primaryInstance) return;
   if (BrowserWindow.getAllWindows().length === 0) {
     createMainWindow();
   } else {

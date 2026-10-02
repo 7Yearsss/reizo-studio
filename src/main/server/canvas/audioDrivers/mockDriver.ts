@@ -1,6 +1,6 @@
-import type { AudioDriver, AudioDriverCredentials, AudioGenerateParams, AudioJobResult } from './types';
+import type { AudioDriver, AudioDriverCredentials, AudioDriverOptions, AudioGenerateParams, AudioJobResult } from './types';
 
-function generateWavBuffer(durationSec: number = 3, freq: number = 440): Buffer {
+function generateWavBuffer(durationSec = 3, freq = 440): Buffer {
   const sampleRate = 44100;
   const numSamples = Math.floor(sampleRate * durationSec);
   const dataSize = numSamples * 2; // 16-bit mono = 2 bytes per sample
@@ -45,10 +45,14 @@ function generateWavBuffer(durationSec: number = 3, freq: number = 440): Buffer 
 export const mockAudioDriver: AudioDriver = {
   id: 'mock',
   name: '本地模拟音频驱动',
-  async synthesize(params: AudioGenerateParams, _credentials: AudioDriverCredentials): Promise<AudioJobResult> {
+  defaultModel: 'mock-synth-1',
+  modelForRequest: () => 'mock-synth-1',
+  async synthesize(params: AudioGenerateParams, _credentials: AudioDriverCredentials, options: AudioDriverOptions = {}): Promise<AudioJobResult> {
+    options.signal?.throwIfAborted();
     const duration = params.pitch ? Math.max(1, Math.min(10, 3 + params.pitch * 0.2)) : 3;
     const freq = params.voiceId === 'beep-pulse' ? 880 : 440;
     const wav = generateWavBuffer(duration, freq);
+    options.signal?.throwIfAborted();
     return {
       audioBuffer: wav,
       format: 'wav',

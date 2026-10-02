@@ -12,8 +12,13 @@ import type {
 } from '../../../shared/canvas';
 import type { DbHandle } from '../db/client';
 import { descendants, inputHash, wouldCycle } from '../canvas/graph';
-import { cancelVideoJob } from '../canvas/asyncJobManager';
 import { isPortCompatible, normalizeSourceHandle } from '../../../shared/canvasGraph';
+import type { CanvasCommit, CanvasDocumentChange } from '../../../shared/canvasSync';
+import { isCanvasCommit } from '../../../shared/canvasSync';
+import { createCanvasJobStore } from './canvasJobStore';
+import { createCanvasAssetStore } from './canvasAssetStore';
+
+export const CANVAS_COMMIT_RETENTION = 1000;
 
 interface CanvasRowRaw {
   id: string;
@@ -138,8 +143,9 @@ export interface EdgeInput {
 /**
  * SQLite-backed canvas store. Like `sqliteSessionStore` it writes straight
  * through `node:sqlite` (the drizzle proxy has no `transaction()`), and every
- * mutation bumps `canvases.live_revision` in the same `BEGIN`/`COMMIT` so a
- * reconnecting client can resume from `after = live_revision`.
+ * outer transaction allocates one `live_revision` per affected canvas and
+ * persists its complete document commit alongside the row changes. Readers
+ * can replay that journal or resync when their cursor is outside retention.
  */
 export function createCanvasStore(handle: DbHandle) {
   const raw: DatabaseSync = handle.raw;
@@ -156,9 +162,54 @@ export function createCanvasStore(handle: DbHandle) {
   );
   const readRev = raw.prepare('SELECT live_revision AS r FROM canvases WHERE id = ?');
 
+  interface TransactionFrame {
+    revisions: Map<string, number>;
+    changes: Map<string, CanvasDocumentChange[]>;
+    dirtyRoots: Map<string, Set<string>>;
+    context?: { canvasId: string; mutationId?: string };
+  }
+  const transactions: TransactionFrame[] = [];
+  const commitListeners = new Set<(commit: CanvasCommit) => void>();
+  const notifications: CanvasCommit[] = [];
+  let notifying = false;
+
+  function notify(commits: CanvasCommit[]): void {
+    notifications.push(...commits);
+    if (notifying || !notifications.length) return;
+    notifying = true;
+    queueMicrotask(() => {
+      try {
+        while (notifications.length) {
+          const commit = notifications.shift();
+          for (const listener of [...commitListeners]) {
+            try { listener(commit); } catch (err) { console.error('[canvas] commit observer failed', err); }
+          }
+        }
+      } finally { notifying = false; }
+    });
+  }
+
+  function change(canvasId: string, event: CanvasDocumentChange, dirtyRoot?: string): void {
+    const frame = transactions[transactions.length - 1];
+    const changes = frame.changes.get(canvasId) ?? [];
+    changes.push(event);
+    frame.changes.set(canvasId, changes);
+    if (dirtyRoot) {
+      const roots = frame.dirtyRoots.get(canvasId) ?? new Set<string>();
+      roots.add(dirtyRoot);
+      frame.dirtyRoots.set(canvasId, roots);
+    }
+  }
+
   function nextRev(canvasId: string): number {
+    for (let i = transactions.length - 1; i >= 0; i -= 1) {
+      const revision = transactions[i].revisions.get(canvasId);
+      if (revision !== undefined) return revision;
+    }
     bumpRev.run(Date.now(), canvasId);
-    return (readRev.get(canvasId) as { r: number }).r;
+    const revision = (readRev.get(canvasId) as { r: number }).r;
+    transactions[transactions.length - 1].revisions.set(canvasId, revision);
+    return revision;
   }
 
   function readNode(canvasId: string, id: string): CanvasNode | null {
@@ -198,20 +249,126 @@ export function createCanvasStore(handle: DbHandle) {
     return toCanvas(selCanvasById.get(id) as unknown as CanvasRowRaw);
   }
 
-  function tx<T>(fn: () => T): T {
-    raw.exec('BEGIN');
+  function tx<T>(fn: () => T, context?: { canvasId: string; mutationId?: string }): T {
+    const savepoint = `canvas_${transactions.length}`;
+    const parent = transactions[transactions.length - 1];
+    const outer = !parent;
+    const frame: TransactionFrame = { revisions: new Map(), changes: new Map(), dirtyRoots: new Map(), context };
+    raw.exec(outer ? 'BEGIN' : `SAVEPOINT ${savepoint}`);
+    transactions.push(frame);
+    const commits: CanvasCommit[] = [];
+    let out: T;
     try {
-      const out = fn();
-      raw.exec('COMMIT');
-      return out;
+      out = fn();
+      if (out && typeof (out as { then?: unknown }).then === 'function') {
+        throw new Error('Canvas transactions must be synchronous');
+      }
+      if (outer) {
+        for (const [canvasId, changes] of frame.changes) {
+          const revision = frame.revisions.get(canvasId);
+          const roots = frame.dirtyRoots.get(canvasId) ?? new Set<string>();
+          // Dirty is derived: an upstream result/edge change also affects untouched descendants.
+          const edges = readEdges(canvasId);
+          const affected = new Set<string>();
+          for (const root of roots) {
+            affected.add(root);
+            for (const id of descendants(edges, root)) affected.add(id);
+          }
+          const seen = new Set<string>();
+          const annotated = affected.size ? annotate(readNodes(canvasId), edges) : [];
+          const byId = new Map(annotated.map((node) => [node.id, node]));
+          const finalNode = (node: CanvasNode): CanvasNode => {
+            const current = byId.get(node.id) ?? readNode(canvasId, node.id) ?? node;
+            if (byId.has(node.id)) return current;
+            if (!current.paramsHash) return { ...current, dirty: false };
+            const upstream = edges.filter((edge) => edge.targetId === current.id)
+              .map((edge) => readNode(canvasId, edge.sourceId)).filter((n): n is CanvasNode => Boolean(n));
+            return { ...current, dirty: current.paramsHash !== inputHash(current, upstream) };
+          };
+          const projected = changes.map((event): CanvasDocumentChange => {
+            if (event.type === 'node_added' || event.type === 'node_updated') {
+              seen.add(event.node.id);
+              return { ...event, node: finalNode(event.node) };
+            }
+            return event;
+          });
+          for (const id of affected) {
+            const node = byId.get(id);
+            if (node && !seen.has(id)) projected.push({ type: 'node_updated', node });
+          }
+          const commit: CanvasCommit = {
+            canvasId, revision, changes: projected,
+            ...(context?.canvasId === canvasId && context.mutationId ? { mutationId: context.mutationId } : {}),
+          };
+          raw.prepare('INSERT INTO canvas_commits (canvas_id, revision, mutation_id, changes_json, created_at) VALUES (?, ?, ?, ?, ?)')
+            .run(canvasId, revision, commit.mutationId ?? null, JSON.stringify(projected), Date.now());
+          raw.prepare('DELETE FROM canvas_commits WHERE canvas_id = ? AND revision <= ?')
+            .run(canvasId, revision - CANVAS_COMMIT_RETENTION);
+          commits.push(commit);
+        }
+      }
+      raw.exec(outer ? 'COMMIT' : `RELEASE SAVEPOINT ${savepoint}`);
     } catch (err) {
-      raw.exec('ROLLBACK');
+      raw.exec(outer ? 'ROLLBACK' : `ROLLBACK TO SAVEPOINT ${savepoint}`);
+      if (!outer) raw.exec(`RELEASE SAVEPOINT ${savepoint}`);
       throw err;
+    } finally {
+      transactions.pop();
     }
+    if (parent) {
+      for (const [id, revision] of frame.revisions) parent.revisions.set(id, revision);
+      for (const [id, changes] of frame.changes) parent.changes.set(id, [...(parent.changes.get(id) ?? []), ...changes]);
+      for (const [id, roots] of frame.dirtyRoots) parent.dirtyRoots.set(id, new Set([...(parent.dirtyRoots.get(id) ?? []), ...roots]));
+    } else notify(commits);
+    return out;
   }
 
+  const jobs = createCanvasJobStore(handle, tx);
+  const assets = createCanvasAssetStore(handle, tx, jobs, () => transactions.length > 0);
+
   return {
+    jobs,
+    assets,
     ensureCanvas,
+    transaction: tx,
+
+    subscribeCommits(listener: (commit: CanvasCommit) => void): () => void {
+      commitListeners.add(listener);
+      return () => commitListeners.delete(listener);
+    },
+
+    readCommitsAfter(canvasId: string, after: number): { revision: number; resync: boolean; commits: CanvasCommit[] } {
+      const current = selCanvasById.get(canvasId) as unknown as CanvasRowRaw | undefined;
+      const revision = current?.live_revision ?? 0;
+      if (!current || !Number.isSafeInteger(after) || after < 0 || after > revision) return { revision, resync: true, commits: [] };
+      if (after === revision) return { revision, resync: false, commits: [] };
+      const rows = raw.prepare('SELECT revision, mutation_id, changes_json FROM canvas_commits WHERE canvas_id = ? AND revision > ? ORDER BY revision')
+        .all(canvasId, after) as { revision: number; mutation_id: string | null; changes_json: string }[];
+      if (rows.length !== revision - after || rows.some((row, index) => row.revision !== after + index + 1)) {
+        return { revision, resync: true, commits: [] };
+      }
+      const commits: CanvasCommit[] = [];
+      try {
+        for (const row of rows) {
+          const commit = { canvasId, revision: row.revision, changes: JSON.parse(row.changes_json),
+            ...(row.mutation_id ? { mutationId: row.mutation_id } : {}) };
+          if (!isCanvasCommit(commit)) return { revision, resync: true, commits: [] };
+          commits.push(commit);
+        }
+      } catch { return { revision, resync: true, commits: [] }; }
+      return { revision, resync: false, commits };
+    },
+
+    getReceipt(canvasId: string, mutationId: string): { requestHash: string; resultJson: string } | null {
+      const row = raw.prepare('SELECT request_hash, result_json FROM canvas_command_receipts WHERE canvas_id = ? AND mutation_id = ?')
+        .get(canvasId, mutationId) as { request_hash: string; result_json: string } | undefined;
+      return row ? { requestHash: row.request_hash, resultJson: row.result_json } : null;
+    },
+
+    saveReceipt(canvasId: string, mutationId: string, requestHash: string, result: unknown): void {
+      raw.prepare('INSERT INTO canvas_command_receipts (canvas_id, mutation_id, request_hash, result_json, created_at) VALUES (?, ?, ?, ?, ?)')
+        .run(canvasId, mutationId, requestHash, JSON.stringify(result), Date.now());
+    },
 
     getCanvas(id: string): Canvas | null {
       const row = selCanvasById.get(id) as unknown as CanvasRowRaw | undefined;
@@ -240,6 +397,10 @@ export function createCanvasStore(handle: DbHandle) {
     getNode: readNode,
     getNodes: readNodes,
     getEdges: readEdges,
+
+    runningNodes(): CanvasNode[] {
+      return (raw.prepare("SELECT * FROM canvas_nodes WHERE run_state = 'running'").all() as unknown as NodeRowRaw[]).map(toNode);
+    },
 
     /** The mutated node plus its descendants, each with a fresh `dirty` flag. */
     annotatedFrom(canvasId: string, nodeId: string): CanvasNode[] {
@@ -275,6 +436,7 @@ export function createCanvasStore(handle: DbHandle) {
         const rev = nextRev(canvasId);
         const saved = readNode(canvasId, id);
         if (!saved) throw new Error("canvas node missing after write");
+        change(canvasId, { type: 'node_added', node: saved });
         return { rev, node: saved };
       });
     },
@@ -307,6 +469,8 @@ export function createCanvasStore(handle: DbHandle) {
         const rev = nextRev(canvasId);
         const saved = readNode(canvasId, id);
         if (!saved) throw new Error("canvas node missing after write");
+        change(canvasId, { type: 'node_updated', node: saved },
+          patch.params !== undefined || patch.output !== undefined || patch.paramsHash !== undefined ? id : undefined);
         return { rev, node: saved };
       });
     },
@@ -315,14 +479,17 @@ export function createCanvasStore(handle: DbHandle) {
       return tx(() => {
         const current = readNode(canvasId, id);
         if (!current) return null;
-        cancelVideoJob(canvasId, id);
+        const removedEdges = readEdges(canvasId).filter((edge) => edge.sourceId === id || edge.targetId === id);
         raw.prepare('DELETE FROM canvas_edges WHERE canvas_id = ? AND (source_id = ? OR target_id = ?)').run(
           canvasId,
           id,
           id,
         );
         raw.prepare('DELETE FROM canvas_nodes WHERE canvas_id = ? AND id = ?').run(canvasId, id);
-        return { rev: nextRev(canvasId) };
+        const rev = nextRev(canvasId);
+        change(canvasId, { type: 'node_deleted', id });
+        for (const edge of removedEdges) change(canvasId, { type: 'edge_deleted', id: edge.id }, edge.sourceId === id ? edge.targetId : undefined);
+        return { rev };
       });
     },
 
@@ -354,7 +521,9 @@ export function createCanvasStore(handle: DbHandle) {
         const edgeRow = raw
           .prepare('SELECT * FROM canvas_edges WHERE id = ?')
           .get(id) as unknown as EdgeRowRaw;
-        return { rev, edge: toEdge({ ...edgeRow, source_type: src.type }) };
+        const edge = toEdge({ ...edgeRow, source_type: src.type });
+        change(canvasId, { type: 'edge_added', edge }, input.targetId);
+        return { rev, edge };
       });
     },
 
@@ -365,7 +534,9 @@ export function createCanvasStore(handle: DbHandle) {
           .get(canvasId, id) as { t: string } | undefined;
         if (!existing) return null;
         raw.prepare('DELETE FROM canvas_edges WHERE canvas_id = ? AND id = ?').run(canvasId, id);
-        return { rev: nextRev(canvasId), targetId: existing.t };
+        const rev = nextRev(canvasId);
+        change(canvasId, { type: 'edge_deleted', id }, existing.t);
+        return { rev, targetId: existing.t };
       });
     },
 

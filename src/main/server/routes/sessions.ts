@@ -3,7 +3,8 @@ import type { SessionStore } from '../../../shared/chat';
 import type { ArtifactStore } from '../storage/artifactStore';
 import { pendingInteractionKindForSession } from '../agent/permissions';
 
-export function createSessionsRouter(sessionStore: SessionStore, artifactStore?: ArtifactStore) {
+export function createSessionsRouter(sessionStore: SessionStore, artifactStore?: ArtifactStore,
+  prepareRemove?: (sessionId: string) => (() => void) | void) {
   const router = new Hono();
 
   router.get('/', async (c) => {
@@ -51,8 +52,10 @@ export function createSessionsRouter(sessionStore: SessionStore, artifactStore?:
 
   router.delete('/:id', async (c) => {
     const id = c.req.param('id');
+    const afterRemove = prepareRemove?.(id);
     if (artifactStore) await artifactStore.removeBySession(id);
     await sessionStore.remove(id);
+    if (typeof afterRemove === 'function') afterRemove();
     return c.body(null, 204);
   });
 

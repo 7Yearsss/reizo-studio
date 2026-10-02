@@ -23,11 +23,16 @@ export interface AudioDriverCredentials {
   appId?: string;
 }
 
+export interface AudioDriverOptions { signal?: AbortSignal }
+
 export interface AudioDriver {
   id: string;
   name: string;
+  defaultModel?: string;
+  modelForRequest?(params: AudioGenerateParams, credentials: AudioDriverCredentials): string;
   synthesize(
     params: AudioGenerateParams,
     credentials: AudioDriverCredentials,
+    options?: AudioDriverOptions,
   ): Promise<AudioJobResult>;
 }

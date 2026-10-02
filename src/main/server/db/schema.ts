@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { check, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 /**
  * SQLite schema for sessions + messages. Timestamps are unix-ms integers;
@@ -211,10 +211,82 @@ export const artifactVersions = sqliteTable(
   }),
 );
 
+export const canvasCommandReceipts = sqliteTable('canvas_command_receipts', {
+  canvasId: text('canvas_id').notNull().references(() => canvases.id, { onDelete: 'cascade' }),
+  mutationId: text('mutation_id').notNull(),
+  requestHash: text('request_hash').notNull(),
+  resultJson: text('result_json').notNull(),
+  createdAt: integer('created_at').notNull(),
+}, (t) => ({ key: primaryKey({ columns: [t.canvasId, t.mutationId] }) }));
+
+export const canvasCommits = sqliteTable('canvas_commits', {
+  canvasId: text('canvas_id').notNull().references(() => canvases.id, { onDelete: 'cascade' }),
+  revision: integer('revision').notNull(),
+  mutationId: text('mutation_id'),
+  changesJson: text('changes_json').notNull(),
+  createdAt: integer('created_at').notNull(),
+}, (t) => ({ key: primaryKey({ columns: [t.canvasId, t.revision] }) }));
+
+/** Durable execution history survives node deletion and is removed with its canvas. */
+export const canvasJobs = sqliteTable('canvas_jobs', {
+  id: text('id').primaryKey(),
+  canvasId: text('canvas_id').notNull().references(() => canvases.id, { onDelete: 'cascade' }),
+  nodeId: text('node_id').notNull(),
+  nodeType: text('node_type').notNull(),
+  generation: integer('generation').notNull(),
+  operationId: text('operation_id'),
+  status: text('status', { enum: ['queued', 'running', 'succeeded', 'failed', 'cancelled', 'interrupted'] }).notNull(),
+  inputJson: text('input_json').notNull(),
+  requestHash: text('request_hash').notNull(),
+  providerId: text('provider_id'),
+  model: text('model'),
+  inputHash: text('input_hash'),
+  remoteTaskJson: text('remote_task_json'),
+  resultJson: text('result_json'),
+  error: text('error'),
+  cancelReason: text('cancel_reason'),
+  createdAt: integer('created_at').notNull(),
+  submittedAt: integer('submitted_at'),
+  endedAt: integer('ended_at'),
+}, (t) => ({
+  generationKey: uniqueIndex('canvas_jobs_generation_unique').on(t.canvasId, t.nodeId, t.generation),
+  operationKey: uniqueIndex('canvas_jobs_operation_unique').on(t.canvasId, t.operationId).where(sql`${t.operationId} IS NOT NULL`),
+  byStatus: index('canvas_jobs_status_idx').on(t.status),
+  generationCheck: check('canvas_jobs_generation_check', sql`${t.generation} >= 1`),
+  statusCheck: check('canvas_jobs_status_check', sql`${t.status} IN ('queued', 'running', 'succeeded', 'failed', 'cancelled', 'interrupted')`),
+}));
+
+/** Origin identifiers are historical metadata, independent of source document deletion. */
+export const canvasAssets = sqliteTable('canvas_assets', {
+  id: text('id').primaryKey(),
+  path: text('path').notNull(),
+  canvasId: text('canvas_id').notNull(),
+  nodeId: text('node_id'),
+  kind: text('kind', { enum: ['image', 'video', 'audio', 'mask'] }).notNull(),
+  mimeType: text('mime_type').notNull(),
+  byteSize: integer('byte_size').notNull(),
+  contentHash: text('content_hash').notNull(),
+  source: text('source', { enum: ['generated', 'imported', 'mask'] }).notNull(),
+  createdAt: integer('created_at').notNull(),
+  jobId: text('job_id'),
+  generation: integer('generation'),
+  providerId: text('provider_id'),
+  model: text('model'),
+  inputHash: text('input_hash'),
+}, (t) => ({
+  pathKey: uniqueIndex('canvas_assets_path_unique').on(t.path),
+  byOrigin: index('canvas_assets_origin_idx').on(t.canvasId, t.createdAt),
+  kindCheck: check('canvas_assets_kind_check', sql`${t.kind} IN ('image', 'video', 'audio', 'mask')`),
+  sourceCheck: check('canvas_assets_source_check', sql`${t.source} IN ('generated', 'imported', 'mask')`),
+  sizeCheck: check('canvas_assets_size_check', sql`${t.byteSize} >= 0`),
+}));
+
 export type SessionRow = typeof sessions.$inferSelect;
 export type MessageRow = typeof messages.$inferSelect;
 export type CanvasRow = typeof canvases.$inferSelect;
 export type CanvasNodeRow = typeof canvasNodes.$inferSelect;
 export type CanvasEdgeRow = typeof canvasEdges.$inferSelect;
+export type CanvasJobRow = typeof canvasJobs.$inferSelect;
+export type CanvasAssetRow = typeof canvasAssets.$inferSelect;
 export type ArtifactRow = typeof artifacts.$inferSelect;
 export type ArtifactVersionRow = typeof artifactVersions.$inferSelect;

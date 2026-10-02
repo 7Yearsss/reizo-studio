@@ -219,6 +219,7 @@ describe('AgentSession.startTurn', () => {
       sessionId: s.id,
       translate: translateOpenAiChunk,
       createStream: () => ({
+        // eslint-disable-next-line require-yield -- These fixtures fail before yielding any provider output.
         fullStream: (async function* () {
           throw new Error('Step timeout of 120000ms exceeded');
         })(),
@@ -239,6 +240,7 @@ describe('AgentSession.startTurn', () => {
       sessionId: s.id,
       translate: translateOpenAiChunk,
       createStream: () => ({
+        // eslint-disable-next-line require-yield -- This fixture fails before yielding any provider output.
         fullStream: (async function* () {
           throw Object.assign(new Error('openai_error'), {
             name: 'AI_APICallError',

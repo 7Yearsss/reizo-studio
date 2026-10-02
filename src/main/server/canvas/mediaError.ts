@@ -39,7 +39,7 @@ const MESSAGES: Record<MediaErrorCode, (subject: MediaError['subject']) => strin
   bad_request: (s) =>
     s === 'input_image'
       ? '生成失败：输入图片无效（格式或尺寸不支持）。'
-      : '生成失败：请求参数无效。检查提示词和尺寸设置。',
+      : '生成失败：请求参数无效。检查提示词和生成设置。',
   auth: () => '生成失败：API Key 无效或缺失。在设置中检查。',
   timeout: () => '生成超时。稍后重试。',
   network: () => '网络错误，未能连接到生成服务。',

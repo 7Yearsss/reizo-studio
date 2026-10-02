@@ -1,7 +1,7 @@
 import { nativeImage } from 'electron';
 import type { FilePart, ModelMessage, TextPart } from 'ai';
 import type { CanvasStore } from '../storage/canvasStore';
-import { readCanvasAsset } from '../canvas/imageExecutor';
+import { readCanvasAsset } from '../canvas/assets';
 
 /** Cap on canvas images inlined into one user message. */
 const MAX_INLINE_IMAGES = 4;

@@ -15,14 +15,18 @@ vi.mock('ai', async (importOriginal) => {
 });
 
 vi.mock('../canvas/imageExecutor', () => ({
-  runImageNode: vi.fn(async () => undefined),
+  startImageNode: vi.fn((options) => ({
+    job: options.canvasStore.jobs.enqueue({ canvasId: options.canvasId, nodeId: options.node.id, nodeType: 'image',
+      input: { request: {} }, operationId: options.operationId }),
+    completion: Promise.resolve(),
+  })),
 }));
 
 import { createImageTools } from './imageTools';
 import { createCanvasStore } from '../storage/canvasStore';
 import { createSqliteSessionStore } from '../storage/sqliteSessionStore';
 import { openDb } from '../db/client';
-import { runImageNode } from '../canvas/imageExecutor';
+import { startImageNode } from '../canvas/imageExecutor';
 
 describe('imageTools', () => {
   it('defines generate_image tool with correct schema and description', () => {
@@ -97,6 +101,7 @@ describe('imageTools', () => {
       expect(res.imageUrl).toMatch(/^\/api\/canvas\/assets\/chat\/img-.*\.png$/);
       expect(res.prompt).toBe('a cyberpunk skyline');
       expect(generateImageMock).toHaveBeenCalled();
+      expect(generateImageMock.mock.calls.at(-1)?.[0].maxRetries).toBe(0);
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
     }
@@ -143,7 +148,7 @@ describe('imageTools', () => {
     expect(snap?.edges.some((e) => e.sourceId === src.id && e.targetId === res.id && e.targetHandle === 'edit_src')).toBe(
       true,
     );
-    expect(runImageNode).toHaveBeenCalled();
+    expect(startImageNode).toHaveBeenCalled();
   });
 
   it('rejects canvas_edit_image when the source has no image', async () => {

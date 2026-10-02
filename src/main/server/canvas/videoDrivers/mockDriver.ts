@@ -21,6 +21,7 @@ const MINIMAL_MP4 = Buffer.from(
 export const mockDriver: VideoDriver = {
   id: 'mock',
   name: '模拟预览 (Dev Mock)',
+  supportsRecovery: false,
 
   async submit(params: VideoGenerateParams): Promise<{ taskId: string }> {
     const taskId = `mock_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;

@@ -12,5 +12,12 @@
     "plugin:import/electron",
     "plugin:import/typescript"
   ],
-  "parser": "@typescript-eslint/parser"
+  "parser": "@typescript-eslint/parser",
+  "plugins": ["react-hooks"],
+  "ignorePatterns": ["dist/", "out/", ".vite/"],
+  "settings": {
+    "import/resolver": {
+      "typescript": { "project": "./tsconfig.json" }
+    }
+  }
 }

@@ -84,7 +84,8 @@ export const DEFAULT_PROVIDER_TEMPLATES: Omit<ManagedProviderConfig, 'createdAt'
     availableModels: [
       { id: 'speech-01-turbo', name: 'Speech-01 Turbo (低延迟/推荐)', badge: '推荐' },
       { id: 'speech-01-hd', name: 'Speech-01 HD (高保真广播级)' },
-      { id: 'speech-02', name: 'Speech-02 (最新多模态拟真)' },
+      { id: 'speech-02-hd', name: 'Speech-02 HD' },
+      { id: 'speech-02-turbo', name: 'Speech-02 Turbo' },
     ],
     voicePresets: [
       { id: 'female-tianmei', name: '甜美女声 (小海螺)', gender: 'female', tag: '短视频/解说' },
@@ -115,7 +116,7 @@ export const DEFAULT_PROVIDER_TEMPLATES: Omit<ManagedProviderConfig, 'createdAt'
     },
     availableModels: [
       { id: 'cosyvoice-v3-flash', name: 'CosyVoice V3 Flash (极速超低价)', badge: '极速' },
-      { id: 'cosyvoice-v3', name: 'CosyVoice V3 Standard' },
+      { id: 'cosyvoice-v3-plus', name: 'CosyVoice V3 Plus' },
     ],
     voicePresets: [
       { id: 'longxiaochun', name: '龙小淳 (灵动女声)', gender: 'female', tag: '通用' },

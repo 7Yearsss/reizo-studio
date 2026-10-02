@@ -10,7 +10,7 @@
 const OSC = /\x1b\][\s\S]*?(?:\x07|\x1b\\)/g;
 const OSC_8BIT = /\x9d[\s\S]*?(?:\x07|\x9c)/g;
 // DCS / PM / APC: ESC (P | ^ | _) ... ESC \
-const DCS_PM_APC = /\x1b[P\^_][\s\S]*?\x1b\\/g;
+const DCS_PM_APC = /\x1b[P^_][\s\S]*?\x1b\\/g;
 // CSI: ESC [ params intermediates final
 const CSI = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 // Any remaining bare ESC sequence (ESC + one byte in 0x40..0x5f range, etc.)

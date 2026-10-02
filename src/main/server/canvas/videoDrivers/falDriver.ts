@@ -1,4 +1,6 @@
-import type { VideoDriver, VideoGenerateParams, VideoJobStatus } from './types';
+import type { VideoDriver, VideoDriverOptions, VideoGenerateParams, VideoJobStatus, VideoSubmission } from './types';
+import { falRemoteContextValid, providerUrl } from './remoteEndpoints';
+import { VideoPollError } from './types';
 
 /**
  * FAL.ai 视频生成驱动 (支持 Kling, WAN 2.1, Luma 等模型队列)
@@ -7,15 +9,21 @@ import type { VideoDriver, VideoGenerateParams, VideoJobStatus } from './types';
 export const falDriver: VideoDriver = {
   id: 'fal',
   name: 'FAL.ai (Kling / Wan 2.1)',
+  supportsRecovery: true,
+  modelForRequest(_params, options) {
+    const endpoint = providerUrl(options.baseUrl || 'https://queue.fal.run/fal-ai/kling-video/v1/standard/text-to-video');
+    return endpoint.pathname.replace(/^\//, '') || endpoint.href;
+  },
+  validateRemoteContext: falRemoteContextValid,
 
   async submit(
     params: VideoGenerateParams,
-    options: { apiKey?: string; baseUrl?: string },
-  ): Promise<{ taskId: string }> {
+    options: VideoDriverOptions,
+  ): Promise<VideoSubmission> {
     const apiKey = options.apiKey;
     if (!apiKey) throw new Error('FAL.ai API key is missing');
 
-    const modelEndpoint = options.baseUrl || 'https://queue.fal.run/fal-ai/kling-video/v1/standard/text-to-video';
+    const modelEndpoint = providerUrl(options.baseUrl || 'https://queue.fal.run/fal-ai/kling-video/v1/standard/text-to-video').href.replace(/\/$/, '');
     // FAL's kling endpoint has no structured `camera_control` channel — camera
     // motion reaches it as the natural-language suffix the executor already
     // appended to `params.prompt` (see `cameraToPrompt`).
@@ -46,6 +54,8 @@ export const falDriver: VideoDriver = {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
+      signal: options.signal,
+      redirect: 'error',
     });
 
     if (!res.ok) {
@@ -53,29 +63,34 @@ export const falDriver: VideoDriver = {
       throw new Error(`FAL submit error (${res.status}): ${err.slice(0, 300)}`);
     }
 
-    const data = (await res.json()) as { request_id?: string; status_url?: string };
+    const data = (await res.json()) as { request_id?: string; status_url?: string; response_url?: string };
     if (!data.request_id) {
       throw new Error('FAL response missing request_id');
     }
 
-    return { taskId: data.request_id };
+    const context = { baseUrl: modelEndpoint, statusUrl: data.status_url, responseUrl: data.response_url };
+    if (!falRemoteContextValid(data.request_id, context)) throw new Error('FAL returned untrusted or incomplete task endpoints');
+    return { taskId: data.request_id, context };
   },
 
   async poll(
     taskId: string,
-    options: { apiKey?: string; baseUrl?: string },
+    options: VideoDriverOptions,
   ): Promise<VideoJobStatus> {
     const apiKey = options.apiKey;
     if (!apiKey) throw new Error('FAL.ai API key is missing');
 
-    const statusUrl = `https://queue.fal.run/fal-ai/kling-video/requests/${taskId}/status`;
+    if (!falRemoteContextValid(taskId, options.context)) throw new Error('Invalid saved FAL task context');
+    const statusUrl = String(options.context.statusUrl);
     const res = await fetch(statusUrl, {
       headers: { Authorization: `Key ${apiKey}` },
+      signal: options.signal,
+      redirect: 'error',
     });
 
     if (!res.ok) {
       const err = await res.text();
-      return { status: 'failed', error: `FAL poll error (${res.status}): ${err.slice(0, 200)}` };
+      throw new VideoPollError(`FAL query error (${res.status}): ${err.slice(0, 200)}`, res.status === 429 || res.status >= 500);
     }
 
     const data = (await res.json()) as {
@@ -96,21 +111,24 @@ export const falDriver: VideoDriver = {
     }
 
     if (data.status === 'COMPLETED') {
-      const responseUrl = data.response_url || `https://queue.fal.run/fal-ai/kling-video/requests/${taskId}`;
+      if (data.error) return { status: 'failed', error: data.error };
+      const responseUrl = String(options.context.responseUrl);
       const resultRes = await fetch(responseUrl, {
         headers: { Authorization: `Key ${apiKey}` },
+        signal: options.signal,
+        redirect: 'error',
       });
       if (!resultRes.ok) {
-        return { status: 'failed', error: 'Failed to fetch completed video payload' };
+        throw new VideoPollError(`FAL result query error (${resultRes.status})`, resultRes.status === 429 || resultRes.status >= 500);
       }
       const resultData = (await resultRes.json()) as { video?: { url?: string } };
       const videoUrl = resultData.video?.url;
       if (!videoUrl) {
-        return { status: 'failed', error: 'No video url in completed response' };
+        throw new VideoPollError('FAL completed but returned no video url', false);
       }
       return { status: 'succeed', progress: 100, videoUrl };
     }
 
-    return { status: 'processing', progress: 30 };
+    throw new VideoPollError('FAL returned an unknown task status', false);
   },
 };

@@ -1,13 +1,15 @@
-import { mkdir, writeFile } from 'node:fs/promises';
-import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { generateImage, tool } from 'ai';
 import { z } from 'zod';
 import { defaultNodeBox } from '../../../shared/canvas';
 import { editNodeTitle, isLocalEdit, type ImageEditKind } from '../../../shared/canvasImageEdit';
 import { getProviderPreset } from '../../../shared/providers';
 import { classifyMediaError } from '../canvas/mediaError';
-import { getCanvasChannel } from '../canvas/channel';
-import { runImageNode } from '../canvas/imageExecutor';
+import { startImageNode } from '../canvas/imageExecutor';
+import { stageCanvasAssets } from '../canvas/assets';
+import { CanvasCommandError, createCanvasApplication } from '../canvas/application';
+import { canvasWorkSignal, canvasWorkStopped } from '../canvas/workLifecycle';
+import { nodeJobsFor, NodeJobsClosedError, type NodeJobSubmission } from '../canvas/nodeJobs';
 import type { CanvasStore } from '../storage/canvasStore';
 import type { SettingsStore } from '../storage/settingsStore';
 import { createOpenAiProvider } from './provider/openai';
@@ -22,6 +24,27 @@ const MODEL_EDIT_KINDS = [
   'matting',
 ] as const satisfies readonly ImageEditKind[];
 
+function toolOperation(toolCallId: string | undefined, kind: string, phase: string): string | undefined {
+  return toolCallId ? `${kind}:${phase}:${createHash('sha256').update(toolCallId).digest('hex')}` : undefined;
+}
+
+function assertImageWork(store: CanvasStore): void {
+  if (canvasWorkStopped(store) || !nodeJobsFor(store).isAccepting()) throw new NodeJobsClosedError();
+}
+
+async function awaitImageJob(store: CanvasStore, submission: NodeJobSubmission) {
+  const signal = canvasWorkSignal(store);
+  let onStopped!: () => void;
+  const stopped = new Promise<void>((resolve) => { onStopped = resolve; });
+  signal.addEventListener('abort', onStopped, { once: true });
+  try {
+    if (!signal.aborted) await Promise.race([submission.completion, stopped]);
+  } finally { signal.removeEventListener('abort', onStopped); }
+  // Host shutdown may have closed SQLite before this continuation resumes.
+  if (canvasWorkStopped(store) || !nodeJobsFor(store).isAccepting()) return null;
+  return store.jobs.get(submission.job.id);
+}
+
 export function createImageTools(options: {
   settingsStore: SettingsStore;
   dataRoot: string;
@@ -29,11 +52,12 @@ export function createImageTools(options: {
   canvasStore?: CanvasStore;
 }) {
   const { settingsStore, dataRoot, sessionId, canvasStore } = options;
+  const canvasApp = canvasStore ? createCanvasApplication(canvasStore) : undefined;
 
   return {
     generate_image: tool({
       description:
-        '在当前对话中直接生成并展示图片（支持插画、海报、头像、设计草图等各种文生图需求）。当用户表示“生图”、“画一张图”、“生成海报/插画”时，必须调用此工具直接在对话中生成，严禁去操作或打开画布。',
+        '在当前对话中直接生成并展示图片（支持插画、海报、头像、设计草图等各种文生图需求）。当用户表示“生图”、“画一张图”、“生成海报/插画”时，必须调用此工具直接在对话中生成，不要另外调用画布操作或打开画布界面。',
       inputSchema: z.object({
         prompt: z
           .string()
@@ -48,10 +72,42 @@ export function createImageTools(options: {
           .optional()
           .describe('生图模型，默认自动使用 gpt-image-2（Reizo网关）或 dall-e-3（OpenAI官方直连）'),
       }),
-      execute: async ({ prompt, size, model }) => {
+      execute: async ({ prompt, size, model }, context) => {
         const cleanPrompt = prompt.trim();
         if (!cleanPrompt) {
           return { ok: false, error: '生图提示词不能为空' };
+        }
+
+        if (canvasStore && sessionId && canvasApp) {
+          try {
+            assertImageWork(canvasStore);
+            const canvas = canvasStore.ensureCanvas(sessionId);
+            const created = canvasApp.batch(canvas.id, { kind: 'inline_image', prompt: cleanPrompt, size: size ?? '1024x1024', model }, () => {
+              const index = canvasStore.getSnapshot(canvas.id)?.nodes.length ?? 0;
+              const box = defaultNodeBox('image');
+              return canvasApp.addNode(canvas.id, {
+                type: 'image', x: 40 + (index % 3) * (box.w + 60), y: 60 + Math.floor(index / 3) * (box.h + 60),
+                w: box.w, h: box.h, title: '对话生成图片',
+                params: { prompt: cleanPrompt, size: size ?? '1024x1024', ...(model ? { model } : {}), origin: 'chat' },
+              }).node;
+            }, toolOperation(context?.toolCallId, 'generate_image', 'node'));
+            const accepted = startImageNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node: created,
+              operationId: toolOperation(context?.toolCallId, 'generate_image', 'job'), signal: context?.abortSignal });
+            const job = await awaitImageJob(canvasStore, accepted);
+            if (!job) return { ok: false, jobId: accepted.job.id, error: '应用正在退出，图片任务已中断。' };
+            if (job.status !== 'succeeded') return { ok: false, jobId: job.id, error: job.error ?? (job.status === 'cancelled' ? '图片任务已停止。' : '图片生成未完成，请重试。') };
+            const output = job.result as { assets?: string[]; resultSet?: Array<{ asset: string; prompt?: string; model?: string }> } | undefined;
+            const image = output?.resultSet?.[0];
+            const asset = image?.asset ?? output?.assets?.[0];
+            if (!asset) return { ok: false, jobId: job.id, error: '生图接口未返回有效图片数据' };
+            const captured = (job.input.node as { params?: { prompt?: string; size?: string } } | undefined)?.params;
+            const imageSize = captured?.size ?? '1024x1024';
+            return { ok: true, jobId: job.id, imageUrl: `/api/canvas/assets/${asset}`, prompt: image?.prompt ?? captured?.prompt ?? cleanPrompt,
+              size: imageSize, model: image?.model ?? job.model ?? model, summary: `已在对话中生成图片 (${imageSize})` };
+          } catch (error) {
+            const classified = classifyMediaError(error);
+            return { ok: false, error: error instanceof CanvasCommandError || error instanceof NodeJobsClosedError ? error.message : classified.message };
+          }
         }
 
         const settings = await settingsStore.get();
@@ -89,34 +145,36 @@ export function createImageTools(options: {
         const effectiveModel = model || (isOfficial ? 'dall-e-3' : 'gpt-image-2');
 
         try {
-          const provider = createOpenAiProvider({ apiKey, baseUrl: effectiveBaseUrl });
+          const provider = createOpenAiProvider({ apiKey, baseUrl: effectiveBaseUrl, retryTransport: false });
           const result = await generateImage({
             model: provider.image(effectiveModel),
             prompt: cleanPrompt,
             size: size ?? '1024x1024',
+            maxRetries: 0,
+            abortSignal: context?.abortSignal,
           });
 
           if (!result.images || result.images.length === 0) {
             return { ok: false, error: '生图接口未返回有效图片数据' };
           }
 
-          const img = result.images[0]!;
+          const img = result.images[0];
+          if (!img.uint8Array.byteLength) return { ok: false, error: '生图接口未返回有效图片数据' };
           const ext = img.mediaType?.includes('jpeg') ? 'jpg' : 'png';
           const filename = `img-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
-          const dir = path.join(dataRoot, 'canvas', 'chat');
-          await mkdir(dir, { recursive: true });
-          await writeFile(path.join(dir, filename), Buffer.from(img.uint8Array));
-
-          const relUrl = `/api/canvas/assets/chat/${filename}`;
-
-          return {
-            ok: true,
-            imageUrl: relUrl,
-            prompt: cleanPrompt,
-            size: size ?? '1024x1024',
-            model: effectiveModel,
-            summary: `已在对话中生成图片 (${size ?? '1024x1024'})`,
-          };
+          const staged = await stageCanvasAssets(dataRoot, 'chat', [{ name: filename, bytes: img.uint8Array,
+            mimeType: ext === 'jpg' ? 'image/jpeg' : 'image/png', kind: 'image' }], context?.abortSignal);
+          try {
+            staged.keep();
+            return {
+              ok: true,
+              imageUrl: `/api/canvas/assets/${staged.files[0].path}`,
+              prompt: cleanPrompt,
+              size: size ?? '1024x1024',
+              model: effectiveModel,
+              summary: `已在对话中生成图片 (${size ?? '1024x1024'})`,
+            };
+          } finally { await staged.discard(); }
         } catch (err) {
           const classified = classifyMediaError(err);
           return {
@@ -160,61 +218,36 @@ export function createImageTools(options: {
           })
           .optional(),
       }),
-      execute: async ({ nodeId, kind, instruction, params }) => {
-        if (!canvasStore || !sessionId) {
+      execute: async ({ nodeId, kind, instruction, params }, context) => {
+        if (!canvasStore || !sessionId || !canvasApp) {
           return { ok: false, error: '当前会话没有画布' };
         }
         if (isLocalEdit(kind)) {
           return { ok: false, error: '该编辑需要在画布上手工完成' };
         }
-        const canvas = canvasStore.ensureCanvas(sessionId);
-        const src = canvasStore.getNode(canvas.id, nodeId);
-        if (!src) return { ok: false, error: `找不到节点 ${nodeId}` };
-        if ((src.output?.assets?.length ?? 0) === 0) {
-          return { ok: false, error: '源节点还没有生成图片' };
+        try {
+          assertImageWork(canvasStore);
+          const canvas = canvasStore.ensureCanvas(sessionId);
+          const node = canvasApp.batch(canvas.id, { kind: 'canvas_edit_image', nodeId, editKind: kind, instruction, params }, () => {
+            const src = canvasStore.getNode(canvas.id, nodeId);
+            if (!src) throw new CanvasCommandError(`找不到节点 ${nodeId}`, 404);
+            if ((src.output?.assets?.length ?? 0) === 0) throw new CanvasCommandError('源节点还没有生成图片');
+            const srcParams = (src.params || {}) as { size?: string; model?: string };
+            const box = defaultNodeBox('image');
+            const created = canvasApp.addNode(canvas.id, { type: 'image', x: Math.round(src.x + src.w + 80), y: Math.round(src.y),
+              w: box.w, h: box.h, title: editNodeTitle(kind), params: { prompt: '', size: srcParams.size ?? '1024x1024',
+                model: srcParams.model, edit: { kind, sourceNodeId: src.id, instruction, params } } }).node;
+            const edge = canvasApp.addEdge(canvas.id, { sourceId: src.id, targetId: created.id, sourceHandle: 'image_out', targetHandle: 'edit_src' });
+            if (!edge.edge) throw new CanvasCommandError(`无法连接编辑源图：${edge.error ?? 'unknown'}`);
+            return created;
+          }, toolOperation(context?.toolCallId, 'canvas_edit_image', 'node'));
+          const accepted = startImageNode({ canvasStore, settingsStore, dataRoot, canvasId: canvas.id, node,
+            operationId: toolOperation(context?.toolCallId, 'canvas_edit_image', 'job'), signal: context?.abortSignal });
+          return { ok: true, id: node.id, jobId: accepted.job.id, kind, sourceNodeId: nodeId, status: accepted.job.status,
+            summary: `已派生「${editNodeTitle(kind)}」节点并开始生成` };
+        } catch (error) {
+          return { ok: false, error: error instanceof Error ? error.message : String(error) };
         }
-        const srcParams = (src.params || {}) as { size?: '1024x1024' | '1024x1536' | '1536x1024'; model?: string };
-        const box = defaultNodeBox('image');
-        const { rev, node } = canvasStore.addNode(canvas.id, {
-          type: 'image',
-          x: Math.round(src.x + src.w + 80),
-          y: Math.round(src.y),
-          w: box.w,
-          h: box.h,
-          title: editNodeTitle(kind),
-          params: {
-            prompt: '',
-            size: srcParams.size ?? '1024x1024',
-            model: srcParams.model,
-            edit: { kind, sourceNodeId: src.id, instruction, params },
-          },
-        });
-        const channel = getCanvasChannel(canvas.id);
-        channel.broadcast(rev, { type: 'node_added', node });
-        const edgeRes = canvasStore.addEdge(canvas.id, {
-          sourceId: src.id,
-          targetId: node.id,
-          sourceHandle: 'image_out',
-          targetHandle: 'edit_src',
-        });
-        if (edgeRes.edge && edgeRes.rev != null) {
-          channel.broadcast(edgeRes.rev, { type: 'edge_added', edge: edgeRes.edge });
-        }
-        void runImageNode({
-          canvasStore,
-          settingsStore,
-          dataRoot,
-          canvasId: canvas.id,
-          node,
-        });
-        return {
-          ok: true,
-          id: node.id,
-          kind,
-          sourceNodeId: src.id,
-          status: 'running',
-          summary: `已派生「${editNodeTitle(kind)}」节点并开始生成`,
-        };
       },
     }),
   };

@@ -82,7 +82,7 @@ function isRetryableStatus(status: number): boolean {
  * pick the surface: `.chat(id)` / `(id)` for language models, `.image(id)` for
  * `generateImage`.
  */
-function createLoggedFetch(): typeof globalThis.fetch {
+function createLoggedFetch(retryTransport = true): typeof globalThis.fetch {
   const loggedFetch: typeof globalThis.fetch = async (input, init) => {
     const url = input instanceof Request ? input.url : String(input);
     const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
@@ -101,7 +101,7 @@ function createLoggedFetch(): typeof globalThis.fetch {
           return response;
         }
 
-        if (isRetryableStatus(response.status) && attempt < MAX_TRANSPORT_RETRIES) {
+        if (retryTransport && isRetryableStatus(response.status) && attempt < MAX_TRANSPORT_RETRIES) {
           const delay = getRetryDelay(response.status, attempt, response.headers);
           console.warn(
             `[chat] retryable HTTP ${response.status}, backing off ${Math.round(delay)}ms before retry ${attempt + 1}`,
@@ -113,7 +113,7 @@ function createLoggedFetch(): typeof globalThis.fetch {
         return response;
       } catch (error) {
         if (init?.signal?.aborted) throw error;
-        if (attempt < MAX_TRANSPORT_RETRIES) {
+        if (retryTransport && attempt < MAX_TRANSPORT_RETRIES) {
           const delay = 500 * Math.pow(2, attempt) + Math.random() * 250;
           console.warn(
             `[chat] transport error, backing off ${Math.round(delay)}ms before retry ${attempt + 1}: ${error instanceof Error ? error.message : String(error)}`,
@@ -136,11 +136,11 @@ function createLoggedFetch(): typeof globalThis.fetch {
  * pick the surface: `.chat(id)` / `(id)` for language models, `.image(id)` for
  * `generateImage`.
  */
-export function createOpenAiProvider(options: { apiKey: string; baseUrl?: string }) {
+export function createOpenAiProvider(options: { apiKey: string; baseUrl?: string; retryTransport?: boolean }) {
   return createOpenAI({
     apiKey: options.apiKey,
     baseURL: options.baseUrl || undefined,
-    fetch: createLoggedFetch(),
+    fetch: createLoggedFetch(options.retryTransport !== false),
   });
 }
 

@@ -1,4 +1,5 @@
 import * as api from '../api';
+import { nanoid } from 'nanoid';
 import * as settingsStore from './settingsStore';
 import {
   activeSessionId as tabStoreActiveSessionId,
@@ -32,6 +33,9 @@ import { grabVideoFrameBlob, type FramePick } from '../lib/videoFrame';
 import { notifyJobDone, primeNotifications } from '../lib/notify';
 import { toast } from '../lib/toast';
 import type { CanvasEvent } from '../../shared/canvasStream';
+import type { CanvasDocumentChange } from '../../shared/canvasSync';
+import { inspectCanvasSyncMessage, projectCanvasChanges, type CanvasSyncCursor } from './canvasSync';
+import { CanvasLocalEdits, type CanvasEditablePatch } from './canvasLocalEdits';
 import {
   isStructuralTargetHandle,
   mentionPromptKey,
@@ -100,7 +104,10 @@ const mentionInsertBySession = new Map<string, (node: CanvasNode) => void>();
 
 const listeners = new Set<() => void>();
 const streamAborts = new Map<string, AbortController>();
-const lastRevBySession = new Map<string, number>();
+const syncCursorBySession = new Map<string, CanvasSyncCursor>();
+const projectionGeneration = new Map<string, number>();
+const localEditsBySession = new Map<string, CanvasLocalEdits>();
+const nodeWriteQueues = new Map<string, Promise<void>>();
 const selectionTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const proposalToastTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const phaseTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -133,6 +140,13 @@ const historyStacks = new Map<string, { undo: HistoryEntry[]; redo: HistoryEntry
 const HISTORY_CAP = 60;
 
 function setState(patch: Partial<CanvasState>): void {
+  const documentSessions = new Set([...Object.keys(patch.nodesBySession ?? {}), ...Object.keys(patch.edgesBySession ?? {})]);
+  for (const sessionId of documentSessions) {
+    if ((patch.nodesBySession && patch.nodesBySession[sessionId] !== state.nodesBySession[sessionId]) ||
+      (patch.edgesBySession && patch.edgesBySession[sessionId] !== state.edgesBySession[sessionId])) {
+      projectionGeneration.set(sessionId, (projectionGeneration.get(sessionId) ?? 0) + 1);
+    }
+  }
   state = { ...state, ...patch };
   listeners.forEach((l) => l());
 }
@@ -225,60 +239,99 @@ function setEdges(sessionId: string, edges: CanvasEdge[]): void {
   setState({ edgesBySession: { ...state.edgesBySession, [sessionId]: edges } });
 }
 
-function ingestSnapshot(sessionId: string, snap: CanvasSnapshot): void {
-  lastRevBySession.set(sessionId, snap.canvas.liveRevision);
+function localEdits(sessionId: string): CanvasLocalEdits {
+  let edits = localEditsBySession.get(sessionId);
+  if (!edits) { edits = new CanvasLocalEdits(); localEditsBySession.set(sessionId, edits); }
+  return edits;
+}
+
+async function readCanvasSnapshot(sessionId: string, signal?: AbortSignal) {
+  const acknowledgedVersion = localEdits(sessionId).acknowledgedVersion;
+  return { snap: await api.getCanvas(sessionId, signal), acknowledgedVersion };
+}
+
+function restoreLiveEdits(sessionId: string): void {
+  const restored = localEditsBySession.get(sessionId)?.discardAllLive();
+  if (!restored?.size) return;
+  setNodes(sessionId, (state.nodesBySession[sessionId] ?? EMPTY_NODES).map((node) => restored.get(node.id) ?? node));
+}
+
+function confirmLocalAcknowledgements(sessionId: string, acknowledgedVersion: number): void {
+  const restored = localEdits(sessionId).confirmAcknowledgements(acknowledgedVersion);
+  if (restored.size) setNodes(sessionId, (state.nodesBySession[sessionId] ?? EMPTY_NODES).map((node) => restored.get(node.id) ?? node));
+}
+
+function ingestSnapshot(sessionId: string, snap: CanvasSnapshot, epoch: string | null = null, resetActivity = false, acknowledgedVersion = 0): void {
+  const cursor = syncCursorBySession.get(sessionId);
+  if (!resetActivity && cursor?.canvasId === snap.canvas.id && snap.canvas.liveRevision < cursor.revision) {
+    confirmLocalAcknowledgements(sessionId, acknowledgedVersion);
+    return;
+  }
+  syncCursorBySession.set(sessionId, { canvasId: snap.canvas.id, revision: snap.canvas.liveRevision, epoch });
+  const edits = localEdits(sessionId);
+  edits.receiveSnapshot(snap.canvas.id, snap.nodes, acknowledgedVersion);
+  if (resetActivity) {
+    const timer = phaseTimers.get(sessionId);
+    if (timer) clearTimeout(timer);
+    phaseTimers.delete(sessionId);
+  }
   setState({
     canvasIdBySession: { ...state.canvasIdBySession, [sessionId]: snap.canvas.id },
-    nodesBySession: { ...state.nodesBySession, [sessionId]: snap.nodes },
+    nodesBySession: { ...state.nodesBySession, [sessionId]: edits.project(snap.nodes) },
     edgesBySession: { ...state.edgesBySession, [sessionId]: snap.edges },
     loadedBySession: { ...state.loadedBySession, [sessionId]: true },
+    ...(resetActivity ? {
+      graphRunBySession: { ...state.graphRunBySession, [sessionId]: undefined },
+      phaseBySession: { ...state.phaseBySession, [sessionId]: undefined },
+    } : {}),
   });
 }
 
+function applyDocumentChanges(sessionId: string, changes: CanvasDocumentChange[], mutationId?: string): void {
+  const previous = { nodes: state.nodesBySession[sessionId] ?? EMPTY_NODES, edges: state.edgesBySession[sessionId] ?? EMPTY_EDGES };
+  const committed = projectCanvasChanges(previous, changes);
+  const edits = localEdits(sessionId);
+  edits.receiveChanges(changes, mutationId);
+  const projectedNodes = edits.project(committed.nodes);
+  const document = projectedNodes === committed.nodes ? committed : { ...committed, nodes: projectedNodes };
+  if (document !== previous) {
+    setState({
+      nodesBySession: document.nodes === previous.nodes ? state.nodesBySession : { ...state.nodesBySession, [sessionId]: document.nodes },
+      edgesBySession: document.edges === previous.edges ? state.edgesBySession : { ...state.edgesBySession, [sessionId]: document.edges },
+    });
+  }
+  if (!state.graphRunBySession[sessionId]?.running) {
+    const completed = new Set(changes.flatMap((change) => change.type === 'node_updated' ? [change.node.id]
+      : change.type === 'run_state' || change.type === 'node_output' ? [change.id] : []));
+    for (const id of completed) {
+      const before = previous.nodes.find((node) => node.id === id);
+      const after = document.nodes.find((node) => node.id === id);
+      if (before?.runState !== 'running' || !after || (after.runState !== 'done' && after.runState !== 'error')) continue;
+      const label = after.title || (after.type === 'video' ? '视频' : after.type === 'image' ? '图片' : '节点');
+      notifyJobDone(after.runState === 'done' ? '生成完成' : '生成失败', after.runState === 'done' ? `「${label}」已就绪` : `「${label}」运行失败`);
+    }
+  }
+}
+
 function applyEvent(sessionId: string, event: CanvasEvent): void {
-  const nodes = state.nodesBySession[sessionId] ?? [];
-  const edges = state.edgesBySession[sessionId] ?? [];
   switch (event.type) {
     case 'node_added':
-      if (!nodes.some((n) => n.id === event.node.id)) setNodes(sessionId, [...nodes, event.node]);
-      break;
     case 'node_updated':
     case 'node_output':
-    case 'run_state': {
-      // A single node finishing (done/error) outside a graph run, while the app
-      // is unfocused, is worth an OS ping — batch runs get their own below.
-      if (event.type !== 'node_updated' && !state.graphRunBySession[sessionId]?.running) {
-        const prev = nodes.find((n) => n.id === event.id);
-        if (prev?.runState === 'running' && (event.runState === 'done' || event.runState === 'error')) {
-          const label = prev.title || (prev.type === 'video' ? '视频' : prev.type === 'image' ? '图片' : '节点');
-          notifyJobDone(
-            event.runState === 'done' ? '生成完成' : '生成失败',
-            event.runState === 'done' ? `「${label}」已就绪` : `「${label}」运行失败`,
-          );
-        }
-      }
-      const patched = nodes.map((n) => {
-        if (event.type === 'node_updated') return n.id === event.node.id ? event.node : n;
-        if (n.id !== event.id) return n;
-        if (event.type === 'run_state') return { ...n, runState: event.runState };
-        return { ...n, runState: event.runState, output: event.output };
-      });
-      setNodes(sessionId, patched);
-      break;
-    }
+    case 'run_state':
     case 'node_deleted':
-      setNodes(sessionId, nodes.filter((n) => n.id !== event.id));
-      break;
     case 'edge_added':
-      if (!edges.some((e) => e.id === event.edge.id)) setEdges(sessionId, [...edges, event.edge]);
-      break;
     case 'edge_deleted':
-      setEdges(sessionId, edges.filter((e) => e.id !== event.id));
+      applyDocumentChanges(sessionId, [event]);
       break;
     case 'graph_run': {
       const wasRunning = state.graphRunBySession[sessionId]?.running ?? false;
       if (wasRunning && !event.running) {
-        notifyJobDone('画布流水线完成', `已生成 ${event.total} 个节点`);
+        const title = event.outcome === 'cancelled' ? '画布流水线已停止'
+          : event.outcome === 'error' ? '画布流水线部分失败' : '画布流水线完成';
+        notifyJobDone(title, event.outcome === 'cancelled'
+          ? `已处理 ${event.done}/${event.total} 个节点`
+          : `成功 ${event.succeeded ?? event.done}，失败 ${event.failed ?? 0}，跳过 ${event.skipped ?? 0}`);
       }
       setState({
         graphRunBySession: {
@@ -333,24 +386,38 @@ function applyEvent(sessionId: string, event: CanvasEvent): void {
  * Inactive sessions get a one-shot snapshot and resync when re-activated.
  */
 const desiredOpen = new Set<string>();
-const startingStreams = new Set<string>();
+const openSnapshotTokens = new Map<string, symbol>();
+const startingStreams = new Map<string, Promise<void>>();
 let tabWatchStarted = false;
 
-async function activateStream(sessionId: string): Promise<void> {
-  if (streamAborts.has(sessionId) || startingStreams.has(sessionId)) return;
-  startingStreams.add(sessionId);
-  try {
-    const snap = await api.getCanvas(sessionId);
-    ingestSnapshot(sessionId, snap);
-    if (!desiredOpen.has(sessionId) || tabStoreActiveSessionId() !== sessionId) return;
-    const abort = new AbortController();
-    streamAborts.set(sessionId, abort);
-    void runStream(sessionId, snap.canvas.id, abort.signal);
-  } catch {
-    /* snapshot failed — retry on next activation */
-  } finally {
-    startingStreams.delete(sessionId);
-  }
+function ownsStream(sessionId: string, abort: AbortController): boolean {
+  return !abort.signal.aborted && streamAborts.get(sessionId) === abort && desiredOpen.has(sessionId) && tabStoreActiveSessionId() === sessionId;
+}
+
+function activateStream(sessionId: string): Promise<void> {
+  const starting = startingStreams.get(sessionId);
+  if (starting) return starting;
+  if (streamAborts.has(sessionId) || !desiredOpen.has(sessionId) || tabStoreActiveSessionId() !== sessionId) return Promise.resolve();
+  // Own the snapshot request as well as the socket. A tab switch invalidates both.
+  const abort = new AbortController();
+  streamAborts.set(sessionId, abort);
+  const activation = (async () => {
+    try {
+      const { snap, acknowledgedVersion } = await readCanvasSnapshot(sessionId, abort.signal);
+      if (!ownsStream(sessionId, abort)) return;
+      ingestSnapshot(sessionId, snap, null, true, acknowledgedVersion);
+      void runStream(sessionId, snap.canvas.id, abort);
+    } catch (error) {
+      if (!ownsStream(sessionId, abort)) return;
+      streamAborts.delete(sessionId);
+      throw error;
+    }
+  })();
+  startingStreams.set(sessionId, activation);
+  void activation.finally(() => {
+    if (startingStreams.get(sessionId) === activation) startingStreams.delete(sessionId);
+  }).catch((): void => undefined);
+  return activation;
 }
 
 function syncStreams(): void {
@@ -359,10 +426,12 @@ function syncStreams(): void {
     if (sessionId !== active) {
       streamAborts.get(sessionId)?.abort();
       streamAborts.delete(sessionId);
+      startingStreams.delete(sessionId);
+      restoreLiveEdits(sessionId);
     }
   }
   for (const sessionId of desiredOpen) {
-    if (sessionId === active) void activateStream(sessionId);
+    if (sessionId === active) void activateStream(sessionId).catch((): void => undefined);
   }
 }
 
@@ -378,29 +447,56 @@ function ensureTabWatch(): void {
   });
 }
 
-async function runStream(sessionId: string, canvasId: string, signal: AbortSignal): Promise<void> {
-  while (!signal.aborted) {
+class CanvasResyncRequired extends Error {
+  constructor(readonly epoch: string) { super('Canvas document requires a fresh snapshot'); }
+}
+
+function waitForReconnect(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) { resolve(); return; }
+    const finish = () => { clearTimeout(timer); signal.removeEventListener('abort', finish); resolve(); };
+    const timer = setTimeout(finish, 1000);
+    signal.addEventListener('abort', finish, { once: true });
+  });
+}
+
+async function runStream(sessionId: string, canvasId: string, abort: AbortController): Promise<void> {
+  let resyncEpoch: string | undefined;
+  while (ownsStream(sessionId, abort)) {
+    if (resyncEpoch !== undefined) {
+      try {
+        const { snap, acknowledgedVersion } = await readCanvasSnapshot(sessionId, abort.signal);
+        if (!ownsStream(sessionId, abort)) return;
+        ingestSnapshot(sessionId, snap, resyncEpoch, true, acknowledgedVersion);
+        canvasId = snap.canvas.id;
+        resyncEpoch = undefined;
+      } catch {
+        await waitForReconnect(abort.signal);
+        continue;
+      }
+    }
     try {
-      await api.readCanvasStream(
+      await api.readCanvasSyncStream(
         canvasId,
-        lastRevBySession.get(sessionId) ?? -1,
-        (event, rev) => {
-          lastRevBySession.set(sessionId, Math.max(lastRevBySession.get(sessionId) ?? 0, rev));
-          applyEvent(sessionId, event);
+        syncCursorBySession.get(sessionId)?.revision ?? 0,
+        (message) => {
+          if (!ownsStream(sessionId, abort)) return;
+          const cursor = syncCursorBySession.get(sessionId);
+          if (!cursor) return;
+          const decision = inspectCanvasSyncMessage(cursor, message);
+          if (decision.kind === 'ignore') return;
+          if (decision.kind === 'resync') throw new CanvasResyncRequired(decision.epoch);
+          syncCursorBySession.set(sessionId, decision.cursor);
+          if (decision.kind === 'commit') applyDocumentChanges(sessionId, decision.commit.changes, decision.commit.mutationId);
+          if (decision.kind === 'activity') applyEvent(sessionId, decision.event);
         },
-        signal,
+        abort.signal,
       );
-    } catch {
-      /* reconnect below */
+    } catch (error) {
+      if (error instanceof CanvasResyncRequired) resyncEpoch = error.epoch;
     }
-    if (signal.aborted) return;
-    await new Promise((r) => setTimeout(r, 1000));
-    if (signal.aborted) return;
-    try {
-      ingestSnapshot(sessionId, await api.getCanvas(sessionId));
-    } catch {
-      /* keep retrying */
-    }
+    if (!ownsStream(sessionId, abort)) return;
+    if (resyncEpoch === undefined) await waitForReconnect(abort.signal);
   }
 }
 
@@ -414,8 +510,9 @@ export async function ensureCanvasLoaded(sessionId: string): Promise<void> {
   if (state.loadedBySession[sessionId] || streamAborts.has(sessionId)) return;
   let inflight = ensureInflight.get(sessionId);
   if (!inflight) {
-    inflight = api.getCanvas(sessionId).then((snap) => {
-      ingestSnapshot(sessionId, snap);
+    const generation = projectionGeneration.get(sessionId) ?? 0;
+    inflight = readCanvasSnapshot(sessionId).then(({ snap, acknowledgedVersion }) => {
+      if ((projectionGeneration.get(sessionId) ?? 0) === generation) ingestSnapshot(sessionId, snap, null, false, acknowledgedVersion);
     }).finally(() => ensureInflight.delete(sessionId));
     ensureInflight.set(sessionId, inflight);
   }
@@ -424,12 +521,20 @@ export async function ensureCanvasLoaded(sessionId: string): Promise<void> {
 
 export async function openCanvas(sessionId: string): Promise<void> {
   desiredOpen.add(sessionId);
+  const token = Symbol();
+  openSnapshotTokens.set(sessionId, token);
   ensureTabWatch();
   primeNotifications();
   try {
-    const snap = await api.getCanvas(sessionId);
-    ingestSnapshot(sessionId, snap);
+    if (tabStoreActiveSessionId() === sessionId) await activateStream(sessionId);
+    else {
+      const generation = projectionGeneration.get(sessionId) ?? 0;
+      const { snap, acknowledgedVersion } = await readCanvasSnapshot(sessionId);
+      if (desiredOpen.has(sessionId) && openSnapshotTokens.get(sessionId) === token && !streamAborts.has(sessionId) &&
+        (projectionGeneration.get(sessionId) ?? 0) === generation) ingestSnapshot(sessionId, snap, null, false, acknowledgedVersion);
+    }
   } catch (err) {
+    if (openSnapshotTokens.get(sessionId) !== token) return;
     desiredOpen.delete(sessionId);
     throw err;
   }
@@ -438,12 +543,112 @@ export async function openCanvas(sessionId: string): Promise<void> {
 
 export function closeCanvas(sessionId: string): void {
   desiredOpen.delete(sessionId);
+  openSnapshotTokens.delete(sessionId);
   streamAborts.get(sessionId)?.abort();
   streamAborts.delete(sessionId);
+  startingStreams.delete(sessionId);
+  restoreLiveEdits(sessionId);
 }
 
 function canvasId(sessionId: string): string | undefined {
   return state.canvasIdBySession[sessionId];
+}
+
+function captureProjectionFence(sessionId: string, expectedCanvasId = canvasId(sessionId)) {
+  const cursor = syncCursorBySession.get(sessionId);
+  return {
+    canvasId: expectedCanvasId,
+    generation: projectionGeneration.get(sessionId) ?? 0,
+    revision: cursor?.revision,
+    epoch: cursor?.epoch,
+  };
+}
+
+/** A delayed HTTP response must not undo a newer stream commit or local edit. */
+async function applyResponseEvent(sessionId: string, event: CanvasEvent, fence: ReturnType<typeof captureProjectionFence>): Promise<void> {
+  const current = captureProjectionFence(sessionId);
+  if (current.canvasId === fence.canvasId && current.generation === fence.generation &&
+    current.revision === fence.revision && current.epoch === fence.epoch) {
+    applyEvent(sessionId, event);
+    return;
+  }
+  if (streamAborts.has(sessionId) || current.canvasId !== fence.canvasId) return;
+  // Inactive canvases have no live commits to fill in a skipped response.
+  try {
+    const { snap, acknowledgedVersion } = await readCanvasSnapshot(sessionId);
+    if (!streamAborts.has(sessionId) && canvasId(sessionId) === current.canvasId &&
+      (projectionGeneration.get(sessionId) ?? 0) === current.generation) ingestSnapshot(sessionId, snap, null, false, acknowledgedVersion);
+  } catch { /* The next activation reloads an authoritative snapshot. */ }
+}
+
+/** Field ownership separates local edits from full authoritative rows on the live channel. */
+async function writeNodePatches(sessionId: string, writes: { nodeId: string; patch: CanvasEditablePatch }[]): Promise<void> {
+  const id = canvasId(sessionId);
+  if (!id) return;
+  const nodes = state.nodesBySession[sessionId] ?? EMPTY_NODES;
+  const edits = localEdits(sessionId);
+  const prepared = writes.flatMap((write) => {
+    const node = nodes.find((item) => item.id === write.nodeId);
+    if (!node) return [];
+    const mutationId = nanoid();
+    edits.stage(node, write.patch, mutationId);
+    return [{ ...write, mutationId }];
+  });
+  if (prepared.length === 0) return;
+  setNodes(sessionId, edits.project(nodes));
+  const requestFence = captureProjectionFence(sessionId);
+  await Promise.all(prepared.map(({ nodeId, patch, mutationId }) => queueNodeWrite(JSON.stringify([sessionId, id, nodeId]), async () => {
+    try {
+      const response = await api.patchCanvasNode(id, nodeId, patch, mutationId);
+      if (canvasId(sessionId) !== id) return;
+      const current = captureProjectionFence(sessionId);
+      const acceptResponse = !streamAborts.has(sessionId) && current.generation === requestFence.generation &&
+        current.revision === requestFence.revision && current.epoch === requestFence.epoch;
+      const acknowledged = edits.acknowledge(nodeId, id, mutationId, response, !acceptResponse);
+      if (acknowledged) setNodes(sessionId, (state.nodesBySession[sessionId] ?? EMPTY_NODES).map((node) => node.id === nodeId ? acknowledged : node));
+      const abort = streamAborts.get(sessionId);
+      if (edits.hasOwner(nodeId, mutationId)) {
+        try {
+          for (let attempt = 0; attempt < 2; attempt += 1) {
+            const fence = captureProjectionFence(sessionId);
+            const { snap, acknowledgedVersion } = await readCanvasSnapshot(sessionId, abort?.signal);
+            if (canvasId(sessionId) !== id || (abort ? !ownsStream(sessionId, abort) : streamAborts.has(sessionId))) return;
+            const after = captureProjectionFence(sessionId);
+            if (after.generation === fence.generation || after.revision !== fence.revision) {
+              ingestSnapshot(sessionId, snap, syncCursorBySession.get(sessionId)?.epoch ?? null, false, acknowledgedVersion);
+              break;
+            }
+            if ((after.revision ?? 0) >= snap.canvas.liveRevision) {
+              confirmLocalAcknowledgements(sessionId, acknowledgedVersion);
+              break;
+            }
+            // A newer local edit changed the projection during this fetch; retry from its fence.
+          }
+        } catch { /* Durable replay or the next fresh snapshot confirms the accepted edit. */ }
+      }
+    } catch {
+      const restored = edits.fail(nodeId, id, mutationId);
+      if (!restored || canvasId(sessionId) !== id) return;
+      setNodes(sessionId, (state.nodesBySession[sessionId] ?? EMPTY_NODES).map((node) => node.id === nodeId ? restored : node));
+      const fence = captureProjectionFence(sessionId);
+      try {
+        const { snap, acknowledgedVersion } = await readCanvasSnapshot(sessionId);
+        const current = captureProjectionFence(sessionId);
+        if (current.canvasId === fence.canvasId && current.generation === fence.generation && current.revision === fence.revision &&
+          current.epoch === fence.epoch) ingestSnapshot(sessionId, snap, current.epoch ?? null, false, acknowledgedVersion);
+      } catch { /* Latest committed fields were already restored above. */ }
+    }
+  })));
+}
+
+function queueNodeWrite(key: string, write: () => Promise<void>): Promise<void> {
+  const previous = nodeWriteQueues.get(key) ?? Promise.resolve();
+  const queued = previous.catch((): void => undefined).then(write);
+  nodeWriteQueues.set(key, queued);
+  void queued.finally(() => {
+    if (nodeWriteQueues.get(key) === queued) nodeWriteQueues.delete(key);
+  }).catch((): void => undefined);
+  return queued;
 }
 
 export function nodeById(sessionId: string, nodeId: string): CanvasNode | undefined {
@@ -659,12 +864,14 @@ async function _addNode(
 ): Promise<string | null> {
   const id = canvasId(sessionId);
   if (!id) return null;
+  const fence = captureProjectionFence(sessionId, id);
   const node = await api.addCanvasNode(id, spec);
-  applyEvent(sessionId, { type: 'node_added', node });
+  await applyResponseEvent(sessionId, { type: 'node_added', node }, fence);
   return node.id;
 }
 
 async function _deleteNode(sessionId: string, nodeId: string): Promise<void> {
+  localEditsBySession.get(sessionId)?.remove(nodeId);
   const nodes = state.nodesBySession[sessionId] ?? [];
   setNodes(sessionId, nodes.filter((n) => n.id !== nodeId));
   setEdges(
@@ -676,10 +883,7 @@ async function _deleteNode(sessionId: string, nodeId: string): Promise<void> {
 }
 
 async function _setPosition(sessionId: string, nodeId: string, x: number, y: number): Promise<void> {
-  const nodes = state.nodesBySession[sessionId] ?? [];
-  setNodes(sessionId, nodes.map((n) => (n.id === nodeId ? { ...n, x, y } : n)));
-  const id = canvasId(sessionId);
-  if (id) await api.patchCanvasNode(id, nodeId, { x: Math.round(x), y: Math.round(y) }).catch((): void => undefined);
+  await writeNodePatches(sessionId, [{ nodeId, patch: { x: Math.round(x), y: Math.round(y) } }]);
 }
 
 export async function resizeNode(sessionId: string, nodeId: string, w: number, h: number): Promise<void> {
@@ -687,10 +891,7 @@ export async function resizeNode(sessionId: string, nodeId: string, w: number, h
 }
 
 async function _setSize(sessionId: string, nodeId: string, w: number, h: number): Promise<void> {
-  const nodes = state.nodesBySession[sessionId] ?? [];
-  setNodes(sessionId, nodes.map((n) => (n.id === nodeId ? { ...n, w, h } : n)));
-  const id = canvasId(sessionId);
-  if (id) await api.patchCanvasNode(id, nodeId, { w: Math.round(w), h: Math.round(h) }).catch((): void => undefined);
+  await writeNodePatches(sessionId, [{ nodeId, patch: { w: Math.round(w), h: Math.round(h) } }]);
 }
 
 async function _setBox(
@@ -698,13 +899,10 @@ async function _setBox(
   nodeId: string,
   box: { w: number; h: number; x?: number; y?: number },
 ): Promise<void> {
-  const nodes = state.nodesBySession[sessionId] ?? [];
-  const patch: Partial<CanvasNode> = { w: Math.round(box.w), h: Math.round(box.h) };
+  const patch: CanvasEditablePatch = { w: Math.round(box.w), h: Math.round(box.h) };
   if (box.x !== undefined) patch.x = Math.round(box.x);
   if (box.y !== undefined) patch.y = Math.round(box.y);
-  setNodes(sessionId, nodes.map((n) => (n.id === nodeId ? { ...n, ...patch } : n)));
-  const id = canvasId(sessionId);
-  if (id) await api.patchCanvasNode(id, nodeId, patch).catch((): void => undefined);
+  await writeNodePatches(sessionId, [{ nodeId, patch }]);
 }
 
 async function _setNode(
@@ -712,10 +910,7 @@ async function _setNode(
   nodeId: string,
   patch: { params?: CanvasNodeParams; title?: string; output?: CanvasNodeOutput },
 ): Promise<void> {
-  const nodes = state.nodesBySession[sessionId] ?? [];
-  setNodes(sessionId, nodes.map((n) => (n.id === nodeId ? { ...n, ...patch } : n)));
-  const id = canvasId(sessionId);
-  if (id) await api.patchCanvasNode(id, nodeId, patch).catch((): void => undefined);
+  await writeNodePatches(sessionId, [{ nodeId, patch }]);
 }
 
 async function _addEdge(
@@ -727,8 +922,9 @@ async function _addEdge(
 ): Promise<string | null> {
   const id = canvasId(sessionId);
   if (!id) return null;
+  const fence = captureProjectionFence(sessionId, id);
   const edge = await api.addCanvasEdge(id, { sourceId, targetId, sourceHandle, targetHandle });
-  applyEvent(sessionId, { type: 'edge_added', edge });
+  await applyResponseEvent(sessionId, { type: 'edge_added', edge }, fence);
   return edge.id;
 }
 
@@ -1091,7 +1287,10 @@ export async function removeNode(sessionId: string, nodeId: string): Promise<voi
 
 /** Records one history entry for a whole drag gesture. */
 export function commitMove(sessionId: string, nodeId: string, from: { x: number; y: number }, to: { x: number; y: number }): void {
-  if (from.x === to.x && from.y === to.y) return;
+  if (from.x === to.x && from.y === to.y) {
+    discardNodeLiveGeometry(sessionId, nodeId, ['x', 'y']);
+    return;
+  }
   void _setPosition(sessionId, nodeId, to.x, to.y);
   record(sessionId, {
     undo: () => _setPosition(sessionId, nodeId, from.x, from.y),
@@ -1101,21 +1300,30 @@ export function commitMove(sessionId: string, nodeId: string, from: { x: number;
 
 /** Live position during a drag — no API call, no history (commitMove does both). */
 export function moveNodeLive(sessionId: string, nodeId: string, x: number, y: number): void {
-  const nodes = state.nodesBySession[sessionId] ?? [];
-  setNodes(sessionId, nodes.map((n) => (n.id === nodeId ? { ...n, x, y } : n)));
+  moveNodesGeometryLive(sessionId, new Map([[nodeId, { x, y }]]));
 }
 
 /** Batch live positions during drag for high-performance atomic update. */
 export function moveNodesBatchLive(sessionId: string, moves: Map<string, { x: number; y: number }>): void {
+  moveNodesGeometryLive(sessionId, moves);
+}
+
+/** React Flow reports drag and resize frames here; persistence stays at gesture end. */
+export function moveNodesGeometryLive(sessionId: string, moves: Map<string, Partial<Pick<CanvasNode, 'x' | 'y' | 'w' | 'h'>>>): void {
   if (moves.size === 0) return;
-  const nodes = state.nodesBySession[sessionId] ?? [];
-  setNodes(
-    sessionId,
-    nodes.map((n) => {
-      const pos = moves.get(n.id);
-      return pos ? { ...n, x: pos.x, y: pos.y } : n;
-    }),
-  );
+  const nodes = state.nodesBySession[sessionId] ?? EMPTY_NODES;
+  const edits = localEdits(sessionId);
+  for (const node of nodes) {
+    const patch = moves.get(node.id);
+    if (patch) edits.stage(node, patch);
+  }
+  const projected = edits.project(nodes);
+  if (projected !== nodes) setNodes(sessionId, projected);
+}
+
+function discardNodeLiveGeometry(sessionId: string, nodeId: string, keys: Array<'x' | 'y' | 'w' | 'h'>): void {
+  const restored = localEditsBySession.get(sessionId)?.discardLive(nodeId, keys);
+  if (restored) setNodes(sessionId, (state.nodesBySession[sessionId] ?? EMPTY_NODES).map((node) => node.id === nodeId ? restored : node));
 }
 
 /**
@@ -1128,33 +1336,16 @@ export function commitMoveBatch(
   moves: { id: string; from: { x: number; y: number }; to: { x: number; y: number } }[],
 ): void {
   const real = moves.filter((m) => m.from.x !== m.to.x || m.from.y !== m.to.y);
+  for (const move of moves) {
+    if (move.from.x === move.to.x && move.from.y === move.to.y) discardNodeLiveGeometry(sessionId, move.id, ['x', 'y']);
+  }
   if (real.length === 0) return;
   if (real.length === 1) {
     commitMove(sessionId, real[0].id, real[0].from, real[0].to);
     return;
   }
   const apply = (pick: 'from' | 'to') => async () => {
-    // 1. Synchronously update all moved nodes in memory state in one atomic pass
-    const targetMap = new Map(real.map((m) => [m.id, m[pick]]));
-    const nodes = state.nodesBySession[sessionId] ?? [];
-    setNodes(
-      sessionId,
-      nodes.map((n) => {
-        const target = targetMap.get(n.id);
-        return target ? { ...n, x: target.x, y: target.y } : n;
-      }),
-    );
-    // 2. Persist to backend concurrently without sequential delays
-    const id = canvasId(sessionId);
-    if (id) {
-      await Promise.all(
-        real.map((m) =>
-          api
-            .patchCanvasNode(id, m.id, { x: Math.round(m[pick].x), y: Math.round(m[pick].y) })
-            .catch((): void => undefined),
-        ),
-      );
-    }
+    await writeNodePatches(sessionId, real.map((move) => ({ nodeId: move.id, patch: { x: Math.round(move[pick].x), y: Math.round(move[pick].y) } })));
   };
   void apply('to')();
   record(sessionId, { undo: apply('from'), redo: apply('to') });
@@ -1230,6 +1421,7 @@ export function commitResize(
     (from.x === undefined || from.x === to.x) &&
     (from.y === undefined || from.y === to.y)
   ) {
+    discardNodeLiveGeometry(sessionId, nodeId, ['x', 'y', 'w', 'h']);
     return;
   }
   void _setBox(sessionId, nodeId, to);
@@ -2142,13 +2334,7 @@ export async function refitGroup(sessionId: string, groupId: string): Promise<vo
     .filter((n): n is CanvasNode => Boolean(n));
   if (members.length === 0) return;
   const box = groupBox(members);
-  const nodes = state.nodesBySession[sessionId] ?? [];
-  setNodes(
-    sessionId,
-    nodes.map((n) => (n.id === groupId ? { ...n, ...box } : n)),
-  );
-  const id = canvasId(sessionId);
-  if (id) await api.patchCanvasNode(id, groupId, box).catch((): void => undefined);
+  await _setBox(sessionId, groupId, box);
 }
 
 export async function duplicateSelectedNodes(sessionId: string, nodeIds: string[]): Promise<string[]> {
@@ -2245,18 +2431,40 @@ export async function importImage(sessionId: string, file: File, at: { x: number
   let binary = '';
   const bytes = new Uint8Array(buffer);
   for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+  const fence = captureProjectionFence(sessionId, id);
   const node = await api.importCanvasImage(id, {
     name: file.name || 'image.png',
     dataBase64: btoa(binary),
     x: at.x,
     y: at.y,
   });
-  applyEvent(sessionId, { type: 'node_added', node });
+  await applyResponseEvent(sessionId, { type: 'node_added', node }, fence);
   record(sessionId, {
     undo: () => _deleteNode(sessionId, node.id),
     redo: () => Promise.resolve(), // imported bytes are gone from the drop event
   });
   return node;
+}
+
+/** Reuse one immutable media version as imported media or a fixed reference anchor. */
+export async function reuseAsset(sessionId: string, input: api.ReuseCanvasAssetInput, operationId = nanoid()): Promise<CanvasNode | null> {
+  const id = canvasId(sessionId);
+  if (!id) return null;
+  const fence = captureProjectionFence(sessionId, id);
+  const result = await api.reuseCanvasAsset(id, input, operationId);
+  await applyResponseEvent(sessionId, { type: 'node_added', node: result.node }, fence);
+  let currentId = result.node.id;
+  record(sessionId, {
+    undo: () => _deleteNode(sessionId, currentId),
+    redo: async () => {
+      const nextFence = captureProjectionFence(sessionId, id);
+      const next = await api.reuseCanvasAsset(id, { assetId: result.asset.id, x: input.x, y: input.y, title: input.title, asReference: input.asReference }, nanoid());
+      await applyResponseEvent(sessionId, { type: 'node_added', node: next.node }, nextFence);
+      currentId = next.node.id;
+    },
+  });
+  spotlight(sessionId, [currentId]);
+  return result.node;
 }
 
 /** Drop an image onto the canvas as a reference `anchor` pin (character by default). */
@@ -2271,6 +2479,7 @@ export async function addAnchorFromFile(
   let binary = '';
   const bytes = new Uint8Array(buffer);
   for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+  const fence = captureProjectionFence(sessionId, id);
   const node = await api.importCanvasImage(id, {
     name: file.name || 'anchor.png',
     dataBase64: btoa(binary),
@@ -2279,7 +2488,7 @@ export async function addAnchorFromFile(
     type: 'anchor',
     params: { role: 'character', strength: 'mid' },
   });
-  applyEvent(sessionId, { type: 'node_added', node });
+  await applyResponseEvent(sessionId, { type: 'node_added', node }, fence);
   record(sessionId, {
     undo: () => _deleteNode(sessionId, node.id),
     redo: () => Promise.resolve(),
@@ -2369,13 +2578,14 @@ export async function extractVideoFrame(
   const label = pick === 'start' ? '镜头首帧' : pick === 'end' ? '镜头尾帧' : '镜头选帧';
   const yOffset = pick === 'start' ? 0 : pick === 'end' ? 80 : 160;
 
+  const fence = captureProjectionFence(sessionId, id);
   const node = await api.importCanvasImage(id, {
     name: label,
     dataBase64: btoa(binary),
     x: Math.round(source.x + source.w + 56),
     y: Math.round(source.y + yOffset),
   });
-  applyEvent(sessionId, { type: 'node_added', node });
+  await applyResponseEvent(sessionId, { type: 'node_added', node }, fence);
 
   const edgeId = await _addEdge(sessionId, videoNodeId, node.id).catch((): null => null);
 
@@ -2418,11 +2628,12 @@ export async function extractFrameForNode(sessionId: string, frameExtractorNodeI
   const bytes = new Uint8Array(buffer);
   for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
 
+  const fence = captureProjectionFence(sessionId, id);
   const updatedNode = await api.setCanvasNodeAsset(id, frameExtractorNodeId, {
     name: `frame-${mode}.png`,
     dataBase64: btoa(binary),
   });
-  applyEvent(sessionId, { type: 'node_updated', node: updatedNode });
+  await applyResponseEvent(sessionId, { type: 'node_updated', node: updatedNode }, fence);
 }
 
 export async function saveAsset(sessionId: string, nodeId: string, assetIndex = 0): Promise<void> {
@@ -2434,11 +2645,12 @@ export async function uploadAssetToNode(sessionId: string, nodeId: string, file:
   const id = canvasId(sessionId);
   if (!id) return;
   const dataBase64 = await blobToBase64(file);
+  const fence = captureProjectionFence(sessionId, id);
   const updatedNode = await api.setCanvasNodeAsset(id, nodeId, {
     name: file.name,
     dataBase64,
   });
-  applyEvent(sessionId, { type: 'node_updated', node: updatedNode });
+  await applyResponseEvent(sessionId, { type: 'node_updated', node: updatedNode }, fence);
 }
 
 const EDIT_NODE_GAP = 80;

@@ -137,4 +137,91 @@ export const MIGRATIONS: Migration[] = [
       `CREATE UNIQUE INDEX artifact_versions_unique ON artifact_versions (artifact_id, n)`,
     ],
   },
+  {
+    name: '0004_canvas_command_receipts',
+    statements: [
+      `CREATE TABLE canvas_command_receipts (
+        canvas_id text NOT NULL,
+        mutation_id text NOT NULL,
+        request_hash text NOT NULL,
+        result_json text NOT NULL,
+        created_at integer NOT NULL,
+        PRIMARY KEY (canvas_id, mutation_id),
+        FOREIGN KEY (canvas_id) REFERENCES canvases(id) ON DELETE cascade
+      )`,
+    ],
+  },
+  {
+    name: '0005_canvas_commits',
+    statements: [
+      `CREATE TABLE canvas_commits (
+        canvas_id text NOT NULL,
+        revision integer NOT NULL,
+        mutation_id text,
+        changes_json text NOT NULL,
+        created_at integer NOT NULL,
+        PRIMARY KEY (canvas_id, revision),
+        FOREIGN KEY (canvas_id) REFERENCES canvases(id) ON DELETE cascade
+      )`,
+    ],
+  },
+  {
+    name: '0006_canvas_jobs',
+    statements: [
+      `CREATE TABLE canvas_jobs (
+        id text PRIMARY KEY NOT NULL,
+        canvas_id text NOT NULL,
+        node_id text NOT NULL,
+        node_type text NOT NULL,
+        generation integer NOT NULL CHECK (generation >= 1),
+        operation_id text,
+        status text NOT NULL CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled', 'interrupted')),
+        input_json text NOT NULL,
+        request_hash text NOT NULL,
+        provider_id text,
+        model text,
+        input_hash text,
+        result_json text,
+        error text,
+        cancel_reason text,
+        created_at integer NOT NULL,
+        submitted_at integer,
+        ended_at integer,
+        FOREIGN KEY (canvas_id) REFERENCES canvases(id) ON DELETE cascade
+      )`,
+      `CREATE UNIQUE INDEX canvas_jobs_generation_unique ON canvas_jobs (canvas_id, node_id, generation)`,
+      `CREATE UNIQUE INDEX canvas_jobs_operation_unique ON canvas_jobs (canvas_id, operation_id) WHERE operation_id IS NOT NULL`,
+      `CREATE INDEX canvas_jobs_status_idx ON canvas_jobs (status)`,
+    ],
+  },
+  {
+    name: '0007_canvas_remote_tasks',
+    statements: [
+      `ALTER TABLE canvas_jobs ADD COLUMN remote_task_json text`,
+    ],
+  },
+  {
+    name: '0008_canvas_assets',
+    statements: [
+      `CREATE TABLE canvas_assets (
+        id text PRIMARY KEY NOT NULL,
+        path text NOT NULL,
+        canvas_id text NOT NULL,
+        node_id text,
+        kind text NOT NULL CHECK (kind IN ('image', 'video', 'audio', 'mask')),
+        mime_type text NOT NULL,
+        byte_size integer NOT NULL CHECK (byte_size >= 0),
+        content_hash text NOT NULL,
+        source text NOT NULL CHECK (source IN ('generated', 'imported', 'mask')),
+        created_at integer NOT NULL,
+        job_id text,
+        generation integer,
+        provider_id text,
+        model text,
+        input_hash text
+      )`,
+      `CREATE UNIQUE INDEX canvas_assets_path_unique ON canvas_assets (path)`,
+      `CREATE INDEX canvas_assets_origin_idx ON canvas_assets (canvas_id, created_at)`,
+    ],
+  },
 ];

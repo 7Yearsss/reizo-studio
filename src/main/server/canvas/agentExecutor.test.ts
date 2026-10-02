@@ -150,7 +150,7 @@ describe('runAgentNode', () => {
     }).node;
     canvas.addEdge(canvasId, { sourceId: imageNode.id, targetId: agentNode.id });
 
-    const imgMod = await import('./imageExecutor');
+    const imgMod = await import('./assets');
     const readSpy = vi.spyOn(imgMod, 'readCanvasAsset').mockResolvedValueOnce(Buffer.from([1, 2, 3]));
 
     const freshAgent = canvas.getNode(canvasId, agentNode.id);

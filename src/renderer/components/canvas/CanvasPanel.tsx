@@ -780,6 +780,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           nextNodes.push(prev);
         } else {
           nextNodes.push({
+            ...prev,
             id: node.id,
             type: node.type,
             position: { x: node.x, y: node.y },
@@ -872,15 +873,25 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
+      const liveGeometry = new Map<string, Partial<Pick<CanvasNode, 'x' | 'y' | 'w' | 'h'>>>();
+      const resizing = new Set(changes.flatMap((change) => change.type === 'dimensions' && change.resizing ? [change.id] : []));
       for (const change of changes) {
         if (change.type === 'remove') {
           void canvasStore.removeNode(sessionId, change.id);
         }
+        if (change.type === 'dimensions' && change.resizing && change.dimensions) {
+          liveGeometry.set(change.id, { ...liveGeometry.get(change.id), w: change.dimensions.width, h: change.dimensions.height });
+        }
+        if (change.type === 'position' && change.position &&
+          (change.dragging || resizing.has(change.id) || rf.getNode(change.id)?.resizing)) {
+          liveGeometry.set(change.id, { ...liveGeometry.get(change.id), x: change.position.x, y: change.position.y });
+        }
       }
+      canvasStore.moveNodesGeometryLive(sessionId, liveGeometry);
       // Group→members follow is handled in onNodeDrag (rf.getNode is already
       // updated here, so a delta computed from it would always be zero).
     },
-    [sessionId],
+    [sessionId, rf],
   );
 
   const onEdgesChange = useCallback(

@@ -1,8 +1,6 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import { generateImage } from 'ai';
 import { DEFAULT_DRAFT_IMAGE_MODEL } from '../../../shared/canvas';
-import type { AnchorRole, AnchorStrength, CanvasImageParams, CanvasNode } from '../../../shared/canvas';
+import type { AnchorRole, AnchorStrength, CanvasEdge, CanvasImageParams, CanvasNode } from '../../../shared/canvas';
 import { buildEditPrompt } from '../../../shared/canvasImageEdit';
 import { getProviderPreset } from '../../../shared/providers';
 import { createOpenAiProvider } from '../agent/provider/openai';
@@ -13,6 +11,14 @@ import { inputHash } from './graph';
 import { classifyMediaError } from './mediaError';
 import { resolveMentions } from '../../../shared/resolveMentions';
 import { planAnchors } from '../../../shared/referenceAnchors';
+import { CanvasReferenceError, captureReferenceNodes, selectedAsset } from '../../../shared/canvasReferences';
+import { nodeJobsFor, type NodeJobContext, type NodeJobSubmission } from './nodeJobs';
+import { CanvasJobStoreError } from '../storage/canvasJobStore';
+import { generationSchedulerFor } from './generationScheduler';
+import { readCanvasAsset, stageCanvasAssets } from './assets';
+import type { CanvasJobFinish } from '../../../shared/canvasJobs';
+
+export { canvasAssetsDir, readCanvasAsset } from './assets';
 
 /**
  * Cap on reference images sent to the model (anchors + @mentions + img2img
@@ -45,6 +51,7 @@ async function generateImageViaChat(options: {
   prompt: string;
   images?: Uint8Array[];
   size?: string;
+  signal?: AbortSignal;
 }): Promise<{ images: RawImage[] }> {
   const content: Array<Record<string, unknown>> = [
     { type: 'text', text: options.size ? `${options.prompt}\n\nImage size: ${options.size}` : options.prompt },
@@ -54,6 +61,7 @@ async function generateImageViaChat(options: {
   }
   const base = (options.baseUrl || 'https://api.openai.com/v1').replace(/\/$/, '');
   const res = await fetch(`${base}/chat/completions`, {
+    signal: options.signal,
     method: 'POST',
     headers: { Authorization: `Bearer ${options.apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -86,21 +94,32 @@ async function generateImageViaChat(options: {
 
 /** Route to chat/completions for Gemini image models, /images otherwise. */
 async function generateOne(
-  resolved: { provider: ReturnType<typeof createOpenAiProvider>; modelId: string; apiKey: string; baseUrl?: string },
+  resolved: { provider: ReturnType<typeof createOpenAiProvider>; providerId: string; modelId: string; apiKey: string; baseUrl?: string },
   prompt: string | { text: string; images: Uint8Array[] },
   size: string,
+  job: NodeJobContext,
+  canvasStore: CanvasStore,
+  taskSignal: AbortSignal = job.signal,
+  onFailure?: (error: unknown) => void,
 ): Promise<{ images: RawImage[] }> {
-  if (isChatCompletionsImageModel(resolved.modelId)) {
-    return generateImageViaChat({
-      baseUrl: resolved.baseUrl,
-      apiKey: resolved.apiKey,
-      modelId: resolved.modelId,
-      prompt: typeof prompt === 'string' ? prompt : prompt.text,
-      images: typeof prompt === 'string' ? [] : prompt.images,
-      size,
-    });
-  }
-  return generateImage({ model: resolved.provider.image(resolved.modelId), prompt, size: size as `${number}x${number}` }) as Promise<{ images: RawImage[] }>;
+  return generationSchedulerFor(canvasStore).run(resolved.providerId, async (signal) => {
+    try {
+      if (!job.markSubmitted({ providerId: resolved.providerId, model: resolved.modelId })) {
+        throw new Error('Image job no longer owns provider submission');
+      }
+      if (isChatCompletionsImageModel(resolved.modelId)) {
+        return await generateImageViaChat({
+          baseUrl: resolved.baseUrl, apiKey: resolved.apiKey, modelId: resolved.modelId,
+          prompt: typeof prompt === 'string' ? prompt : prompt.text,
+          images: typeof prompt === 'string' ? [] : prompt.images, size, signal,
+        });
+      }
+      return await generateImage({ model: resolved.provider.image(resolved.modelId), prompt, size: size as `${number}x${number}`, abortSignal: signal, maxRetries: 0 }) as { images: RawImage[] };
+    } catch (error) {
+      onFailure?.(error); // Revoke sibling permits before this request releases capacity.
+      throw error;
+    }
+  }, taskSignal);
 }
 
 /**
@@ -123,29 +142,11 @@ export function broadcastDownstreamDirty(
   }
 }
 
-/** Where a canvas node's generated assets live on disk. */
-export function canvasAssetsDir(dataRoot: string, canvasId: string): string {
-  return path.join(dataRoot, 'canvas', canvasId);
-}
-
-function assetAbsPath(dataRoot: string, relPath: string): string {
-  // relPath is `<canvasId>/<file>`; keep it inside the canvas dir.
-  const abs = path.resolve(dataRoot, 'canvas', relPath);
-  if (!abs.startsWith(path.resolve(dataRoot, 'canvas') + path.sep)) {
-    throw new Error('asset path escapes canvas dir');
-  }
-  return abs;
-}
-
-export async function readCanvasAsset(dataRoot: string, relPath: string): Promise<Buffer> {
-  return readFile(assetAbsPath(dataRoot, relPath));
-}
-
 async function resolveImageProvider(
   settingsStore: SettingsStore,
   providerId: string | undefined,
   params: CanvasImageParams,
-): Promise<{ provider: ReturnType<typeof createOpenAiProvider>; modelId: string; apiKey: string; baseUrl?: string } | { error: string }> {
+): Promise<{ provider: ReturnType<typeof createOpenAiProvider>; providerId: string; modelId: string; apiKey: string; baseUrl?: string } | { error: string }> {
   const settings = await settingsStore.get();
   let resolvedId = providerId || settings.activeProviderId || 'openai';
   let stored = settings.providers[resolvedId];
@@ -167,8 +168,8 @@ async function resolveImageProvider(
   const modelId = params.draft
     ? settings.mediaModels?.draft || DEFAULT_DRAFT_IMAGE_MODEL
     : params.model || settings.mediaModels?.image || (isOfficial ? 'dall-e-3' : 'gpt-image-2');
-  const provider = createOpenAiProvider({ apiKey: stored.apiKey, baseUrl });
-  return { provider, modelId, apiKey: stored.apiKey, baseUrl };
+  const provider = createOpenAiProvider({ apiKey: stored.apiKey, baseUrl, retryTransport: false });
+  return { provider, providerId: resolvedId, modelId, apiKey: stored.apiKey, baseUrl };
 }
 
 async function writeImageAssetsAndBroadcast(options: {
@@ -180,76 +181,69 @@ async function writeImageAssetsAndBroadcast(options: {
   rawPrompt: string;
   results: Array<{ images: Array<{ mediaType?: string; uint8Array: Uint8Array }> }>;
   forcePng?: boolean;
+  job: NodeJobContext;
+  model: string;
 }): Promise<void> {
-  const { canvasStore, dataRoot, canvasId, node, upstream, rawPrompt, results, forcePng } = options;
-  const channel = getCanvasChannel(canvasId);
-  const dir = canvasAssetsDir(dataRoot, canvasId);
-  await mkdir(dir, { recursive: true });
-  const rels: string[] = [];
-  let n = 0;
-  for (const res of results) {
-    for (const image of res.images) {
-      const ext = forcePng ? 'png' : image.mediaType?.includes('jpeg') ? 'jpg' : 'png';
-      const file = `${node.id}-${Date.now().toString(36)}-${n}.${ext}`;
-      await writeFile(path.join(dir, file), Buffer.from(image.uint8Array));
-      rels.push(`${canvasId}/${file}`);
-      n += 1;
-    }
+  const { canvasStore, dataRoot, canvasId, node, upstream, rawPrompt, results, job } = options;
+  const canCommit = () => job.isCurrent() && Boolean(canvasStore.getNode(canvasId, node.id));
+  if (!canCommit()) return;
+  if (!results.some((result) => result.images.length > 0)) throw new Error('Image provider returned no generated assets');
+  if (results.some((result) => result.images.some((image) => image.uint8Array.byteLength === 0))) {
+    throw new Error('Image provider returned an empty generated asset');
   }
-
-  const prevAssets = node.output?.assets ?? [];
-  const combinedAssets = [...rels, ...prevAssets.filter((p) => !rels.includes(p))].slice(0, 10);
-  const nowIso = new Date().toISOString();
-  const newResultSetItems = rels.map((asset) => ({
-    asset,
-    createdAt: nowIso,
-    prompt: rawPrompt,
-  }));
-  const prevResultSet = node.output?.resultSet ?? [];
-  const combinedResultSet = [
-    ...newResultSetItems,
-    ...prevResultSet.filter((it) => !rels.includes(it.asset)),
-  ].slice(0, 20);
-
-  const outputPayload = {
-    assets: combinedAssets,
-    resultSet: combinedResultSet,
-    activeAssetIndex: 0,
-  };
-
-  const done = canvasStore.updateNode(canvasId, node.id, {
-    runState: 'done',
-    output: outputPayload,
-    paramsHash: inputHash(node, upstream),
-  });
-  if (done) {
-    channel.broadcast(done.rev, {
-      type: 'node_output',
-      id: node.id,
-      output: done.node.output ?? outputPayload,
-      runState: 'done',
-    });
-    broadcastDownstreamDirty(canvasStore, canvasId, node.id, done.rev, false);
+  const channel = getCanvasChannel(canvasId);
+  const staged = await stageCanvasAssets(dataRoot, canvasId, results.flatMap((result) => result.images).map((image, index) => {
+    const mimeType = image.mediaType === 'image/jpeg' ? 'image/jpeg' : image.mediaType === 'image/webp' ? 'image/webp' : 'image/png';
+    const extension = mimeType === 'image/jpeg' ? 'jpg' : mimeType === 'image/webp' ? 'webp' : 'png';
+    return { name: `${node.id}-${job.id}-${index}.${extension}`, bytes: image.uint8Array, mimeType, kind: 'image' as const };
+  }), job.signal);
+  try {
+    if (!canCommit()) return;
+    const details: CanvasJobFinish = {};
+    const done = job.finish('succeeded', () => {
+      const registered = staged.files.map((file) => canvasStore.assets.register({ ...file, canvasId, nodeId: node.id, jobId: job.id, source: 'generated' }));
+      const paths = registered.map((asset) => asset.path);
+      const previous = canvasStore.getNode(canvasId, node.id)?.output ?? {};
+      const output = { assets: [...paths, ...(previous.assets ?? []).filter((asset) => !paths.includes(asset))].slice(0, 10),
+        resultSet: [...registered.map((asset) => ({ asset: asset.path, assetId: asset.id, jobId: asset.jobId,
+          generation: asset.generation, providerId: asset.providerId, inputHash: asset.inputHash,
+          createdAt: new Date().toISOString(), prompt: rawPrompt, model: asset.model ?? options.model })),
+        ...(previous.resultSet ?? []).filter((item) => !paths.includes(item.asset))].slice(0, 20), activeAssetIndex: 0 };
+      details.result = output;
+      return canvasStore.updateNode(canvasId, node.id, { runState: 'done', output, paramsHash: inputHash(node, upstream) });
+    }, details);
+    if (done) {
+      staged.keep();
+      channel.broadcast(done.rev, {
+        type: 'node_output',
+        id: node.id,
+        output: done.node.output ?? {},
+        runState: 'done',
+      });
+      broadcastDownstreamDirty(canvasStore, canvasId, node.id, done.rev, false);
+    }
+  } finally {
+    await staged.discard();
   }
 }
 
 async function upstreamImageBytes(
-  store: CanvasStore,
+  upstream: CanvasNode[],
   dataRoot: string,
-  canvasId: string,
-  nodeId: string,
 ): Promise<Uint8Array[]> {
-  const upstream = store.upstreamNodes(canvasId, nodeId);
   const out: Uint8Array[] = [];
+  const seen = new Set<string>();
   for (const node of upstream) {
-    const assets = node.output?.assets ?? [];
-    for (const rel of assets.slice(0, 2)) {
-      try {
-        out.push(new Uint8Array(await readCanvasAsset(dataRoot, rel)));
-      } catch {
-        /* skip a missing asset */
-      }
+    if (seen.has(node.id)) continue;
+    seen.add(node.id);
+    const rel = selectedAsset(node);
+    if (!rel) continue;
+    try {
+      out.push(new Uint8Array(await readCanvasAsset(dataRoot, rel)));
+    } catch {
+      /* skip a missing legacy asset */
     }
+    if (out.length === 2) break;
   }
   return out.slice(0, 2);
 }
@@ -262,59 +256,124 @@ async function upstreamImageBytes(
  *
  * Fire-and-forget: the route returns before this resolves.
  */
-export async function runImageNode(options: {
+export interface ImageRunOptions {
   canvasStore: CanvasStore;
   settingsStore: SettingsStore;
   dataRoot: string;
   canvasId: string;
   node: CanvasNode;
   providerId?: string;
-}): Promise<void> {
+  signal?: AbortSignal;
+  operationId?: string;
+}
+
+interface ImageJobInput {
+  request: { providerId?: string };
+  node: CanvasNode;
+  upstream: CanvasNode[];
+  nodes: CanvasNode[];
+  edges: CanvasEdge[];
+  requiredAssetPaths: string[];
+}
+
+function failImageJob(options: ImageRunOptions, job: NodeJobContext, message: string): void {
+  const { canvasStore, canvasId } = options;
+  if (!job.isCurrent()) return;
+  const merged = { ...(canvasStore.getNode(canvasId, options.node.id)?.output ?? {}), error: message };
+  const result = job.finish('failed', () => canvasStore.updateNode(canvasId, options.node.id, { runState: 'error', output: merged }), { error: message });
+  if (result) {
+    getCanvasChannel(canvasId).broadcast(result.rev, { type: 'node_output', id: options.node.id, output: result.node.output ?? merged, runState: 'error' });
+    broadcastDownstreamDirty(canvasStore, canvasId, options.node.id, result.rev);
+  }
+}
+
+/** Synchronous durable admission; accepted identity is available before HTTP 202. */
+export function startImageNode(options: ImageRunOptions): NodeJobSubmission {
+  const { canvasStore, canvasId } = options;
+  const runtime = nodeJobsFor(canvasStore);
+  runtime.assertAccepting();
+  const receipt = runtime.replay(canvasId, options.node.id, options.operationId, options.providerId);
+  if (receipt) return receipt;
+  const node = canvasStore.getNode(canvasId, options.node.id);
+  if (!node || node.type !== 'image') throw new CanvasJobStoreError('Image node not found', 404);
+  const snapshot = canvasStore.getSnapshot(canvasId);
+  if (!snapshot) throw new CanvasJobStoreError('Canvas not found', 404);
+  let references: ReturnType<typeof captureReferenceNodes>;
+  try {
+    references = captureReferenceNodes(canvasStore.upstreamNodes(canvasId, node.id), (id) => canvasStore.assets.get(id));
+  } catch (error) {
+    throw new CanvasJobStoreError(error instanceof Error ? error.message : String(error));
+  }
+  const capturedById = new Map(references.nodes.map((reference) => [reference.id, reference]));
+  const input: ImageJobInput = structuredClone({ request: { providerId: options.providerId }, node,
+    upstream: references.nodes, nodes: snapshot.nodes.map((candidate) => capturedById.get(candidate.id) ?? candidate),
+    edges: snapshot.edges, requiredAssetPaths: references.requiredAssetPaths });
+  return runtime.start({
+    canvasId, nodeId: node.id, nodeType: 'image', signal: options.signal, operationId: options.operationId,
+    input: { ...input }, inputHash: inputHash(input.node, input.upstream),
+    execute: (job) => executeImageNode({ ...options, node: input.node, input, job }),
+    onFailure: (error, job) => failImageJob(options, job, classifyMediaError(error).message),
+    onCancelled: (reason) => {
+      const current = canvasStore.getNode(canvasId, node.id);
+      if (!current) return;
+      const output = { ...(current.output ?? {}) };
+      delete output.error;
+      delete output.progress;
+      if (reason === 'interrupted') output.error = '任务因应用退出而中断，请重试。';
+      const result = canvasStore.updateNode(canvasId, node.id, { runState: reason === 'interrupted' ? 'error' : 'idle', output });
+      if (!result) throw new Error('Image job cancellation could not update its node');
+      return () => { getCanvasChannel(canvasId).broadcast(result.rev, { type: 'node_updated', node: result.node }); };
+    },
+  });
+}
+
+export async function runImageNode(options: ImageRunOptions): Promise<void> {
+  await startImageNode(options).completion;
+}
+
+async function executeImageNode(options: ImageRunOptions & { input: ImageJobInput; job: NodeJobContext }): Promise<void> {
   const { canvasStore, settingsStore, dataRoot, canvasId, node } = options;
   const channel = getCanvasChannel(canvasId);
+  const canCommit = () => options.job.isCurrent() && Boolean(canvasStore.getNode(canvasId, node.id));
 
   // Keep the existing output so previous versions' assets/resultSet survive
   // the rerun — output is replaced wholesale on write, not merged.
+  if (!canCommit()) return;
   const running = canvasStore.updateNode(canvasId, node.id, { runState: 'running' });
-  if (running) channel.broadcast(running.rev, { type: 'run_state', id: node.id, runState: 'running' });
+  if (!running) throw new Error('Image job could not start its node');
+  channel.broadcast(running.rev, { type: 'run_state', id: node.id, runState: 'running' });
 
   const fail = (message: string) => {
-    const merged = { ...(canvasStore.getNode(canvasId, node.id)?.output ?? {}), error: message };
-    const res = canvasStore.updateNode(canvasId, node.id, {
-      runState: 'error',
-      output: merged,
-    });
-    if (res) {
-      channel.broadcast(res.rev, {
-        type: 'node_output',
-        id: node.id,
-        output: res.node.output ?? merged,
-        runState: 'error',
-      });
-      broadcastDownstreamDirty(canvasStore, canvasId, node.id, res.rev);
-    }
+    failImageJob(options, options.job, message);
   };
 
   try {
-    const upstream = canvasStore.upstreamNodes(canvasId, node.id);
+    const upstream = options.input.upstream;
+    const fixedImages = new Map<string, Uint8Array>();
+    for (const rel of options.input.requiredAssetPaths) {
+      try {
+        fixedImages.set(rel, new Uint8Array(await readCanvasAsset(dataRoot, rel)));
+      } catch (error) {
+        throw new CanvasReferenceError(`固定参考图无法读取：${rel}`, { cause: error });
+      }
+    }
     const params = (node.params || {}) as CanvasImageParams;
     let rawPrompt = (typeof params.prompt === 'string' ? params.prompt : '').trim();
 
     const edit = params.edit;
     if (edit) {
       rawPrompt = buildEditPrompt(edit);
-      const snap = canvasStore.getSnapshot(canvasId);
-      const srcEdge = snap?.edges.find((e) => e.targetId === node.id && e.targetHandle === 'edit_src');
+      const snap = options.input;
+      const srcEdge = snap.edges.find((e) => e.targetId === node.id && e.targetHandle === 'edit_src');
       const srcNode =
-        (srcEdge && snap?.nodes.find((n) => n.id === srcEdge.sourceId)) ||
-        canvasStore.upstreamNodes(canvasId, node.id).find((u) => (u.output?.assets?.length ?? 0) > 0);
-      if (!srcNode?.output?.assets?.length) {
+        (srcEdge && snap.nodes.find((n) => n.id === srcEdge.sourceId)) ||
+        upstream.find((u) => (u.output?.assets?.length ?? 0) > 0);
+      const srcRel = srcNode ? selectedAsset(srcNode) : undefined;
+      if (!srcRel) {
         fail('编辑节点缺少源图输入');
         return;
       }
-      const srcAssets = srcNode.output.assets;
-      const srcRel = srcAssets[srcNode.output.activeAssetIndex ?? 0] ?? srcAssets[0];
-      const imgs: Uint8Array[] = [new Uint8Array(await readCanvasAsset(dataRoot, srcRel))];
+      const imgs: Uint8Array[] = [fixedImages.get(srcRel) ?? new Uint8Array(await readCanvasAsset(dataRoot, srcRel))];
       if (edit.maskAsset) {
         try {
           imgs.push(new Uint8Array(await readCanvasAsset(dataRoot, edit.maskAsset)));
@@ -327,9 +386,10 @@ export async function runImageNode(options: {
         fail(resolved.error);
         return;
       }
-      const srcParams = (srcNode.params || {}) as CanvasImageParams;
+      const srcParams = (srcNode?.params || {}) as CanvasImageParams;
       const size = params.size ?? srcParams.size ?? '1024x1024';
-      const result = await generateOne(resolved, { text: rawPrompt, images: imgs }, size);
+      if (!canCommit()) return;
+      const result = await generateOne(resolved, { text: rawPrompt, images: imgs }, size, options.job, canvasStore);
       await writeImageAssetsAndBroadcast({
         canvasStore,
         dataRoot,
@@ -339,6 +399,8 @@ export async function runImageNode(options: {
         rawPrompt,
         results: [result],
         forcePng: edit.kind === 'matting',
+        job: options.job,
+        model: resolved.modelId,
       });
       return;
     }
@@ -371,13 +433,13 @@ export async function runImageNode(options: {
       fail(resolved.error);
       return;
     }
-    const { provider, modelId } = resolved;
     let images: Uint8Array[] = [];
 
     const readRefBytes = async (rel: string): Promise<void> => {
       try {
-        images.push(new Uint8Array(await readCanvasAsset(dataRoot, rel)));
-      } catch {
+        images.push(fixedImages.get(rel) ?? new Uint8Array(await readCanvasAsset(dataRoot, rel)));
+      } catch (error) {
+        if (options.input.requiredAssetPaths.includes(rel)) throw new CanvasReferenceError(`固定参考图无法读取：${rel}`, { cause: error });
         /* ignore unreadable asset */
       }
     };
@@ -387,7 +449,7 @@ export async function runImageNode(options: {
     // just an ordered pile + wording (see referenceAnchors.ts / docs).
     // Within a role, honour the `ref_N` slot number the edge carries.
     const slotByAnchor = new Map<string, number>();
-    for (const e of canvasStore.getSnapshot(canvasId)?.edges ?? []) {
+    for (const e of options.input.edges) {
       if (e.targetId !== node.id) continue;
       const m = /^ref_(\d+)$/.exec(e.targetHandle ?? '');
       if (m) slotByAnchor.set(e.sourceId, Number(m[1]));
@@ -398,13 +460,14 @@ export async function runImageNode(options: {
     const { orderedAssetRefs: anchorRefs, promptPrefix } = planAnchors(
       anchorNodes.map((a) => {
         const ap = a.params as { role?: AnchorRole; strength?: AnchorStrength; note?: string };
+        const asset = selectedAsset(a);
         return {
           id: a.id,
           role: ap.role ?? 'character',
           strength: ap.strength ?? 'mid',
           note: ap.note,
           title: a.title || '',
-          assets: a.output?.assets ?? [],
+          assets: asset ? [asset] : [],
         };
       }),
       1,
@@ -415,9 +478,10 @@ export async function runImageNode(options: {
     if (rawPrompt.includes('@')) {
       // @-mentions resolve against the whole canvas by id (the chip picker and
       // the agent can both reference a node that is not wired in as an edge).
-      const candidates = (canvasStore.getSnapshot(canvasId)?.nodes ?? [])
+      const candidates = options.input.nodes
         .filter((u) => u.id !== node.id && u.type !== 'anchor')
         .map((u) => {
+          const asset = selectedAsset(u);
           let text: string | undefined;
           if (u.type === 'note') {
             text = (u.params as { content?: string } | undefined)?.content;
@@ -427,7 +491,7 @@ export async function runImageNode(options: {
           return {
             id: u.id,
             label: u.title || '',
-            assets: u.output?.assets ?? [],
+            assets: asset ? [asset] : [],
             text,
           };
         });
@@ -437,19 +501,24 @@ export async function runImageNode(options: {
     }
 
     if (images.length === 0) {
-      images = await upstreamImageBytes(canvasStore, dataRoot, canvasId, node.id);
+      images = await upstreamImageBytes(upstream, dataRoot);
     }
 
     images = images.slice(0, MAX_REFERENCE_IMAGES);
     const prompt = images.length > 0 ? { text: rawPrompt, images } : rawPrompt;
 
-    const variationsCount = Math.min(
-      4,
-      Math.max(1, Number(params.count ?? 1)),
-    );
+    const requestedCount = Number(params.count ?? 1);
+    if (!Number.isFinite(requestedCount) || requestedCount < 1) {
+      fail('图片数量参数无效，请重新选择生成数量。');
+      return;
+    }
+    const variationsCount = Math.min(4, Math.floor(requestedCount));
 
+    if (!canCommit()) return;
+    const batchAbort = new AbortController();
+    const batchSignal = AbortSignal.any([options.job.signal, batchAbort.signal]);
     const genPromises = Array.from({ length: variationsCount }, () =>
-      generateOne(resolved, prompt, params.size ?? '1024x1024'),
+      generateOne(resolved, prompt, params.size ?? '1024x1024', options.job, canvasStore, batchSignal, (error) => batchAbort.abort(error)),
     );
     const results = await Promise.all(genPromises);
     await writeImageAssetsAndBroadcast({
@@ -460,8 +529,12 @@ export async function runImageNode(options: {
       upstream,
       rawPrompt,
       results,
+      job: options.job,
+      model: resolved.modelId,
     });
   } catch (err) {
+    if (!canCommit()) return;
+    if (err instanceof CanvasReferenceError) { fail(err.message); return; }
     const classified = classifyMediaError(err);
     if (classified.raw !== classified.message) {
       console.warn(`[canvas] image node ${node.id} failed: ${classified.raw}`);

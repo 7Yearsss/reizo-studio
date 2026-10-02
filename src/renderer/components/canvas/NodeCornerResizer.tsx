@@ -71,13 +71,7 @@ function NodeCornerResizer({
     setActiveResizingCorner(null);
     const from = resizeStart.current;
     resizeStart.current = null;
-    if (
-      from &&
-      (from.w !== p.width ||
-        from.h !== p.height ||
-        (from.x !== undefined && from.x !== p.x) ||
-        (from.y !== undefined && from.y !== p.y))
-    ) {
+    if (from) {
       canvasStore.commitResize(sessionId, nodeId, from, {
         w: Math.round(p.width),
         h: Math.round(p.height),

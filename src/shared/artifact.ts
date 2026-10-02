@@ -46,6 +46,14 @@ export interface ArtifactOrigin {
   turnId?: string;
   canvasNodeId?: string;
   model?: string;
+  /** Stable media identity and the original generation, preserved per artifact version. */
+  canvasAssetId?: string;
+  canvasId?: string;
+  jobId?: string;
+  generation?: number;
+  providerId?: string;
+  inputHash?: string;
+  contentHash?: string;
 }
 
 export interface Artifact {

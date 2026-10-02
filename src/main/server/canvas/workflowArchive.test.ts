@@ -1,8 +1,9 @@
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
-import { unzipSync, strFromU8 } from 'fflate';
+import { unzipSync, strFromU8, strToU8, zipSync } from 'fflate';
 import { openDb } from '../db/client';
 import { createSqliteSessionStore } from '../storage/sqliteSessionStore';
 import { createCanvasStore } from '../storage/canvasStore';
@@ -30,6 +31,84 @@ async function seedAsset(dataRoot: string, canvasId: string, name: string, bytes
 }
 
 describe('workflow archive round-trip', () => {
+  it('preserves masks, historical bytes and both mention forms while assigning imported asset identities', async () => {
+    const { canvas, dataRoot, newCanvas } = await scaffold();
+    const source = await newCanvas(); const target = await newCanvas();
+    const base = canvas.addNode(source.id, { type: 'image', x: 0, y: 0, w: 100, h: 100, params: { prompt: 'source' } }).node;
+    const current = await seedAsset(dataRoot, source.id, 'current.png', Buffer.from('current'));
+    const history = await seedAsset(dataRoot, source.id, 'history.png', Buffer.from('history'));
+    const mask = await seedAsset(dataRoot, source.id, 'mask.png', Buffer.from('mask'));
+    canvas.assets.register({ id: 'source-fixed-history', canvasId: source.id, nodeId: base.id, path: history,
+      kind: 'image', mimeType: 'image/png', byteSize: 7, contentHash: createHash('sha256').update('history').digest('hex'), source: 'imported' });
+    canvas.updateNode(source.id, base.id, { output: { assets: [current], resultSet: [{ asset: current }, { asset: history, assetId: 'foreign-asset', jobId: 'foreign-job', generation: 8, providerId: 'foreign-provider' }] }, runState: 'done' });
+    const edited = canvas.addNode(source.id, { type: 'image', x: 100, y: 0, w: 100, h: 100, params: {
+      prompt: 'Use @[source](canvas:' + base.id + ') and @#' + base.id.slice(0, 8),
+      edit: { kind: 'inpaint', sourceNodeId: base.id, maskAsset: mask },
+    } }).node;
+    canvas.addEdge(source.id, { sourceId: base.id, targetId: edited.id, targetHandle: 'edit_src' });
+    const anchor = canvas.addNode(source.id, { type: 'anchor', x: 0, y: 200, w: 100, h: 100,
+      params: { assetId: 'source-fixed-history', role: 'content', strength: 'mid' } }).node;
+    // The registry identity wins over stale display output, just as it does at job admission.
+    canvas.updateNode(source.id, anchor.id, { runState: 'done', output: { assets: [current] } });
+    const zip = await exportWorkflowZip({ canvasStore: canvas, dataRoot, canvasId: source.id });
+    const originalEntries = unzipSync(zip);
+    const manifest = JSON.parse(strFromU8(originalEntries['workflow.json']));
+    const packedAnchor = manifest.nodes.find((node: { type: string }) => node.type === 'anchor');
+    expect(packedAnchor.params.assetId).toBeUndefined();
+    expect(packedAnchor.params.assetRef).toBe(packedAnchor.output.assets[0]);
+    const imported = await importWorkflowZip({ canvasStore: canvas, dataRoot, canvasId: target.id, zip, operationId: 'portable-import' });
+    const restored = canvas.getNode(target.id, imported.nodeIds[0]);
+    const restoredEdit = canvas.getNode(target.id, imported.nodeIds[1]);
+    const restoredAnchor = canvas.getNode(target.id, imported.nodeIds[2]);
+    const restoredAnchorParams = restoredAnchor.params as { assetId: string };
+    const params = restoredEdit.params as { prompt: string; edit: { sourceNodeId: string; maskAsset: string } };
+    expect(params.prompt).toContain('](canvas:' + restored.id + ')');
+    expect(params.prompt).toContain('@#' + restored.id.slice(0, 8));
+    expect(params.edit.sourceNodeId).toBe(restored.id);
+    expect((await readFile(path.join(dataRoot, 'canvas', params.edit.maskAsset))).toString()).toBe('mask');
+    const version = restored.output.resultSet[1];
+    expect((await readFile(path.join(dataRoot, 'canvas', version.asset))).toString()).toBe('history');
+    expect(version.jobId).toBeUndefined(); expect(version.providerId).toBeUndefined();
+    expect(canvas.assets.get(version.assetId)).toMatchObject({ source: 'imported', canvasId: target.id });
+    expect(restoredAnchor.params).toMatchObject({ assetId: version.assetId, role: 'content', strength: 'mid' });
+    expect(restoredAnchor.params).not.toHaveProperty('assetRef');
+    expect(restoredAnchor.output.assets).toEqual([version.asset]);
+    expect(restoredAnchorParams.assetId).not.toBe('source-fixed-history');
+    const repeated = await importWorkflowZip({ canvasStore: canvas, dataRoot, canvasId: target.id, zip, operationId: 'portable-import' });
+    expect(repeated).toEqual(imported); expect(canvas.getSnapshot(target.id)?.nodes).toHaveLength(3);
+    expect(canvas.assets.list(target.id)).toHaveLength(3);
+    const exported = unzipSync(await exportWorkflowZip({ canvasStore: canvas, dataRoot, canvasId: target.id }));
+    expect(Object.keys(exported).filter((name) => name.startsWith('assets/'))).toHaveLength(3);
+    // Earlier v1 archives retained the source local ID; selected archived bytes must still get a fresh identity.
+    packedAnchor.params.assetId = 'source-fixed-history';
+    delete packedAnchor.params.assetRef;
+    const legacyTarget = await newCanvas();
+    const legacy = await importWorkflowZip({ canvasStore: canvas, dataRoot, canvasId: legacyTarget.id,
+      zip: zipSync({ ...originalEntries, 'workflow.json': strToU8(JSON.stringify(manifest)) }) });
+    const legacyAnchor = canvas.getNode(legacyTarget.id, legacy.nodeIds[2]);
+    const legacyAnchorParams = legacyAnchor.params as { assetId: string };
+    expect(legacyAnchorParams.assetId).not.toBe('source-fixed-history');
+    expect(canvas.assets.get(legacyAnchorParams.assetId)).toMatchObject({ canvasId: legacyTarget.id, source: 'imported' });
+    expect((await readFile(path.join(dataRoot, 'canvas', legacyAnchor.output.assets[0]))).toString()).toBe('history');
+  });
+
+  it('rolls document, metadata and newly staged files back together if restoring output fails', async () => {
+    const { canvas, dataRoot, newCanvas } = await scaffold();
+    const source = await newCanvas(); const target = await newCanvas();
+    const node = canvas.addNode(source.id, { type: 'image', x: 0, y: 0, w: 100, h: 100 }).node;
+    const file = await seedAsset(dataRoot, source.id, 'original.png', Buffer.from('bytes'));
+    canvas.updateNode(source.id, node.id, { runState: 'done', output: { assets: [file] } });
+    const zip = await exportWorkflowZip({ canvasStore: canvas, dataRoot, canvasId: source.id });
+    const before = canvas.getSnapshot(target.id);
+    const update = canvas.updateNode;
+    canvas.updateNode = () => { throw new Error('restore failure'); };
+    try { await expect(importWorkflowZip({ canvasStore: canvas, dataRoot, canvasId: target.id, zip })).rejects.toThrow('restore failure'); }
+    finally { canvas.updateNode = update; }
+    expect(canvas.getSnapshot(target.id)).toEqual(before);
+    expect(canvas.assets.list(target.id)).toEqual([]);
+    expect(await readdir(path.join(dataRoot, 'canvas', target.id))).toEqual([]);
+  });
+
   it('exports nodes/edges/assets and re-imports them with fresh ids', async () => {
     const { canvas, dataRoot, newCanvas } = await scaffold();
     const c = await newCanvas();

@@ -1,12 +1,16 @@
 import type { SettingsStore } from '../storage/settingsStore';
 import type { CanvasStore } from '../storage/canvasStore';
 import { getCanvasChannel } from './channel';
-import { runImageNode } from './imageExecutor';
+import { startImageNode } from './imageExecutor';
 import { runAgentNode } from './agentExecutor';
-import { runVideoNode } from './videoExecutor';
-import { runAudioNode } from './audioExecutor';
+import { startVideoNode } from './videoExecutor';
+import { nanoid } from 'nanoid';
+import { startAudioNode } from './audioExecutor';
 import type { ProviderStore } from '../storage/providerStore';
 import { descendants, directUpstream, topoOrder, buildPipelineWaves, inputHash, isImportedMedia } from './graph';
+import { nodeJobsFor, type NodeJobSubmission } from './nodeJobs';
+import { canvasWorkStopped } from './workLifecycle';
+import { cancelVideoJobsForCanvas } from './asyncJobManager';
 
 /** Node types the executor knows how to run. */
 // `note` / `group` / `anchor` are inert: `anchor` is a reference pin consumed
@@ -23,17 +27,28 @@ const RUNNABLE = new Set(['image', 'agent', 'video', 'audio']);
 export const MAX_CONCURRENCY = 8;
 
 /** In-flight `runGraph` per canvas, so a "stop" can abort between nodes. */
-const activeRuns = new Map<string, AbortController>();
+const activeRuns = new Map<string, { controller: AbortController; store: CanvasStore }>();
 
 export function isCanvasRunning(canvasId: string): boolean {
   return activeRuns.has(canvasId);
 }
 
-export function stopCanvasRun(canvasId: string): boolean {
-  const controller = activeRuns.get(canvasId);
-  if (!controller) return false;
-  controller.abort();
-  return true;
+export function stopCanvasRun(canvasId: string, store?: CanvasStore): boolean {
+  const candidate = activeRuns.get(canvasId);
+  const run = !store || candidate?.store === store ? candidate : undefined;
+  run?.controller.abort();
+  const repository = store ?? run?.store;
+  const stoppedNodes = repository ? nodeJobsFor(repository).cancelCanvas(canvasId) : false;
+  const stoppedVideos = repository ? cancelVideoJobsForCanvas(repository, canvasId) : false;
+  return Boolean(run) || stoppedNodes || stoppedVideos;
+}
+
+export function stopCanvasRunsForStore(store: CanvasStore): void {
+  for (const [canvasId, run] of activeRuns) {
+    if (run.store !== store) continue;
+    activeRuns.delete(canvasId);
+    run.controller.abort('shutdown');
+  }
 }
 
 /**
@@ -52,8 +67,10 @@ export async function runGraph(options: {
   nodeIds?: string[];
   providerId?: string;
   providerStore?: ProviderStore;
+  onJob?: (submission: NodeJobSubmission) => void;
 }): Promise<void> {
   const { canvasStore, settingsStore, dataRoot, canvasId, fromNodeId, nodeIds, providerId, providerStore } = options;
+  if (canvasWorkStopped(canvasStore)) return;
   const snapshot = canvasStore.getSnapshot(canvasId);
   if (!snapshot) return;
   const { nodes, edges } = snapshot;
@@ -78,6 +95,7 @@ export async function runGraph(options: {
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
   const channel = getCanvasChannel(canvasId);
   const failed = new Set<string>();
+  const runId = nanoid();
 
   const waves = buildPipelineWaves(
     nodes,
@@ -90,16 +108,21 @@ export async function runGraph(options: {
   if (total === 0) return;
 
   const abort = new AbortController();
-  activeRuns.get(canvasId)?.abort();
-  activeRuns.set(canvasId, abort);
+  activeRuns.get(canvasId)?.controller.abort();
+  const run = { controller: abort, store: canvasStore };
+  activeRuns.set(canvasId, run);
+  const canRun = () => !canvasWorkStopped(canvasStore) && !abort.signal.aborted && activeRuns.get(canvasId) === run;
   const rev = () => canvasStore.getCanvas(canvasId)?.liveRevision ?? 0;
   channel.broadcast(rev(), { type: 'graph_run', running: true, done: 0, total });
 
+  let done = 0;
+  let succeeded = 0;
+  let skipped = 0;
+  let failedCount = 0;
   try {
-    let done = 0;
 
     const runOne = async (id: string): Promise<void> => {
-      if (abort.signal.aborted) return;
+      if (!canRun()) return;
       const node = byId.get(id);
       if (!node || !RUNNABLE.has(node.type)) return;
 
@@ -108,7 +131,7 @@ export async function runGraph(options: {
         failed.add(id);
         const res = canvasStore.updateNode(canvasId, id, {
           runState: 'error',
-          output: { error: 'Upstream node failed' },
+          output: { ...(canvasStore.getNode(canvasId, id)?.output ?? {}), error: 'Upstream node failed' },
         });
         if (res) {
           channel.broadcast(res.rev, {
@@ -119,15 +142,22 @@ export async function runGraph(options: {
           });
         }
         done += 1;
+        skipped += 1;
         channel.broadcast(rev(), { type: 'graph_run', running: true, done, total });
         return;
       }
 
       // `runImageNode` / `runVideoNode` re-reads the node so re-read fresh snapshot
       const fresh = canvasStore.getNode(canvasId, id);
-      if (!fresh) return;
+      if (!fresh) {
+        failed.add(id);
+        done += 1;
+        skipped += 1;
+        return;
+      }
       if (isImportedMedia(fresh)) {
         done += 1;
+        skipped += 1;
         channel.broadcast(rev(), { type: 'graph_run', running: true, done, total });
         return;
       }
@@ -141,10 +171,12 @@ export async function runGraph(options: {
 
       if (fresh.runState === 'done' && fresh.paramsHash && fresh.paramsHash === currentHash) {
         done += 1;
+        skipped += 1;
         channel.broadcast(rev(), { type: 'graph_run', running: true, done, total });
         return;
       }
 
+      let jobId: string | undefined;
       try {
         if (fresh.type === 'agent') {
           await runAgentNode({
@@ -156,59 +188,81 @@ export async function runGraph(options: {
             providerId,
             signal: abort.signal,
           });
-        } else if (fresh.type === 'video') {
-          await runVideoNode({
+        } else if (fresh.type === 'video' || fresh.type === 'image' || fresh.type === 'audio') {
+          if (fresh.type === 'audio' && !providerStore) throw new Error('Audio node needs a provider store');
+          const start = fresh.type === 'video' ? startVideoNode : fresh.type === 'image' ? startImageNode : startAudioNode;
+          const submission = start({
             canvasStore,
             settingsStore,
             dataRoot,
             canvasId,
             node: fresh,
             providerId,
-            waitForCompletion: true,
-          });
-        } else if (fresh.type === 'audio') {
-          if (!providerStore) throw new Error('Audio node needs a provider store');
-          await runAudioNode({
-            canvasStore,
+            signal: abort.signal,
+            operationId: `graph:${runId}:${id}`,
             providerStore,
-            dataRoot,
-            canvasId,
-            node: fresh,
-            providerId,
           });
-        } else {
-          await runImageNode({
-            canvasStore,
-            settingsStore,
-            dataRoot,
-            canvasId,
-            node: fresh,
-            providerId,
-          });
+          jobId = submission.job.id;
+          options.onJob?.(submission);
+          await submission.completion;
         }
       } catch (err) {
+        if (!canRun()) return;
         console.warn(`[canvas] node ${id} execution error:`, err);
+        const previous = canvasStore.getNode(canvasId, id);
+        if (!abort.signal.aborted && previous && (!jobId || canvasStore.jobs.isCurrent(jobId))) {
+          const updated = canvasStore.updateNode(canvasId, id, {
+            runState: 'error', output: { ...(previous.output ?? {}), error: err instanceof Error ? err.message : String(err) },
+          });
+          if (updated) channel.broadcast(updated.rev, { type: 'node_updated', node: updated.node });
+        }
       }
 
-      if (canvasStore.getNode(canvasId, id)?.runState === 'error') {
+      if (!canRun()) return;
+      const outcome = jobId ? canvasStore.jobs.get(jobId)?.status : canvasStore.getNode(canvasId, id)?.runState;
+      if (outcome === 'failed' || outcome === 'interrupted' || outcome === 'error') {
         failed.add(id);
+        failedCount += 1;
+      } else if (outcome === 'succeeded' || outcome === 'done') {
+        succeeded += 1;
+      } else {
+        // A replaced/deleted execution is not a successful upstream dependency.
+        failed.add(id);
+        skipped += 1;
       }
       done += 1;
       channel.broadcast(rev(), { type: 'graph_run', running: true, done, total });
     };
 
     for (const wave of waves) {
-      if (abort.signal.aborted) break;
+      if (!canRun()) break;
 
       // Execute wave in batches up to MAX_CONCURRENCY
       for (let i = 0; i < wave.length; i += MAX_CONCURRENCY) {
-        if (abort.signal.aborted) break;
+        if (!canRun()) break;
         const batch = wave.slice(i, i + MAX_CONCURRENCY);
-        await Promise.allSettled(batch.map((id) => runOne(id)));
+        const outcomes = await Promise.allSettled(batch.map((id) => runOne(id)));
+        if (canRun()) {
+          outcomes.forEach((outcome, index) => {
+            if (outcome.status === 'rejected') {
+              failed.add(batch[index]);
+              failedCount += 1;
+              done += 1;
+              console.error(`[canvas] node ${batch[index]} did not settle`, outcome.reason);
+            }
+          });
+        }
       }
     }
   } finally {
-    if (activeRuns.get(canvasId) === abort) activeRuns.delete(canvasId);
-    channel.broadcast(rev(), { type: 'graph_run', running: false, done: total, total });
+    // An older run's finally must not announce that its replacement has stopped.
+    if (activeRuns.get(canvasId) === run) {
+      activeRuns.delete(canvasId);
+      if (!canvasWorkStopped(canvasStore)) channel.broadcast(rev(), {
+        type: 'graph_run', running: false, done, total, succeeded, skipped,
+        failed: failedCount,
+        outcome: abort.signal.aborted ? 'cancelled' : failed.size > 0 ? 'error' : 'completed',
+      });
+    }
   }
 }

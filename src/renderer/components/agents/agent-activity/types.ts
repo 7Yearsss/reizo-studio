@@ -36,7 +36,7 @@ export interface AgentActivitySearch {
 export interface AgentActivityTool {
   id: string;
   type: "tool";
-  action: "read" | "edit" | "run" | (string & {});
+  action: "read" | "edit" | "run" | (string & Record<never, never>);
   target: ReactNode;
   additions?: number;
   deletions?: number;
@@ -48,7 +48,7 @@ export type AgentTraceKind =
   | "write"
   | "run"
   | "read"
-  | (string & {});
+  | (string & Record<never, never>);
 
 export interface AgentActivityTrace {
   id: string;

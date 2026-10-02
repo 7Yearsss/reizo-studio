@@ -1,12 +1,13 @@
 import type { CanvasEdge, CanvasNode } from './canvas';
 
 /**
- * An image node holding media but no prompt and no edit spec — an upload or
- * import. It is a pipeline source, not something a graph run can regenerate.
+ * Uploaded images and explicitly reused media are pipeline sources until a
+ * prompt or edit spec is supplied.
  */
 export function isImportedMedia(node: CanvasNode): boolean {
-  if (node.type !== 'image') return false;
-  const params = node.params as { prompt?: unknown; edit?: unknown } | undefined;
+  if (node.type !== 'image' && node.type !== 'video' && node.type !== 'audio') return false;
+  const params = node.params as { prompt?: unknown; edit?: unknown; importedAssetId?: unknown } | undefined;
+  if (node.type !== 'image' && (typeof params?.importedAssetId !== 'string' || !params.importedAssetId.trim())) return false;
   if (params?.edit) return false;
   const hasPrompt = typeof params?.prompt === 'string' && params.prompt.trim().length > 0;
   return !hasPrompt && (node.output?.assets?.length ?? 0) > 0;
@@ -223,7 +224,18 @@ export function layoutGraph(
 export function inputHash(node: CanvasNode, upstream: CanvasNode[]): string {
   const up = [...upstream]
     .sort((a, b) => a.id.localeCompare(b.id))
-    .map((n) => ({ id: n.id, assets: n.output?.assets ?? [], text: n.output?.text ?? null }));
+    .map((n) => {
+      const anchor = n.type === 'anchor' ? n.params as { assetId?: string; role?: string; strength?: string; note?: string } : undefined;
+      const semantics = anchor ? { role: anchor.role ?? 'character', strength: anchor.strength ?? 'mid', note: anchor.note ?? '' } : undefined;
+      if (anchor?.assetId !== undefined) return { id: n.id, assetId: anchor.assetId, ...semantics };
+      const sourceText = n.type === 'note' ? (n.params as { content?: unknown })?.content : undefined;
+      return { id: n.id, assets: n.output?.assets ?? [], text: n.output?.text ?? null,
+        // Default selection preserves hashes saved before version selection was tracked.
+        ...(n.output?.activeAssetIndex ? { activeAssetIndex: n.output.activeAssetIndex } : {}),
+        ...(typeof sourceText === 'string' && sourceText.trim() ? { sourceText } : {}),
+        ...(semantics ? { anchor: semantics } : {}),
+      };
+    });
   return JSON.stringify({ params: node.params, up });
 }
 

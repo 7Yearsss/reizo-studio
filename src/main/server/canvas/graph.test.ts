@@ -120,5 +120,10 @@ describe('canvas graph helpers', () => {
     expect(isImportedMedia({ ...upload, type: 'note' })).toBe(false);
     const cropEdit = { ...upload, params: { prompt: '', edit: { kind: 'crop', sourceNodeId: 'u' } } } as unknown as CanvasNode;
     expect(isImportedMedia(cropEdit)).toBe(false);
+    for (const type of ['video', 'audio'] as const) {
+      expect(isImportedMedia({ ...upload, type })).toBe(false);
+      expect(isImportedMedia({ ...upload, type, params: { importedAssetId: 'registered-version' } })).toBe(true);
+      expect(isImportedMedia({ ...generated, type, params: { importedAssetId: 'registered-version', prompt: 'new generation' } })).toBe(false);
+    }
   });
 });

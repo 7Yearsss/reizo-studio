@@ -5,7 +5,8 @@
 **你的 AI 创意工作室，就住在你的电脑里。**
 
 本地优先的桌面 Agent —— 对话、画布、技能、自动化，一台机器全搞定。
-不排队、不上传、不订阅焦虑。数据是你的，算力听你的。
+会话、工作流和产物保存在本地；生成请求按你的配置调用模型服务。
+对话、画布和可复用技能共用创作基础，电商套图、封面及其他工具各自扩展。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-accent.svg)](LICENSE)
 [![Electron](https://img.shields.io/badge/Electron-Forge-blue)](https://www.electronforge.io/)
@@ -70,7 +71,7 @@ Electron Forge + Vite 三层构建（main / preload / renderer）
        └─ node:sqlite + drizzle + JSON 存储 —— 全部落在 userData/data
 ```
 
-没有云端，没有账号墙，没有遥测。`npm start` 就跑起来。
+桌面数据无需 Reizo 云端托管；模型请求由所选服务处理。`npm start` 就跑起来。
 
 ## 🚀 快速开始
 

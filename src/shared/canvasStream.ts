@@ -13,7 +13,8 @@ export type CanvasEvent =
   | { type: 'edge_deleted'; id: string; operationId?: string }
   | { type: 'run_state'; id: string; runState: NodeRunState; operationId?: string }
   | { type: 'node_output'; id: string; output: CanvasNodeOutput; runState: NodeRunState; operationId?: string }
-  | { type: 'graph_run'; running: boolean; done: number; total: number; operationId?: string }
+  | { type: 'graph_run'; running: boolean; done: number; total: number; operationId?: string;
+      outcome?: 'completed' | 'error' | 'cancelled'; succeeded?: number; failed?: number; skipped?: number }
   | { type: 'proposal_created'; nodeIds: string[]; operationId?: string }
   | { type: 'proposal_accepted'; operationId?: string }
   | { type: 'proposal_rejected'; operationId?: string }

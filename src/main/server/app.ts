@@ -27,6 +27,11 @@ import { createAdminProvidersRouter } from './routes/adminProviders';
 import { createPublicProvidersRouter } from './routes/publicProviders';
 import { createMemoryEventsStore } from './storage/memoryEventsStore';
 import { createMemoryRouter } from './routes/memory';
+import { recoverCanvasJobs } from './canvas/recoverJobs';
+import { nodeJobsFor } from './canvas/nodeJobs';
+import { stopCanvasWork } from './canvas/workLifecycle';
+import { stopCanvasRun, stopCanvasRunsForStore } from './canvas/graphExecutor';
+import { resumeVideoJobs, stopVideoJobsForStore } from './canvas/asyncJobManager';
 
 export interface CreateAppOptions {
   /** Directory the local session/settings JSON files live under. */
@@ -144,19 +149,45 @@ export function createApp(options: CreateAppOptions) {
   const db = options.db ?? openDb(':memory:');
   const artifactStore = createArtifactStore(db, options.dataRoot);
   const canvasStore = createCanvasStore(db);
+  recoverCanvasJobs(canvasStore);
+  let canvasJobsStopped = false;
+  let canvasJobsStarted = false;
+  // Call only after binding: a failed port attempt must not start background queries.
+  const startCanvasJobs = () => {
+    if (canvasJobsStarted || canvasJobsStopped) return;
+    canvasJobsStarted = true;
+    resumeVideoJobs({ canvasStore, settingsStore, dataRoot: options.dataRoot });
+  };
+  const stopCanvasJobs = () => {
+    if (canvasJobsStopped) return;
+    canvasJobsStopped = true;
+    stopVideoJobsForStore(canvasStore);
+    stopCanvasWork(canvasStore);
+    nodeJobsFor(canvasStore).shutdown();
+    stopCanvasRunsForStore(canvasStore);
+    recoverCanvasJobs(canvasStore, 'shutdown');
+  };
 
   // Ask cards the user never answered survive an app restart.
   void initInteractionPersistence(createInteractionStore(options.dataRoot));
 
   const app = new Hono();
   app.use('*', originGuard(options));
+  app.use('*', async (c, next) => {
+    if (canvasJobsStopped) return c.json({ error: '应用正在退出，暂不接受新的请求' }, 503);
+    await next();
+  });
 
   app.get('/api/health', (c) => c.json({ ok: true }));
   const skillsDirs = options.skillsDirs ?? [];
   const memoryEventsStore = createMemoryEventsStore(options.dataRoot);
   const scheduleStore = options.scheduleStore ?? createScheduleStore(options.dataRoot);
   const thoughtStore = options.thoughtStore ?? createThoughtStore(options.dataRoot);
-  app.route('/api/sessions', createSessionsRouter(sessionStore, artifactStore));
+  app.route('/api/sessions', createSessionsRouter(sessionStore, artifactStore, (sessionId) => {
+    const canvasId = canvasStore.findCanvasBySession(sessionId)?.id;
+    if (!canvasId) return;
+    return () => { stopCanvasRun(canvasId, canvasStore); };
+  }));
   app.route(
     '/api/sessions',
     createChatRouter(
@@ -195,5 +226,5 @@ export function createApp(options: CreateAppOptions) {
     );
   }
 
-  return app;
+  return Object.assign(app, { startCanvasJobs, stopCanvasJobs });
 }

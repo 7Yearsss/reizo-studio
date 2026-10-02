@@ -40,9 +40,9 @@ describe('audioDrivers & audioExecutor', () => {
 
   it('driver factory resolves driver by type safely', () => {
     expect(getAudioDriver('mock').id).toBe('mock');
-    expect(getAudioDriver('minimax').id).toBe('minimax');
+    expect(getAudioDriver(' MINIMAX ').id).toBe('minimax');
     expect(getAudioDriver('cosyvoice').id).toBe('cosyvoice');
-    expect(getAudioDriver('unknown_future_vendor').id).toBe('mock');
+    expect(() => getAudioDriver('unknown_future_vendor')).toThrow('Unknown audio driver');
   });
 
   it('runAudioNode executes mock driver and writes asset to disk', async () => {

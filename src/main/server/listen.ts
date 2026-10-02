@@ -1,5 +1,4 @@
 import { serve, type ServerType } from '@hono/node-server';
-import type { Hono } from 'hono';
 import { API_BASE_PORT, API_PORT_SCAN_ATTEMPTS } from '../../shared/constants';
 import { createApp } from './app';
 import type { SessionStore } from '../../shared/chat';
@@ -12,6 +11,7 @@ export interface RunningServer {
   server: ServerType;
   port: number;
   origin: string;
+  stopCanvasJobs(): void;
 }
 
 /**
@@ -36,7 +36,7 @@ export async function startLocalServer(options: {
 
   for (let attempt = 0; attempt < API_PORT_SCAN_ATTEMPTS; attempt += 1) {
     const port = API_BASE_PORT + attempt;
-    const app: Hono = createApp({
+    const app = createApp({
       dataRoot: options.dataRoot,
       port,
       devServerOrigin: options.devServerOrigin,
@@ -56,11 +56,14 @@ export async function startLocalServer(options: {
         );
         instance.once('error', reject);
       });
-      return { server, port, origin: `http://127.0.0.1:${port}` };
+      app.startCanvasJobs();
+      return { server, port, origin: `http://127.0.0.1:${port}`, stopCanvasJobs: app.stopCanvasJobs };
     } catch (err) {
+      app.stopCanvasJobs();
       lastError = err;
       const code = (err as NodeJS.ErrnoException)?.code;
-      if (code !== 'EADDRINUSE') throw err;
+      // Windows can reserve an otherwise unused port (Hyper-V / VPN) and return EACCES.
+      if (code !== 'EADDRINUSE' && code !== 'EACCES') throw err;
     }
   }
 
@@ -70,7 +73,12 @@ export async function startLocalServer(options: {
 }
 
 export function stopLocalServer(running: RunningServer): Promise<void> {
+  running.stopCanvasJobs();
   return new Promise((resolve) => {
     running.server.close(() => resolve());
+    // Active NDJSON readers otherwise keep close() pending while Electron waits to quit.
+    if ('closeAllConnections' in running.server && typeof running.server.closeAllConnections === 'function') {
+      running.server.closeAllConnections();
+    }
   });
 }

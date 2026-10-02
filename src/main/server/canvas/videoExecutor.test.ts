@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createCanvasApplication } from './application';
 import { openDb } from '../db/client';
 import { createSqliteSessionStore } from '../storage/sqliteSessionStore';
 import { createCanvasStore } from '../storage/canvasStore';
@@ -111,7 +112,7 @@ describe('videoExecutor & asyncJobManager', () => {
     await expect(promise).resolves.toBeUndefined();
   });
 
-  it('automatically cancels video job when video node is deleted from canvasStore', async () => {
+  it('cancels video job when the application deletes its video node', async () => {
     const { canvas, canvasId } = await freshCanvas();
     const node = canvas.addNode(canvasId, {
       type: 'video',
@@ -135,7 +136,7 @@ describe('videoExecutor & asyncJobManager', () => {
     expect(getActiveJob(canvasId, node.id)).toBeTruthy();
 
     // Now delete the node
-    canvas.deleteNode(canvasId, node.id);
+    createCanvasApplication(canvas).deleteNode(canvasId, node.id);
 
     // Assert that active job was automatically cleaned up
     expect(getActiveJob(canvasId, node.id)).toBeUndefined();

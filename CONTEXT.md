@@ -31,3 +31,21 @@ _Avoid_: Resume.
 **Terminal outcome**:
 The immutable result of a turn: `completed`, `interrupted`, or `error`. A turn cannot silently transition from running to terminal without an explicit outcome.
 _Avoid_: Done ("done" is a transport event, not a user-facing outcome).
+
+## Creative Assets
+
+**Asset**:
+An existing media result with its own identity and origin, independent of the node currently displaying it.
+_Avoid_: Node, generation (these have different lifetimes).
+
+**Selected version**:
+The version currently chosen for display and for references that follow a producer's selection.
+_Avoid_: Latest generation (the selected version may be older).
+
+**Fixed reference**:
+A deliberate reference to one existing asset; later changes to its original producer do not change that reference.
+_Avoid_: Current preview, selected version (those may change).
+
+**Asset reuse**:
+Making an existing asset available in another creative context while retaining its origin, without generating new media.
+_Avoid_: Regenerate, rerun.

@@ -15,10 +15,9 @@ const DRIVERS: Record<string, AudioDriver> = {
 };
 
 export function getAudioDriver(driverType: string): AudioDriver {
-  const driver = DRIVERS[driverType.toLowerCase()];
+  const driver = DRIVERS[driverType?.trim().toLowerCase()];
   if (!driver) {
-    // Fall back to mock if unknown driver
-    return mockAudioDriver;
+    throw new Error(`Unknown audio driver: ${driverType}`);
   }
   return driver;
 }

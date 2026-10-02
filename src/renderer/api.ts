@@ -9,6 +9,8 @@ import { parseStreamLine, type AskQuestion, type ChatStreamEvent, type MemoryEve
 import { isLiveEnvelope } from '../shared/liveRevision';
 import type { CanvasSnapshot, CanvasEdge, CanvasNode, CanvasNodeParams, CanvasNodeType, CanvasNodeOutput } from '../shared/canvas';
 import { isCanvasEnvelope, type CanvasEvent } from '../shared/canvasStream';
+import { isCanvasSyncMessage, type CanvasSyncMessage } from '../shared/canvasSync';
+import type { CanvasAsset, CanvasAssetSummary, CanvasAssetReuseInput } from '../shared/canvasAssets';
 import type {
   ProviderCatalogResponse,
   ProviderCategory,
@@ -570,8 +572,8 @@ export async function canvasAssetUrl(relPath: string): Promise<string> {
   return `${origin}/api/canvas/assets/${relPath}`;
 }
 
-export async function getCanvas(sessionId: string): Promise<CanvasSnapshot> {
-  const res = await api(`/api/canvas/${sessionId}`);
+export async function getCanvas(sessionId: string, signal?: AbortSignal): Promise<CanvasSnapshot> {
+  const res = await api(`/api/canvas/${sessionId}`, { signal });
   return res.json();
 }
 
@@ -592,10 +594,11 @@ export async function patchCanvasNode(
   canvasId: string,
   id: string,
   patch: { x?: number; y?: number; w?: number; h?: number; title?: string; params?: CanvasNodeParams; output?: CanvasNodeOutput },
+  mutationId?: string,
 ): Promise<CanvasNode> {
   const res = await api(`/api/canvas/${canvasId}/nodes/${id}`, {
     method: 'PATCH',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...(mutationId ? { 'Idempotency-Key': mutationId } : {}) },
     body: JSON.stringify(patch),
   });
   const { node } = await res.json();
@@ -766,28 +769,80 @@ export async function readCanvasStream(
   const origin = await apiOrigin();
   const res = await fetch(`${origin}/api/canvas/${canvasId}/stream?after=${after}`, { signal });
   if (!res.ok || !res.body) throw new Error(`canvas stream failed: ${res.status}`);
-  const reader = res.body.getReader();
+  await readCanvasLines(res.body, (parsed) => {
+    if (isCanvasEnvelope(parsed)) onEvent(parsed.event, parsed.rev);
+  }, signal);
+}
+
+export type ReusableMediaKind = 'image' | 'video' | 'audio';
+export type ReuseCanvasAssetInput = CanvasAssetReuseInput;
+
+export async function listCanvasAssets(options: { kind?: ReusableMediaKind; limit?: number; signal?: AbortSignal } = {}): Promise<CanvasAssetSummary[]> {
+  const query = new URLSearchParams({ limit: String(options.limit ?? 80) });
+  if (options.kind) query.set('kind', options.kind);
+  const response = await api(`/api/canvas/assets/library?${query.toString()}`, { signal: options.signal });
+  return (await response.json()).assets ?? [];
+}
+
+export async function reuseCanvasAsset(canvasId: string, input: ReuseCanvasAssetInput, operationId: string, signal?: AbortSignal): Promise<{ node: CanvasNode; asset: CanvasAsset }> {
+  const response = await api(`/api/canvas/${canvasId}/assets/reuse`, {
+    method: 'POST', headers: { 'content-type': 'application/json', 'Idempotency-Key': operationId }, body: JSON.stringify(input), signal,
+  });
+  return response.json();
+}
+
+/** Complete document commits, with activity on a separate non-durable cursor. */
+export async function readCanvasSyncStream(
+  canvasId: string,
+  after: number,
+  onMessage: (message: CanvasSyncMessage) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const origin = await apiOrigin();
+  signal?.throwIfAborted();
+  const params = new URLSearchParams({ protocol: '2', after: String(after) });
+  const res = await fetch(`${origin}/api/canvas/${canvasId}/stream?${params.toString()}`, { signal });
+  if (!res.ok || !res.body) throw new Error(`canvas stream failed: ${res.status}`);
+  await readCanvasLines(res.body, (parsed) => {
+    if (isCanvasSyncMessage(parsed)) onMessage(parsed);
+  }, signal);
+}
+
+async function readCanvasLines(body: ReadableStream<Uint8Array>, onMessage: (parsed: unknown) => void, signal?: AbortSignal): Promise<void> {
+  const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   const dispatch = (line: string) => {
+    signal?.throwIfAborted();
     const trimmed = line.trim();
     if (!trimmed) return;
+    let parsed: unknown;
     try {
-      const parsed = JSON.parse(trimmed);
-      if (isCanvasEnvelope(parsed)) onEvent(parsed.event, parsed.rev);
+      parsed = JSON.parse(trimmed);
     } catch {
-      /* skip a partial line */
+      return; // Only malformed JSON is ignorable; consumer errors must propagate.
     }
+    onMessage(parsed);
   };
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() ?? '';
-    for (const line of lines) dispatch(line);
+  const cancel = () => { void reader.cancel().catch((): void => undefined); };
+  signal?.addEventListener('abort', cancel, { once: true });
+  try {
+    signal?.throwIfAborted();
+    for (;;) {
+      const { done, value } = await reader.read();
+      signal?.throwIfAborted();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) dispatch(line);
+    }
+    dispatch(buffer + decoder.decode());
+  } finally {
+    signal?.removeEventListener('abort', cancel);
+    await reader.cancel().catch((): void => undefined);
+    reader.releaseLock();
   }
-  dispatch(buffer);
 }
 
 // ==========================================

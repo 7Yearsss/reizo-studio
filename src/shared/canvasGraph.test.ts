@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isPortCompatible, normalizeSourceHandle, wouldCycle } from './canvasGraph';
+import { inputHash, isPortCompatible, normalizeSourceHandle, wouldCycle } from './canvasGraph';
 import type { CanvasNode, CanvasEdge } from './canvas';
 
 function makeNode(type: CanvasNode['type'], id: string): CanvasNode {
@@ -19,6 +19,46 @@ function makeNode(type: CanvasNode['type'], id: string): CanvasNode {
     updatedAt: '',
   };
 }
+
+describe('inputHash selected upstream versions', () => {
+  it('invalidates a saved input hash when the selected version changes with the same asset array', () => {
+    const video = makeNode('video', 'video');
+    const assets = ['draft.png', 'refined.png', 'edited.png'];
+    const source = { ...makeNode('image', 'frame'), output: { assets } };
+    const saved = inputHash(video, [source]);
+    const selected = inputHash(video, [{ ...source, output: { assets, activeAssetIndex: 1 } }]);
+    expect(selected).not.toBe(saved);
+    expect(inputHash(video, [{ ...source, output: { assets, activeAssetIndex: 2 } }])).not.toBe(selected);
+    expect(inputHash(video, [{ ...source, output: { assets, activeAssetIndex: 0 } }])).toBe(saved);
+    const anchor = { ...makeNode('anchor', 'fixed'), params: { assetId: 'asset-version-1', role: 'content', strength: 'mid', note: 'composition' } };
+    const pinned = inputHash(video, [anchor]);
+    expect(inputHash(video, [{ ...anchor, runState: 'error', output: { assets, activeAssetIndex: 2 } }])).toBe(pinned);
+    for (const change of [{ assetId: 'asset-version-2' }, { role: 'style' }, { strength: 'high' }, { note: 'changed' }]) {
+      expect(inputHash(video, [{ ...anchor, params: { ...anchor.params, ...change } }])).not.toBe(pinned);
+    }
+  });
+
+  it('retains the exact legacy hash format for missing or zero selection', () => {
+    const video = { ...makeNode('video', 'video'), params: { prompt: 'use the frame' } };
+    const source = { ...makeNode('image', 'frame'), output: { assets: ['draft.png', 'refined.png'], text: 'reference' } };
+    const legacy = JSON.stringify({ params: video.params, up: [{ id: 'frame', assets: source.output.assets, text: 'reference' }] });
+    expect(inputHash(video, [source])).toBe(legacy);
+    expect(inputHash(video, [{ ...source, output: { ...source.output, activeAssetIndex: 0 } }])).toBe(legacy);
+  });
+});
+
+describe('inputHash upstream note content', () => {
+  it('keeps legacy hashes when there is no meaningful note content', () => {
+    const audio = makeNode('audio', 'audio');
+    const note = makeNode('note', 'script');
+    const legacy = JSON.stringify({ params: audio.params, up: [{ id: 'script', assets: [], text: null }] });
+    for (const content of [undefined, '', '  ']) {
+      expect(inputHash(audio, [{ ...note, params: { content } }])).toBe(legacy);
+    }
+    const image = { ...makeNode('image', 'script'), params: { content: 'Unrelated image metadata' } };
+    expect(inputHash(audio, [image])).toBe(legacy);
+  });
+});
 
 describe('isPortCompatible (Port Compatibility Matrix)', () => {
   const noteNode = makeNode('note', 'note1');

@@ -33,13 +33,13 @@ const ROLL_BLUR = "blur(6px)";
 
 const CASCADE_LETTER_VARIANTS: Variants = {
   initial: { opacity: 0, y: "105%", filter: ROLL_BLUR },
-  animate: (delay: number = 0) => ({
+  animate: (delay = 0) => ({
     opacity: 1,
     y: "0%",
     filter: "blur(0px)",
     transition: { ...SPRING_SWAP, delay },
   }),
-  exit: (delay: number = 0) => ({
+  exit: (delay = 0) => ({
     opacity: 0,
     y: "-105%",
     filter: ROLL_BLUR,

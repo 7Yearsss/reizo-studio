@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { zipSync, strToU8 } from 'fflate';
 import type { CanvasStore } from '../storage/canvasStore';
-import { readCanvasAsset } from './imageExecutor';
+import { readCanvasAsset } from './assets';
 
 /** Bump when the on-disk shape of `workflow.json` changes incompatibly. */
 export const WORKFLOW_VERSION = 1;
@@ -46,7 +46,22 @@ export async function exportWorkflowZip(options: {
   const warnings: string[] = [];
 
   const refs = new Set<string>();
-  for (const n of snap.nodes) for (const a of n.output?.assets ?? []) refs.add(a);
+  const fixedPaths = new Map<string, string | null>();
+  for (const n of snap.nodes) {
+    const assetId = (n.params as { assetId?: unknown }).assetId;
+    if (n.type === 'anchor' && assetId !== undefined) {
+      const asset = typeof assetId === 'string' ? canvasStore.assets.get(assetId) : null;
+      const fixedPath = asset && (asset.kind === 'image' || asset.kind === 'mask') ? asset.path : null;
+      fixedPaths.set(n.id, fixedPath);
+      if (fixedPath) refs.add(fixedPath);
+      else warnings.push(`固定参考资源不存在：${String(assetId)}`);
+    } else {
+      for (const a of n.output?.assets ?? []) refs.add(a);
+    }
+    for (const version of n.output?.resultSet ?? []) refs.add(version.asset);
+    const mask = (n.params as { edit?: { maskAsset?: string } })?.edit?.maskAsset;
+    if (mask) refs.add(mask);
+  }
 
   for (const rel of refs) {
     try {
@@ -65,15 +80,38 @@ export async function exportWorkflowZip(options: {
     delete copy.canvasId;
     return copy;
   };
+  const archivedFixedOutput = (id: string) => {
+    const fixedPath = fixedPaths.get(id);
+    const archived = fixedPath ? remap.get(fixedPath) : undefined;
+    return { assets: archived ? [archived] : [], activeAssetIndex: 0 };
+  };
 
   const nodes = snap.nodes.map((n) => ({
     ...stripCanvasId(n),
-    output: n.output
+    params: (() => {
+      const params: Record<string, unknown> = { ...n.params };
+      if (fixedPaths.has(n.id)) {
+        const fixedPath = fixedPaths.get(n.id);
+        delete params.assetId;
+        // Archive-local path, never a foreign local database identity.
+        params.assetRef = fixedPath ? remap.get(fixedPath) ?? fixedPath : '';
+      }
+      const edit = (params as { edit?: { maskAsset?: string } }).edit;
+      if (edit?.maskAsset) return { ...params, edit: { ...edit, maskAsset: remap.get(edit.maskAsset) } };
+      return params;
+    })(),
+    output: fixedPaths.has(n.id)
+      ? archivedFixedOutput(n.id)
+      : n.output
       ? {
           ...n.output,
           assets: (n.output.assets ?? [])
             .map((a) => remap.get(a))
             .filter((a): a is string => Boolean(a)),
+          resultSet: (n.output.resultSet ?? []).flatMap((version) => {
+            const asset = remap.get(version.asset);
+            return asset ? [{ ...version, asset }] : [];
+          }),
         }
       : n.output,
   }));

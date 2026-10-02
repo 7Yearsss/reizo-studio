@@ -25,7 +25,7 @@ function SectionNode({ id, data, selected }: NodeProps) {
   const [colorPickerOpen, setColorPickerOpen] = useState(false);
   const [editingDesc, setEditingDesc] = useState(false);
   const [descDraft, setDescDraft] = useState(params.description || '');
-  const resizeStart = useRef<{ w: number; h: number } | null>(null);
+  const resizeStart = useRef<{ w: number; h: number; x: number; y: number } | null>(null);
 
   const rf = useReactFlow();
 
@@ -100,7 +100,7 @@ function SectionNode({ id, data, selected }: NodeProps) {
         lineClassName="!border-line/60"
         handleClassName="!h-2.5 !w-2.5 !rounded-md !border-line !bg-paper"
         onResizeStart={(_, p: ResizeParams) => {
-          resizeStart.current = { w: p.width, h: p.height };
+          resizeStart.current = { w: p.width, h: p.height, x: p.x, y: p.y };
         }}
         onResizeEnd={(_, p: ResizeParams) => {
           const from = resizeStart.current;
@@ -110,7 +110,7 @@ function SectionNode({ id, data, selected }: NodeProps) {
               sessionId,
               id,
               from,
-              { w: p.width, h: p.height },
+              { w: p.width, h: p.height, x: p.x, y: p.y },
             );
           }
         }}

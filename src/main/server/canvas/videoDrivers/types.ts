@@ -6,6 +6,7 @@ export interface VideoGenerateParams {
   prompt: string;
   duration?: '5s' | '10s';
   ratio?: '16:9' | '9:16' | '1:1';
+  model?: string;
   /** @deprecated legacy preset string; drivers should read `camera`. */
   cameraMotion?: string;
   /** Structured camera motion, already clamped/normalized by the executor. */
@@ -14,6 +15,20 @@ export interface VideoGenerateParams {
   endImageBytes?: Uint8Array;
   /** Reference images for multimodal conditioning (e.g. character / style references) */
   referenceImages?: Array<{ bytes: Uint8Array; role?: string }>;
+}
+
+export interface VideoDriverOptions {
+  apiKey?: string;
+  baseUrl?: string;
+  context?: Record<string, unknown>;
+  signal?: AbortSignal;
+}
+
+export interface VideoSubmission { taskId: string; context?: Record<string, unknown> }
+
+/** Query failures describe transport certainty, separately from a provider's failed task outcome. */
+export class VideoPollError extends Error {
+  constructor(message: string, readonly retryable: boolean) { super(message); }
 }
 
 export interface VideoJobStatus {
@@ -27,12 +42,16 @@ export interface VideoJobStatus {
 export interface VideoDriver {
   id: string;
   name: string;
+  supportsRecovery?: boolean;
+  defaultModel?: string;
+  modelForRequest?(params: VideoGenerateParams, options: VideoDriverOptions): string;
+  validateRemoteContext?(taskId: string, context?: Record<string, unknown>): boolean;
   submit(
     params: VideoGenerateParams,
-    options: { apiKey?: string; baseUrl?: string },
-  ): Promise<{ taskId: string }>;
+    options: VideoDriverOptions,
+  ): Promise<VideoSubmission>;
   poll(
     taskId: string,
-    options: { apiKey?: string; baseUrl?: string },
+    options: VideoDriverOptions,
   ): Promise<VideoJobStatus>;
 }

@@ -72,8 +72,9 @@ describe('runImageNode edit branch', () => {
     const dir = canvasAssetsDir(dataRoot, canvasId);
     await mkdir(dir, { recursive: true });
     await writeFile(path.join(dir, 'src.png'), PNG);
+    await writeFile(path.join(dir, 'old.png'), Buffer.from('old-source'));
     await writeFile(path.join(dir, 'mask.png'), PNG);
-    canvas.updateNode(canvasId, src.id, { runState: 'done', output: { assets: [`${canvasId}/src.png`] } });
+    canvas.updateNode(canvasId, src.id, { runState: 'done', output: { assets: [`${canvasId}/old.png`, `${canvasId}/src.png`], activeAssetIndex: 1 } });
 
     const editSpec = {
       kind: 'inpaint' as const,
