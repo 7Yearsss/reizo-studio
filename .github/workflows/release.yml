@@ -1,0 +1,91 @@
+name: Build and release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows
+          - os: macos-latest
+            name: macos
+          - os: ubuntu-latest
+            name: linux
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Linux packaging tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes rpm
+
+      - name: Set release version
+        shell: bash
+        run: |
+          base_version=$(node -p "require('./package.json').version")
+          release_version="${base_version}-main.${GITHUB_RUN_NUMBER}"
+          npm version "$release_version" --no-git-tag-version
+          echo "RELEASE_VERSION=$release_version" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=v$release_version" >> "$GITHUB_ENV"
+
+      - name: Build installers
+        run: npm run make
+
+      - name: Upload release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.name }}
+          path: out/make/**
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set release version
+        shell: bash
+        run: |
+          base_version=$(node -p "require('./package.json').version")
+          release_version="${base_version}-main.${GITHUB_RUN_NUMBER}"
+          echo "RELEASE_TAG=v$release_version" >> "$GITHUB_ENV"
+
+      - name: Download installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mapfile -t assets < <(find release-assets -type f)
+          gh release create "$RELEASE_TAG" "${assets[@]}" --title "$RELEASE_TAG" --generate-notes
