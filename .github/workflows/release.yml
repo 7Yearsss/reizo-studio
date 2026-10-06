@@ -66,6 +66,8 @@ jobs:
     name: Publish GitHub Release
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -76,6 +78,23 @@ jobs:
           base_version=$(node -p "require('./package.json').version")
           release_version="${base_version}-main.${GITHUB_RUN_NUMBER}"
           echo "RELEASE_TAG=v$release_version" >> "$GITHUB_ENV"
+
+      - name: Generate release notes from merged pull requests
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f tag_name="$RELEASE_TAG" \
+            --jq .body > release-notes.md
+          sed -E \
+            -e 's#\[([^]]+)\]\(https://github.com/7Yearsss/reizo-studio/pull/([0-9]+)\)#\1 (PR #\2)#g' \
+            -e '/^\*\*Full Changelog\*\*:/d' \
+            release-notes.md > release-notes.cleaned.md
+          mv release-notes.cleaned.md release-notes.md
+          if [[ ! -s release-notes.md ]]; then
+            printf 'Reizo Studio desktop installers for %s.\n' "$RELEASE_TAG" > release-notes.md
+          fi
 
       - name: Download installers
         uses: actions/download-artifact@v4
@@ -93,4 +112,4 @@ jobs:
           gh release create "$RELEASE_TAG" "${assets[@]}" \
             --repo 7Yearsss/reizo-studio-downloads \
             --title "$RELEASE_TAG" \
-            --notes "Reizo Studio desktop installers. Download the package for your operating system."
+            --notes-file release-notes.md
