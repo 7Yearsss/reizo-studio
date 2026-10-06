@@ -11,6 +11,7 @@ const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
     icon: 'resources/icon',
+    executableName: 'reizo-studio',
     // WASM binaries for the local matting feature (onnxruntime-web): copied
     // flat into resources/ so /api/matting/ort/* can serve them in packaged
     // builds. The asyncify variants are intentionally left out (~25MB) — the
