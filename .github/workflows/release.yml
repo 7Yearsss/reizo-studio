@@ -50,6 +50,8 @@ jobs:
           echo "RELEASE_TAG=v$release_version" >> "$GITHUB_ENV"
 
       - name: Build installers
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
         run: npm run make
 
       - name: Upload release files
