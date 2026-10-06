@@ -9,13 +9,14 @@
  * grays. Components use `bg-paper`, `text-ink`, `border-line`.
  */
 :root {
-  --paper: #faf6ee;
-  --paper-raised: #fffcf7;
-  --paper-inset: #e8dccf;
-  --sidebar: #f5efe5;
-  --ink: #1c1612;
-  --ink-muted: #6f6156;
-  --line: #eadfce;
+  /* Day mode: white surfaces with neutral gray controls and separators. */
+  --paper: #ffffff;
+  --paper-raised: #ffffff;
+  --paper-inset: #f5f5f5;
+  --sidebar: #ffffff;
+  --ink: #171717;
+  --ink-muted: #737373;
+  --line: #e5e5e5;
   --canvas-dot: rgba(0, 0, 0, 0.16);
   --accent: #c26d3a;
   --accent-ink: #ffffff;
@@ -25,7 +26,7 @@
 
   /* Zero-alpha `--paper` for gradient masks. `transparent` interpolates
      through black in WebKit and leaves a dirty edge. */
-  --paper-a0: rgb(250 246 238 / 0);
+  --paper-a0: rgb(255 255 255 / 0);
 
   /* shadcn / beUI semantic aliases — keep Reizo paper/ink as the source. */
   --background: var(--paper);
@@ -50,7 +51,7 @@
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
   --duration-fast: 140ms;
   --duration-base: 200ms;
-  --group-container-bg: #ececf0;
+  --group-container-bg: #f5f5f5;
   --group-container-border: rgba(0, 0, 0, 0.12);
 }
 
