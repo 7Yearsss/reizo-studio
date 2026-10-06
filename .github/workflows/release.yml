@@ -6,7 +6,7 @@ on:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -87,7 +87,10 @@ jobs:
       - name: Publish release
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.DOWNLOADS_REPO_TOKEN }}
         run: |
           mapfile -t assets < <(find release-assets -type f)
-          gh release create "$RELEASE_TAG" "${assets[@]}" --title "$RELEASE_TAG" --generate-notes
+          gh release create "$RELEASE_TAG" "${assets[@]}" \
+            --repo 7Yearsss/reizo-studio-downloads \
+            --title "$RELEASE_TAG" \
+            --notes "Reizo Studio desktop installers. Download the package for your operating system."
