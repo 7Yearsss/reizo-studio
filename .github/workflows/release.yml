@@ -54,6 +54,10 @@ jobs:
           NODE_OPTIONS: --max-old-space-size=6144
         run: npm run make
 
+      - name: Verify extracted macOS app signature
+        if: runner.os == 'macOS'
+        run: bash scripts/verify-macos-package.sh
+
       - name: Upload release files
         uses: actions/upload-artifact@v4
         with:
@@ -88,7 +92,8 @@ jobs:
             -f tag_name="$RELEASE_TAG" \
             --jq .body > release-notes.md
           sed -E \
-            -e 's#\[([^]]+)\]\(https://github.com/7Yearsss/reizo-studio/pull/([0-9]+)\)#\1 (PR #\2)#g' \
+            -e 's|\[([^]]+)\]\(https://github\.com/7Yearsss/reizo-studio/pull/([0-9]+)\)|\1 (PR #\2)|g' \
+            -e 's|https://github\.com/7Yearsss/reizo-studio/pull/([0-9]+)|PR #\1|g' \
             -e '/^\*\*Full Changelog\*\*:/d' \
             release-notes.md > release-notes.cleaned.md
           mv release-notes.cleaned.md release-notes.md
