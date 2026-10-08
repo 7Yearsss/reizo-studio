@@ -12,6 +12,17 @@ const config: ForgeConfig = {
     asar: true,
     icon: 'resources/icon',
     executableName: 'reizo-studio',
+    // Re-sign the entire bundle after Packager changes Info.plist and Electron
+    // fuses. Ad-hoc signing restores integrity; it is not Developer ID signing
+    // or notarization and does not enable trusted macOS automatic updates.
+    osxSign: {
+      identity: '-',
+      identityValidation: false,
+      preAutoEntitlements: false,
+      preEmbedProvisioningProfile: false,
+      continueOnError: false,
+      optionsForFile: () => ({ timestamp: 'none' }),
+    },
     // WASM binaries for the local matting feature (onnxruntime-web): copied
     // flat into resources/ so /api/matting/ort/* can serve them in packaged
     // builds. The asyncify variants are intentionally left out (~25MB) — the
