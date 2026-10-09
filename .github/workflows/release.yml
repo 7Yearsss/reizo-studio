@@ -1,9 +1,9 @@
 name: Build and release
 
 on:
-  push:
-    branches:
-      - main
+  # Manual only: run from the Actions tab (or `gh workflow run release.yml`)
+  # to build and publish installers for all three platforms.
+  workflow_dispatch:
 
 permissions:
   contents: read
