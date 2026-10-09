@@ -13,6 +13,18 @@ const config: ForgeConfig = {
     icon: 'resources/icon',
     // Only runtime build output belongs in app.asar; keep private QA fixtures out.
     ignore: (file) => Boolean(file) && file !== '/.vite' && !/^\/\.vite\/(build|renderer)(?:\/|$)/.test(file),
+    executableName: 'reizo-studio',
+    // Re-sign the entire bundle after Packager changes Info.plist and Electron
+    // fuses. Ad-hoc signing restores integrity; it is not Developer ID signing
+    // or notarization and does not enable trusted macOS automatic updates.
+    osxSign: {
+      identity: '-',
+      identityValidation: false,
+      preAutoEntitlements: false,
+      preEmbedProvisioningProfile: false,
+      continueOnError: false,
+      optionsForFile: () => ({ timestamp: 'none' }),
+    },
     // WASM binaries for the local matting feature (onnxruntime-web): copied
     // flat into resources/ so /api/matting/ort/* can serve them in packaged
     // builds. The asyncify variants are intentionally left out (~25MB) — the

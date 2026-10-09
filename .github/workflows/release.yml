@@ -1,0 +1,120 @@
+name: Build and release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows
+          - os: macos-latest
+            name: macos
+          - os: ubuntu-latest
+            name: linux
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Linux packaging tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes rpm
+
+      - name: Set release version
+        shell: bash
+        run: |
+          base_version=$(node -p "require('./package.json').version")
+          release_version="${base_version}-main.${GITHUB_RUN_NUMBER}"
+          npm version "$release_version" --no-git-tag-version
+          echo "RELEASE_VERSION=$release_version" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=v$release_version" >> "$GITHUB_ENV"
+
+      - name: Build installers
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+        run: npm run make
+
+      - name: Verify extracted macOS app signature
+        if: runner.os == 'macOS'
+        run: bash scripts/verify-macos-package.sh
+
+      - name: Upload release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.name }}
+          path: out/make/**
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set release version
+        shell: bash
+        run: |
+          base_version=$(node -p "require('./package.json').version")
+          release_version="${base_version}-main.${GITHUB_RUN_NUMBER}"
+          echo "RELEASE_TAG=v$release_version" >> "$GITHUB_ENV"
+
+      - name: Generate release notes from merged pull requests
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f tag_name="$RELEASE_TAG" \
+            --jq .body > release-notes.md
+          sed -E \
+            -e 's|\[([^]]+)\]\(https://github\.com/7Yearsss/reizo-studio/pull/([0-9]+)\)|\1 (PR #\2)|g' \
+            -e 's|https://github\.com/7Yearsss/reizo-studio/pull/([0-9]+)|PR #\1|g' \
+            -e '/^\*\*Full Changelog\*\*:/d' \
+            release-notes.md > release-notes.cleaned.md
+          mv release-notes.cleaned.md release-notes.md
+          if [[ ! -s release-notes.md ]]; then
+            printf 'Reizo Studio desktop installers for %s.\n' "$RELEASE_TAG" > release-notes.md
+          fi
+
+      - name: Download installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.DOWNLOADS_REPO_TOKEN }}
+        run: |
+          mapfile -t assets < <(find release-assets -type f)
+          gh release create "$RELEASE_TAG" "${assets[@]}" \
+            --repo 7Yearsss/reizo-studio-downloads \
+            --title "$RELEASE_TAG" \
+            --notes-file release-notes.md
