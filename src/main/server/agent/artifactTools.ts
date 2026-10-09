@@ -2,6 +2,11 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import type { ArtifactStore } from '../storage/artifactStore';
 import { ArtifactVersionConflictError } from '../storage/artifactStore';
+import type { ArtifactReviewStore } from '../storage/artifactReviewStore';
+import { sheetEditSchema } from './sheetReviewAdapter';
+import type { SheetReviewOperation } from '../../../shared/sheetReview';
+import { sheetPivots } from '../../../shared/sheetPivot';
+import { describeChartSource, sheetCharts } from '../../../shared/sheetChart';
 import { summarizeSheet } from '../../../shared/sheetReferences';
 import { READ_PAGE_BUDGET } from './readBudget';
 import { serializeCanvasContent } from '../../../shared/canvasContent';
@@ -18,6 +23,8 @@ export function createArtifactTools(options: {
   sessionId: string;
   projectId?: string | null;
   artifactStore: ArtifactStore;
+  /** When present, edits to existing workbooks go through propose_sheet_edits and user review. */
+  reviews?: ArtifactReviewStore;
 }) {
   return {
     read_sheet: tool({
@@ -29,7 +36,8 @@ export function createArtifactTools(options: {
         if (!artifact || artifact.sessionId !== options.sessionId || artifact.kind !== 'sheet') return { ok: false, error: '未找到本会话的表格' };
         const content = parseSheetContent(artifact.content);
         if (!content) return { ok: false, error: '表格内容无法解析' };
-        return { ok: true, artifactId, name: artifact.name, version: artifact.version, sheets: content.sheets.map((s) => ({ id: s.id, name: s.name })), summary: summarizeSheet(content, { sheet, range }, READ_PAGE_BUDGET) };
+        const pivots = sheetPivots(content).map((p) => ({ id: p.id, name: p.name, source: `${content.sheets.find((s) => s.id === p.source.sheetId)?.name ?? p.source.sheetId}!${p.source.range}`, output: p.output ? `${content.sheets.find((s) => s.id === p.target.sheetId)?.name ?? p.target.sheetId}!${p.output}` : undefined, rows: p.rows, columns: p.columns, values: p.values, filters: p.filters, totals: p.totals }));
+        return { ok: true, artifactId, name: artifact.name, version: artifact.version, sheets: content.sheets.map((s) => ({ id: s.id, name: s.name })), ...(pivots.length ? { pivots } : {}), ...(sheetCharts(content).length ? { charts: sheetCharts(content).map((c) => ({ id: c.id, name: c.name, type: c.type, source: describeChartSource(content, c) })) } : {}), summary: summarizeSheet(content, { sheet, range }, READ_PAGE_BUDGET) };
       },
     }),
     generate_diagram: tool({
@@ -80,7 +88,9 @@ export function createArtifactTools(options: {
 
     generate_sheet: tool({
       description:
-        '创建或更新可编辑的 Excel 工作簿，支持多工作表、数据和函数公式。右侧 Excel 面板可编辑并导出 .xlsx。修改已有表格前使用 read_sheet 读取最新内容和 version，传入 sourceArtifactId、expectedVersion 和 operations 局部修改。',
+        options.reviews
+          ? '新建可编辑的 Excel 工作簿，支持多工作表、数据和函数公式。右侧 Excel 面板可编辑并导出 .xlsx。修改已有表格必须用 read_sheet 读取后调用 propose_sheet_edits 提出建议，不能用本工具。'
+          : '创建或更新可编辑的 Excel 工作簿，支持多工作表、数据和函数公式。右侧 Excel 面板可编辑并导出 .xlsx。修改已有表格前使用 read_sheet 读取最新内容和 version，传入 sourceArtifactId、expectedVersion 和 operations 局部修改。',
       inputSchema: z.object({
         title: z.string().describe('表格标题，例如 "2026年Q1财务预算表" 或 "研发任务跟踪表"'),
         sourceArtifactId: z.string().optional().describe('已有表格产物 ID（用于局部修改）'),
@@ -143,6 +153,7 @@ export function createArtifactTools(options: {
       }),
       execute: async ({ title, sourceArtifactId, expectedVersion, sheets, operations }) => {
         const cleanTitle = title.trim();
+        if (sourceArtifactId && options.reviews) return { ok: false, error: '修改已有表格请先 read_sheet，再调用 propose_sheet_edits 提出待用户审核的修改；本次未修改表格' };
         if (sourceArtifactId) {
           const existing = await options.artifactStore.get(sourceArtifactId);
           if (!existing || existing.sessionId !== options.sessionId || existing.kind !== 'sheet') {
@@ -207,5 +218,21 @@ export function createArtifactTools(options: {
         };
       },
     }),
+    ...(options.reviews ? {
+      propose_sheet_edits: tool({
+        description: '为已有 Excel 表格提出待审核的修改。先 read_sheet 取得最新 version，使用 expectedVersion。每项操作必须能单独接受：不同项的单元格范围不能重叠，重命名/删除工作表不能与同表的其他修改同批；新工作表的数据写进 addSheet 的 values/formulas。透视/分组汇总用 upsertPivot：结果写成 SUMIFS 等实时公式，不能覆盖已有数据，放到空白区域或 target.newSheet；改已有透视表传其 id。图表用 upsertChart，优先 pivotId 绑定透视表；同一批里新建的透视表还没有 id，图表需在用户接受后再提。原表保持不变，用户在 Excel 面板逐项或批量接受/拒绝后才会写入。',
+        // The cast keeps the tool's inferred input type shallow; the full schema is still sent to the model and validated.
+        inputSchema: z.object({ artifactId: z.string(), expectedVersion: z.number().int().positive(), operations: z.array(sheetEditSchema as unknown as z.ZodType<SheetReviewOperation>).min(1).max(40) }),
+        execute: async ({ artifactId, expectedVersion, operations }) => {
+          try {
+            const review = await options.reviews!.create({ artifactId, sessionId: options.sessionId, expectedVersion, operations, origin: { surface: 'chat' } });
+            return { ok: true, artifactId, reviewId: review.id, pending: review.changes.length, changes: review.changes.map((change) => change.label), summary: '表格修改建议已生成，原表未改变，等待用户在 Excel 面板审核。' };
+          } catch (error) {
+            if (error instanceof ArtifactVersionConflictError) return { ok: false, error: '表格版本已变化，请重新 read_sheet 后再提出建议' };
+            return { ok: false, error: error instanceof Error ? error.message : '创建建议失败' };
+          }
+        },
+      }),
+    } : {}),
   };
 }

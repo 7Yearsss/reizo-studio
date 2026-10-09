@@ -7,13 +7,15 @@ interface State {
   selectedBySession: Record<string, string | undefined>;
   activeBySession: Record<string, SheetSelection | undefined>;
   pinnedBySession: Record<string, SheetSelection[] | undefined>;
+  reviewRevisions: Record<string, number>;
 }
-let state: State = { selectedBySession: {}, activeBySession: {}, pinnedBySession: {} };
+let state: State = { selectedBySession: {}, activeBySession: {}, pinnedBySession: {}, reviewRevisions: {} };
 const listeners = new Set<() => void>();
 function update(patch: Partial<State>) { state = { ...state, ...patch }; listeners.forEach((l) => l()); }
 export function useSheetWorkspace<T>(select: (s: State) => T): T {
   return useSyncExternalStore((listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; }, () => select(state));
 }
+export function refreshSheetReviews(artifactId: string) { update({ reviewRevisions: { ...state.reviewRevisions, [artifactId]: (state.reviewRevisions[artifactId] ?? 0) + 1 } }); }
 export function selectWorkbook(sessionId: string, artifactId: string) {
   update({ selectedBySession: { ...state.selectedBySession, [sessionId]: artifactId } });
 }

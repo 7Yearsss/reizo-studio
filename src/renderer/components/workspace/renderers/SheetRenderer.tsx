@@ -5,7 +5,7 @@ import { CalculationMode, UniverSheetsCorePreset } from '@univerjs/preset-sheets
 import sheetsZhCN from '@univerjs/preset-sheets-core/locales/zh-CN';
 import { CommandType, createUniver, defaultTheme, LocaleType } from '@univerjs/presets';
 import type { ArtifactRenderProps } from './types';
-import { compactToUniverSnapshot, parseSheetContent, replaceUniverSnapshot, serializeSheetContent } from '../../../../shared/sheetContent';
+import { compactToUniverSnapshot, parseSheetContent, replaceUniverSnapshot, serializeSheetContent, type SheetArtifactContent } from '../../../../shared/sheetContent';
 import { clearActiveSheet, publishSheetSelection, registerSheetFlusher } from '../../../state/sheetWorkspace';
 import { useChatStore } from '../../../state/useChatStore';
 import { Button } from '../../ui/button';
@@ -16,22 +16,51 @@ import '@univerjs/presets/lib/styles/preset-sheets-core.css';
 
 type Workbook = { save(): unknown; setEditable(value: boolean): Workbook; isCellEditing(): boolean; endEditingAsync(save?: boolean): Promise<boolean> };
 type SelectionEvent = { type?: number; worksheet?: { getSheetId(): string; getSheetName(): string; getRange(range: unknown): { getA1Notation(): string } }; selections?: unknown[] };
+type FacadeSheet = { activate(): unknown; getRange(a1: string): { activate(): unknown } };
 type UniverAPI = {
   getFormula(): { onCalculationResultApplied(timeout?: number): Promise<void> };
   toggleDarkMode(isDarkMode: boolean): void;
   Event: { CommandExecuted: string; SelectionChanged: string; SelectionMoving: string };
   addEvent(event: string, listener: (payload: SelectionEvent) => void): { dispose(): void };
   createWorkbook(data: Record<string, unknown>): Workbook;
+  getActiveWorkbook(): { getSheetBySheetId(id: string): FacadeSheet | null } | null;
 };
-export interface SheetRendererProps extends ArtifactRenderProps { initialDirty?: boolean; initialError?: string }
+export interface SheetCellFocus { sheetId: string; range: string; nonce: number }
+export interface SheetRendererProps extends ArtifactRenderProps {
+  initialDirty?: boolean;
+  initialError?: string;
+  /** Read-only caption shown instead of the history-version label. */
+  readOnlyLabel?: string;
+  onSelectCell?(cell: { sheetId: string; row: number; col: number }): void;
+  focus?: SheetCellFocus;
+  /** Workbook content with current formula results, emitted after load and after edits settle (for charts). */
+  onLiveContent?(content: SheetArtifactContent): void;
+}
 
-export default function SheetRenderer({ artifact, text, onCommitDraft, initialDirty = false, initialError }: SheetRendererProps) {
+export default function SheetRenderer({ artifact, text, onCommitDraft, initialDirty = false, initialError, readOnlyLabel, onSelectCell, focus, onLiveContent }: SheetRendererProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const workbookRef = useRef<Workbook | null>(null);
   const formulaRef = useRef<ReturnType<UniverAPI['getFormula']> | null>(null);
   const parsedRef = useRef(parseSheetContent(text));
   const saveCallback = useRef(onCommitDraft);
   saveCallback.current = onCommitDraft;
+  const selectCallback = useRef(onSelectCell);
+  selectCallback.current = onSelectCell;
+  const liveCallback = useRef(onLiveContent);
+  liveCallback.current = onLiveContent;
+  const liveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const emitLive = useCallback(() => {
+    if (!liveCallback.current) return;
+    if (liveTimer.current) clearTimeout(liveTimer.current);
+    liveTimer.current = setTimeout(() => {
+      void (formulaRef.current?.onCalculationResultApplied(3000) ?? Promise.resolve()).catch((): void => undefined).then(() => {
+        const workbook = workbookRef.current;
+        if (!workbook || !parsedRef.current) return;
+        try { liveCallback.current?.(replaceUniverSnapshot(parsedRef.current, workbook.save())); } catch { /* Disposed mid-flight. */ }
+      });
+    }, 400);
+  }, []);
+  const apiRef = useRef<UniverAPI | null>(null);
   const dirty = useRef(initialDirty);
   const discarded = useRef(false);
   const editSequence = useRef(0);
@@ -113,7 +142,7 @@ export default function SheetRenderer({ artifact, text, onCommitDraft, initialDi
       clearTimeout(hydrationTimer);
       hydrationTimer = setTimeout(() => {
         hydrating.current = false;
-        if (!disposed) setReady(true);
+        if (!disposed) { setReady(true); emitLive(); }
         window.dispatchEvent(new Event('resize'));
       }, Math.max(0, Math.min(150, hydrationDeadline - Date.now())));
     };
@@ -126,10 +155,12 @@ export default function SheetRenderer({ artifact, text, onCommitDraft, initialDi
           presets: [UniverSheetsCorePreset({ container: engineHost, header: true, toolbar: true, formulaBar: true, formula: { initialFormulaComputing: CalculationMode.FORCED }, footer: { sheetBar: true, statisticBar: true, menus: true, zoomSlider: true } })] });
         univer = created.univer;
         api = created.univerAPI as unknown as UniverAPI;
+        apiRef.current = api;
         formulaRef.current = api.getFormula();
         workbookRef.current = api.createWorkbook((parsed.univerSnapshot ?? compactToUniverSnapshot(parsed, artifact.name)) as Record<string, unknown>);
         workbookRef.current.setEditable(Boolean(saveCallback.current) && !busy);
         subscriptions.push(api.addEvent(api.Event.CommandExecuted, (event) => {
+          if (!disposed && !hydrating.current && event.type === CommandType.MUTATION) emitLive();
           if (disposed || event.type !== CommandType.MUTATION || !saveCallback.current) return;
           if (hydrating.current) { finishHydration(); return; }
           dirty.current = true;
@@ -138,10 +169,13 @@ export default function SheetRenderer({ artifact, text, onCommitDraft, initialDi
           timer.current = setTimeout(() => { void flushRef.current().catch((): void => undefined); }, 600);
         }));
         const select = (event: SelectionEvent) => {
-          if (disposed || hydrating.current || !saveCallback.current) return;
+          if (disposed || hydrating.current) return;
           const worksheet = event.worksheet;
           const range = event.selections?.[0];
           if (!worksheet || !range) return;
+          const start = range as { startRow?: number; startColumn?: number };
+          if (typeof start.startRow === 'number' && typeof start.startColumn === 'number') selectCallback.current?.({ sheetId: worksheet.getSheetId(), row: start.startRow, col: start.startColumn });
+          if (!saveCallback.current) return;
           publishSheetSelection(artifact.sessionId, { artifactId: artifact.id, name: artifact.name, sheetId: worksheet.getSheetId(), sheetName: worksheet.getSheetName(), range: worksheet.getRange(range).getA1Notation() });
         };
         subscriptions.push(api.addEvent(api.Event.SelectionChanged, select), api.addEvent(api.Event.SelectionMoving, select));
@@ -165,6 +199,7 @@ export default function SheetRenderer({ artifact, text, onCommitDraft, initialDi
       clearTimeout(startTimer);
       clearTimeout(hydrationTimer);
       if (timer.current) clearTimeout(timer.current);
+      if (liveTimer.current) clearTimeout(liveTimer.current);
       observer.disconnect();
       themeObserver.disconnect();
       clearActiveSheet(artifact.sessionId, artifact.id);
@@ -173,10 +208,20 @@ export default function SheetRenderer({ artifact, text, onCommitDraft, initialDi
         subscriptions.forEach((s) => s.dispose());
         workbookRef.current = null;
         formulaRef.current = null;
+        apiRef.current = null;
         setTimeout(() => { univer?.dispose(); engineHost.remove(); }, 0);
       });
     };
   }, [artifact.id]);
+
+  useEffect(() => {
+    if (!focus || !ready) return;
+    try {
+      const sheet = apiRef.current?.getActiveWorkbook()?.getSheetBySheetId(focus.sheetId);
+      sheet?.activate();
+      sheet?.getRange(focus.range).activate();
+    } catch { /* A sheet removed by the review has nothing to focus. */ }
+  }, [focus, ready]);
 
   async function download() {
     setExporting(true);
@@ -192,7 +237,7 @@ export default function SheetRenderer({ artifact, text, onCommitDraft, initialDi
   if (initError) return <Alert variant="destructive"><AlertDescription>{initError}</AlertDescription></Alert>;
   return <div className="relative flex min-h-[420px] min-w-0 flex-1 flex-col overflow-hidden bg-paper-raised">
     <div className="flex shrink-0 items-center justify-end gap-2 px-3 py-1">
-      <span role="status" className="text-xs text-ink-muted">{saving ? '正在保存…' : busy ? 'Agent 正在处理，暂时只读' : onCommitDraft ? '自动保存 · 选中单元格可在对话中引用' : '历史版本 · 只读'}</span>
+      <span role="status" className="text-xs text-ink-muted">{saving ? '正在保存…' : busy ? 'Agent 正在处理，暂时只读' : onCommitDraft ? '自动保存 · 选中单元格可在对话中引用' : readOnlyLabel ?? '历史版本 · 只读'}</span>
       <Button variant="ghost" size="sm" onClick={() => void download()} disabled={!ready || saving || exporting}><Download data-icon="inline-start" />{exporting ? '正在导出…' : '导出 Excel'}</Button>
     </div>
     {error && <Alert variant="destructive"><AlertDescription>{error}<Button variant="outline" size="sm" onClick={() => void flushRef.current().catch((): void => undefined)}>重试保存</Button></AlertDescription></Alert>}

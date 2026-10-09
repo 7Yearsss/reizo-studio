@@ -14,6 +14,7 @@ const PERSISTENT_TOOL_NAMES = new Set([
   'generate_image',
   'generate_diagram',
   'generate_sheet',
+  'propose_sheet_edits',
 ]);
 
 /** Live thinking beats and persisted segments both render as collapsed

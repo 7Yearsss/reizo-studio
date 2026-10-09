@@ -8,7 +8,7 @@ import { clearSheetRecovery, getSheetRecovery } from '../../state/sheetWorkspace
 import SheetDocument from './SheetDocument';
 
 const harness = vi.hoisted(() => ({ get: vi.fn(), save: vi.fn(), upsert: vi.fn(), mount: vi.fn(), content: '' }));
-vi.mock('../../api', () => ({ getArtifact: harness.get, addArtifactVersion: harness.save }));
+vi.mock('../../api', () => ({ getArtifact: harness.get, addArtifactVersion: harness.save, listArtifactReviews: async (): Promise<unknown[]> => [] }));
 vi.mock('../../state/artifactStore', () => ({ upsertArtifact: harness.upsert }));
 vi.mock('../DeferredView', () => ({ createDeferredView: () => function Editor(props: { text: string; onCommitDraft?: (text: string) => Promise<void> }) {
   useEffect(() => { harness.mount(); }, []);

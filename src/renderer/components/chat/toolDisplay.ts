@@ -58,6 +58,7 @@ export function toolLabel(name: string): string {
     case 'read_html': return '读取 HTML 页面';
     case 'generate_html': return '创建 HTML 页面';
     case 'propose_html_edits': return '提出 HTML 修改建议';
+    case 'propose_sheet_edits': return '提出表格修改建议';
     default: return name.replace(/[_-]+/g, ' ');
   }
 }
@@ -66,7 +67,7 @@ export function toolAction(name: string): 'read' | 'edit' | 'write' | 'run' | 's
   if (name === 'run_command') return 'run';
   if (name === 'edit_file') return 'edit';
   if (name === 'write_file') return 'write';
-  if (name === 'generate_sheet') return 'edit';
+  if (name === 'generate_sheet' || name === 'propose_sheet_edits') return 'edit';
   if (name === 'grep' || name === 'find_files') return 'search';
   return 'read';
 }
@@ -106,10 +107,11 @@ export function toolDetail(part: ToolCallPart): string {
       if (Array.isArray(result.documents)) return result.documents.map((doc: { name: string }) => doc.name).join('\n') || '当前会话没有文档';
     } catch { /* Partial tool output. */ }
   }
-  if ((part.name === 'read_sheet' || part.name === 'generate_sheet') && part.result) {
+  if ((part.name === 'read_sheet' || part.name === 'generate_sheet' || part.name === 'propose_sheet_edits') && part.result) {
     try {
       const result = JSON.parse(part.result);
       if (result.error) return String(result.error);
+      if (Array.isArray(result.changes)) return `${result.changes.length} 项修改待审核\n${result.changes.join('\n')}`;
       if (result.name) return `${part.name === 'read_sheet' ? '已读取' : '已更新'}「${result.name}」${result.version ? ` · v${result.version}` : ''}`;
       if (Array.isArray(result.workbooks)) return result.workbooks.map((book: { name: string }) => book.name).join('\n') || '当前会话没有表格';
     } catch { /* streamed output is not complete yet */ }

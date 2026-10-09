@@ -24,7 +24,7 @@ import * as uiStore from './uiStore';
 import * as canvasStore from './canvasStore';
 import { isCanvasTool, trailEntryFromTool, UNDOABLE_TRAIL_VERBS } from '../../shared/agentTrail';
 import * as artifactStore from './artifactStore';
-import { flushSheetEdits, selectWorkbook, restoreSheetReferences } from './sheetWorkspace';
+import { flushSheetEdits, selectWorkbook, restoreSheetReferences, refreshSheetReviews } from './sheetWorkspace';
 import { splitSheetContext } from '../../shared/sheetReferences';
 import { recordRecentSkill } from './skillStore';
 import { appendTerminalLine } from './terminalStore';
@@ -945,11 +945,12 @@ function makeEventFolder(
             if (result.ok && result.artifactId) { selectDocument(sessionId, result.artifactId); refreshDocumentReviews(result.artifactId); uiStore.setRightPanelTab('documents'); void artifactStore.loadSessionArtifacts(sessionId); }
           } catch { /* Incomplete tool output. */ }
         }
-        if (event.name === 'generate_sheet' && event.result) {
+        if ((event.name === 'generate_sheet' || event.name === 'propose_sheet_edits') && event.result) {
           try {
             const result = JSON.parse(event.result) as { ok?: boolean; artifactId?: string };
             if (result.ok && result.artifactId) {
               selectWorkbook(sessionId, result.artifactId);
+              refreshSheetReviews(result.artifactId);
               uiStore.setRightPanelTab('sheets');
               void artifactStore.loadSessionArtifacts(sessionId);
             }

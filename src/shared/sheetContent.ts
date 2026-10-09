@@ -46,6 +46,10 @@ export type SheetArtifactContent = {
   /** Last Univer workbook.save() payload; optional visual restore. */
   univerSnapshot?: unknown;
   importMeta?: SheetImportMeta;
+  /** Pivot definitions (see sheetPivot.ts); their output lives in ordinary cells as live formulas. */
+  pivots?: unknown[];
+  /** Chart definitions (see sheetChart.ts); rendered over live values, exported as images. */
+  charts?: unknown[];
 };
 
 export type SheetCreateSheet = {
@@ -119,6 +123,8 @@ export function normalizeSheetContent(value: unknown): SheetArtifactContent | nu
     sheets,
     ...(raw.univerSnapshot === undefined ? {} : { univerSnapshot: raw.univerSnapshot }),
     ...(raw.importMeta ? { importMeta: raw.importMeta } : {}),
+    ...(Array.isArray(raw.pivots) && raw.pivots.length ? { pivots: raw.pivots.slice(0, 20) } : {}),
+    ...(Array.isArray(raw.charts) && raw.charts.length ? { charts: raw.charts.slice(0, 20) } : {}),
   };
 }
 
@@ -835,6 +841,8 @@ export function univerSnapshotToCompact(
     sheets,
     univerSnapshot: snapshot,
     ...(fallback.importMeta ? { importMeta: fallback.importMeta } : {}),
+    ...(fallback.pivots ? { pivots: fallback.pivots } : {}),
+    ...(fallback.charts ? { charts: fallback.charts } : {}),
   };
 }
 

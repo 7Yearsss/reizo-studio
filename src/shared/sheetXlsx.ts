@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import { addNativeCharts } from "./sheetXlsxCharts";
 import {
   MAX_COLS,
   MAX_GRID_CELLS,
@@ -570,9 +571,11 @@ export async function sheetContentToXlsxBuffer(content: SheetArtifactContent): P
   workbook.calcProperties.fullCalcOnLoad = true;
   const snapshot = asExportableSnapshot(content.univerSnapshot);
   const usedNames = new Set<string>();
+  const sheetNames = new Map<string, string>();
 
   for (const grid of content.sheets) {
     const worksheet = workbook.addWorksheet(safeWorksheetName(grid.name, usedNames));
+    sheetNames.set(grid.id, worksheet.name);
     const univerSheet = snapshot?.sheets?.[grid.id];
     if (univerSheet) {
       writeSheetFromSnapshot(worksheet, univerSheet, snapshot?.styles ?? {});
@@ -592,7 +595,7 @@ export async function sheetContentToXlsxBuffer(content: SheetArtifactContent): P
   }
 
   const buffer = await workbook.xlsx.writeBuffer();
-  return new Uint8Array(buffer);
+  return (await addNativeCharts(new Uint8Array(buffer), content, sheetNames)).bytes;
 }
 
 export async function downloadSheetAsXlsx(content: SheetArtifactContent, filename = 'spreadsheet.xlsx'): Promise<void> {
