@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { ArtifactStore } from '../storage/artifactStore';
 import { ArtifactVersionConflictError } from '../storage/artifactStore';
 import { summarizeSheet } from '../../../shared/sheetReferences';
+import { READ_PAGE_BUDGET } from './readBudget';
 import { serializeCanvasContent } from '../../../shared/canvasContent';
 import {
   applySheetOperations,
@@ -28,7 +29,7 @@ export function createArtifactTools(options: {
         if (!artifact || artifact.sessionId !== options.sessionId || artifact.kind !== 'sheet') return { ok: false, error: '未找到本会话的表格' };
         const content = parseSheetContent(artifact.content);
         if (!content) return { ok: false, error: '表格内容无法解析' };
-        return { ok: true, artifactId, name: artifact.name, version: artifact.version, sheets: content.sheets.map((s) => ({ id: s.id, name: s.name })), summary: summarizeSheet(content, { sheet, range }) };
+        return { ok: true, artifactId, name: artifact.name, version: artifact.version, sheets: content.sheets.map((s) => ({ id: s.id, name: s.name })), summary: summarizeSheet(content, { sheet, range }, READ_PAGE_BUDGET) };
       },
     }),
     generate_diagram: tool({

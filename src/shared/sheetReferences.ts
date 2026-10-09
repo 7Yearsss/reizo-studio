@@ -60,13 +60,14 @@ export function parseSheetReferences(mentions: string[]): { refs: SheetReference
 }
 
 /** Bounded TSV with actual addresses, including selections outside the top-left preview. */
-export function summarizeSheet(content: SheetArtifactContent, target?: { sheet?: string; range?: string }): string {
+export function summarizeSheet(content: SheetArtifactContent, target?: { sheet?: string; range?: string }, maxChars = 24000): string {
   const sheets = target?.sheet
     ? content.sheets.filter((s) => s.id === target.sheet || s.name === target.sheet)
     : content.sheets;
   if (!sheets.length) return 'Unknown worksheet. Read the workbook first.';
   const selected = target?.range ? parseA1Range(target.range) : null;
   if (target?.range && !selected) return 'Invalid range.';
+  let remaining = maxChars;
   const blocks = sheets.map((sheet) => {
     const used = usedRange(sheet);
     const row = selected?.start.row ?? 0;
@@ -74,6 +75,8 @@ export function summarizeSheet(content: SheetArtifactContent, target?: { sheet?:
     const endRow = Math.min(selected?.end.row ?? Math.max(0, used.rows - 1), row + 79);
     const endCol = Math.min(selected?.end.col ?? Math.max(0, used.cols - 1), col + 19);
     const lines = [`Sheet ${JSON.stringify(sheet.name)} id=${sheet.id}; used=${used.rows}x${used.cols}; showing=${a1Of(row, col)}:${a1Of(endRow, endCol)}`];
+    remaining -= lines[0].length + 1;
+    let cutAt = -1;
     for (let r = row; r <= endRow; r++) {
       const cells: string[] = [];
       for (let c = col; c <= endCol; c++) {
@@ -81,9 +84,15 @@ export function summarizeSheet(content: SheetArtifactContent, target?: { sheet?:
         const value = cell?.f ?? cell?.v ?? '';
         cells.push(`${a1Of(r, c)}=${String(value).replace(/[\t\r\n]/g, ' ').slice(0, 160)}`);
       }
-      lines.push(cells.join('\t'));
+      const line = cells.join('\t');
+      // Always keep the first row so a tight budget still shows the header; otherwise stop at a row boundary.
+      if (r > row && line.length + 1 > remaining) { cutAt = r; break; }
+      lines.push(line);
+      remaining -= line.length + 1;
     }
-    if ((selected?.end.row ?? used.rows - 1) > endRow || (selected?.end.col ?? used.cols - 1) > endCol) {
+    if (cutAt >= 0) {
+      lines.push(`Output budget reached before row ${cutAt + 1}. Use read_sheet with a range starting at ${a1Of(cutAt, col)} for the rest.`);
+    } else if ((selected?.end.row ?? used.rows - 1) > endRow || (selected?.end.col ?? used.cols - 1) > endCol) {
       lines.push('Preview truncated. Use read_sheet with a narrower sheet/range for remaining cells.');
     }
     return lines.join('\n');
@@ -91,5 +100,5 @@ export function summarizeSheet(content: SheetArtifactContent, target?: { sheet?:
   if (content.importMeta?.truncatedRows || content.importMeta?.truncatedCols || content.importMeta?.truncatedSheets) {
     blocks.unshift('Import was truncated to the workbook limits; this is not the complete source file.');
   }
-  return blocks.join('\n\n').slice(0, 24000);
+  return blocks.join('\n\n').slice(0, maxChars + 1000);
 }

@@ -3,11 +3,11 @@ import { EditorContent, useEditor } from '@tiptap/react';
 import { Bold, Italic, List, ListOrdered, Table, Undo2, Redo2, Download, Quote, History } from 'lucide-react';
 import type { Artifact, ArtifactWithContent } from '../../../shared/artifact';
 import type { ArtifactReview } from '../../../shared/artifactReview';
-import { documentExtensions, normalizeDocumentContent, parseDocumentContent, typographyCss, type DocumentContent, type DocumentSelection } from '../../../shared/documentContent';
+import { documentExtensions, documentSelectionIntact, normalizeDocumentContent, parseDocumentContent, typographyCss, type DocumentContent, type DocumentSelection } from '../../../shared/documentContent';
 import * as api from '../../api';
 import * as artifacts from '../../state/artifactStore';
 import { clearEditorRecovery, getEditorRecovery, registerEditorFlusher, setEditorRecovery, trackEditorWrite } from '../../state/editorPersistence';
-import { referenceDocument, useDocumentWorkspace } from '../../state/documentWorkspace';
+import { dropDocumentSelection, reconcileDocumentSelection, referenceDocument, syncDocumentReferenceVersion, useDocumentWorkspace } from '../../state/documentWorkspace';
 import { Button } from '../ui/button';
 import { Alert, AlertDescription } from '../ui/alert';
 import DocumentReview, { ReviewLog } from './DocumentReview';
@@ -65,6 +65,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
         if (mounted.current) setStatus('正在保存…');
         const saved = await api.addArtifactVersion(artifact.id, raw, version.current);
         version.current = saved.version;
+        syncDocumentReferenceVersion(artifact.sessionId, artifact.id, saved.version);
         dirty.current = JSON.stringify(value.current) !== snapshot;
         if (!dirty.current) value.current = normalized;
         artifacts.upsertArtifact(saved);
@@ -88,8 +89,8 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
       if (JSON.stringify(value.current.doc) === JSON.stringify(current.getJSON())) return;
       value.current = { ...value.current, doc: current.getJSON() }; dirty.current = true; setStatus('尚未保存');
       setEditorRecovery(artifact.id, { sessionId: artifact.sessionId, content: JSON.stringify(value.current), expectedVersion: version.current });
-      // Any edit invalidates the exact selection previously sent to the composer.
-      referenceDocument(artifact.sessionId);
+      // Typing elsewhere keeps the reference; the selection only goes once its own text moved or changed.
+      reconcileDocumentSelection(artifact.sessionId, artifact.id, (selected) => documentSelectionIntact(current.state.doc, selected));
       clearTimeout(timer.current); timer.current = setTimeout(() => { void flush().catch((): void => { /* Error is shown by the save/review handler. */ }); }, 700);
     },
     onSelectionUpdate: ({ editor: current }) => {
@@ -110,7 +111,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
     const content = parseDocumentContent(artifact.content); if (!content) return;
     value.current = content; version.current = artifact.version;
     editor.commands.setContent(content.doc, { emitUpdate: false });
-    referenceDocument(artifact.sessionId); setSelection(undefined); setStatus('已保存');
+    dropDocumentSelection(artifact.sessionId); setSelection(undefined); setStatus('已保存');
   }, [artifact, editor]);
   async function act(run: () => Promise<void>) {
     setBusy(true); editor?.setEditable(false, false); setError('');
@@ -125,7 +126,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
       if (next && result.artifact.version > version.current) {
         value.current = next; version.current = result.artifact.version;
         editor?.commands.setContent(next.doc, { emitUpdate: false });
-        referenceDocument(artifact.sessionId); setSelection(undefined);
+        dropDocumentSelection(artifact.sessionId); setSelection(undefined);
       }
       artifacts.upsertArtifact(result.artifact); await refreshReviews();
     });
@@ -169,7 +170,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
       const latest = await api.getArtifact(artifact.id); const content = parseDocumentContent(latest.content);
       if (!content) throw new Error('文档格式无效');
       value.current = content; version.current = latest.version; dirty.current = false;
-      editor?.commands.setContent(content.doc, { emitUpdate: false }); referenceDocument(artifact.sessionId); setSelection(undefined);
+      editor?.commands.setContent(content.doc, { emitUpdate: false }); dropDocumentSelection(artifact.sessionId); setSelection(undefined);
       artifacts.upsertArtifact(latest); await refreshReviews();
     }} />}
   </div>;

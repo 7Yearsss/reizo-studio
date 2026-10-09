@@ -10,3 +10,8 @@ export function selectPresentation(sessionId: string, id: string) { update({ sel
 export function referencePresentation(sessionId: string, ref?: PresentationReference) { update({ references: { ...state.references, [sessionId]: ref } }); }
 export function refreshPresentationReviews(id: string) { update({ revisions: { ...state.revisions, [id]: (state.revisions[id] ?? 0) + 1 } }); }
 export function presentationMentions(sessionId: string): string[] { const ref = state.references[sessionId]; return ref ? [serializePresentationReference(ref)] : []; }
+/** A slide/element scope is spent after it is sent or when the deck changes under it; keep the deck as a whole-deck reference. */
+export function dropPresentationScope(sessionId: string) {
+  const ref = state.references[sessionId];
+  if (ref && (ref.slideId || ref.elementIds?.length)) referencePresentation(sessionId, { artifactId: ref.artifactId, name: ref.name, version: ref.version });
+}

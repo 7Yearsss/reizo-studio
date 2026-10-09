@@ -1,4 +1,5 @@
 import { clipToolOutput, TOOL_OUTPUT_CLIP_CHARS } from './modelHistory';
+import { READ_TOOL_CLIP } from './readBudget';
 
 /**
  * L1: Per-tool character budgets (inspired by Claude Code's toolResultBudget).
@@ -12,6 +13,11 @@ export const TOOL_OUTPUT_BUDGETS: Record<string, number> = {
   read_file: 6_000,
   run_command: 4_000,
   memory_read: 4_000,
+  // Office readers self-paginate under READ_PAGE_BUDGET; this is only a safety net above it.
+  read_document: READ_TOOL_CLIP,
+  read_sheet: READ_TOOL_CLIP,
+  read_presentation: READ_TOOL_CLIP,
+  read_html: READ_TOOL_CLIP,
 };
 
 /**

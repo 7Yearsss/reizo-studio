@@ -3,7 +3,7 @@ import { Download, History, Quote, Redo2, Undo2 } from 'lucide-react';
 import type { Artifact, ArtifactWithContent } from '../../../shared/artifact';
 import type { ArtifactReview } from '../../../shared/artifactReview';
 import * as api from '../../api';
-import { referenceHtml, useHtmlWorkspace } from '../../state/htmlWorkspace';
+import { referenceHtml, useHtmlWorkspace, dropHtmlSelection } from '../../state/htmlWorkspace';
 import { Button } from '../ui/button';
 import { Alert, AlertDescription } from '../ui/alert';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../ui/tabs';
@@ -42,7 +42,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
   async function decide(review: ArtifactReview, ids: string[], decision: 'accept' | 'reject') {
     await act(async () => {
       const result = await api.decideArtifactReview(artifact.id, review.id, review.reviewVersion, ids, decision);
-      if (result.artifact.version !== draft.getVersion()) { draft.load(result.artifact); referenceHtml(artifact.sessionId); setRun(false); }
+      if (result.artifact.version !== draft.getVersion()) { draft.load(result.artifact); dropHtmlSelection(artifact.sessionId); setRun(false); }
       await refresh();
     });
   }
@@ -55,10 +55,10 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
       <Button size="icon-sm" variant="ghost" aria-label="HTML 版本历史" disabled={busy} onClick={() => void act(async () => setHistory(true))}><History /></Button>
       <Button size="xs" variant="outline" disabled={busy} onClick={() => void act(async () => download(draft.getText(), /\.html?$/i.test(artifact.name) ? artifact.name : `${artifact.name}.html`))}><Download data-icon="inline-start" />导出</Button>
     </div>
-    {draft.error && <Alert variant="destructive"><AlertDescription>{draft.error}<div className="mt-2 flex gap-2"><Button size="xs" variant="outline" onClick={() => void act(async () => { /* Flush retries the retained draft. */ })}>重试保存</Button><Button size="xs" variant="outline" onClick={() => { void (async () => { await draft.waitForSave()?.catch((): void => { /* Keep recovery source. */ }); download(draft.getText(), `${artifact.name}-恢复副本.html`); const latest = await api.getArtifact(artifact.id); draft.load(latest); referenceHtml(artifact.sessionId); })().catch((cause) => draft.setError(String(cause))); }}>下载恢复副本并重新载入</Button></div></AlertDescription></Alert>}
+    {draft.error && <Alert variant="destructive"><AlertDescription>{draft.error}<div className="mt-2 flex gap-2"><Button size="xs" variant="outline" onClick={() => void act(async () => { /* Flush retries the retained draft. */ })}>重试保存</Button><Button size="xs" variant="outline" onClick={() => { void (async () => { await draft.waitForSave()?.catch((): void => { /* Keep recovery source. */ }); download(draft.getText(), `${artifact.name}-恢复副本.html`); const latest = await api.getArtifact(artifact.id); draft.load(latest); dropHtmlSelection(artifact.sessionId); })().catch((cause) => draft.setError(String(cause))); }}>下载恢复副本并重新载入</Button></div></AlertDescription></Alert>}
     <div className="min-h-0 flex-1 overflow-auto">
       <Tabs defaultValue="code" className="gap-0"><div className="flex items-center justify-between gap-2 px-2 py-1"><TabsList><TabsTrigger value="code">源码</TabsTrigger><TabsTrigger value="preview">页面预览</TabsTrigger></TabsList><Button variant="ghost" size="xs" onClick={() => setRun((value) => !value)}>{run ? '停止脚本' : '运行页面脚本'}</Button></div>
-        <TabsContent value="code" forceMount className="h-[420px] data-[state=inactive]:hidden"><div inert={busy} className="h-full"><HtmlCodeEditor key={draft.source.generation} ref={code} name={artifact.name} text={draft.source.text} onChange={(text) => { draft.change(text); referenceHtml(artifact.sessionId); }} /></div></TabsContent>
+        <TabsContent value="code" forceMount className="h-[420px] data-[state=inactive]:hidden"><div inert={busy} className="h-full"><HtmlCodeEditor key={draft.source.generation} ref={code} name={artifact.name} text={draft.source.text} onChange={(text) => { draft.change(text); dropHtmlSelection(artifact.sessionId); }} /></div></TabsContent>
         <TabsContent value="preview" forceMount className="h-[420px] data-[state=inactive]:hidden"><HtmlPreview html={preview} run={run} /></TabsContent>
       </Tabs>
       {run && <p className="px-3 py-1 text-xs text-ink-muted">已运行页面内脚本；外部脚本和网络请求未启用。</p>}
@@ -73,6 +73,6 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
         {reviews.some((r) => r.changes.some((c) => c.status !== 'pending')) && <details><summary className="cursor-pointer text-xs text-ink-muted">审核记录</summary>{reviews.flatMap((r) => r.changes.filter((c) => c.status !== 'pending').map((c) => <p key={c.id} className="mt-2 text-xs">{c.label} · {c.status === 'accepted' ? `已接受 · 版本 ${c.acceptedVersion}` : '已拒绝'}</p>))}</details>}
       </section>
     </div>
-    {history && <ArtifactHistoryDialog artifact={{ ...artifact, version: draft.getVersion() }} close={() => setHistory(false)} flush={draft.flush} getVersion={draft.getVersion} render={(content) => <HtmlPreview html={content} title="HTML 历史版本预览" />} restored={async () => { draft.load(await api.getArtifact(artifact.id)); referenceHtml(artifact.sessionId); setRun(false); await refresh(); }} />}
+    {history && <ArtifactHistoryDialog artifact={{ ...artifact, version: draft.getVersion() }} close={() => setHistory(false)} flush={draft.flush} getVersion={draft.getVersion} render={(content) => <HtmlPreview html={content} title="HTML 历史版本预览" />} restored={async () => { draft.load(await api.getArtifact(artifact.id)); dropHtmlSelection(artifact.sessionId); setRun(false); await refresh(); }} />}
   </div>;
 }

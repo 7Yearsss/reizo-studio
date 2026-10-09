@@ -180,6 +180,23 @@ export function documentBlocks(content: DocumentContent): DocumentBlock[] {
   return blocks;
 }
 
+/**
+ * True while the referenced range still sits where it was picked: same block, same
+ * offsets, same text. The editor uses this after each edit to keep a selection
+ * reference alive across unrelated typing and drop it only once it truly moved.
+ */
+export function documentSelectionIntact(doc: DocumentNode, selection: DocumentSelection): boolean {
+  if (selection.text === undefined) return false;
+  let intact = false;
+  doc.descendants((node) => {
+    if (intact) return false;
+    if (node.attrs.id !== selection.blockId) return true;
+    intact = node.isTextblock && selection.end <= node.content.size && node.textBetween(selection.start, selection.end).slice(0, 2000) === selection.text;
+    return false;
+  });
+  return intact;
+}
+
 function locate(doc: DocumentNode, id: string): { node: DocumentNode; pos: number } {
   let found: { node: DocumentNode; pos: number } | undefined;
   doc.descendants((node, pos) => { if (node.attrs.id === id) found = { node, pos }; });

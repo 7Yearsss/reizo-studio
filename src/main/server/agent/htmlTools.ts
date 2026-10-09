@@ -4,6 +4,7 @@ import { applyHtmlEdits, htmlEditRange, validateHtmlContent, type HtmlEdit } fro
 import type { HtmlReference } from '../../../shared/htmlReferences';
 import type { ArtifactStore } from '../storage/artifactStore';
 import type { ArtifactReviewAdapter, ArtifactReviewStore } from '../storage/artifactReviewStore';
+import { READ_PAGE_BUDGET } from './readBudget';
 
 const editSchema = z.object({ oldText: z.string().min(1).max(500000), newText: z.string().max(500000) });
 export const htmlReviewAdapter: ArtifactReviewAdapter = {
@@ -19,14 +20,19 @@ export function createHtmlTools(options: { sessionId: string; projectId?: string
   const { sessionId, artifacts, reviews } = options;
   return {
     read_html: tool({
-      description: '列出或读取本会话 HTML 页面最新源码。startLine 从 1 开始，最多 200 行/24000 字符；返回 version 供修改校验。先读取再提出建议。',
+      description: '列出或读取本会话 HTML 页面最新源码。startLine 从 1 开始，按大小分页（约 6000 字符），truncated 时用 nextStartLine 继续读取；返回 version 供修改校验。先读取再提出建议。',
       inputSchema: z.object({ artifactId: z.string().optional(), startLine: z.number().int().positive().optional(), limit: z.number().int().min(1).max(200).optional() }),
       execute: async ({ artifactId, startLine = 1, limit = 120 }) => {
         if (!artifactId) return { ok: true, pages: (await artifacts.listBySession(sessionId)).filter((a) => a.kind === 'html').map((a) => ({ artifactId: a.id, name: a.name, version: a.version })) };
         const artifact = await artifacts.get(artifactId);
         if (!artifact || artifact.sessionId !== sessionId || artifact.kind !== 'html') return { ok: false, error: '未找到本会话 HTML 页面' };
-        const lines = artifact.content.split('\n'); const text = lines.slice(startLine - 1, startLine - 1 + limit).join('\n');
-        return { ok: true, artifactId, name: artifact.name, version: artifact.version, startLine, totalLines: lines.length, text: text.slice(0, 24000), truncated: text.length > 24000 || startLine + limit - 1 < lines.length, selection: options.getReferences?.().find((ref) => ref.artifactId === artifactId)?.selection };
+        const lines = artifact.content.split('\n');
+        // Take whole lines until the read budget is spent (always at least one, cut if it alone is huge, e.g. minified HTML).
+        const first = startLine - 1; const last = Math.min(lines.length, first + limit); let end = first; let used = 0;
+        while (end < last && (end === first || used + lines[end].length + 1 <= READ_PAGE_BUDGET)) { used += lines[end].length + 1; end++; }
+        const joined = lines.slice(first, end).join('\n'); const lineCut = joined.length > READ_PAGE_BUDGET;
+        return { ok: true, artifactId, name: artifact.name, version: artifact.version, selection: options.getReferences?.().find((ref) => ref.artifactId === artifactId)?.selection,
+          startLine, endLine: end, totalLines: lines.length, truncated: lineCut || end < lines.length, nextStartLine: end < lines.length ? end + 1 : null, text: lineCut ? joined.slice(0, READ_PAGE_BUDGET) : joined };
       },
     }),
     generate_html: tool({

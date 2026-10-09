@@ -6,13 +6,17 @@ import type { ArtifactStore } from '../storage/artifactStore';
 import type { ArtifactReviewStore } from '../storage/artifactReviewStore';
 import { documentEditSchema } from './documentReviewAdapter';
 import { documentFromHtml } from './documentIO';
+import { takeWithinBudget } from './readBudget';
+
+/** One block longer than this is cut and flagged `truncated`; keeps a single page under the read budget. */
+const MAX_BLOCK_TEXT = 5_000;
 
 export function createDocumentTools(options: { sessionId: string; projectId?: string | null; artifacts: ArtifactStore; reviews: ArtifactReviewStore; references?: DocumentReference[]; getReferences?: () => DocumentReference[] }) {
   const { artifacts, reviews, sessionId } = options;
   const references = () => options.getReferences?.() ?? options.references ?? [];
   return {
     read_document: tool({
-      description: '读取本会话 Doc 文档；不提供 artifactId 则列出文档。返回稳定 blockId、版本、块内容和选区。使用 offset/limit 分页，blockId 精确读取。文字范围是 ProseMirror UTF-16 偏移，图片占 1。修改已有文档只能调用 propose_document_edits。',
+      description: '读取本会话 Doc 文档；不提供 artifactId 则列出文档。返回稳定 blockId、版本、块内容和选区。输出按大小分页：若 nextOffset 非空，用它作为 offset 继续读取；blockId 精确读取单块。文字范围是 ProseMirror UTF-16 偏移，图片占 1。修改已有文档只能调用 propose_document_edits。',
       inputSchema: z.object({ artifactId: z.string().optional(), blockId: z.string().optional(), offset: z.number().int().nonnegative().optional(), limit: z.number().int().min(1).max(80).optional() }),
       execute: async ({ artifactId, blockId, offset = 0, limit = 40 }) => {
         if (!artifactId) return { ok: true, documents: (await artifacts.listBySession(sessionId)).filter((a) => a.kind === 'doc').map((a) => ({ artifactId: a.id, name: a.name, version: a.version })) };
@@ -21,9 +25,13 @@ export function createDocumentTools(options: { sessionId: string; projectId?: st
         const content = parseDocumentContent(artifact.content);
         if (!content) return { ok: false, error: '文档格式无效' };
         const blocks = documentBlocks(content);
+        const page = (blockId ? blocks.filter((b) => b.id === blockId) : blocks.slice(offset, offset + limit))
+          .map((b) => ({ ...b, text: b.text.slice(0, MAX_BLOCK_TEXT), truncated: b.text.length > MAX_BLOCK_TEXT }));
+        const shown = takeWithinBudget(page);
+        // Small metadata first, bulky blocks last: a clip can then never drop the version/pending info.
         return { ok: true, artifactId, name: artifact.name, version: artifact.version, selection: references().find((r) => r.artifactId === artifactId)?.selection,
-          totalBlocks: blocks.length, blocks: (blockId ? blocks.filter((b) => b.id === blockId) : blocks.slice(offset, offset + limit)).map((b) => ({ ...b, text: b.text.slice(0, 12000), truncated: b.text.length > 12000 })),
-          pendingReviews: reviews.list(artifactId).filter((r) => r.changes.some((c) => c.status === 'pending')).map((r) => ({ id: r.id, stale: r.stale, changes: r.changes.length })) };
+          pendingReviews: reviews.list(artifactId).filter((r) => r.changes.some((c) => c.status === 'pending')).map((r) => ({ id: r.id, stale: r.stale, changes: r.changes.length })),
+          totalBlocks: blocks.length, returned: shown.length, nextOffset: !blockId && offset + shown.length < blocks.length ? offset + shown.length : null, blocks: shown };
       },
     }),
     generate_document: tool({

@@ -10,7 +10,7 @@ import { Alert, AlertDescription } from '../ui/alert';
 import { useTextArtifact } from './useTextArtifact';
 import PresentationSurface, { type PresentationEditingApi } from './PresentationSurface';
 import ArtifactHistoryDialog from './ArtifactHistoryDialog';
-import { referencePresentation, usePresentationWorkspace } from '../../state/presentationWorkspace';
+import { referencePresentation, usePresentationWorkspace, dropPresentationScope } from '../../state/presentationWorkspace';
 import PresentationReview from './PresentationReview';
 import { createChartInsertElements, createElementInsertElements, createTableInsertElements, createTextInsertElements } from '../../vendor/presenton/insert/insert-elements';
 import { TEMPLATE_V2_INSERT_ELEMENTS_EVENT, TEMPLATE_V2_SURFACE_SELECTED_EVENT, type TemplateV2SurfaceSelectedDetail } from '../../vendor/presenton/events/events';
@@ -45,7 +45,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
     window.addEventListener(TEMPLATE_V2_SURFACE_SELECTED_EVENT, listener); return () => window.removeEventListener(TEMPLATE_V2_SURFACE_SELECTED_EVENT, listener);
   }, [selected?.id]);
   function read(): PresentationContent { const value = parsePresentation(draft.getText()); if (!value) throw new Error('演示稿格式无效'); return value; }
-  function change(next: PresentationContent) { draft.change(JSON.stringify(normalizePresentation(next))); referencePresentation(artifact.sessionId); }
+  function change(next: PresentationContent) { draft.change(JSON.stringify(normalizePresentation(next))); dropPresentationScope(artifact.sessionId); }
   async function act(action: () => Promise<void> | void) {
     if (busy) return; setBusy(true); draft.setError('');
     try { await draft.flush(); await action(); } catch (cause) { draft.setError(cause instanceof Error ? cause.message : '操作失败'); } finally { setBusy(false); }
@@ -70,7 +70,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
       surface.current?.flush(); await draft.waitForSave()?.catch((): void => { /* The recovery download preserves this failed save. */ });
       const url = URL.createObjectURL(new Blob([draft.getText()], { type: 'application/json' }));
       const anchor = document.createElement('a'); anchor.href = url; anchor.download = `${artifact.name}-恢复副本.reizo-ppt.json`; document.body.append(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-      const latest = await api.getArtifact(artifact.id); surface.current = null; draft.load(latest); referencePresentation(artifact.sessionId); setSelection(null);
+      const latest = await api.getArtifact(artifact.id); surface.current = null; draft.load(latest); dropPresentationScope(artifact.sessionId); setSelection(null);
     } catch (cause) { draft.setError(String(cause)); } finally { setBusy(false); }
   }
   function cite(elements: boolean, wholeDeck = false) {
@@ -92,17 +92,17 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
     </div>
     <div className="flex flex-wrap items-center gap-2 border-b border-line p-2" data-inline-edit-ignore="true"><Button size="xs" variant="outline" disabled={busy} onClick={() => cite(true)}>引用选中元素</Button><Button size="xs" variant="ghost" disabled={busy} onClick={() => cite(false)}>引用当前页</Button><Button size="xs" variant="ghost" disabled={busy} onClick={() => cite(false, true)}>引用整稿</Button><span className="text-xs text-ink-muted">{selection?.targetLabel ?? '双击文字编辑，拖动元素调整位置'}</span></div>
     {draft.error && <Alert variant="destructive"><AlertDescription>{draft.error}<div className="mt-2 flex flex-wrap gap-2"><Button size="xs" variant="outline" disabled={busy} onClick={() => void act(() => undefined)}>重试保存</Button><Button size="xs" variant="outline" disabled={busy} onClick={() => void recover()}>下载恢复副本并重新载入</Button></div></AlertDescription></Alert>}
-    <div className="flex min-h-0 flex-1"><aside className="flex w-28 shrink-0 flex-col gap-2 overflow-auto border-r border-line p-2" aria-label="幻灯片列表"><Button size="xs" disabled={busy} onClick={() => void act(() => addSlide())}><Plus data-icon="inline-start" />添加页</Button>{content.slides.map((slide, index) => <button key={slide.id} type="button" aria-label={`第 ${index + 1} 页：${slide.title}`} aria-pressed={selected.id === slide.id} className="rounded border border-line p-1 text-left aria-pressed:border-accent" onClick={() => void act(() => { setSelectedId(slide.id); setSelection(null); referencePresentation(artifact.sessionId); })}><div className="pointer-events-none overflow-hidden"><PresentationSurface slide={slide} index={index} /></div><span className="mt-1 block truncate text-[10px]">{index + 1}. {slide.title}</span></button>)}</aside>
+    <div className="flex min-h-0 flex-1"><aside className="flex w-28 shrink-0 flex-col gap-2 overflow-auto border-r border-line p-2" aria-label="幻灯片列表"><Button size="xs" disabled={busy} onClick={() => void act(() => addSlide())}><Plus data-icon="inline-start" />添加页</Button>{content.slides.map((slide, index) => <button key={slide.id} type="button" aria-label={`第 ${index + 1} 页：${slide.title}`} aria-pressed={selected.id === slide.id} className="rounded border border-line p-1 text-left aria-pressed:border-accent" onClick={() => void act(() => { setSelectedId(slide.id); setSelection(null); dropPresentationScope(artifact.sessionId); })}><div className="pointer-events-none overflow-hidden"><PresentationSurface slide={slide} index={index} /></div><span className="mt-1 block truncate text-[10px]">{index + 1}. {slide.title}</span></button>)}</aside>
       <div className="min-w-0 flex-1 overflow-auto p-3"><div className="mb-3 flex items-center gap-1"><Input aria-label="幻灯片标题" value={selected.title} disabled={busy} onChange={(event) => { const next = read(); const slide = next.slides.find((s) => s.id === selected.id); if (slide) { slide.title = event.target.value; change(next); } }} /><Button size="icon-sm" variant="ghost" aria-label="复制当前页" disabled={busy} onClick={() => void act(() => addSlide(true))}><Copy /></Button><Button size="icon-sm" variant="ghost" aria-label="当前页上移" disabled={busy || content.slides[0].id === selected.id} onClick={() => void act(() => move(-1))}><ArrowUp /></Button><Button size="icon-sm" variant="ghost" aria-label="当前页下移" disabled={busy || content.slides.at(-1)?.id === selected.id} onClick={() => void act(() => move(1))}><ArrowDown /></Button><Button size="icon-sm" variant="ghost" aria-label="删除当前页" disabled={busy || content.slides.length === 1} onClick={() => void act(() => { const next = read(); next.slides = next.slides.filter((s) => s.id !== selected.id); change(next); setSelectedId(next.slides[0].id); })}><Trash2 /></Button></div>
         <div inert={busy} className="overflow-hidden rounded border border-line bg-white"><PresentationSurface key={`${selected.id}:${draft.source.generation}`} slide={initialSlide} index={content.slides.findIndex((s) => s.id === selected.id)} editable editingApiRef={surface} historyCommand={historyCommand} prepare={(layout) => { const next = read(); const slide = next.slides.find((s) => s.id === selected.id); if (slide) slide.layout = layout; return normalizePresentation(next).slides.find((s) => s.id === selected.id)?.layout ?? layout; }} onChange={(layout) => { const next = read(); const slide = next.slides.find((s) => s.id === selected.id); if (slide) { slide.layout = layout; change(next); } }} /></div>
         <PresentationReview reviews={reviews} busy={busy} decide={(review, ids, decision) => void act(async () => {
           try {
             const result = await api.decideArtifactReview(artifact.id, review.id, review.reviewVersion, ids, decision);
-            if (result.artifact.version !== draft.getVersion()) { draft.load(result.artifact); surface.current = null; setSelection(null); referencePresentation(artifact.sessionId); }
+            if (result.artifact.version !== draft.getVersion()) { draft.load(result.artifact); surface.current = null; setSelection(null); dropPresentationScope(artifact.sessionId); }
           } finally { setReviews(await api.listArtifactReviews(artifact.id)); }
         })} />
       </div>
     </div>
-    {history && <ArtifactHistoryDialog artifact={{ ...artifact, version: draft.getVersion() }} close={() => setHistory(false)} flush={draft.flush} getVersion={draft.getVersion} render={(text) => <div className="flex flex-col gap-3 p-3">{parsePresentation(text)?.slides.map((slide, index) => <PresentationSurface key={slide.id} slide={slide} index={index} />)}</div>} restored={async () => { draft.load(await api.getArtifact(artifact.id)); referencePresentation(artifact.sessionId); setSelection(null); }} />}
+    {history && <ArtifactHistoryDialog artifact={{ ...artifact, version: draft.getVersion() }} close={() => setHistory(false)} flush={draft.flush} getVersion={draft.getVersion} render={(text) => <div className="flex flex-col gap-3 p-3">{parsePresentation(text)?.slides.map((slide, index) => <PresentationSurface key={slide.id} slide={slide} index={index} />)}</div>} restored={async () => { draft.load(await api.getArtifact(artifact.id)); dropPresentationScope(artifact.sessionId); setSelection(null); }} />}
   </div>;
 }

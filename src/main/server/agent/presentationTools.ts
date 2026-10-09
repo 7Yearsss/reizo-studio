@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { applyPresentationEdit, normalizePresentation, parsePresentation, presentationElements, PRESENTATION_MIME, type PresentationEdit, type PresentationElement, type PresentationReference } from '../../../shared/presentationContent';
 import type { ArtifactStore } from '../storage/artifactStore';
 import type { ArtifactReviewAdapter, ArtifactReviewStore } from '../storage/artifactReviewStore';
+import { takeWithinBudget } from './readBudget';
 
 const layoutSchema = z.record(z.string(), z.unknown());
 const slideSchema = z.object({ id: z.string().optional(), title: z.string().max(200), layout: layoutSchema, notes: z.string().max(20000).optional() });
@@ -54,12 +55,16 @@ export const presentationReviewAdapter: ArtifactReviewAdapter = {
 export function createPresentationTools(options: { sessionId: string; projectId?: string | null; artifacts: ArtifactStore; reviews: ArtifactReviewStore; getReferences?: () => PresentationReference[] }) {
   const { artifacts, reviews, sessionId } = options;
   return {
-    read_presentation: tool({ description: '读取本会话 PPT；不传 artifactId 列出演示稿。传 slideId/elementId 精确读取，offset/limit 分页。返回最新 version、稳定页与元素 ID、元素属性。图片返回摘要；geometry 单位是 1280×720 画布像素。', inputSchema: z.object({ artifactId: z.string().optional(), slideId: z.string().optional(), elementId: z.string().optional(), offset: z.number().int().nonnegative().optional(), limit: z.number().int().min(1).max(40).optional() }),
+    read_presentation: tool({ description: '读取本会话 PPT；不传 artifactId 列出演示稿。传 slideId/elementId 精确读取；元素按大小分页，nextOffset 非空时用它作为 offset 继续读取。返回最新 version、稳定页与元素 ID、元素属性。图片返回摘要；geometry 单位是 1280×720 画布像素。', inputSchema: z.object({ artifactId: z.string().optional(), slideId: z.string().optional(), elementId: z.string().optional(), offset: z.number().int().nonnegative().optional(), limit: z.number().int().min(1).max(40).optional() }),
       execute: async ({ artifactId, slideId, elementId, offset = 0, limit = 20 }) => {
         if (!artifactId) return { ok: true, presentations: (await artifacts.listBySession(sessionId)).filter((a) => a.kind === 'presentation').map((a) => ({ artifactId: a.id, name: a.name, version: a.version })) };
         const artifact = await artifacts.get(artifactId); if (!artifact || artifact.sessionId !== sessionId || artifact.kind !== 'presentation') return { ok: false, error: '未找到本会话演示稿' };
         const deck = read(artifact.content); const slides = slideId ? deck.slides.filter((s) => s.id === slideId) : deck.slides.slice(0, 1);
-        return { ok: true, artifactId, name: artifact.name, version: artifact.version, canvas: { width: 1280, height: 720 }, slides: deck.slides.map((s) => ({ id: s.id, title: s.title, elements: presentationElements(s).length })), content: slides.map((s) => ({ id: s.id, notes: s.notes, background: s.layout.background, elements: presentationElements(s).filter((e) => !elementId || e.element.id === elementId).slice(offset, offset + limit).map((e) => ({ id: e.element.id, ancestors: e.ancestors, attributes: summary(e.element).slice(0, 6000) })) })), scope: options.getReferences?.().find((r) => r.artifactId === artifactId) };
+        return { ok: true, artifactId, name: artifact.name, version: artifact.version, canvas: { width: 1280, height: 720 }, slides: deck.slides.map((s) => ({ id: s.id, title: s.title, elements: presentationElements(s).length })), content: slides.map((s) => {
+          const all = presentationElements(s).filter((e) => !elementId || e.element.id === elementId);
+          const shown = takeWithinBudget(all.slice(offset, offset + limit).map((e) => ({ id: e.element.id, ancestors: e.ancestors, attributes: summary(e.element).slice(0, 2000) })));
+          return { id: s.id, notes: s.notes, background: s.layout.background, totalElements: all.length, nextOffset: offset + shown.length < all.length ? offset + shown.length : null, elements: shown };
+        }), scope: options.getReferences?.().find((r) => r.artifactId === artifactId) };
       } }),
     generate_presentation: tool({ description: '新建可编辑 PPT。slides[].layout 使用 Template V2：elements 数组，每元素有 type、position:{x,y}、size:{width,height}；text 用 runs:[{text}]、font:{family,size,color,bold}；image 用 data；rectangle/ellipse 用 fill:{color}；坐标 1280×720。修改已有稿必须提出建议。', inputSchema: z.object({ title: z.string().min(1).max(200), slides: z.array(slideSchema).min(1).max(64) }), execute: async ({ title, slides }) => {
       try { const artifact = await artifacts.create({ sessionId, projectId: options.projectId, name: title, kind: 'presentation', mimeType: PRESENTATION_MIME, source: 'generated', origin: { surface: 'chat' }, content: JSON.stringify(normalizePresentation({ schemaVersion: 1, slides })) }); return { ok: true, artifactId: artifact.id, name: artifact.name, version: artifact.version }; } catch (error) { return { ok: false, error: String(error) }; }
@@ -69,7 +74,8 @@ export function createPresentationTools(options: { sessionId: string; projectId?
         const artifact = await artifacts.get(artifactId); if (!artifact || artifact.sessionId !== sessionId || artifact.kind !== 'presentation') return { ok: false, error: '未找到本会话演示稿' };
         const content = read(artifact.content);
         for (const ref of options.getReferences?.().filter((r) => r.artifactId === artifactId) ?? []) {
-          if (ref.version !== artifact.version) throw new Error('引用的页面版本已变化，请重新选择');
+          // Only a slide/element scope is tied to a version; a whole-deck reference just names the deck.
+          if ((ref.slideId || ref.elementIds?.length) && ref.version !== artifact.version) throw new Error('引用的页面版本已变化，请重新选择');
           for (const operation of operations) applyPresentationEdit(content, operation as PresentationEdit, ref);
         }
         const review = await reviews.create({ artifactId, sessionId, expectedVersion, operations, origin: { surface: 'chat' } });

@@ -1,6 +1,6 @@
-import { presentationMentions, usePresentationWorkspace, referencePresentation, selectPresentation } from '../../state/presentationWorkspace';
-import { htmlMentions, useHtmlWorkspace, referenceHtml } from '../../state/htmlWorkspace';
-import { documentMentions, useDocumentWorkspace, referenceDocument, selectDocument } from '../../state/documentWorkspace';
+import { presentationMentions, usePresentationWorkspace, referencePresentation, selectPresentation, dropPresentationScope } from '../../state/presentationWorkspace';
+import { htmlMentions, useHtmlWorkspace, referenceHtml, dropHtmlSelection } from '../../state/htmlWorkspace';
+import { documentMentions, useDocumentWorkspace, referenceDocument, selectDocument, dropDocumentSelection } from '../../state/documentWorkspace';
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import { AtSign, Clapperboard, FolderTree, Paperclip, Image as ImageIcon, Video, Type, Volume2, Bot, Sparkles, BoxSelect, Layers, Pin, Wrench } from 'lucide-react';
 import { isImeComposingEvent } from '../../lib/ime';
@@ -169,6 +169,8 @@ export default function Composer({
       chatStore.clearComposerSeed(sessionId);
       chatStore.clearNodeRefs(sessionId);
       clearPinnedSheets(sessionId);
+      // A picked range / slide / element is spent once sent; the file itself stays referenced as a whole.
+      dropDocumentSelection(sessionId); dropHtmlSelection(sessionId); dropPresentationScope(sessionId);
       chatStore.setPickingReference(sessionId, false);
     }
   }
