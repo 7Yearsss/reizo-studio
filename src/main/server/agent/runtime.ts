@@ -4,6 +4,7 @@ import { createHtmlTools } from './htmlTools';
 import { parseHtmlReferences, splitHtmlContext, wrapHtmlContext } from '../../../shared/htmlReferences';
 import type { ArtifactReviewStore } from '../storage/artifactReviewStore';
 import { createDocumentTools } from './documentTools';
+import { describeSessionArtifacts } from './sessionArtifactsHint';
 import { parseDocumentReferences, splitDocumentContext, wrapDocumentContext } from '../../../shared/documentReferences';
 import { isStepCount, streamText, type ModelMessage } from 'ai';
 import { nanoid } from 'nanoid';
@@ -331,6 +332,8 @@ export async function runChatTurn(options: {
   const computerEnabled =
     Boolean(dataRoot) && settings.computerUse === true && isComputerUseSupported();
 
+  const sessionArtifactsHint = artifactStore && options.artifactReviews ? await describeSessionArtifacts(artifactStore, sessionId) : '';
+
   const systemParts = [
     workspacePath
       ? `You are Reizo Studio, a local desktop agent that finishes real work in the user's files. The workspace is at: ${workspacePath}. For workspace tasks prefer tools over guessing: use list_dir/read_file/find_files/grep to inspect, edit_file/write_file to change files, run_command for tests and git, ask_user when you need a choice, todo_write for a visible plan, and memory_read/memory_write/memory_delete for durable memory files (indexed in MEMORY.md). Greetings, small talk, and questions you can answer from this prompt get a direct reply with no tool calls; the memory index below is already loaded, so only memory_read a file whose description matters for the current task.`
@@ -351,6 +354,7 @@ export async function runChatTurn(options: {
     'When a request needs a visual direction (mood, palette, typography) before you generate or design something, call ask_user with kind:"direction" and 2-4 `directions` cards (title, palette hex list, displayFont/bodyFont stacks, one-line mood, real-world references) so the user picks by looking. If a direction maps to a node already on the canvas (e.g. a draft image the user can inspect), set the card\'s `nodeId` so the card shows that node\'s real thumbnail. To show real draft images on the cards: add the draft nodes directly (never asProposal — proposals need manual acceptance and stay idle), call run_node on each, and wait until their outputs land before sending the direction question. When a skill mentions preset sample images, set the card\'s `imageUrl` to the given `skill-asset:` URL instead.',
     options.artifactReviews ? 'For editable PPT decks use generate_presentation. Read existing slide and element IDs with read_presentation, then propose_presentation_edits. Keep edits within referenced pages/elements and wait for user review. Never bypass review through shell, files, or HTTP.' : '',
     options.artifactReviews ? 'Use generate_html for new editable HTML pages. For changes read_html then propose_html_edits. Do not bypass review with file writes, shell commands, or HTTP requests.' : '',
+    sessionArtifactsHint,
     options.artifactReviews ? 'For editable documents use generate_document. Before modifying an existing Doc call read_document, then propose_document_edits with the current version and stable block IDs. Proposals do not change the original. Only the user may accept or reject in the Doc panel. Never use file writes, shell commands, or HTTP calls to bypass document review. Respect referenced selected ranges.' : '',
     artifactStore
       ? 'When the user asks for a flowchart, sequence diagram, system architecture diagram, or mind map, call generate_diagram with Mermaid syntax to produce an interactive Excalidraw canvas artifact in the right panel. When the user asks for a spreadsheet, budget, financial report, or table calculation, call generate_sheet with rows, columns, and formulas to render a full-featured Excel sheet artifact in the right panel.'
