@@ -1,17 +1,19 @@
-import { isStepCount, streamText, tool } from 'ai';
-import { z } from 'zod';
+import { isStepCount, streamText } from 'ai';
 import type { CanvasAgentParams, CanvasNode } from '../../../shared/canvas';
-import { getProviderPreset } from '../../../shared/providers';
+import { resolveSettingsModel } from '../providerResolver';
+import { usageFetch } from '../agent/provider/usageFetch';
 import { createOpenAiModel } from '../agent/provider/openai';
 import type { SettingsStore } from '../storage/settingsStore';
 import type { CanvasStore } from '../storage/canvasStore';
 import { getCanvasChannel } from './channel';
 import { broadcastDownstreamDirty } from './imageExecutor';
-import { readCanvasAsset } from './assets';
+import { readOnlyCanvasTools, upstreamContext, collectUpstreamImages } from './agentNodeContext';
+import { nodeJobsFor, type NodeJobContext, type NodeJobSubmission } from './nodeJobs';
+import { llmSchedulerFor } from '../agent/provider/quotaFetch';
+import { CanvasJobStoreError } from '../storage/canvasJobStore';
+import { redactSecrets } from '../../../shared/redactSecrets';
 import { inputHash } from './graph';
-import { canvasWorkSignal, canvasWorkStopped } from './workLifecycle';
-
-const activeAgents = new WeakMap<CanvasStore, Map<string, symbol>>();
+import { canvasWorkStopped } from './workLifecycle';
 
 /** How often streaming text is flushed onto the canvas channel. */
 const FLUSH_INTERVAL_MS = 400;
@@ -24,92 +26,6 @@ function isAgentParams(value: unknown): value is CanvasAgentParams {
   );
 }
 
-/** Read-only canvas introspection, scoped to one canvas id (no writes, no session). */
-function readOnlyCanvasTools(canvasStore: CanvasStore, canvasId: string, canRead: () => boolean) {
-  const brief = (node: CanvasNode) => {
-    const params = node.params as Record<string, unknown>;
-    return {
-      id: node.id,
-      type: node.type,
-      title: node.title || null,
-      runState: node.runState,
-      prompt: typeof params.prompt === 'string' ? params.prompt : undefined,
-      instruction: typeof params.instruction === 'string' ? params.instruction : undefined,
-      assetCount: node.output?.assets?.length ?? 0,
-      text: node.output?.text,
-      error: node.output?.error,
-    };
-  };
-  return {
-    read_canvas: tool({
-      description: 'List every node on this canvas with its type, run state, prompt/instruction and outputs, plus the edges.',
-      inputSchema: z.object({}),
-      execute: async () => {
-        if (!canRead()) return { error: 'Run stopped' };
-        const snap = canvasStore.getSnapshot(canvasId);
-        return {
-          nodes: (snap?.nodes ?? []).map(brief),
-          edges: (snap?.edges ?? []).map((e) => ({ source: e.sourceId, target: e.targetId })),
-        };
-      },
-    }),
-    read_node: tool({
-      description: 'Read one canvas node in full by id (params, run state, output text/assets/error).',
-      inputSchema: z.object({ id: z.string() }),
-      execute: async ({ id }) => {
-        if (!canRead()) return { error: 'Run stopped' };
-        const node = canvasStore.getNode(canvasId, id);
-        return node ? brief(node) : { error: `No canvas node "${id}"` };
-      },
-    }),
-  };
-}
-
-/** Compact context describing what feeds this agent node. */
-function upstreamContext(canvasStore: CanvasStore, canvasId: string, nodeId: string): string {
-  const upstream = canvasStore.upstreamNodes(canvasId, nodeId);
-  if (upstream.length === 0) return '';
-  const lines = upstream.map((n) => {
-    const p = n.params as Record<string, unknown>;
-    if (n.type === 'image') {
-      const assets = n.output?.assets?.length ?? 0;
-      return `- [image node ${n.id}] prompt: "${typeof p.prompt === 'string' ? p.prompt : ''}" (${assets} image(s) generated)`;
-    }
-    const text = n.output?.text ? `\n  result: ${n.output.text.slice(0, 800)}` : '';
-    return `- [agent node ${n.id}] task: "${typeof p.instruction === 'string' ? p.instruction : ''}"${text}`;
-  });
-  return `Connected input nodes:\n${lines.join('\n')}`;
-}
-
-async function collectUpstreamImages(
-  canvasStore: CanvasStore,
-  dataRoot: string | undefined,
-  canvasId: string,
-  nodeId: string,
-  canRead: () => boolean,
-): Promise<Array<{ bytes: Uint8Array; mediaType: string }>> {
-  if (!dataRoot || !canRead()) return [];
-  const upstream = canvasStore.upstreamNodes(canvasId, nodeId);
-  const out: Array<{ bytes: Uint8Array; mediaType: string }> = [];
-  for (const node of upstream) {
-    if (node.type !== 'image') continue;
-    const assets = node.output?.assets ?? [];
-    for (const rel of assets.slice(0, 2)) {
-      try {
-        const buf = await readCanvasAsset(dataRoot, rel);
-        if (!canRead()) return [];
-        const lower = rel.toLowerCase();
-        const mediaType = lower.endsWith('.jpg') || lower.endsWith('.jpeg') ? 'image/jpeg' : 'image/png';
-        out.push({ bytes: new Uint8Array(buf), mediaType });
-      } catch {
-        if (!canRead()) return [];
-        /* skip unreadable asset */
-      }
-    }
-  }
-  return out;
-}
-
 /**
  * Run one "agent" canvas node: a headless, isolated sub-agent pass with a
  * read-only toolset (`read_canvas` / `read_node`). It does not see the chat
@@ -118,44 +34,57 @@ async function collectUpstreamImages(
  *
  * Fire-and-forget, same contract as `runImageNode`.
  */
-export async function runAgentNode(options: {
-  canvasStore: CanvasStore;
-  settingsStore: SettingsStore;
-  canvasId: string;
-  node: CanvasNode;
-  providerId?: string;
-  signal?: AbortSignal;
-  dataRoot?: string;
-}): Promise<void> {
+export interface AgentNodeOptions {
+  canvasStore: CanvasStore; settingsStore: SettingsStore; canvasId: string; node: CanvasNode;
+  providerId?: string; operationId?: string; signal?: AbortSignal; dataRoot?: string;
+}
+
+function projectFailure(options: AgentNodeOptions, job: NodeJobContext, message: string) {
+  const { canvasStore, canvasId, node } = options;
+  const result = job.finish('failed', () => canvasStore.updateNode(canvasId, node.id, {
+    runState: 'error', output: { ...canvasStore.getNode(canvasId, node.id)?.output, error: redactSecrets(message) },
+  }), { error: redactSecrets(message) });
+  if (result) getCanvasChannel(canvasId).broadcast(result.rev, { type: 'node_updated', node: result.node });
+}
+
+export function startAgentNode(options: AgentNodeOptions): NodeJobSubmission {
+  const { canvasStore, canvasId } = options;
+  const runtime = nodeJobsFor(canvasStore);
+  const receipt = runtime.replay(canvasId, options.node.id, options.operationId, options.providerId, 'agent');
+  if (receipt) return receipt;
+  const node = canvasStore.getNode(canvasId, options.node.id);
+  if (!node || node.type !== 'agent') throw new CanvasJobStoreError('Agent node not found', 404);
+  const input = structuredClone({ request: { providerId: options.providerId }, node,
+    upstream: canvasStore.upstreamNodes(canvasId, node.id) });
+  return runtime.start({ canvasId, nodeId: node.id, nodeType: 'agent', operationId: options.operationId,
+    signal: options.signal, input, inputHash: inputHash(input.node, input.upstream),
+    execute: (job) => executeAgentNode({ ...options, node: input.node }, input.upstream, job),
+    onFailure: (error, job) => projectFailure(options, job, error instanceof Error ? error.message : String(error)),
+    onCancelled: (reason) => {
+      const current = canvasStore.getNode(canvasId, node.id);
+      if (!current) return;
+      const output = { ...current.output }; delete output.error;
+      if (reason === 'interrupted') output.error = 'Agent 因应用退出而中断，请手动重试。';
+      const result = canvasStore.updateNode(canvasId, node.id, { runState: reason === 'interrupted' ? 'error' : 'idle', output });
+      if (!result) throw new Error('Agent cancellation could not update its node');
+      return () => getCanvasChannel(canvasId).broadcast(result.rev, { type: 'node_updated', node: result.node });
+    },
+  });
+}
+
+export async function runAgentNode(options: AgentNodeOptions): Promise<void> {
+  if (canvasWorkStopped(options.canvasStore) || options.signal?.aborted) return;
+  await startAgentNode(options).completion;
+}
+
+async function executeAgentNode(options: AgentNodeOptions, upstream: CanvasNode[], job: NodeJobContext): Promise<void> {
   const { canvasStore, settingsStore, canvasId, node, dataRoot } = options;
-  if (canvasWorkStopped(canvasStore) || options.signal?.aborted) return;
-  let active = activeAgents.get(canvasStore);
-  if (!active) { active = new Map(); activeAgents.set(canvasStore, active); }
-  const key = `${canvasId}:${node.id}`;
-  const token = Symbol('agent');
-  active.set(key, token);
-  const signal = AbortSignal.any([canvasWorkSignal(canvasStore), ...(options.signal ? [options.signal] : [])]);
-  const isCurrent = () => !canvasWorkStopped(canvasStore) && active.get(key) === token;
-  const canRun = () => isCurrent() && !signal.aborted;
+  const signal = job.signal;
+  const isCurrent = job.isCurrent;
+  const canRun = () => isCurrent() && Boolean(canvasStore.getNode(canvasId, node.id));
   const channel = getCanvasChannel(canvasId);
 
-  const fail = (message: string) => {
-    if (!isCurrent()) return;
-    const res = canvasStore.updateNode(canvasId, node.id, {
-      runState: 'error',
-      output: { ...(canvasStore.getNode(canvasId, node.id)?.output ?? {}), error: message },
-    });
-    if (res) {
-      channel.broadcast(res.rev, {
-        type: 'node_output',
-        id: node.id,
-        output: res.node.output ?? { error: message },
-        runState: 'error',
-      });
-      broadcastDownstreamDirty(canvasStore, canvasId, node.id, res.rev);
-    }
-    if (active.get(key) === token) active.delete(key);
-  };
+  const fail = (message: string) => projectFailure(options, job, message);
 
   if (!isAgentParams(node.params) || !node.params.instruction.trim()) {
     fail('Agent node has no instruction');
@@ -163,31 +92,23 @@ export async function runAgentNode(options: {
   }
   const instruction = node.params.instruction.trim();
 
-  const running = canvasStore.updateNode(canvasId, node.id, { runState: 'running', output: null });
+  const running = canvasStore.updateNode(canvasId, node.id, { runState: 'running' });
   if (running) channel.broadcast(running.rev, { type: 'run_state', id: node.id, runState: 'running' });
 
+  let release: (() => void) | undefined;
   try {
     const settings = await settingsStore.get();
     if (!canRun()) return;
-    const providerId = options.providerId || settings.activeProviderId || 'openai';
-    const preset = getProviderPreset(providerId);
-    const stored = settings.providers?.[providerId];
-    if (!preset || !stored?.apiKey) {
-      fail(`No API key configured for ${preset?.name ?? providerId}. Add one in Settings.`);
-      return;
-    }
-    const modelId = stored.model || preset.defaultModel;
-    const baseUrl = stored.baseUrl || preset.baseUrl;
-    if (!modelId || !baseUrl) {
-      fail('Provider is missing a base URL or model id.');
-      return;
-    }
+    const { providerId, modelId, apiKey, baseUrl } = resolveSettingsModel(settings, { category: 'llm', providerId: options.providerId });
 
-    const upstream = canvasStore.upstreamNodes(canvasId, node.id);
-    const context = upstreamContext(canvasStore, canvasId, node.id);
-    const model = createOpenAiModel({ apiKey: stored.apiKey, modelId, baseUrl });
+    release = await llmSchedulerFor(canvasStore).acquire(providerId, signal);
+    if (!canRun()) return;
+    const context = upstreamContext(upstream);
+    const model = createOpenAiModel({ apiKey, modelId, baseUrl, fetch: usageFetch(canvasStore.usage, {
+      executionId: `job:${job.id}`, jobId: job.id, canvasId, nodeId: node.id, providerId, model: modelId, category: 'llm', accepting: () => !canvasWorkStopped(canvasStore),
+    }) });
 
-    const upstreamImages = await collectUpstreamImages(canvasStore, dataRoot, canvasId, node.id, canRun);
+    const upstreamImages = await collectUpstreamImages(dataRoot, upstream, canRun);
     if (!canRun()) return;
     const textPrompt = context ? `${instruction}\n\n${context}` : instruction;
 
@@ -204,7 +125,9 @@ export async function runAgentNode(options: {
           ]
         : textPrompt;
 
+    if (!job.markSubmitted({ providerId, model: modelId })) return;
     const result = streamText({
+      maxRetries: 0,
       model,
       instructions:
         'You are a research / critique sidecar attached to a node on a visual canvas. ' +
@@ -249,11 +172,9 @@ export async function runAgentNode(options: {
       fail('The agent returned an empty answer');
       return;
     }
-    const done = canvasStore.updateNode(canvasId, node.id, {
-      runState: 'done',
-      output: { text },
-      paramsHash: inputHash(node, upstream),
-    });
+    const done = job.finish('succeeded', () => canvasStore.updateNode(canvasId, node.id, {
+      runState: 'done', output: { text }, paramsHash: inputHash(node, upstream),
+    }), { result: { text } });
     if (done) {
       channel.broadcast(done.rev, {
         type: 'node_output',
@@ -272,6 +193,6 @@ export async function runAgentNode(options: {
     fail(err instanceof Error ? err.message : String(err));
   } finally {
     if (isCurrent() && signal.aborted) fail('Run stopped');
-    if (active.get(key) === token) active.delete(key);
+    release?.();
   }
 }

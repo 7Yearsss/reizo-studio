@@ -21,6 +21,8 @@ import {
 import { cn } from '../../lib/cn';
 import { Switch } from '../../components/motion/switch';
 import { toast } from '../../lib/toast';
+import { Alert, AlertDescription, AlertTitle } from '../../components/ui/alert';
+import { Button } from '../../components/ui/button';
 import * as api from '../../api';
 import { loadProviderCatalog } from '../../state/providerCatalogStore';
 import {
@@ -29,7 +31,9 @@ import {
   type ProviderCategory,
 } from '../../../shared/providerRegistry';
 
-export function AdminProvidersSection() {
+const runsFromRegistry = (category?: ProviderCategory) => category === 'audio' || category === 'video';
+
+export function AdminProvidersSection({ onOpenSystemProviders }: { onOpenSystemProviders?: () => void } = {}) {
   const [passkey, setPasskey] = useState('');
   const [unlocked, setUnlocked] = useState(false);
   const [verifying, setVerifying] = useState(false);
@@ -78,6 +82,7 @@ export function AdminProvidersSection() {
   }
 
   async function handleSetDefault(p: ManagedProviderConfig) {
+    if (!runsFromRegistry(p.category)) { toast.info('图片与对话请到模型供应商设置配置；此登记项当前未接入运行'); return; }
     try {
       await api.setDefaultAdminProvider(passkey, p.category, p.id);
       await fetchProviders(passkey);
@@ -121,13 +126,16 @@ export function AdminProvidersSection() {
       toast.error('请填写完整的服务商 ID、名称、模态与驱动类型');
       return;
     }
+    const existing = providers.find((provider) => provider.id === item.id);
+    if (!existing && !runsFromRegistry(item.category)) { toast.error('新建运行配置当前仅支持语音和视频'); return; }
+    if (existing && !runsFromRegistry(existing.category) && (item.category !== existing.category || item.isDefault !== existing.isDefault)) { toast.error('旧图片与对话登记仅供保留，不能改为运行默认'); return; }
     try {
       await api.saveAdminProvider(passkey, item as any);
       setModalOpen(false);
       setEditingProvider(null);
       await fetchProviders(passkey);
       void loadProviderCatalog(true);
-      toast.success(`服务商 ${item.name} 配置已保存`);
+      toast.success(runsFromRegistry(item.category) ? `服务商 ${item.name} 配置已保存` : `登记 ${item.name} 已保存，当前未接入运行`);
     } catch (err: any) {
       toast.error(err.message || '保存配置失败');
     }
@@ -141,8 +149,9 @@ export function AdminProvidersSection() {
         </div>
         <h2 className="mb-1 text-lg font-semibold text-ink">平台管理中心门禁</h2>
         <p className="mb-6 text-xs text-ink-muted">
-          管理后台集中配置各模态的 Master API Key 与样例参数模板。为了防止密钥泄漏，需要管理员口令解锁。
+          管理已接入的语音和视频配置。图片与对话请到系统模型供应商设置；查看登记密钥需要管理员口令。
         </p>
+        {onOpenSystemProviders ? <Button type="button" variant="ghost" size="xs" className="mb-3" onClick={onOpenSystemProviders}>打开模型供应商设置</Button> : null}
 
         <div className="w-full space-y-3">
           <input
@@ -170,6 +179,7 @@ export function AdminProvidersSection() {
   const filteredProviders = providers.filter(
     (p) => categoryFilter === 'all' || p.category === categoryFilter,
   );
+  const editingExisting = providers.find((provider) => provider.id === editingProvider?.id);
 
   return (
     <div className="max-w-4xl space-y-6">
@@ -220,6 +230,8 @@ export function AdminProvidersSection() {
         </div>
       </div>
 
+      <Alert><AlertTitle>配置支持范围</AlertTitle><AlertDescription><p>语音和视频从此登记读取运行配置。图片与对话从系统“模型供应商”设置读取，此处已有登记会保留，当前未接入运行。</p>{onOpenSystemProviders ? <Button type="button" variant="outline" size="sm" onClick={onOpenSystemProviders}>打开模型供应商设置</Button> : null}</AlertDescription></Alert>
+
       {/* Category Tabs */}
       <div className="flex items-center gap-1.5 border-b border-line/60 pb-2 text-xs">
         {(
@@ -260,6 +272,7 @@ export function AdminProvidersSection() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {filteredProviders.map((p) => {
             const isTesting = testTestingId === p.id;
+            const runnable = runsFromRegistry(p.category);
             return (
               <div
                 key={p.id}
@@ -271,7 +284,7 @@ export function AdminProvidersSection() {
                       <h3 className="font-medium text-ink text-sm">{p.name}</h3>
                       {p.isDefault ? (
                         <span className="inline-flex items-center gap-0.5 rounded bg-accent/15 px-1.5 py-0.2 text-[10px] font-semibold text-accent">
-                          <Star size={9} className="fill-current" /> 默认
+                          <Star size={9} className="fill-current" /> {runnable ? '默认' : '已存默认标记'}
                         </span>
                       ) : null}
                     </div>
@@ -284,6 +297,7 @@ export function AdminProvidersSection() {
                   <p className="text-xs text-ink-muted line-clamp-2 mb-3">
                     {p.description || '暂无描述'}
                   </p>
+                  {!runnable ? <p className="mb-3 text-xs leading-relaxed text-ink-muted">当前仅保存，未接入运行；生成与对话请到模型供应商设置配置。</p> : null}
 
                   <div className="space-y-1.5 rounded-lg bg-paper-inset/60 p-2.5 text-[11px] text-ink-muted font-mono">
                     <div className="flex items-center justify-between">
@@ -312,7 +326,7 @@ export function AdminProvidersSection() {
 
                 <div className="mt-4 flex items-center justify-between pt-2 border-t border-line/50 text-xs">
                   <div className="flex items-center gap-1.5">
-                    {!p.isDefault ? (
+                    {!p.isDefault && runnable ? (
                       <button
                         type="button"
                         onClick={() => void handleSetDefault(p)}
@@ -324,7 +338,8 @@ export function AdminProvidersSection() {
                     <button
                       type="button"
                       onClick={() => void handleTest(p.id, p.name)}
-                      disabled={isTesting}
+                      disabled={isTesting || !runnable}
+                      title={!runnable ? '此登记当前未接入运行' : '测试已接入的运行配置'}
                       className="flex items-center gap-1 rounded px-2 py-1 text-ink-muted hover:bg-paper-inset hover:text-ink transition-colors text-[11px]"
                     >
                       {isTesting ? <Loader2 size={11} className="animate-spin" /> : <Activity size={11} />}
@@ -377,12 +392,14 @@ export function AdminProvidersSection() {
               </button>
             </div>
 
+            {editingExisting && !runsFromRegistry(editingExisting.category) ? <Alert><AlertTitle>保留的登记配置</AlertTitle><AlertDescription>此项当前未被图片或对话执行器读取。保存只更新登记内容；实际运行配置请到模型供应商设置。</AlertDescription></Alert> : null}
+
             {/* Quick template loader */}
             {!providers.some((p) => p.id === editingProvider.id) ? (
               <div className="rounded-lg bg-paper-inset/70 p-3 text-xs space-y-1.5">
                 <span className="font-medium text-ink">从官方模板快速填充：</span>
                 <div className="flex flex-wrap gap-1.5 pt-1">
-                  {DEFAULT_PROVIDER_TEMPLATES.map((tmpl) => (
+                  {DEFAULT_PROVIDER_TEMPLATES.filter((template) => runsFromRegistry(template.category)).map((tmpl) => (
                     <button
                       key={tmpl.id}
                       type="button"
@@ -408,6 +425,7 @@ export function AdminProvidersSection() {
                 <input
                   type="text"
                   value={editingProvider.id ?? ''}
+                  disabled={Boolean(editingExisting)}
                   onChange={(e) => setEditingProvider({ ...editingProvider, id: e.target.value })}
                   placeholder="如: minimax-audio-prod"
                   className="w-full rounded-lg border border-line bg-paper-inset px-3 py-1.5 text-xs text-ink font-mono"
@@ -430,6 +448,7 @@ export function AdminProvidersSection() {
                   <label className="block text-ink-muted mb-1">模态类型</label>
                   <select
                     value={editingProvider.category ?? 'audio'}
+                    disabled={Boolean(editingExisting && !runsFromRegistry(editingExisting.category))}
                     onChange={(e) =>
                       setEditingProvider({
                         ...editingProvider,
@@ -440,8 +459,8 @@ export function AdminProvidersSection() {
                   >
                     <option value="audio">语音 (Audio)</option>
                     <option value="video">视频 (Video)</option>
-                    <option value="image">图片 (Image)</option>
-                    <option value="llm">语言模型 (LLM)</option>
+                    {editingExisting?.category === 'image' ? <option value="image">图片（当前仅保存）</option> : null}
+                    {editingExisting?.category === 'llm' ? <option value="llm">对话（当前仅保存）</option> : null}
                   </select>
                 </div>
 
@@ -547,6 +566,7 @@ export function AdminProvidersSection() {
               <div className="flex items-center gap-6 pt-2 text-xs text-ink">
                 <Switch
                   checked={editingProvider.isDefault ?? false}
+                  disabled={!runsFromRegistry(editingProvider.category)}
                   onCheckedChange={(v) =>
                     setEditingProvider({ ...editingProvider, isDefault: v })
                   }
@@ -558,7 +578,7 @@ export function AdminProvidersSection() {
                   onCheckedChange={(v) =>
                     setEditingProvider({ ...editingProvider, enabled: v })
                   }
-                  label="启用该服务商"
+                  label={runsFromRegistry(editingProvider.category) ? '启用该服务商' : '启用标记（未接入运行）'}
                   ariaLabel="启用该服务商"
                 />
               </div>

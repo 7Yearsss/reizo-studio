@@ -13,10 +13,15 @@ import Tooltip from '../ui/Tooltip';
 import CanvasSkeleton from '../canvas/CanvasSkeleton';
 import { lazyWithRetry } from '../../lib/lazyWithRetry';
 import { setPanelResizing } from '../../lib/panelResize';
+import CanvasPerformanceProbe from '../canvas/CanvasPerformanceProbe';
 
 // Heavy panels are code-split so the drawer shell never waits on their bundle.
 const CanvasPanel = lazyWithRetry(() => import('../canvas/CanvasPanel'));
 const ArtifactPanel = lazyWithRetry(() => import('./ArtifactPanel'));
+const SheetPanel = lazyWithRetry(() => import('./SheetPanel'));
+const DocumentPanel = lazyWithRetry(() => import('./DocumentPanel'));
+const HtmlPanel = lazyWithRetry(() => import('./HtmlPanel'));
+const PresentationPanel = lazyWithRetry(() => import('./PresentationPanel'));
 
 const PANEL_DURATION = 0.22;
 const PANEL_EASE: [number, number, number, number] = [0.16, 1, 0.3, 1];
@@ -151,8 +156,10 @@ export default function RightPanel({
   return (
     <motion.aside
       ref={asideRef}
+      aria-label={activeTab === 'canvas' ? '画布工作区' : '工具面板'}
+      data-canvas-workspace={activeTab === 'canvas' ? '' : undefined}
       initial={{ width: 0, opacity: 0, x: 24 }}
-      animate={{ width: maximized ? '100%' : storedWidth, opacity: 1, x: 0 }}
+      animate={{ width: isPresent ? (maximized ? '100%' : storedWidth) : 0, opacity: isPresent ? 1 : 0, x: isPresent ? 0 : 24 }}
       exit={{ width: 0, opacity: 0, x: 24 }}
       transition={
         isDragging || instantCommit.current
@@ -188,6 +195,12 @@ export default function RightPanel({
       {rightSlot &&
         createPortal(
           <div className="ml-1 flex items-center gap-0.5 border-l border-line/60 pl-1.5">
+              <Tooltip content={maximized ? '还原宽度' : '最大化面板'} side="bottom">
+                <button type="button" onClick={() => uiStore.toggleRightPanelMaximized()} aria-label={maximized ? '还原宽度' : '最大化面板'}
+                  className="rounded-full p-1.5 text-ink-muted transition-colors hover:bg-paper-inset/70 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent">
+                  {maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+                </button>
+              </Tooltip>
               <Tooltip content="关闭面板" side="bottom">
                 <button
                   type="button"
@@ -201,17 +214,6 @@ export default function RightPanel({
             </div>,
           rightSlot,
         )}
-      {/* Maximize floats inside the panel corner — the title bar only carries close */}
-      <Tooltip content={maximized ? '还原宽度' : '最大化面板'} side="left">
-        <button
-          type="button"
-          onClick={() => uiStore.toggleRightPanelMaximized()}
-          className="absolute bottom-3 right-3 z-30 rounded-full bg-paper-raised/80 p-1.5 text-ink-muted shadow-sm backdrop-blur-sm transition-colors hover:bg-paper-inset hover:text-ink"
-          aria-label={maximized ? '还原宽度' : '最大化面板'}
-        >
-          {maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-        </button>
-      </Tooltip>
       <div className="min-h-0 flex-1 bg-sidebar">
         {activeTab === 'canvas' &&
           (showContent && sessionId ? (
@@ -230,12 +232,17 @@ export default function RightPanel({
                 <ArtifactPanel sessionId={sessionId} />
               </Suspense>
             )}
+            {activeTab === 'sheets' && sessionId && <Suspense fallback={null}><SheetPanel key={sessionId} sessionId={sessionId} /></Suspense>}
+            {activeTab === 'documents' && sessionId && <Suspense fallback={null}><DocumentPanel key={sessionId} sessionId={sessionId} /></Suspense>}
+            {activeTab === 'html' && sessionId && <Suspense fallback={null}><HtmlPanel key={sessionId} sessionId={sessionId} /></Suspense>}
+            {activeTab === 'presentations' && sessionId && <Suspense fallback={null}><PresentationPanel key={sessionId} sessionId={sessionId} /></Suspense>}
             {activeTab === 'files' && <DirectoryPanel embedded />}
             {activeTab === 'git' && <GitPanel />}
             {activeTab === 'terminal' && <TerminalPanel />}
           </>
         )}
       </div>
+      {activeTab === 'canvas' && import.meta.env.DEV && new URLSearchParams(window.location.search).has('canvas-perf') ? <CanvasPerformanceProbe key={sessionId} /> : null}
     </motion.aside>
   );
 }

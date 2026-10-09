@@ -1,20 +1,30 @@
 import { useEffect, useRef, useState } from 'react';
-import { Play, Pause, SkipForward, SkipBack, RotateCcw, X, Film, Download, Copy, Check } from 'lucide-react';
+import { Play, Pause, SkipForward, SkipBack, RotateCcw, X, Film, Download, Copy, Check, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { CanvasNode, CanvasVideoParams } from '../../../shared/canvas';
 import { canvasAssetUrl } from '../../api';
 import { cn } from '../../lib/cn';
+import CompositionExport from './CompositionExport';
+import { selectedAsset } from '../../../shared/canvasReferences';
 
 interface StoryboardModalProps {
   nodes: CanvasNode[];
   onClose: () => void;
+  sessionId: string;
+  onComposeAccepted: () => void;
 }
 
-export default function StoryboardModal({ nodes, onClose }: StoryboardModalProps) {
+export default function StoryboardModal({ nodes, onClose, sessionId, onComposeAccepted }: StoryboardModalProps) {
   // Filter only video nodes with assets
-  const videoClips = nodes.filter((n) => {
+  const available = nodes.filter((n) => {
     const assets = (n.output?.assets as string[]) || [];
     return n.type === 'video' && assets.length > 0;
   });
+  const [clipOrder, setClipOrder] = useState<string[] | null>(null);
+  const defaultOrder = [...available].sort((a, b) => a.x - b.x || a.y - b.y).map((node) => node.id);
+  const order = clipOrder ? [...clipOrder, ...defaultOrder.filter((id) => !clipOrder.includes(id))] : defaultOrder;
+  const byId = new Map(available.map((node) => [node.id, node]));
+  const videoClips = order.map((id) => byId.get(id)).filter((node): node is CanvasNode => Boolean(node));
+  const assetKey = videoClips.map((node) => `${node.id}:${selectedAsset(node)}`).join('|');
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
@@ -26,8 +36,8 @@ export default function StoryboardModal({ nodes, onClose }: StoryboardModalProps
   useEffect(() => {
     let active = true;
     for (const node of videoClips) {
-      const rel = (node.output?.assets as string[])?.[0];
-      if (rel && !videoUrls[node.id]) {
+      const rel = selectedAsset(node);
+      if (rel) {
         void canvasAssetUrl(rel).then((u) => {
           if (active && u) {
             setVideoUrls((prev) => ({ ...prev, [node.id]: u }));
@@ -38,7 +48,7 @@ export default function StoryboardModal({ nodes, onClose }: StoryboardModalProps
     return () => {
       active = false;
     };
-  }, [videoClips, videoUrls]);
+  }, [assetKey]);
 
   const currentClip = videoClips[currentIndex];
   const currentUrl = currentClip ? videoUrls[currentClip.id] : null;
@@ -122,6 +132,7 @@ export default function StoryboardModal({ nodes, onClose }: StoryboardModalProps
         </div>
 
         <div className="flex items-center gap-2">
+          <CompositionExport sessionId={sessionId} nodeIds={videoClips.map((node) => node.id)} onAccepted={onComposeAccepted} />
           <button
             type="button"
             onClick={copyScriptOverview}
@@ -230,8 +241,8 @@ export default function StoryboardModal({ nodes, onClose }: StoryboardModalProps
               const p = (clip.params as unknown as CanvasVideoParams) || ({} as Partial<CanvasVideoParams>);
               const isCurrent = idx === currentIndex;
               return (
+                <div key={clip.id} className="group w-40 shrink-0">
                 <button
-                  key={clip.id}
                   type="button"
                   onClick={() => setCurrentIndex(idx)}
                   className={cn(
@@ -266,6 +277,17 @@ export default function StoryboardModal({ nodes, onClose }: StoryboardModalProps
                     </p>
                   </div>
                 </button>
+                <div className="mt-1 flex justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none">
+                  {[-1, 1].map((direction) => <button key={direction} type="button" disabled={idx + direction < 0 || idx + direction >= videoClips.length}
+                    aria-label={`${direction < 0 ? '前移' : '后移'}${clip.title || `镜头 ${idx + 1}`}`} title={direction < 0 ? '前移镜头' : '后移镜头'}
+                    className="rounded-md p-1 text-white/70 hover:bg-white/10 hover:text-white disabled:opacity-30"
+                    onClick={() => {
+                      const ids = videoClips.map((node) => node.id); const activeId = videoClips[currentIndex]?.id;
+                      [ids[idx], ids[idx + direction]] = [ids[idx + direction], ids[idx]];
+                      setClipOrder(ids); if (activeId) setCurrentIndex(ids.indexOf(activeId));
+                    }}>{direction < 0 ? <ChevronLeft size={12} /> : <ChevronRight size={12} />}</button>)}
+                </div>
+                </div>
               );
             })}
           </div>

@@ -224,4 +224,42 @@ export const MIGRATIONS: Migration[] = [
       `CREATE INDEX canvas_assets_origin_idx ON canvas_assets (canvas_id, created_at)`,
     ],
   },
+  {
+    name: '0009_canvas_library',
+    statements: [
+      `ALTER TABLE canvas_assets ADD COLUMN name text NOT NULL DEFAULT ''`,
+      `ALTER TABLE canvas_assets ADD COLUMN folder text NOT NULL DEFAULT ''`,
+      `ALTER TABLE canvas_assets ADD COLUMN tags_json text NOT NULL DEFAULT '[]'`,
+      `UPDATE canvas_assets SET name = COALESCE((SELECT title FROM canvas_nodes WHERE canvas_nodes.id = canvas_assets.node_id), '')`,
+      `CREATE INDEX canvas_assets_library_idx ON canvas_assets (kind, created_at DESC)`,
+      `CREATE INDEX canvas_assets_folder_idx ON canvas_assets (folder)`,
+    ],
+  },
+  { name: '0010_delivery_plans', statements: [
+    `CREATE TABLE delivery_plans (id text PRIMARY KEY NOT NULL, canvas_id text NOT NULL REFERENCES canvases(id) ON DELETE CASCADE,
+      skill_id text NOT NULL, contract_json text NOT NULL, plan_json text NOT NULL, manifest_json text NOT NULL,
+      complete integer NOT NULL DEFAULT 0, issues_json text NOT NULL, created_at integer NOT NULL, updated_at integer NOT NULL)`,
+    `CREATE INDEX delivery_plans_canvas_idx ON delivery_plans (canvas_id, updated_at)`,
+  ] },
+  { name: '0011_usage_ledger', statements: [
+    `CREATE TABLE usage_pricing (id text PRIMARY KEY NOT NULL, provider_id text NOT NULL, model text NOT NULL, category text NOT NULL, effective_at integer NOT NULL, snapshot_json text NOT NULL, created_at integer NOT NULL)`,
+    `CREATE INDEX usage_pricing_model_idx ON usage_pricing(provider_id, model, category, effective_at DESC)`,
+    `CREATE TABLE usage_executions (id text PRIMARY KEY NOT NULL, execution_id text NOT NULL UNIQUE, job_id text, session_id text, canvas_id text, node_id text, category text NOT NULL, provider_id text NOT NULL, model text NOT NULL, pricing_json text, metrics_json text NOT NULL DEFAULT '[]', usage_state text NOT NULL DEFAULT 'unknown', report_count integer NOT NULL DEFAULT 0, unknown_report_count integer NOT NULL DEFAULT 0, estimate_amount real, estimate_currency text, estimate_reason text, created_at integer NOT NULL)`,
+    `CREATE INDEX usage_execution_job_idx ON usage_executions(job_id, created_at DESC)`,
+    `CREATE INDEX usage_execution_created_idx ON usage_executions(created_at DESC, id DESC)`,
+    `CREATE TABLE usage_reports (execution_id text NOT NULL REFERENCES usage_executions(execution_id), report_id text NOT NULL, metrics_json text NOT NULL, request_id text, reported_model text, updated_at integer NOT NULL, PRIMARY KEY(execution_id, report_id))`,
+    `CREATE TABLE usage_bills (id text PRIMARY KEY NOT NULL, execution_id text NOT NULL UNIQUE REFERENCES usage_executions(execution_id), amount real NOT NULL CHECK(amount >= 0), currency text NOT NULL, source text NOT NULL, reference text NOT NULL, created_at integer NOT NULL)`,
+    `CREATE UNIQUE INDEX usage_bill_evidence_unique ON usage_bills(source, reference)`,
+    `INSERT INTO usage_executions (id, execution_id, job_id, canvas_id, node_id, category, provider_id, model, estimate_reason, created_at) SELECT 'legacy-' || id, 'job:' || id, id, canvas_id, node_id, CASE WHEN provider_id = 'local' THEN 'local' WHEN node_type = 'agent' THEN 'llm' ELSE node_type END, provider_id, model, '升级前未记录供应商报告用量', submitted_at FROM canvas_jobs WHERE submitted_at IS NOT NULL AND provider_id IS NOT NULL AND model IS NOT NULL`,
+  ] },
+  { name: '0012_usage_report_outcome', statements: ['ALTER TABLE usage_reports ADD COLUMN outcome text'] },
+  { name: '0013_delivery_exports', statements: [
+    `CREATE TABLE delivery_exports (id text PRIMARY KEY NOT NULL, plan_id text NOT NULL REFERENCES delivery_plans(id) ON DELETE CASCADE, artifact_id text NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE, artifact_version integer NOT NULL, format text NOT NULL, job_id text NOT NULL UNIQUE, source_asset_ids_json text NOT NULL, page_count integer NOT NULL, content_hash text NOT NULL, created_at integer NOT NULL)`,
+    `CREATE INDEX delivery_exports_plan_idx ON delivery_exports(plan_id, created_at DESC)`,
+    `CREATE TRIGGER delivery_export_removed AFTER DELETE ON delivery_exports BEGIN UPDATE delivery_plans SET complete = 0, issues_json = '["交付文件已移除，请重新核验"]' WHERE id = OLD.plan_id; END`,
+  ] },
+  { name: '0014_artifact_reviews', statements: [
+    `CREATE TABLE artifact_reviews (id text PRIMARY KEY NOT NULL, artifact_id text NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE, review_version integer NOT NULL DEFAULT 1, payload_json text NOT NULL, created_at integer NOT NULL, updated_at integer NOT NULL)`,
+    `CREATE INDEX artifact_reviews_artifact_idx ON artifact_reviews(artifact_id, created_at)`,
+  ] },
 ];

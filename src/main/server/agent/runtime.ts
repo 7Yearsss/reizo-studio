@@ -1,12 +1,27 @@
+import { createPresentationTools } from './presentationTools';
+import { parsePresentationReferences, splitPresentationContext, wrapPresentationContext } from '../../../shared/presentationReferences';
+import { createHtmlTools } from './htmlTools';
+import { parseHtmlReferences, splitHtmlContext, wrapHtmlContext } from '../../../shared/htmlReferences';
+import type { ArtifactReviewStore } from '../storage/artifactReviewStore';
+import { createDocumentTools } from './documentTools';
+import { parseDocumentReferences, splitDocumentContext, wrapDocumentContext } from '../../../shared/documentReferences';
 import { isStepCount, streamText, type ModelMessage } from 'ai';
 import { nanoid } from 'nanoid';
-import { getProviderPreset } from '../../../shared/providers';
+import { resolveSettingsModel } from '../providerResolver';
+import { usageFetch } from './provider/usageFetch';
+import type { UsageStore } from '../storage/usageStore';
+import { canvasWorkStopped } from '../canvas/workLifecycle';
 import { CANVAS_BUDGET_TOOL, type ChatStreamEvent, type MemoryItem, type TodoItem } from '../../../shared/stream';
 import { createOpenAiModel, isOfficialOpenAi } from './provider/openai';
+import { quotaFetch, llmSchedulerFor } from './provider/quotaFetch';
+import { createGenerationScheduler } from '../canvas/generationScheduler';
+import { createDeliveryTools } from './deliveryTools';
 import { createAskUserTool, createWorkspaceTools } from './workspaceTools';
 import { createScheduleTools } from './scheduleTools';
 import { createCanvasTools } from './canvasTools';
 import { createArtifactTools } from './artifactTools';
+import { buildSheetContext } from './sheetContext';
+import { parseSheetReferences, wrapSheetContext } from '../../../shared/sheetReferences';
 import { createImageTools } from './imageTools';
 import { createComputerTools, isComputerUseSupported } from './computerTools';
 import { COMPUTER_TOOL_NAME, SCREENSHOT_RETENTION } from '../../../shared/computerUse';
@@ -49,6 +64,7 @@ import type { MemoryEventsStore } from '../storage/memoryEventsStore';
  * into a dead `openai_error` with no second chance.
  */
 const PROVIDER_MAX_RETRIES = 2;
+const standaloneLlmScheduler = createGenerationScheduler({ globalLimit: 4, providerLimit: 4, reservedInteractiveSlots: 1 });
 /**
  * These now only ever cover *real generation* plus bounded autonomous tools
  * (read_file, inspect-only git, post-approval tool bodies — the shell path
@@ -138,10 +154,18 @@ export function buildSteerContent(
   text: string,
   mentions: string[],
 ): string {
-  const { refs, paths } = parseCanvasRefs(mentions);
+  const presentationRefs = parsePresentationReferences(mentions);
+  const htmlRefs = parseHtmlReferences(presentationRefs.rest);
+  const documentRefs = parseDocumentReferences(htmlRefs.rest);
+  const sheetRefs = parseSheetReferences(documentRefs.rest);
+  const { refs, paths } = parseCanvasRefs(sheetRefs.rest);
   const blocks = [
     paths.length > 0 ? `Referenced workspace paths:\n${paths.map((m) => `- ${m}`).join('\n')}` : '',
     buildCanvasRefBlock(canvasStore, sessionId, refs),
+    documentRefs.refs.length ? wrapDocumentContext(documentRefs.refs) : '',
+    htmlRefs.refs.length ? wrapHtmlContext(htmlRefs.refs) : '',
+    presentationRefs.refs.length ? wrapPresentationContext(presentationRefs.refs) : '',
+    sheetRefs.refs.length ? wrapSheetContext(sheetRefs.refs.map((ref) => ({ ...ref, name: 'Excel 工作簿' })), 'Use read_sheet with the referenced artifactId before editing. Preserve the referenced sheet and range.') : '',
   ].filter(Boolean);
   return blocks.length > 0 ? `${text}\n\n${blocks.join('\n\n')}` : text;
 }
@@ -157,12 +181,14 @@ export async function runChatTurn(options: {
   skill?: Skill | null;
   attachments?: { name: string; content: string }[];
   artifactStore?: ArtifactStore;
+  artifactReviews?: ArtifactReviewStore;
   projectStore?: ProjectStore;
   truncateAfterId?: string;
   regenerate?: boolean;
   largeValueStore?: LargeValueStore;
   canvasStore?: CanvasStore;
   canvasProviderStore?: import('../storage/providerStore').ProviderStore;
+  usageStore?: UsageStore;
   dataRoot?: string;
   memoryEventsStore?: MemoryEventsStore;
   scheduleStore?: import('../storage/scheduleStore').ScheduleStore;
@@ -187,31 +213,16 @@ export async function runChatTurn(options: {
   } = options;
 
   let session = await sessionStore.get(sessionId);
+  if (skill?.contractError) return Response.json({ error: skill.contractError }, { status: 400 });
   if (!session) {
     return Response.json({ error: 'Session not found' }, { status: 404 });
   }
 
   const settings = await settingsStore.get();
-  const providerId = options.providerId || settings.activeProviderId;
-  const preset = getProviderPreset(providerId);
-  if (!preset) {
-    return Response.json({ error: 'Unknown provider' }, { status: 400 });
-  }
-
-  const stored = settings.providers[providerId];
-  const apiKey = stored?.apiKey;
-  if (!apiKey) {
-    return Response.json(
-      { error: `No API key configured for ${preset.name}. Add one in Settings.` },
-      { status: 400 },
-    );
-  }
-
-  const modelId = options.model || stored.model || preset.defaultModel;
-  const baseUrl = stored.baseUrl || preset.baseUrl;
-  if (!baseUrl || !modelId) {
-    return Response.json({ error: 'Provider is missing a base URL or model id.' }, { status: 400 });
-  }
+  let resolved: ReturnType<typeof resolveSettingsModel>;
+  try { resolved = resolveSettingsModel(settings, { category: 'llm', providerId: options.providerId, model: options.model }); }
+  catch (error) { return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 }); }
+  const { providerId, modelId, apiKey, baseUrl } = resolved;
 
   if (truncateAfterId) {
     const idx = session.messages.findIndex((m) => m.id === truncateAfterId);
@@ -221,12 +232,21 @@ export async function runChatTurn(options: {
     session = await sessionStore.setMessages(sessionId, session.messages.slice(0, idx));
   }
 
-  const { refs: canvasRefs, paths: pathMentions } = parseCanvasRefs(mentions);
+  const presentationRefs = parsePresentationReferences(mentions);
+  const htmlRefs = parseHtmlReferences(presentationRefs.rest);
+  const documentRefs = parseDocumentReferences(htmlRefs.rest);
+  const sheetRefs = parseSheetReferences(documentRefs.rest);
+  const { refs: canvasRefs, paths: pathMentions } = parseCanvasRefs(sheetRefs.rest);
   const canvasRefBlock = buildCanvasRefBlock(canvasStore, sessionId, canvasRefs);
+  const sheetRefBlock = await buildSheetContext(artifactStore, sessionId, sheetRefs.refs);
 
   const extraBlocks = [
     pathMentions.length > 0 ? `Referenced workspace paths:\n${pathMentions.map((m) => `- ${m}`).join('\n')}` : '',
     canvasRefBlock,
+    sheetRefBlock,
+    documentRefs.refs.length ? wrapDocumentContext(documentRefs.refs) : '',
+    htmlRefs.refs.length ? wrapHtmlContext(htmlRefs.refs) : '',
+    presentationRefs.refs.length ? wrapPresentationContext(presentationRefs.refs) : '',
     attachments.length > 0
       ? attachments
           .map(
@@ -329,6 +349,9 @@ export async function runChatTurn(options: {
     '- ask_user cards already render the question and every option to the user — never restate the question or enumerate the options in your reply, before or after they answer. Respond directly to what they picked (e.g. "好的，扩展画布边缘 —— 我来处理"). When a card collected several answers at once, a single short recap clause is enough.',
     canvasSummary,
     'When a request needs a visual direction (mood, palette, typography) before you generate or design something, call ask_user with kind:"direction" and 2-4 `directions` cards (title, palette hex list, displayFont/bodyFont stacks, one-line mood, real-world references) so the user picks by looking. If a direction maps to a node already on the canvas (e.g. a draft image the user can inspect), set the card\'s `nodeId` so the card shows that node\'s real thumbnail. To show real draft images on the cards: add the draft nodes directly (never asProposal — proposals need manual acceptance and stay idle), call run_node on each, and wait until their outputs land before sending the direction question. When a skill mentions preset sample images, set the card\'s `imageUrl` to the given `skill-asset:` URL instead.',
+    options.artifactReviews ? 'For editable PPT decks use generate_presentation. Read existing slide and element IDs with read_presentation, then propose_presentation_edits. Keep edits within referenced pages/elements and wait for user review. Never bypass review through shell, files, or HTTP.' : '',
+    options.artifactReviews ? 'Use generate_html for new editable HTML pages. For changes read_html then propose_html_edits. Do not bypass review with file writes, shell commands, or HTTP requests.' : '',
+    options.artifactReviews ? 'For editable documents use generate_document. Before modifying an existing Doc call read_document, then propose_document_edits with the current version and stable block IDs. Proposals do not change the original. Only the user may accept or reject in the Doc panel. Never use file writes, shell commands, or HTTP calls to bypass document review. Respect referenced selected ranges.' : '',
     artifactStore
       ? 'When the user asks for a flowchart, sequence diagram, system architecture diagram, or mind map, call generate_diagram with Mermaid syntax to produce an interactive Excalidraw canvas artifact in the right panel. When the user asks for a spreadsheet, budget, financial report, or table calculation, call generate_sheet with rows, columns, and formulas to render a full-featured Excel sheet artifact in the right panel.'
       : '',
@@ -425,7 +448,7 @@ export async function runChatTurn(options: {
   const canvasBudget = createCanvasBudget();
   const canvasTools =
     canvasStore && dataRoot
-      ? createCanvasTools({ sessionId, canvasStore, settingsStore, dataRoot, providerStore: options.canvasProviderStore, budget: canvasBudget })
+      ? createCanvasTools({ sessionId, canvasStore, settingsStore, dataRoot, artifactStore, providerStore: options.canvasProviderStore, budget: canvasBudget })
       : undefined;
 
   const artifactTools = artifactStore
@@ -452,8 +475,11 @@ export async function runChatTurn(options: {
 
   // Automations live outside any workspace — the agent can always schedule
   // recurring or one-shot follow-up work (paseo-style heartbeat).
-  const scheduleTools = scheduleStore ? createScheduleTools({ scheduleStore }) : undefined;
+  const scheduleTools = scheduleStore ? createScheduleTools({ scheduleStore, sessionId }) : undefined;
 
+  let currentPresentationRefs = regenerate ? splitPresentationContext(userMessage?.content ?? '').refs : presentationRefs.refs;
+  let currentHtmlRefs = regenerate ? splitHtmlContext(userMessage?.content ?? '').refs : htmlRefs.refs;
+  let currentDocumentRefs = regenerate ? splitDocumentContext(userMessage?.content ?? '').refs : documentRefs.refs;
   const tools =
     toolset?.tools || canvasTools || artifactTools || imageTools || computerTools || scheduleTools || askTool
       ? {
@@ -461,13 +487,20 @@ export async function runChatTurn(options: {
           ...(toolset?.tools ?? {}),
           ...(canvasTools?.tools ?? {}),
           ...(artifactTools ?? {}),
+          ...(artifactStore && options.artifactReviews ? createPresentationTools({ sessionId, projectId: session.projectId, artifacts: artifactStore, reviews: options.artifactReviews, getReferences: () => currentPresentationRefs }) : {}),
+          ...(artifactStore && options.artifactReviews ? createHtmlTools({ sessionId, projectId: session.projectId, artifacts: artifactStore, reviews: options.artifactReviews, getReferences: () => currentHtmlRefs }) : {}),
+          ...(artifactStore && options.artifactReviews ? createDocumentTools({ sessionId, projectId: session.projectId, artifacts: artifactStore, reviews: options.artifactReviews, getReferences: () => currentDocumentRefs }) : {}),
           ...(imageTools ?? {}),
           ...(computerTools?.tools ?? {}),
           ...(scheduleTools ?? {}),
+          ...(skill?.contract && canvasStore && dataRoot ? createDeliveryTools({ skill, canvasStore, sessionId, dataRoot, artifactStore }) : {}),
         }
       : undefined;
 
-  const model = createOpenAiModel({ apiKey, modelId, baseUrl });
+  const accounting = options.usageStore ?? canvasStore?.usage;
+  const model = createOpenAiModel({ apiKey, modelId, baseUrl,
+    fetch: quotaFetch(canvasStore ? llmSchedulerFor(canvasStore) : standaloneLlmScheduler, providerId,
+      accounting ? usageFetch(accounting, { sessionId, providerId, model: modelId, category: 'llm', accepting: canvasStore ? () => !canvasWorkStopped(canvasStore) : undefined }) : undefined, true) });
 
   // Reasoning models on gateways can burn 10-90s "thinking" before the first
   // token (measured: gpt-5.6-sol 12-98s default vs ~3s at effort=low). Send the
@@ -543,6 +576,12 @@ export async function runChatTurn(options: {
         // appended user messages forward through the rest of this pass).
         const steers = drainSteerInbox(sessionId);
         for (const steer of steers) {
+          const steeredPresentation = splitPresentationContext(steer.content).refs;
+          if (steeredPresentation.length) currentPresentationRefs = steeredPresentation;
+          const steeredHtml = splitHtmlContext(steer.content).refs;
+          if (steeredHtml.length) currentHtmlRefs = steeredHtml;
+          const steeredDocs = splitDocumentContext(steer.content).refs;
+          if (steeredDocs.length) currentDocumentRefs = steeredDocs;
           const message: ChatMessage = {
             id: steer.id,
             role: 'user',

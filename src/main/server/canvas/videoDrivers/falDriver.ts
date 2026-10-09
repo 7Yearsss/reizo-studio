@@ -2,6 +2,23 @@ import type { VideoDriver, VideoDriverOptions, VideoGenerateParams, VideoJobStat
 import { falRemoteContextValid, providerUrl } from './remoteEndpoints';
 import { VideoPollError } from './types';
 
+const DEFAULT_MODEL = 'fal-ai/kling-video/v1/standard/text-to-video';
+function falModelEndpoint(params: VideoGenerateParams, options: VideoDriverOptions): URL {
+  const configured = providerUrl(options.baseUrl || `https://queue.fal.run/${DEFAULT_MODEL}`);
+  const model = params.model?.trim();
+  if (!model || model === configured.href || model === configured.pathname.replace(/^\//, '')) {
+    if (configured.pathname === '/') configured.pathname = `/${DEFAULT_MODEL}`;
+    return configured;
+  }
+  // Old canvases used a display label in params.model while the complete configured
+  // endpoint chose the model. Preserve that configuration; owner/model IDs select explicitly.
+  if (!model.includes('/') && configured.pathname !== '/') return configured;
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_./-]+$/.test(model) || model.split('/').some((part) => !part || part === '.' || part === '..'))
+    throw new Error('FAL 模型需要完整的 owner/model 路径');
+  configured.pathname = `/${model}`;
+  return configured;
+}
+
 /**
  * FAL.ai 视频生成驱动 (支持 Kling, WAN 2.1, Luma 等模型队列)
  * 采用 FAL 官方队列协议: POST submit -> GET status -> GET response
@@ -10,9 +27,9 @@ export const falDriver: VideoDriver = {
   id: 'fal',
   name: 'FAL.ai (Kling / Wan 2.1)',
   supportsRecovery: true,
-  modelForRequest(_params, options) {
-    const endpoint = providerUrl(options.baseUrl || 'https://queue.fal.run/fal-ai/kling-video/v1/standard/text-to-video');
-    return endpoint.pathname.replace(/^\//, '') || endpoint.href;
+  defaultModel: DEFAULT_MODEL,
+  modelForRequest(params, options) {
+    return falModelEndpoint(params, options).pathname.replace(/^\//, '');
   },
   validateRemoteContext: falRemoteContextValid,
 
@@ -23,7 +40,7 @@ export const falDriver: VideoDriver = {
     const apiKey = options.apiKey;
     if (!apiKey) throw new Error('FAL.ai API key is missing');
 
-    const modelEndpoint = providerUrl(options.baseUrl || 'https://queue.fal.run/fal-ai/kling-video/v1/standard/text-to-video').href.replace(/\/$/, '');
+    const modelEndpoint = falModelEndpoint(params, options).href.replace(/\/$/, '');
     // FAL's kling endpoint has no structured `camera_control` channel — camera
     // motion reaches it as the natural-language suffix the executor already
     // appended to `params.prompt` (see `cameraToPrompt`).

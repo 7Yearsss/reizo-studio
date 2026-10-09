@@ -7,17 +7,21 @@ import { getCanvasChannel } from './channel';
 import { cancelVideoJob } from './asyncJobManager';
 import { nodeJobsFor } from './nodeJobs';
 import { canvasWorkStopped } from './workLifecycle';
+import type { CanvasEdit } from '../../../shared/canvasEdits';
+
+const editId = z.string().min(1).max(128);
 
 const nodeTypes: [CanvasNodeType, ...CanvasNodeType[]] = [
   'image', 'agent', 'video', 'audio', 'note', 'group', 'anchor', 'reroute', 'frameExtractor', 'section', 'subgraph',
 ];
 const record = z.record(z.string(), z.unknown());
 const nodeInput = z.object({
+  id: editId.regex(/^[A-Za-z0-9_-]+$/).optional(),
   type: z.enum(nodeTypes), x: z.number().finite(), y: z.number().finite(),
   w: z.number().finite().positive(), h: z.number().finite().positive(),
   title: z.string().optional(), params: record.optional(),
 });
-const nodePatch = nodeInput.omit({ type: true }).partial().extend({
+const nodePatch = nodeInput.omit({ type: true, id: true }).partial().extend({
   runState: z.enum(['idle', 'running', 'done', 'error']).optional(),
   output: record.nullable().optional(), paramsHash: z.string().nullable().optional(),
 });
@@ -27,6 +31,13 @@ const edgeInput = z.object({
 });
 const reuseInput = z.object({ assetId: z.string().min(1), x: z.number().finite().optional(), y: z.number().finite().optional(),
   title: z.string().optional(), asReference: z.boolean().optional() });
+const editSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('add_node'), id: editId, node: nodeInput.partial({ w: true, h: true }), patch: nodePatch.optional() }),
+  z.object({ kind: z.literal('update_node'), id: editId, patch: nodePatch }),
+  z.object({ kind: z.literal('delete_node'), id: editId }),
+  z.object({ kind: z.literal('add_edge'), edge: edgeInput.extend({ id: editId }) }),
+  z.object({ kind: z.literal('delete_edge'), id: editId }),
+]);
 
 export class CanvasCommandError extends Error {
   constructor(message: string, readonly status: 400 | 404 | 409 | 503 = 400) { super(message); }
@@ -119,6 +130,55 @@ export function createCanvasApplication(store: CanvasStore, options: {
 
   return {
     batch,
+    edit(canvasId: string, edits: CanvasEdit[], operationId?: string, expectedRevision?: number) {
+      const checked = parse(z.array(editSchema).min(1).max(2000), edits);
+      if (expectedRevision !== undefined && (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0))
+        throw new CanvasCommandError('expectedRevision must be a nonnegative integer');
+      batch(canvasId, { kind: 'edit', edits: checked, expectedRevision }, () => {
+        if (expectedRevision !== undefined && store.getCanvas(canvasId)?.liveRevision !== expectedRevision)
+          throw new CanvasCommandError('画布已更新，请同步后重试', 409);
+        for (const edit of checked) {
+          if (edit.kind === 'add_node') {
+            if (store.getNode(canvasId, edit.id)) throw new CanvasCommandError('节点已经存在', 409);
+            const result = store.addNode(canvasId, { ...defaultNodeBox(edit.node.type), ...edit.node } as NodeInput, edit.id);
+            if (edit.patch) {
+              const updated = store.updateNode(canvasId, edit.id, edit.patch as NodePatch);
+              if (!updated) throw new CanvasCommandError('节点不存在', 404);
+              emit(updated.rev, { type: 'node_added', node: updated.node, operationId });
+            } else emit(result.rev, { type: 'node_added', node: result.node, operationId });
+          } else if (edit.kind === 'add_edge') {
+            const result = store.addEdge(canvasId, edit.edge, edit.edge.id);
+            if (result.error) throw new CanvasCommandError(`连线失败: ${result.error}`, 409);
+            emit(result.rev, { type: 'edge_added', edge: result.edge, operationId });
+            dirty(canvasId, edit.edge.targetId, result.rev);
+          } else if (edit.kind === 'update_node') {
+            const result = store.updateNode(canvasId, edit.id, edit.patch as NodePatch);
+            if (!result) throw new CanvasCommandError('节点不存在', 404);
+            emit(result.rev, { type: 'node_updated', node: result.node, operationId });
+            if (edit.patch.params !== undefined || edit.patch.output !== undefined) dirty(canvasId, edit.id, result.rev);
+          } else if (edit.kind === 'delete_edge') {
+            const result = store.deleteEdge(canvasId, edit.id);
+            if (!result) throw new CanvasCommandError('连线已被删除', 409);
+            emit(result.rev, { type: 'edge_deleted', id: edit.id, operationId });
+            dirty(canvasId, result.targetId, result.rev);
+          } else {
+            const edges = store.getEdges(canvasId).filter((edge) => edge.sourceId === edit.id || edge.targetId === edit.id);
+            const result = store.deleteNode(canvasId, edit.id);
+            if (!result) throw new CanvasCommandError('节点已被删除', 409);
+            frames.at(-1).afterCommit.push(() => cancelNode(canvasId, edit.id));
+            emit(result.rev, { type: 'node_deleted', id: edit.id, operationId });
+            for (const edge of edges) {
+              emit(result.rev, { type: 'edge_deleted', id: edge.id, operationId });
+              if (edge.sourceId === edit.id) dirty(canvasId, edge.targetId, result.rev);
+            }
+          }
+        }
+        // A receipt proves the command was committed. Replaying reads current authority instead
+        // of persisting an entire large canvas for every gesture.
+        return { revision: store.getCanvas(canvasId).liveRevision };
+      }, operationId);
+      return store.getSnapshot(canvasId);
+    },
     /** Read durable command results before asynchronous adapters recapture mutable source selections. */
     replay<T>(canvasId: string, request: unknown, mutationId?: string): T | null {
       if (canvasWorkStopped(store)) throw new CanvasCommandError('应用正在退出，不能提交新的画布操作', 503);
@@ -142,7 +202,7 @@ export function createCanvasApplication(store: CanvasStore, options: {
         const params = type === 'anchor' ? { assetId: asset.id, role: 'content', strength: 'mid' }
           : { importedAssetId: asset.id, prompt: '', ...(type === 'image' ? { size: '1024x1024' } : {}) };
         const node = store.addNode(canvasId, { type, x: checked.x ?? 40, y: checked.y ?? 40, ...box,
-          title: checked.title ?? (type === 'anchor' ? '固定参考' : type === 'audio' ? '音频素材' : type === 'video' ? '视频素材' : '图片素材'), params }).node;
+          title: checked.title ?? (asset.name?.trim() || (type === 'anchor' ? '固定参考' : type === 'audio' ? '音频素材' : type === 'video' ? '视频素材' : '图片素材')), params }).node;
         const result = store.updateNode(canvasId, node.id, { runState: 'done', output: { assets: [asset.path], activeAssetIndex: 0,
           resultSet: [{ asset: asset.path, assetId: asset.id, createdAt: asset.createdAt, jobId: asset.jobId, generation: asset.generation,
             providerId: asset.providerId, model: asset.model, inputHash: asset.inputHash }] } });
@@ -159,7 +219,9 @@ export function createCanvasApplication(store: CanvasStore, options: {
     },
     addNode(canvasId: string, input: NodeInput, operationId?: string) {
       return batch(canvasId, { kind: 'add_node', input }, () => {
-        const result = store.addNode(canvasId, parse(nodeInput, input));
+        const checked = parse(nodeInput, input);
+        if (checked.id && store.getNode(canvasId, checked.id)) throw new CanvasCommandError('节点已经存在', 409);
+        const result = store.addNode(canvasId, checked, checked.id);
         emit(result.rev, { type: 'node_added', node: result.node, operationId });
         return result;
       }, operationId);

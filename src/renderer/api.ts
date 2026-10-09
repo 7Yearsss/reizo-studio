@@ -83,7 +83,8 @@ function apiOrigin(): Promise<string> {
     if (typeof window !== 'undefined' && window.reizo?.getApiOrigin) {
       originPromise = window.reizo.getApiOrigin();
     } else {
-      originPromise = Promise.resolve('http://127.0.0.1:47100');
+      // Browser-only QA can target an isolated fixture server; desktop uses its preload bridge.
+      originPromise = Promise.resolve(import.meta.env?.DEV && import.meta.env.VITE_DEV_API_ORIGIN || 'http://127.0.0.1:47100');
     }
     void originPromise.then((o) => {
       resolvedOrigin = o;
@@ -119,12 +120,16 @@ export function canvasAssetUrlSync(relPath: string): string | null {
   return resolvedOrigin ? `${resolvedOrigin}/api/canvas/assets/${relPath}` : null;
 }
 
+export class ApiRequestError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+
 async function api(path: string, init?: RequestInit): Promise<Response> {
   const origin = await apiOrigin();
   const res = await fetch(`${origin}${path}`, init);
   if (!res.ok && res.status !== 204) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(body.error ?? `Request failed: ${res.status}`);
+    throw new ApiRequestError(body.error ?? `Request failed: ${res.status}`, res.status);
   }
   return res;
 }
@@ -362,6 +367,8 @@ export async function createSchedule(input: {
   prompt: string;
   intervalMs: number;
   skillId?: string;
+  once?: boolean;
+  operationId?: string;
 }): Promise<Schedule> {
   const res = await api('/api/schedules', {
     method: 'POST',
@@ -539,18 +546,18 @@ export async function getArtifactVersions(id: string): Promise<ArtifactVersion[]
   return versions;
 }
 
-export async function addArtifactVersion(id: string, content: string): Promise<ArtifactWithContent> {
+export async function addArtifactVersion(id: string, content: string, expectedVersion?: number): Promise<ArtifactWithContent> {
   const res = await api(`/api/artifacts/${id}/versions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({ content, expectedVersion }),
   });
   const { artifact } = await res.json();
   return artifact;
 }
 
-export async function restoreArtifactVersion(id: string, n: number): Promise<ArtifactWithContent> {
-  const res = await api(`/api/artifacts/${id}/restore/${n}`, { method: 'POST' });
+export async function restoreArtifactVersion(id: string, n: number, expectedVersion?: number): Promise<ArtifactWithContent> {
+  const res = await api(`/api/artifacts/${id}/restore/${n}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedVersion }) });
   const { artifact } = await res.json();
   return artifact;
 }
@@ -567,6 +574,78 @@ export async function deleteArtifact(id: string): Promise<void> {
 
 // --- Canvas ---
 
+export async function exportCanvasPresentation(canvasId: string, request: import('../shared/canvasPresentation').PresentationExportRequest, operationId: string): Promise<{ jobId: string; nodeId: string; status: string }> {
+  return (await api(`/api/canvas/${canvasId}/presentation-export`, { method: 'POST',
+    headers: { 'content-type': 'application/json', 'Idempotency-Key': operationId }, body: JSON.stringify(request) })).json();
+}
+
+export async function importSheet(sessionId: string, file: File): Promise<ArtifactWithContent> {
+  const res = await api(`/api/sessions/${sessionId}/artifacts/sheets/import?name=${encodeURIComponent(file.name)}`, {
+    method: 'POST', headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, body: file,
+  });
+  return (await res.json()).artifact;
+}
+
+export async function createDocument(sessionId: string, name: string): Promise<ArtifactWithContent> {
+  return (await (await api(`/api/sessions/${sessionId}/documents`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) })).json()).artifact;
+}
+export async function importDocument(sessionId: string, file: File): Promise<ArtifactWithContent> {
+  return (await (await api(`/api/sessions/${sessionId}/documents/import?name=${encodeURIComponent(file.name)}`, { method: 'POST', body: file })).json()).artifact;
+}
+export async function importPresentation(sessionId: string, file: File): Promise<ArtifactWithContent> {
+  return (await (await api(`/api/sessions/${sessionId}/presentations/import?name=${encodeURIComponent(file.name)}`, { method: 'POST', body: file })).json()).artifact;
+}
+export async function exportDocument(id: string): Promise<Blob> { return (await api(`/api/artifacts/${id}/document.docx`)).blob(); }
+export async function listArtifactReviews(id: string): Promise<import('../shared/artifactReview').ArtifactReview[]> {
+  return (await (await api(`/api/artifacts/${id}/reviews`)).json()).reviews;
+}
+export async function reviseArtifactReview(id: string, reviewId: string, changeId: string, expectedReviewVersion: number, operation: unknown): Promise<import('../shared/artifactReview').ArtifactReview> {
+  return (await (await api(`/api/artifacts/${id}/reviews/${reviewId}/changes/${changeId}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedReviewVersion, operation }) })).json()).review;
+}
+export async function decideArtifactReview(id: string, reviewId: string, expectedReviewVersion: number, changeIds: string[], decision: 'accept' | 'reject'): Promise<{ review: import('../shared/artifactReview').ArtifactReview; artifact: ArtifactWithContent }> {
+  return (await api(`/api/artifacts/${id}/reviews/${reviewId}/decide`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedReviewVersion, changeIds, decision }) })).json();
+}
+export async function listDeliveryExports(canvasId: string, planId: string): Promise<import('../shared/canvasPresentation').DeliveryExport[]> {
+  return (await (await api(`/api/canvas/${canvasId}/deliveries/${encodeURIComponent(planId)}/exports`)).json()).exports;
+}
+export async function listCanvasDeliveryPlans(canvasId: string): Promise<import('../shared/skillContract').SavedDeliveryPlan[]> {
+  return (await (await api(`/api/canvas/${canvasId}/deliveries`)).json()).deliveries;
+}
+
+export async function getUsageSummary(): Promise<import('../shared/usage').UsageSummary> { return (await api('/api/usage/summary')).json(); }
+export async function listUsageRecords(options: { jobId?: string; limit?: number; cursor?: string } = {}): Promise<import('../shared/usage').UsagePage> {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(options)) if (value !== undefined) query.set(key, String(value));
+  return (await api(`/api/usage/records?${query}`)).json();
+}
+
+export async function requestScheduleRun(id: string, operationId: string): Promise<Schedule> {
+  const response = await api(`/api/schedules/${encodeURIComponent(id)}/run`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ operationId }) });
+  return (await response.json()).schedule;
+}
+export async function listPricingSnapshots(): Promise<import('../shared/usage').PricingSnapshot[]> { return (await (await api('/api/usage/pricing')).json()).snapshots; }
+export async function createPricingSnapshot(input: import('../shared/usage').PricingSnapshotInput): Promise<import('../shared/usage').PricingSnapshot> {
+  return (await api('/api/usage/pricing', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })).json();
+}
+export async function recordUsageBill(input: import('../shared/usage').UsageBillInput): Promise<import('../shared/usage').UsageRecord> {
+  return (await api('/api/usage/bills', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })).json();
+}
+
+export async function scanCanvasStorage(): Promise<import('../shared/canvasMaintenance').CanvasMaintenanceScan> {
+  return (await api('/api/canvas-maintenance/scan')).json();
+}
+export async function quarantineCanvasFiles(token: string, paths: string[], operationId: string): Promise<import('../shared/canvasMaintenance').CanvasQuarantineBatch> {
+  return (await api('/api/canvas-maintenance/quarantine', { method: 'POST',
+    headers: { 'content-type': 'application/json', 'Idempotency-Key': operationId }, body: JSON.stringify({ token, paths }) })).json();
+}
+export async function listCanvasQuarantine(): Promise<import('../shared/canvasMaintenance').CanvasQuarantineBatch[]> {
+  return (await (await api('/api/canvas-maintenance/quarantine')).json()).batches;
+}
+export async function restoreCanvasFiles(batchId: string, paths: string[]): Promise<import('../shared/canvasMaintenance').CanvasQuarantineBatch> {
+  return (await api(`/api/canvas-maintenance/quarantine/${encodeURIComponent(batchId)}/restore`, { method: 'POST',
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify({ paths }) })).json();
+}
+
 export async function canvasAssetUrl(relPath: string): Promise<string> {
   const origin = await apiOrigin();
   return `${origin}/api/canvas/assets/${relPath}`;
@@ -577,13 +656,28 @@ export async function getCanvas(sessionId: string, signal?: AbortSignal): Promis
   return res.json();
 }
 
+export async function editCanvas(canvasId: string, edits: import('../shared/canvasEdits').CanvasEdit[], operationId: string,
+  expectedRevision?: number): Promise<CanvasSnapshot> {
+  const response = await api(`/api/canvas/${canvasId}/edits`, { method: 'POST',
+    headers: { 'content-type': 'application/json', 'Idempotency-Key': operationId },
+    body: JSON.stringify({ edits, expectedRevision }) });
+  return (await response.json()).snapshot;
+}
+
+export async function editCanvasWithUploads(canvasId: string, edits: import('../shared/canvasEdits').CanvasEdit[],
+  uploads: import('../shared/canvasEdits').CanvasEditUpload[], operationId: string): Promise<CanvasSnapshot> {
+  return (await (await api(`/api/canvas/${canvasId}/edits`, { method: 'POST',
+    headers: { 'content-type': 'application/json', 'Idempotency-Key': operationId }, body: JSON.stringify({ edits, uploads }) })).json()).snapshot;
+}
+
 export async function addCanvasNode(
   canvasId: string,
-  input: { type: CanvasNodeType; x?: number; y?: number; w?: number; h?: number; title?: string; params?: CanvasNodeParams },
+  input: { id?: string; type: CanvasNodeType; x?: number; y?: number; w?: number; h?: number; title?: string; params?: CanvasNodeParams },
+  operationId?: string,
 ): Promise<CanvasNode> {
   const res = await api(`/api/canvas/${canvasId}/nodes`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...(operationId ? { 'Idempotency-Key': operationId } : {}) },
     body: JSON.stringify(input),
   });
   const { node } = await res.json();
@@ -605,8 +699,8 @@ export async function patchCanvasNode(
   return node;
 }
 
-export async function deleteCanvasNode(canvasId: string, id: string): Promise<void> {
-  await api(`/api/canvas/${canvasId}/nodes/${id}`, { method: 'DELETE' });
+export async function deleteCanvasNode(canvasId: string, id: string, operationId?: string): Promise<void> {
+  await api(`/api/canvas/${canvasId}/nodes/${id}`, { method: 'DELETE', headers: operationId ? { 'Idempotency-Key': operationId } : undefined });
 }
 
 export async function addCanvasEdge(
@@ -776,6 +870,35 @@ export async function readCanvasStream(
 
 export type ReusableMediaKind = 'image' | 'video' | 'audio';
 export type ReuseCanvasAssetInput = CanvasAssetReuseInput;
+
+export async function listCanvasJobs(canvasId: string, options: { status?: string; search?: string; cursor?: string; signal?: AbortSignal } = {}): Promise<import('../shared/canvasJobs').CanvasJobPage> {
+  const query = new URLSearchParams({ limit: '50' });
+  for (const key of ['status', 'search', 'cursor'] as const) if (options[key]) query.set(key, options[key]);
+  return (await api(`/api/canvas/${canvasId}/jobs?${query}`, { signal: options.signal })).json();
+}
+
+export async function cancelCanvasJob(canvasId: string, jobId: string): Promise<void> {
+  await api(`/api/canvas/${canvasId}/jobs/${jobId}/cancel`, { method: 'POST' });
+}
+
+export async function retryCanvasJob(canvasId: string, jobId: string, operationId: string): Promise<{ jobId: string }> {
+  return (await api(`/api/canvas/${canvasId}/jobs/${jobId}/retry`, { method: 'POST',
+    headers: { 'content-type': 'application/json', 'Idempotency-Key': operationId }, body: JSON.stringify({ confirmedSpend: true }) })).json();
+}
+
+export async function composeCanvasVideo(canvasId: string, input: { nodeIds: string[]; width: number; height: number; fps?: number; sourceVolume?: number; audioVolume?: number; title?: string }, operationId: string): Promise<{ jobId: string; nodeId: string }> {
+  return (await api(`/api/canvas/${canvasId}/compose`, { method: 'POST', headers: { 'content-type': 'application/json', 'Idempotency-Key': operationId }, body: JSON.stringify(input) })).json();
+}
+
+export async function canvasAssetLibraryPage(options: import('../shared/canvasAssets').CanvasAssetLibraryQuery & { signal?: AbortSignal } = {}): Promise<import('../shared/canvasAssets').CanvasAssetLibraryPage> {
+  const query = new URLSearchParams({ limit: String(options.limit ?? 40) });
+  for (const key of ['kind', 'search', 'folder', 'tag', 'cursor'] as const) if (options[key] !== undefined) query.set(key, options[key]);
+  return (await api(`/api/canvas/assets/library?${query}`, { signal: options.signal })).json();
+}
+
+export async function updateCanvasAssetMetadata(assetId: string, patch: import('../shared/canvasAssets').CanvasAssetMetadataPatch): Promise<CanvasAsset> {
+  return (await (await api(`/api/canvas/assets/library/${assetId}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(patch) })).json()).asset;
+}
 
 export async function listCanvasAssets(options: { kind?: ReusableMediaKind; limit?: number; signal?: AbortSignal } = {}): Promise<CanvasAssetSummary[]> {
   const query = new URLSearchParams({ limit: String(options.limit ?? 80) });

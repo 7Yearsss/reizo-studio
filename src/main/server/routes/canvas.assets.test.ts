@@ -41,6 +41,23 @@ async function fixture() {
 }
 
 describe('canvas asset publication', () => {
+  it('keeps committed upload files when a commit observer aborts the HTTP request', async () => {
+    const f = await fixture();
+    const abort = new AbortController();
+    const unsubscribe = f.store.subscribeCommits(() => abort.abort());
+    try {
+      const response = await f.app.request(`/api/canvas/${f.canvasId}/edits`, { method: 'POST', signal: abort.signal,
+        headers: { 'content-type': 'application/json', 'Idempotency-Key': 'abort-after-commit' }, body: JSON.stringify({
+          edits: [{ kind: 'add_node', id: 'committed-image', node: { type: 'image', x: 0, y: 0 } }],
+          uploads: [{ nodeId: 'committed-image', name: 'test.png', mimeType: 'image/png', dataBase64: PNG.toString('base64') }],
+        }) });
+      expect(response.status).toBe(200);
+      expect(abort.signal.aborted).toBe(true);
+      const node = f.store.getNode(f.canvasId, 'committed-image');
+      expect(await readFile(path.join(f.dataRoot, 'canvas', node.output.assets[0]))).toEqual(PNG);
+    } finally { unsubscribe(); }
+  });
+
   it('reuses exact versions across canvases without generation and keeps fixed targets isolated from the original producer', async () => {
     const f = await fixture();
     const image = { images: [{ uint8Array: new Uint8Array(PNG), mediaType: 'image/png' }] };

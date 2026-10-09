@@ -22,11 +22,15 @@ export default function ArtifactVersionRail({
   activeVersion,
   onPick,
   onRestored,
+  onBeforeRestore,
+  getExpectedVersion,
 }: {
   artifactId: string;
   activeVersion: number;
   onPick: (n: number) => void;
   onRestored: () => void;
+  onBeforeRestore?: () => Promise<void>;
+  getExpectedVersion?: () => number;
 }) {
   const versions = useArtifactStore((s) => s.versionsById[artifactId]) as
     | ArtifactVersion[]
@@ -49,14 +53,15 @@ export default function ArtifactVersionRail({
   async function restore(n: number) {
     setBusyVersion(n);
     try {
+      await onBeforeRestore?.();
       const { restoreArtifactVersion } = await import('../../api');
-      await restoreArtifactVersion(artifactId, n);
+      await restoreArtifactVersion(artifactId, n, getExpectedVersion?.());
       artifactStore.invalidateArtifact(artifactId);
       await artifactStore.loadArtifactVersions(artifactId);
       toast.success(`已切换到版本 v${n}`);
       onRestored();
-    } catch {
-      toast.error('切换版本失败');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '切换版本失败');
     } finally {
       setBusyVersion(null);
     }
@@ -76,9 +81,7 @@ export default function ArtifactVersionRail({
 
           return (
             <li key={v.n} className="relative">
-              <button
-                type="button"
-                onClick={() => onPick(v.n)}
+              <div
                 className={cn(
                   'relative w-full rounded-lg px-2.5 py-2 text-left transition-colors',
                   isActive ? 'text-ink' : 'text-ink-muted hover:text-ink hover:bg-paper-inset/50',
@@ -91,7 +94,8 @@ export default function ArtifactVersionRail({
                     transition={{ type: 'spring', stiffness: 500, damping: 38 }}
                   />
                 )}
-                <div className="relative z-10 flex items-center gap-1.5">
+                <button type="button" onClick={() => onPick(v.n)} aria-label={`查看版本 ${v.n}`} className="relative z-10 w-full text-left">
+                <div className="flex items-center gap-1.5">
                   <span className="text-[11px] font-semibold tabular-nums text-accent">v{v.n}</span>
                   <span className="truncate text-[10px] text-ink-muted">{v.label}</span>
                   {isActive && <Check size={11} className="ml-auto text-accent" />}
@@ -99,6 +103,7 @@ export default function ArtifactVersionRail({
                 <div className="relative z-10 mt-0.5 truncate text-[10px] text-ink-muted/80">
                   {relTime(v.createdAt)}
                 </div>
+                </button>
                 {v.origin?.prompt ? (
                   <div className="relative z-10 mt-1 flex items-start gap-1">
                     <span className="line-clamp-2 flex-1 text-[10px] leading-4 text-ink-muted">
@@ -132,7 +137,7 @@ export default function ArtifactVersionRail({
                     {isBusy ? '切换中…' : '切换到此版本'}
                   </button>
                 ) : null}
-              </button>
+              </div>
             </li>
           );
         })}

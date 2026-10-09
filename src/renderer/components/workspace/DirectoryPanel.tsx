@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { FolderOpen, X, ExternalLink, RefreshCw } from 'lucide-react';
 import * as api from '../../api';
 import * as settingsStore from '../../state/settingsStore';
@@ -6,36 +6,29 @@ import { useSettingsStore } from '../../state/useSettingsStore';
 import type { DirEntry } from '../../../shared/workspace';
 import { cn } from '../../lib/cn';
 import { toast } from '../../lib/toast';
-import Tooltip from '../ui/Tooltip';
+import { Tooltip } from '../ui/Tooltip';
+import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
+import { Button } from '../ui/button';
 import { FileTree, FileTreeFolder, FileTreeFile } from '../motion/file-tree';
-import { CodeBlock } from '../agents/code-block';
+import { CodeBlock, type CodeBlockProps } from '../agents/code-block';
 
-function detectLanguage(path: string): any {
+function detectLanguage(path: string): CodeBlockProps['language'] {
   const ext = path.split('.').pop()?.toLowerCase();
   switch (ext) {
     case 'ts':
-    case 'tsx':
       return 'typescript';
-    case 'js':
+    case 'tsx':
     case 'jsx':
-      return 'javascript';
+      return 'tsx';
+    case 'js':
+      return 'typescript';
     case 'json':
       return 'json';
-    case 'md':
-      return 'markdown';
-    case 'css':
-      return 'css';
-    case 'html':
-      return 'html';
-    case 'py':
-      return 'python';
-    case 'rs':
-      return 'rust';
     case 'sh':
     case 'bash':
       return 'bash';
     default:
-      return 'typescript';
+      return 'text';
   }
 }
 
@@ -44,16 +37,24 @@ export default function DirectoryPanel({ embedded = false }: { embedded?: boolea
   const [root, setRoot] = useState<DirEntry[]>([]);
   const [openDirs, setOpenDirs] = useState<Record<string, DirEntry[]>>({});
   const [expandedIds, setExpandedIds] = useState<string[]>([]);
-  const [preview, setPreview] = useState<{ path: string; content: string } | null>(null);
+  const [preview, setPreview] = useState<{ path: string; content: string; truncated: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [readingPath, setReadingPath] = useState('');
+  const scope = useRef(workspacePath); scope.current = workspacePath;
+  const listSequence = useRef(0);
+  const fileSequence = useRef(0);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const name = workspacePath?.split(/[/\\]/).filter(Boolean).pop() ?? '工作区';
 
   const refresh = useCallback(async () => {
+    if (!workspacePath) return;
+    const actionScope = workspacePath;
+    const sequence = ++listSequence.current;
     setRefreshing(true);
     try {
       const next = await api.listWorkspace();
-      setRoot(next);
       const expanded = Object.keys(openDirs);
       const updated: Record<string, DirEntry[]> = {};
       for (const rel of expanded) {
@@ -63,52 +64,65 @@ export default function DirectoryPanel({ embedded = false }: { embedded?: boolea
           /* gone */
         }
       }
-      setOpenDirs(updated);
+      if (!mounted.current || scope.current !== actionScope || sequence !== listSequence.current) return;
+      setRoot(next); setOpenDirs(updated); setError(null);
       toast.success('工作区文件已刷新');
     } catch (err) {
-      setError((err as Error).message);
+      if (mounted.current && scope.current === actionScope && sequence === listSequence.current) setError((err as Error).message);
     } finally {
-      setRefreshing(false);
+      if (mounted.current && scope.current === actionScope && sequence === listSequence.current) setRefreshing(false);
     }
-  }, [openDirs]);
+  }, [openDirs, workspacePath]);
 
   useEffect(() => {
-    if (!workspacePath) return;
-    setPreview(null);
+    const sequence = ++listSequence.current;
+    ++fileSequence.current;
+    setPreview(null); setReadingPath(''); setRoot([]); setError(null); setRefreshing(Boolean(workspacePath));
     setOpenDirs({});
     setExpandedIds([]);
+    if (!workspacePath) return;
+    let current = true;
     api
       .listWorkspace()
-      .then(setRoot)
-      .catch((err) => setError((err as Error).message));
+      .then((entries) => { if (current && mounted.current && sequence === listSequence.current) setRoot(entries); })
+      .catch((err) => { if (current && mounted.current && sequence === listSequence.current) setError((err as Error).message); })
+      .finally(() => { if (current && mounted.current && sequence === listSequence.current) setRefreshing(false); });
+    return () => { current = false; };
   }, [workspacePath]);
 
   const handleExpandedChange = useCallback(
     async (ids: string[]) => {
+      const actionScope = workspacePath;
       setExpandedIds(ids);
       for (const rel of ids) {
         if (!openDirs[rel]) {
           try {
             const children = await api.listWorkspace(rel);
-            setOpenDirs((prev) => ({ ...prev, [rel]: children }));
-          } catch {
-            /* ignore */
+            if (mounted.current && scope.current === actionScope) setOpenDirs((prev) => ({ ...prev, [rel]: children }));
+          } catch (error) {
+            if (mounted.current && scope.current === actionScope) setError(error instanceof Error ? error.message : '目录未能展开');
           }
         }
       }
     },
-    [openDirs],
+    [openDirs, workspacePath],
   );
 
   const openFile = useCallback(async (relativePath: string) => {
+    const actionScope = workspacePath;
+    const sequence = ++fileSequence.current;
+    setReadingPath(relativePath);
     try {
       const file = await api.readWorkspaceFile(relativePath);
-      setPreview({ path: file.relativePath, content: file.content });
+      if (!mounted.current || scope.current !== actionScope || sequence !== fileSequence.current) return;
+      setPreview({ path: file.relativePath, content: file.content, truncated: file.truncated });
       setError(null);
     } catch (err) {
-      setError((err as Error).message);
+      if (mounted.current && scope.current === actionScope && sequence === fileSequence.current) setError((err as Error).message);
+    } finally {
+      if (mounted.current && scope.current === actionScope && sequence === fileSequence.current) setReadingPath('');
     }
-  }, []);
+  }, [workspacePath]);
 
   function renderNode(entry: DirEntry) {
     if (entry.kind === 'dir') {
@@ -136,7 +150,8 @@ export default function DirectoryPanel({ embedded = false }: { embedded?: boolea
           <button
             type="button"
             className="rounded p-1 text-ink-muted hover:bg-paper-inset hover:text-ink transition-colors"
-            onClick={() => void window.reizo.revealInFolder()}
+            onClick={() => void window.reizo.revealInFolder().catch((error) => setError(error instanceof Error ? error.message : '文件夹未能打开'))}
+            disabled={!workspacePath}
             aria-label="打开文件夹"
           >
             <ExternalLink size={12} />
@@ -147,7 +162,7 @@ export default function DirectoryPanel({ embedded = false }: { embedded?: boolea
             type="button"
             className="rounded p-1 text-ink-muted hover:bg-paper-inset hover:text-ink transition-colors"
             onClick={() => void refresh()}
-            disabled={refreshing}
+            disabled={refreshing || !workspacePath}
             aria-label="刷新"
           >
             <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} />
@@ -157,11 +172,10 @@ export default function DirectoryPanel({ embedded = false }: { embedded?: boolea
           type="button"
           className="rounded px-2 py-0.5 text-[11px] text-ink-muted hover:bg-paper-inset hover:text-ink transition-colors"
           onClick={async () => {
-            const path = await api.pickFolder();
-            if (path) {
-              await settingsStore.patchSettings({ workspacePath: path });
-              toast.success('已切换工作区');
-            }
+            try {
+              const path = await api.pickFolder();
+              if (path) { await settingsStore.patchSettings({ workspacePath: path }); toast.success('已切换工作区'); }
+            } catch (error) { setError(error instanceof Error ? error.message : '工作区未能切换'); }
           }}
         >
           更换
@@ -169,9 +183,10 @@ export default function DirectoryPanel({ embedded = false }: { embedded?: boolea
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
-        {error && <p className="px-2 py-1 text-xs text-danger">{error}</p>}
+        {error && <Alert variant="destructive"><AlertTitle>读取未完成</AlertTitle><AlertDescription className="min-w-0 [overflow-wrap:anywhere]">{error}{workspacePath ? <Button type="button" variant="ghost" size="xs" disabled={refreshing} onClick={() => void refresh()}>重新读取</Button> : null}</AlertDescription></Alert>}
+        {readingPath ? <p role="status" className="px-2 py-2 text-xs text-ink-muted [overflow-wrap:anywhere]">正在读取 {readingPath}</p> : null}
         {root.length === 0 && !error ? (
-          <p className="px-2 py-4 text-center text-xs text-ink-muted">工作区暂无文件</p>
+          <p role={refreshing ? 'status' : undefined} className="px-2 py-4 text-center text-xs text-ink-muted">{refreshing ? '正在读取工作区…' : workspacePath ? '工作区暂无文件' : '选择文件夹后可浏览工作区'}</p>
         ) : (
           <FileTree
             value={preview?.path ?? null}
@@ -193,12 +208,14 @@ export default function DirectoryPanel({ embedded = false }: { embedded?: boolea
             <span className="truncate font-mono text-[11px] text-ink-muted">{preview.path}</span>
             <button
               type="button"
-              onClick={() => setPreview(null)}
+              onClick={() => { ++fileSequence.current; setPreview(null); setReadingPath(''); }}
+              aria-label="关闭文件预览"
               className="rounded p-0.5 text-ink-muted hover:bg-paper-inset hover:text-ink transition-colors"
             >
               <X size={12} />
             </button>
           </div>
+          {preview.truncated ? <p role="status" className="px-3 py-2 text-xs text-ink-muted">文件预览已截断，仅显示前段内容。</p> : null}
           <div className="min-h-0 flex-1 overflow-auto">
             <CodeBlock
               code={preview.content}

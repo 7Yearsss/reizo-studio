@@ -17,6 +17,10 @@ import { startVideoNode, replayVideoJob } from '../canvas/videoExecutor';
 import { startAudioNode, replayAudioJob } from '../canvas/audioExecutor';
 import { CanvasJobStoreError } from '../storage/canvasJobStore';
 import type { ProviderStore } from '../storage/providerStore';
+import type { ArtifactStore } from '../storage/artifactStore';
+import { nanoid } from 'nanoid';
+import { isPresentationExportNode } from '../../../shared/canvasPresentation';
+import { startPresentationExport } from '../canvas/presentationExport';
 import { runGraph } from '../canvas/graphExecutor';
 import { descendants, isImportedMedia } from '../canvas/graph';
 import { readCanvasAsset } from '../canvas/assets';
@@ -72,7 +76,7 @@ function runGraphScope(
     keep = new Set(snap.nodes.map((n) => n.id));
   }
   return snap.nodes
-    .filter((n) => keep.has(n.id) && RUNNABLE_TYPES.has(n.type) && !isImportedMedia(n))
+    .filter((n) => keep.has(n.id) && (RUNNABLE_TYPES.has(n.type) || isPresentationExportNode(n)) && !isImportedMedia(n))
     .map((n) => n.id);
 }
 
@@ -175,11 +179,12 @@ export function createCanvasTools(options: {
   settingsStore: SettingsStore;
   dataRoot: string;
   providerStore?: ProviderStore;
+  artifactStore?: ArtifactStore;
   /** Per-turn execution cap — created once per runChatTurn so an approval
    * suspension and resume share the same counters. */
   budget?: CanvasBudget;
 }) {
-  const { sessionId, canvasStore, settingsStore, dataRoot, providerStore, budget } = options;
+  const { sessionId, canvasStore, settingsStore, dataRoot, providerStore, artifactStore, budget } = options;
   const canvasApp = createCanvasApplication(canvasStore);
   const sessionCanvas = () => {
     if (canvasWorkStopped(canvasStore)) throw new NodeJobsClosedError();
@@ -659,10 +664,17 @@ export function createCanvasTools(options: {
         const saved = existing?.nodeType === 'video'
           ? replayVideoJob(canvasStore, canvas.id, id, mediaOperationId)
           : existing?.nodeType === 'audio' ? replayAudioJob(canvasStore, canvas.id, id, mediaOperationId)
-            : nodeJobsFor(canvasStore).replay(canvas.id, id, mediaOperationId);
+            : nodeJobsFor(canvasStore).replay(canvas.id, id, mediaOperationId, undefined, existing?.nodeType ?? 'image');
         if (saved) return jobOutcome(saved, wait, timeoutMs, true);
         const node = canvasStore.getNode(canvas.id, id);
         if (!node) return { error: `No canvas node "${id}"` };
+        if (isPresentationExportNode(node)) {
+          if (!artifactStore) throw new CanvasJobStoreError('本地演示稿导出需要 Artifact store');
+          const local = (node.params as any).localExport;
+          const accepted = startPresentationExport({ store: canvasStore, artifactStore, dataRoot, canvasId: canvas.id, request: local.request,
+            fixedSources: local.sources, targetNodeId: node.id, operationId: mediaOperationId ?? nanoid() });
+          return jobOutcome(accepted, wait, timeoutMs, false);
+        }
         if (!RUNNABLE_TYPES.has(node.type)) return { ok: false, id, status: node.runState, error: `Node type "${node.type}" cannot run` };
         if (isImportedMedia(node)) return { ok: true, id, status: 'done', output: node.output, note: '已有素材可以直接引用；填写提示词后可生成新版本。' };
         if (node.type === 'audio' && !providerStore) throw new CanvasJobStoreError('Audio provider store is unavailable');
@@ -734,7 +746,8 @@ export function createCanvasTools(options: {
         if (missing.length > 0) return { error: `No canvas node(s) ${missing.join(', ')}` };
         const scope = runGraphScope(canvasStore, canvas.id, from, nodeIds);
         const warnings = findLikelyGaps(canvasStore, canvas.id, scope, intent);
-        gateExecute(toolOptions, { tool: 'run_graph', from, nodeIds, wait, timeoutMs }, Math.max(scope.length, 1));
+        const generationScope = scope.filter((id) => !isPresentationExportNode(canvasStore.getNode(canvas.id, id)));
+        if (generationScope.length || !scope.length) gateExecute(toolOptions, { tool: 'run_graph', from, nodeIds, wait, timeoutMs }, Math.max(generationScope.length, 1));
         const jobIds = new Map<string, string>();
         let background = wait === false;
         const running = runGraph({
@@ -745,12 +758,13 @@ export function createCanvasTools(options: {
           fromNodeId: from,
           nodeIds,
           providerStore,
+          artifactStore,
           onJob: ({ job }) => {
             jobIds.set(job.nodeId, job.id);
             if (background) watchCanvasNodeJob(sessionId, canvas.id, canvasStore, [job.nodeId], job.id);
           },
         });
-        if (scope.length > 0) chargeExecute(canvas.id, scope, scope.length, running, jobIds);
+        if (generationScope.length > 0) chargeExecute(canvas.id, generationScope, generationScope.length, running, jobIds);
         if (wait === false) {
           void running.catch((): undefined => undefined);
           const legacy = scope.filter((id) => {

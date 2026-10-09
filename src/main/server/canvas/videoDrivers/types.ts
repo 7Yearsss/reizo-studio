@@ -37,6 +37,7 @@ export interface VideoJobStatus {
   videoUrl?: string;
   videoBuffer?: Buffer;
   error?: string;
+  usage?: unknown;
 }
 
 export interface VideoDriver {

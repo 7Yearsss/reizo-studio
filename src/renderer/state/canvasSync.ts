@@ -42,46 +42,40 @@ export function inspectCanvasSyncMessage(cursor: CanvasSyncCursor, message: Canv
 
 /** Pure projection: a transaction becomes one document update with stable untouched references. */
 export function projectCanvasChanges(document: CanvasDocument, changes: CanvasDocumentChange[]): CanvasDocument {
-  let { nodes, edges } = document;
-  for (const change of changes) {
-    switch (change.type) {
-      case 'node_added':
-        if (!nodes.some((node) => node.id === change.node.id)) nodes = [...nodes, change.node];
-        break;
-      case 'node_updated': {
-        const index = nodes.findIndex((node) => node.id === change.node.id);
-        if (index >= 0 && nodes[index] !== change.node) {
-          nodes = [...nodes];
-          nodes[index] = change.node;
-        }
-        break;
-      }
-      case 'node_output':
-      case 'run_state': {
-        const index = nodes.findIndex((node) => node.id === change.id);
-        if (index < 0) break;
-        const node = nodes[index];
-        if (node.runState === change.runState && (change.type === 'run_state' || node.output === change.output)) break;
-        nodes = [...nodes];
-        nodes[index] = change.type === 'run_state'
-          ? { ...node, runState: change.runState }
-          : { ...node, runState: change.runState, output: change.output };
-        break;
-      }
-      case 'node_deleted': {
-        if (nodes.some((node) => node.id === change.id)) nodes = nodes.filter((node) => node.id !== change.id);
-        if (edges.some((edge) => edge.sourceId === change.id || edge.targetId === change.id)) {
-          edges = edges.filter((edge) => edge.sourceId !== change.id && edge.targetId !== change.id);
-        }
-        break;
-      }
-      case 'edge_added':
-        if (!edges.some((edge) => edge.id === change.edge.id)) edges = [...edges, change.edge];
-        break;
-      case 'edge_deleted':
-        if (edges.some((edge) => edge.id === change.id)) edges = edges.filter((edge) => edge.id !== change.id);
-        break;
+  const nodes = new Map(document.nodes.map((node) => [node.id, node]));
+  const edges = new Map(document.edges.map((edge) => [edge.id, edge]));
+  let nodesChanged = false; let edgesChanged = false;
+  const touching = new Map<string, Set<string>>();
+  const needCascade = changes.some((change) => change.type === 'node_deleted');
+  const indexEdge = (edge: CanvasEdge) => {
+    if (!needCascade) return;
+    for (const id of [edge.sourceId, edge.targetId]) {
+      const ids = touching.get(id) ?? new Set(); ids.add(edge.id); touching.set(id, ids);
     }
+  };
+  for (const edge of edges.values()) indexEdge(edge);
+  const removeEdge = (id: string) => {
+    const edge = edges.get(id); if (!edge) return;
+    edges.delete(id); edgesChanged = true;
+    touching.get(edge.sourceId)?.delete(id); touching.get(edge.targetId)?.delete(id);
+  };
+  for (const change of changes) {
+    if (change.type === 'node_added') {
+      if (!nodes.has(change.node.id)) { nodes.set(change.node.id, change.node); nodesChanged = true; }
+    } else if (change.type === 'node_updated') {
+      if (nodes.has(change.node.id) && nodes.get(change.node.id) !== change.node) { nodes.set(change.node.id, change.node); nodesChanged = true; }
+    } else if (change.type === 'run_state' || change.type === 'node_output') {
+      const node = nodes.get(change.id);
+      if (node && (node.runState !== change.runState || change.type === 'node_output' && node.output !== change.output)) {
+        nodes.set(change.id, change.type === 'run_state' ? { ...node, runState: change.runState } : { ...node, runState: change.runState, output: change.output });
+        nodesChanged = true;
+      }
+    } else if (change.type === 'node_deleted') {
+      nodesChanged = nodes.delete(change.id) || nodesChanged;
+      for (const id of [...(touching.get(change.id) ?? [])]) removeEdge(id);
+    } else if (change.type === 'edge_added') {
+      if (!edges.has(change.edge.id)) { edges.set(change.edge.id, change.edge); indexEdge(change.edge); edgesChanged = true; }
+    } else if (change.type === 'edge_deleted') removeEdge(change.id);
   }
-  return nodes === document.nodes && edges === document.edges ? document : { nodes, edges };
+  return !nodesChanged && !edgesChanged ? document : { nodes: nodesChanged ? [...nodes.values()] : document.nodes, edges: edgesChanged ? [...edges.values()] : document.edges };
 }

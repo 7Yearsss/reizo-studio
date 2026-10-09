@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import * as chatStore from '../state/chatStore';
 import * as tabStore from '../state/tabStore';
 import { useChatStore } from '../state/useChatStore';
+import { useUiStore } from '../state/useUiStore';
 import MessageList from '../components/chat/MessageList';
 import Composer from '../components/chat/Composer';
 import ChatSearchPanel from '../components/chat/ChatSearchPanel';
@@ -26,6 +27,7 @@ function ChatPage({
   treeOpen?: boolean;
 }) {
   const session = useChatStore((s) => s.sessions.find((x) => x.id === sessionId));
+  const canvasActive = useUiStore((s) => active && s.canvasOpen && (s.mode === 'chat' || s.mode === 'projects'));
   const messages = useChatStore((s) => s.messagesBySession[sessionId]) ?? [];
   const sending = useChatStore((s) => s.sendingBySession[sessionId]) ?? false;
   const error = useChatStore((s) => s.errorBySession[sessionId]) ?? null;
@@ -70,6 +72,7 @@ function ChatPage({
   useEffect(() => {
     if (!active) return;
     function onKey(event: KeyboardEvent) {
+      if (event.defaultPrevented || !(event.target instanceof Node) || !containerRef.current?.contains(event.target)) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
         event.preventDefault();
         setSearchOpen(true);
@@ -192,6 +195,7 @@ function ChatPage({
         />
       )}
       <MessageList
+        emptyContext={canvasActive ? 'canvas' : 'chat'}
         messages={messages}
         sessionId={sessionId}
         compact={isCompact}

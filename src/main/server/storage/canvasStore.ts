@@ -17,6 +17,9 @@ import type { CanvasCommit, CanvasDocumentChange } from '../../../shared/canvasS
 import { isCanvasCommit } from '../../../shared/canvasSync';
 import { createCanvasJobStore } from './canvasJobStore';
 import { createCanvasAssetStore } from './canvasAssetStore';
+import { createDeliveryPlanStore } from './deliveryPlanStore';
+import { createUsageStore } from './usageStore';
+import { createDeliveryExportStore } from './deliveryExportStore';
 
 export const CANVAS_COMMIT_RETENTION = 1000;
 
@@ -104,6 +107,7 @@ function toEdge(row: EdgeRowRaw & { source_type?: string }): CanvasEdge {
 }
 
 export interface NodeInput {
+  id?: string;
   type: CanvasNodeType;
   x: number;
   y: number;
@@ -228,12 +232,16 @@ export function createCanvasStore(handle: DbHandle) {
   /** Set the derived `dirty` flag: ran before, but inputs have drifted since. */
   function annotate(nodes: CanvasNode[], edges: CanvasEdge[]): CanvasNode[] {
     const byId = new Map(nodes.map((n) => [n.id, n] as const));
+    const incoming = new Map<string, CanvasNode[]>();
+    for (const edge of edges) {
+      const source = byId.get(edge.sourceId);
+      if (!source) continue;
+      const bucket = incoming.get(edge.targetId) ?? [];
+      bucket.push(source); incoming.set(edge.targetId, bucket);
+    }
     return nodes.map((node) => {
       if (!node.paramsHash) return { ...node, dirty: false };
-      const upstream = edges
-        .filter((e) => e.targetId === node.id)
-        .map((e) => byId.get(e.sourceId))
-        .filter((n): n is CanvasNode => Boolean(n));
+      const upstream = incoming.get(node.id) ?? [];
       return { ...node, dirty: node.paramsHash !== inputHash(node, upstream) };
     });
   }
@@ -269,10 +277,21 @@ export function createCanvasStore(handle: DbHandle) {
           const roots = frame.dirtyRoots.get(canvasId) ?? new Set<string>();
           // Dirty is derived: an upstream result/edge change also affects untouched descendants.
           const edges = readEdges(canvasId);
+          const incomingSources = new Map<string, string[]>();
+          for (const edge of edges) {
+            const sources = incomingSources.get(edge.targetId) ?? [];
+            sources.push(edge.sourceId); incomingSources.set(edge.targetId, sources);
+          }
           const affected = new Set<string>();
-          for (const root of roots) {
-            affected.add(root);
-            for (const id of descendants(edges, root)) affected.add(id);
+          const outgoing = new Map<string, string[]>();
+          for (const edge of edges) {
+            const targets = outgoing.get(edge.sourceId) ?? [];
+            targets.push(edge.targetId); outgoing.set(edge.sourceId, targets);
+          }
+          const pending = [...roots];
+          for (let i = 0; i < pending.length; i++) {
+            const id = pending[i]; if (affected.has(id)) continue;
+            affected.add(id); pending.push(...(outgoing.get(id) ?? []));
           }
           const seen = new Set<string>();
           const annotated = affected.size ? annotate(readNodes(canvasId), edges) : [];
@@ -281,8 +300,8 @@ export function createCanvasStore(handle: DbHandle) {
             const current = byId.get(node.id) ?? readNode(canvasId, node.id) ?? node;
             if (byId.has(node.id)) return current;
             if (!current.paramsHash) return { ...current, dirty: false };
-            const upstream = edges.filter((edge) => edge.targetId === current.id)
-              .map((edge) => readNode(canvasId, edge.sourceId)).filter((n): n is CanvasNode => Boolean(n));
+            const upstream = (incomingSources.get(current.id) ?? [])
+              .map((id) => readNode(canvasId, id)).filter((n): n is CanvasNode => Boolean(n));
             return { ...current, dirty: current.paramsHash !== inputHash(current, upstream) };
           };
           const projected = changes.map((event): CanvasDocumentChange => {
@@ -327,6 +346,9 @@ export function createCanvasStore(handle: DbHandle) {
   const assets = createCanvasAssetStore(handle, tx, jobs, () => transactions.length > 0);
 
   return {
+    deliveryExports: createDeliveryExportStore(handle),
+    usage: createUsageStore(handle),
+    deliveries: createDeliveryPlanStore(handle),
     jobs,
     assets,
     ensureCanvas,
@@ -412,9 +434,8 @@ export function createCanvasStore(handle: DbHandle) {
       return annotated.filter((n) => affected.has(n.id));
     },
 
-    addNode(canvasId: string, input: NodeInput): { rev: number; node: CanvasNode } {
+    addNode(canvasId: string, input: NodeInput, id = nanoid()): { rev: number; node: CanvasNode } {
       return tx(() => {
-        const id = nanoid();
         const now = Date.now();
         raw
           .prepare(
@@ -493,7 +514,7 @@ export function createCanvasStore(handle: DbHandle) {
       });
     },
 
-    addEdge(canvasId: string, input: EdgeInput): AddEdgeResult {
+    addEdge(canvasId: string, input: EdgeInput, id = nanoid()): AddEdgeResult {
       return tx((): AddEdgeResult => {
         const src = readNode(canvasId, input.sourceId);
         const tgt = readNode(canvasId, input.targetId);
@@ -510,7 +531,6 @@ export function createCanvasStore(handle: DbHandle) {
         ) {
           return { error: 'cycle' };
         }
-        const id = nanoid();
         raw
           .prepare(
             `INSERT INTO canvas_edges (id, canvas_id, source_id, source_handle, target_id, target_handle)

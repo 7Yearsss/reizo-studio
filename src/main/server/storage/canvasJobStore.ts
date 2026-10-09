@@ -10,6 +10,7 @@ import type {
 } from '../../../shared/canvasJobs';
 import { isCanvasJobTerminal } from '../../../shared/canvasJobs';
 import type { DbHandle } from '../db/client';
+import { createUsageStore } from './usageStore';
 
 type Transaction = <T>(fn: () => T) => T;
 
@@ -96,6 +97,7 @@ function toJob(row: JobRow): CanvasJob {
 /** Uses the canvas repository's transaction so job admission/results can commit with document changes. */
 export function createCanvasJobStore(handle: DbHandle, transaction: Transaction) {
   const raw = handle.raw;
+  const usage = createUsageStore(handle);
   const byId = raw.prepare('SELECT * FROM canvas_jobs WHERE id = ?');
   const byOperation = raw.prepare('SELECT * FROM canvas_jobs WHERE canvas_id = ? AND operation_id = ?');
   const latest = raw.prepare('SELECT * FROM canvas_jobs WHERE canvas_id = ? AND node_id = ? ORDER BY generation DESC LIMIT 1');
@@ -172,6 +174,43 @@ export function createCanvasJobStore(handle: DbHandle, transaction: Transaction)
       return (rows as unknown as JobRow[]).map(toJob);
     },
 
+    page(canvasId: string, options: { limit?: number; status?: string; search?: string; cursor?: string } = {}) {
+      const limit = options.limit ?? 50;
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new CanvasJobStoreError('Job limit must be between 1 and 500');
+      const where = ['canvas_id = ?'];
+      const values: Array<string | number> = [canvasId];
+      if (options.status === 'active') where.push("status IN ('queued', 'running')");
+      else if (options.status === 'attention') where.push("status IN ('failed', 'interrupted')");
+      else if (options.status && options.status !== 'all') {
+        if (!['queued', 'running', 'succeeded', 'failed', 'cancelled', 'interrupted'].includes(options.status)) throw new CanvasJobStoreError('Unknown job status');
+        where.push('status = ?'); values.push(options.status);
+      }
+      if (options.search) {
+        if (options.search.length > 200) throw new CanvasJobStoreError('Search is too long');
+        where.push("instr(lower(COALESCE(model, '') || ' ' || COALESCE(error, '') || ' ' || node_id || ' ' || COALESCE((SELECT title FROM canvas_nodes WHERE id = canvas_jobs.node_id), '')), lower(?)) > 0");
+        values.push(options.search);
+      }
+      if (options.cursor) {
+        let cursor: unknown;
+        try { cursor = JSON.parse(Buffer.from(options.cursor, 'base64url').toString()); } catch { throw new CanvasJobStoreError('Invalid job cursor'); }
+        if (!Array.isArray(cursor) || cursor.length !== 2 || !Number.isSafeInteger(cursor[0]) || typeof cursor[1] !== 'string' || cursor[1].length > 128)
+          throw new CanvasJobStoreError('Invalid job cursor');
+        where.push('(created_at < ? OR (created_at = ? AND id < ?))'); values.push(cursor[0], cursor[0], cursor[1]);
+      }
+      // History never reads potentially large input/result JSON blobs.
+      const rows = raw.prepare(`SELECT id, canvas_id, node_id, node_type, generation, operation_id, status, provider_id, model,
+        input_hash, remote_task_json, error, cancel_reason, created_at, submitted_at, ended_at FROM canvas_jobs
+        WHERE ${where.join(' AND ')} ORDER BY created_at DESC, id DESC LIMIT ?`).all(...values, limit + 1) as unknown as JobRow[];
+      const visible = rows.slice(0, limit);
+      const jobs = visible.map((row) => {
+        const summary = toJob({ ...row, input_json: '{}', result_json: null });
+        const { input: _input, result: _result, ...job } = summary;
+        return job;
+      });
+      const last = visible.at(-1);
+      return { jobs, ...(rows.length > limit && last ? { nextCursor: Buffer.from(JSON.stringify([last.created_at, last.id])).toString('base64url') } : {}) };
+    },
+
     unfinished(): CanvasJob[] {
       return (raw.prepare("SELECT * FROM canvas_jobs WHERE status IN ('queued', 'running') ORDER BY created_at, id")
         .all() as unknown as JobRow[]).map(toJob);
@@ -182,9 +221,17 @@ export function createCanvasJobStore(handle: DbHandle, transaction: Transaction)
     markSubmitted(id: string, info: { providerId?: string; model?: string } = {}): boolean {
       return transaction(() => {
         if (!isCurrent(id)) return false;
-        return raw.prepare(`UPDATE canvas_jobs SET status = 'running', submitted_at = ?,
+        const accepted = raw.prepare(`UPDATE canvas_jobs SET status = 'running', submitted_at = ?,
           provider_id = COALESCE(?, provider_id), model = COALESCE(?, model)
           WHERE id = ? AND status = 'queued'`).run(Date.now(), info.providerId ?? null, info.model ?? null, id).changes === 1;
+        if (accepted && info.providerId && info.model) {
+          const job = getRow(id);
+          const session = raw.prepare('SELECT session_id FROM canvases WHERE id = ?').get(job.canvas_id) as { session_id: string } | undefined;
+          const category = info.providerId === 'local' ? 'local' : job.node_type === 'agent' ? 'llm' : job.node_type === 'image' || job.node_type === 'audio' || job.node_type === 'video' ? job.node_type : 'local';
+          usage.ensure({ executionId: `job:${id}`, jobId: id, canvasId: job.canvas_id, nodeId: job.node_id, sessionId: session?.session_id,
+            category, providerId: info.providerId, model: info.model });
+        }
+        return accepted;
       });
     },
 

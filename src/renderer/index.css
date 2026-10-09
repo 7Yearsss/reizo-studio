@@ -4,6 +4,25 @@
 @source "../../node_modules/streamdown/dist/*.js";
 @source "../../node_modules/@streamdown/code/dist/*.js";
 
+.document-prose { color: var(--ink); line-height: 1.8; overflow-wrap: anywhere; }
+.document-prose p { margin: .6em 0; }
+.document-prose h1 { font-size: 2em; font-weight: 700; margin: .8em 0; }
+.document-prose h2 { font-size: 1.5em; font-weight: 650; margin: .8em 0; }
+.document-prose h3 { font-size: 1.2em; font-weight: 600; margin: .7em 0; }
+.document-prose ul { list-style: disc; padding-left: 1.5em; }
+.document-prose ol { list-style: decimal; padding-left: 1.5em; }
+.document-prose blockquote { border-left: 3px solid var(--line); padding-left: 1em; }
+.document-prose table { border-collapse: collapse; width: 100%; table-layout: fixed; margin: 1em 0; }
+.document-prose th, .document-prose td { border: 1px solid var(--line); padding: .4em .6em; vertical-align: top; position: relative; }
+.document-prose th { background: var(--paper-inset); font-weight: 600; }
+.document-prose .selectedCell { background: var(--paper-inset); }
+.document-prose pre { white-space: pre-wrap; background: var(--paper-inset); padding: .75em; border-radius: .4em; }
+.document-prose img { max-width: 100%; height: auto; }
+.document-prose a { text-decoration: underline; color: var(--accent); }
+.document-review ins { background: color-mix(in srgb, var(--accent) 18%, transparent); text-decoration: underline; }
+.document-review del { background: color-mix(in srgb, var(--destructive) 15%, transparent); text-decoration: line-through; }
+.document-review [data-type="modification"] { outline: 1px dashed var(--accent); }
+
 /*
  * Semantic color tokens (`--paper`, `--ink`, ...) rather than raw Tailwind
  * grays. Components use `bg-paper`, `text-ink`, `border-line`.
@@ -591,8 +610,14 @@ pre,
    backdrop-blur and drop-shadows cost real per-frame compositing time even
    when nothing is actively being dragged, and none of that detail is legible
    at that zoom level anyway. */
-[data-lowzoom='true'] .react-flow__node {
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+[data-lowzoom='true'] .react-flow__node,
+[data-lowzoom='true'] .react-flow__node > :first-child,
+[data-held-pan='true'] .react-flow__node,
+[data-held-pan='true'] .react-flow__node > :first-child {
+  /* Custom node cards put their plate inside RF's positioned wrapper. Both
+     layers must be targeted; shadows and transitions are not inherited. */
+  box-shadow: none !important;
+  transition: none !important;
 }
 [data-lowzoom='true'] [class*='backdrop-blur'],
 [data-dragging='true'] [class*='backdrop-blur'] {

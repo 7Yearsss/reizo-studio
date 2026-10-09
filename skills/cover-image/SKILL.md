@@ -30,3 +30,10 @@ category: design
 1. 三问收齐后，在画布上建 2-3 个不同方向的草稿图节点（**严禁 asProposal / 幽灵提案**，直接创建普通节点），建好立即对每个节点 `run_node`。
 2. 等草稿出图完成后，用 `ask_user` 发方向卡（`kind: 'direction'`，每个选项带对应草稿节点的 `nodeId`，卡片会显示真实缩略图），让用户挑选。
 3. 按用户选中的方向精修产出终图，终图的画幅与样式必须严格采用用户的回答；未选中的草稿节点留在画布上，不要删除。
+
+
+## 程序化交付
+
+封面的 `input.aspectRatio` 是用户明确选择的画幅，保存计划时会自动写入图片产物的 `geometry.aspectRatio`；不得另填冲突画幅。用户明确指定像素尺寸时，在产物的可选 `geometry` 中填写 `width`、`height` 或 `minWidth`、`minHeight`。`check_delivery` 从实际图片字节核对这些条件；颜色、文字、构图、风格与视觉品质仍需人工验收。
+
+收齐上述选择后，先调用 `plan_delivery` 保存 `contract.json` 规定的输入和明确的产物角色、数量及必要素材引用。中断后使用 `read_delivery_plans` 读取原计划。成品就绪后，调用 `check_delivery` 提交真实 `assetId` 清单；仅当 `complete: true` 时报告交付完成，否则说明缺项并只修复相应产物。不得把草稿、缺失文件或同一文件重复计为多个成品。

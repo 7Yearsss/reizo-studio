@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -8,6 +8,7 @@ import {
   Panel,
   useReactFlow,
   useStore,
+  useNodesInitialized,
   applyNodeChanges,
   ConnectionMode,
   SelectionMode,
@@ -25,41 +26,25 @@ import {
   Bot,
   PlayCircle,
   Square,
-  Copy,
-  Trash2,
-  MessagesSquare,
-  Play,
   Undo2,
   Redo2,
   ListRestart,
   LayoutGrid,
-  AtSign,
   Video,
-  GitBranchPlus,
   HelpCircle,
-  StickyNote,
   Film,
-  Boxes,
-  AlignHorizontalDistributeCenter,
   FileDown,
   FileUp,
   Plus,
   Maximize,
-  Maximize2,
   MoreHorizontal,
   ChevronDown,
-  Pin,
   MousePointer2,
   Hand,
-  ZoomIn,
-  ZoomOut,
   Focus,
   Search,
   ChevronUp,
   X,
-  Palette,
-  Sparkles,
-  FolderKanban,
   Layers,
   Clock,
   Mouse,
@@ -77,7 +62,7 @@ import { cn } from '../../lib/cn';
 import { setCanvasInteracting } from '../../lib/canvasInteraction';
 import { layoutGraph, wouldCycle, isPortCompatible } from '../../../shared/canvasGraph';
 import { estimateGraphCost } from '../../../shared/canvasPricing';
-import { defaultNodeBox, type CanvasEdge, type CanvasGroupParams, type CanvasNode, type CanvasNodeType } from '../../../shared/canvas';
+import type { CanvasEdge, CanvasGroupParams, CanvasNode, CanvasNodeType } from '../../../shared/canvas';
 import { extractSubgraph, formatSubgraphForPrompt } from '../../../shared/canvasSubgraph';
 import { nodeReadinessIssues } from '../../../shared/canvasReadiness';
 import { OPEN_HANDLE_MENU_EVENT, type HandleMenuEventDetail } from './MagneticHandle';
@@ -96,11 +81,17 @@ import SubgraphNode from './SubgraphNode';
 import ProposalBar from './ProposalBar';
 import { AlignmentGuides } from './AlignmentGuides';
 import AssetShelf from './AssetShelf';
+import CanvasJobsPanel from './CanvasJobsPanel';
 import AgentActivityStrip from './AgentActivityStrip';
-import StoryboardModal from './StoryboardModal';
+import LazyStoryboardModal, { preloadStoryboard } from './LazyStoryboardModal';
+import LazyPresentationExportModal, { preloadPresentationExport } from './LazyPresentationExportModal';
 import CuttableEdge from './edges/CuttableEdge';
 import AddNodesModal from './AddNodesModal';
 import CanvasContextMenu from './CanvasContextMenu';
+import HandleDropMenu, { type HandleDropIntent } from './HandleDropMenu';
+import { CanvasToolButton as NavButton, CanvasToolbarDropdown as ToolbarDropdown } from './CanvasToolbar';
+import CanvasZoomControls from './CanvasZoomControls';
+import { Separator } from '../ui/separator';
 import CanvasEmptyPrompt from './CanvasEmptyPrompt';
 import ReturnToNodesToast from './ReturnToNodesToast';
 import MultiSelectToolbar from './MultiSelectToolbar';
@@ -108,9 +99,8 @@ import InsertFromCanvasBanner from './InsertFromCanvasBanner';
 import CanvasRefPickBanner from './CanvasRefPickBanner';
 import { getCanvasNodeThumbnail } from './canvasThumbnail';
 import ErrorBoundary from '../ErrorBoundary';
-import Tooltip from '../ui/Tooltip';
-import { motion, AnimatePresence } from 'motion/react';
 import { canvasAssetUrlSync } from '../../api';
+import { CanvasAutoFocusContext } from './CanvasAutoFocusContext';
 
 const NODE_TYPES: NodeTypes = {
   image: ImageNode,
@@ -141,6 +131,15 @@ const MINIMAP_NODE_COLOR = (n: { type?: string }) => {
 type Menu =
   | { kind: 'node'; x: number; y: number; nodeId: string }
   | { kind: 'pane'; x: number; y: number; flowX: number; flowY: number };
+
+/** Semantic inputs share one visual intake; persisted handle IDs still drive generation. */
+function displayedTargetHandle(nodeType: string | undefined, handle: string | null | undefined) {
+  if (nodeType === 'video' && handle && ['start_frame', 'end_frame', 'startFrame', 'endFrame', 'audio_in'].includes(handle)) return 'reference';
+  if ((nodeType === 'video' || nodeType === 'image') && handle?.startsWith('ref_')) return 'reference';
+  if (nodeType === 'audio' && handle === 'audio_in') return 'prompt';
+  if (nodeType === 'note' && (handle === 'prompt' || handle === 'input')) return 'text_in';
+  return handle;
+}
 
 function computeNodeInputMeta(
   node: CanvasNode,
@@ -267,6 +266,7 @@ export function computeEdgeZIndex(
 }
 
 function CanvasInner({ sessionId }: { sessionId: string }) {
+  const autoFocus = useContext(CanvasAutoFocusContext);
   const storeNodes = useCanvasStore((s) => s.nodesBySession[sessionId] ?? canvasStore.EMPTY_NODES);
   const storeEdges = useCanvasStore((s) => s.edgesBySession[sessionId] ?? canvasStore.EMPTY_EDGES);
   const loaded = useCanvasStore((s) => s.loadedBySession[sessionId] ?? false);
@@ -323,6 +323,20 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
   const [highlightIds, setHighlightIds] = useState<string[]>([]);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showStoryboard, setShowStoryboard] = useState(false);
+  const [showPresentationExport, setShowPresentationExport] = useState(false);
+  const [pendingExportNodeId, setPendingExportNodeId] = useState<string | null>(null);
+  const [utilityPanel, setUtilityPanel] = useState<'assets' | 'jobs' | null>(null);
+  const [graphRepairEpoch, setGraphRepairEpoch] = useState(0);
+  const canvasRootRef = useRef<HTMLDivElement>(null);
+  const [emptyCreating, setEmptyCreating] = useState<string | null>(null);
+  const [emptyCreationError, setEmptyCreationError] = useState<string | null>(null);
+  const emptyCreationPending = useRef(false);
+  const preparedEmptyCreations = useRef(new Map<string, () => Promise<string[]>>());
+  const preparedSimpleCreations = useRef(new Map<string, () => Promise<void>>());
+  const canvasScreenCenter = useCallback(() => {
+    const bounds = canvasRootRef.current?.getBoundingClientRect();
+    return bounds ? { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 } : { x: 220, y: 160 };
+  }, []);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const confirmTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const dragStart = useRef<Record<string, { x: number; y: number }>>({});
@@ -382,10 +396,10 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     const handleDeselect = (e: Event) => {
       const detail = (e as CustomEvent<{ sessionId?: string; nodeId?: string }>).detail;
       if (detail?.nodeId && (!detail.sessionId || detail.sessionId === sessionId)) {
-        setSelectedNodeIds((prev) => {
-          const next = prev.filter((id) => id !== detail.nodeId);
-          const nextSet = new Set(next);
-          rf.setNodes((nds) => {
+        const next = canvasStore.getSnapshot().selectedNodeIdsBySession[sessionId] ?? [];
+        setSelectedNodeIds(next);
+        const nextSet = new Set(next);
+        rf.setNodes((nds) => {
             const zIndexes = computeNodeZIndexes(storeNodes, (id) => nextSet.has(id));
             return nds.map((n) => {
               const isSelected = nextSet.has(n.id);
@@ -397,8 +411,6 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
                 zIndex: nextZ,
               };
             });
-          });
-          return next;
         });
       }
     };
@@ -445,14 +457,15 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       typeof window !== 'undefined' &&
       window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     const one = present.length === 1 ? currentNodes.find((n) => n.id === present[0]) : null;
-    if (one) {
+    const moveCamera = autoFocus || spot.source !== 'automatic';
+    if (moveCamera && one) {
       // Center AND lift the zoom floor — spotlighting at 30% zoom leaves the
       // node a thumbnail, which defeats the point of focusing it.
       rf.setCenter(one.x + one.w / 2, one.y + one.h / 2, {
         zoom: Math.min(1.25, Math.max(rf.getZoom(), 0.9)),
         duration: reduced ? 0 : 300,
       });
-    } else {
+    } else if (moveCamera) {
       rf.fitView({
         nodes: present.map((id) => ({ id })),
         padding: 0.25,
@@ -463,7 +476,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     setHighlightIds(present);
     const t = setTimeout(() => setHighlightIds([]), 1800);
     return () => clearTimeout(t);
-  }, [spot?.at, rf]);
+  }, [spot?.at, rf, autoFocus]);
 
   // When a node's run lands (running -> done), spotlight it so the finished
   // media gets a gentle focus/zoom-in instead of staying a thumbnail.
@@ -477,27 +490,33 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       if (prev.get(n.id) === 'running' && n.runState === 'done') justDone.push(n.id);
     }
     prevRunStatesRef.current = next;
-    if (justDone.length > 0) canvasStore.spotlight(sessionId, justDone);
+    if (justDone.length > 0) canvasStore.spotlight(sessionId, justDone, 'automatic');
   }, [storeNodes, sessionId]);
 
   const restoredRef = useRef(false);
-  const restoreViewport = () => {
-    if (restoredRef.current) return;
-    restoredRef.current = true;
+  const viewportReady = useStore((s) => Boolean(s.panZoom));
+  const nodesReady = useNodesInitialized();
+  const restoreViewport = useCallback(() => {
+    if (restoredRef.current || !viewportReady) return;
     try {
       const raw = localStorage.getItem(VIEWPORT_KEY(sessionId));
       if (raw) {
         const v = JSON.parse(raw) as Viewport;
-        if (typeof v.x === 'number') {
-          rf.setViewport(v);
+        if ([v.x, v.y, v.zoom].every(Number.isFinite) && v.zoom > 0) {
+          restoredRef.current = true;
+          void rf.setViewport({ ...v, zoom: Math.min(3, Math.max(0.05, v.zoom)) });
           return;
         }
       }
     } catch {
       /* ignore */
     }
-    rf.fitView({ padding: 0.2, maxZoom: 1 });
-  };
+    // onInit can run before the async snapshot has arrived or nodes are measured.
+    if (!loaded || !nodesReady || !storeNodes.length) return;
+    restoredRef.current = true;
+    void rf.fitView({ padding: 0.2, maxZoom: 1 });
+  }, [viewportReady, loaded, nodesReady, storeNodes.length, sessionId, rf]);
+  useEffect(() => { restoreViewport(); }, [restoreViewport]);
 
   /** Nodes sitting inside a *locked* group — pinned in place. */
   const lockedMembers = useMemo(() => {
@@ -546,6 +565,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
   const inertiaRafRef = useRef(0);
   const coastTimerRef = useRef(0);
   const [isInteracting, setIsInteracting] = useState(false);
+  const [isHeldViewportGesture, setIsHeldViewportGesture] = useState(false);
   // Mirror the drag/pan flag for JS animators (e.g. dither fields) that pause
   // their per-frame painting while a gesture owns the frame budget.
   useEffect(() => {
@@ -561,10 +581,12 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       window.clearTimeout(coastTimerRef.current);
       coastTimerRef.current = 0;
     }
+    setIsHeldViewportGesture(false);
   }, []);
 
   const settleInteraction = useCallback(() => {
     if (!isDraggingRef.current && !pointerDownRef.current && !isPanningRef.current) {
+      setIsHeldViewportGesture(false);
       setIsInteracting(false);
     }
   }, []);
@@ -605,6 +627,10 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       if (!coastingRef.current) return;
       coastingRef.current = false;
       inertiaRafRef.current = 0;
+      // This coast owns the ended gesture. XYFlow's last viewport callback can
+      // be programmatic (event=null), so it may not clear the native-pan flag.
+      // A new gesture cancels this coast before its finish callback can run.
+      isPanningRef.current = false;
       settleInteraction();
       try {
         localStorage.setItem(VIEWPORT_KEY(sessionId), JSON.stringify(rf.getViewport()));
@@ -657,7 +683,11 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     const onUp = () => {
       if (!pointerDownRef.current) return;
       pointerDownRef.current = false;
-      if (pannedRef.current) startCoast();
+      setIsHeldViewportGesture(false);
+      if (pannedRef.current) {
+        isPanningRef.current = false;
+        startCoast();
+      }
       else settleInteraction();
     };
     // pointerdown is capture so the button state is set before the pan samples.
@@ -685,7 +715,6 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     isLowZoomRef.current = isLowZoomRef.current ? zoom < 0.5 : zoom < 0.45;
     return isLowZoomRef.current;
   });
-  const currentZoom = useStore((s) => Math.round((s.transform[2] || 1) * 100));
 
   const initialNodes = useMemo(() => {
     const nodesById = new Map(storeNodes.map((n) => [n.id, n]));
@@ -701,6 +730,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       return {
         id: node.id,
         type: node.type,
+        ariaLabel: node.title || node.type,
         position: { x: node.x, y: node.y },
         width: node.w,
         height: node.h,
@@ -783,6 +813,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
             ...prev,
             id: node.id,
             type: node.type,
+            ariaLabel: node.title || node.type,
             position: { x: node.x, y: node.y },
             width: node.w,
             height: node.h,
@@ -806,7 +837,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       }
       return nextNodes;
     });
-  }, [storeNodes, storeEdges, sessionId, highlightIds, lockedMembers, agentMarkedIds, proposals, selectedNodeIds, rf]);
+  }, [storeNodes, storeEdges, sessionId, highlightIds, lockedMembers, agentMarkedIds, proposals, selectedNodeIds, graphRepairEpoch, rf]);
 
   const nodeMetaKey = useMemo(
     () => storeNodes.map((n) => `${n.id}:${n.type}:${n.runState}`).join('|'),
@@ -839,6 +870,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
 
   const edges: Edge[] = useMemo(() => {
     const zIndexes = computeNodeZIndexes(storeNodes, (id) => selectedNodeIds.includes(id));
+    const nodeTitles = new Map(storeNodes.map((node) => [node.id, node.title || node.type]));
     return storeEdges.map((edge) => {
       const sourceMeta = nodeMetaMap.get(edge.sourceId);
       const targetMeta = nodeMetaMap.get(edge.targetId);
@@ -856,7 +888,8 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         source: edge.sourceId,
         sourceHandle: edge.sourceHandle,
         target: edge.targetId,
-        targetHandle: edge.targetHandle,
+        targetHandle: displayedTargetHandle(targetMeta?.type, edge.targetHandle),
+        ariaLabel: `连线：${nodeTitles.get(edge.sourceId) || edge.sourceId} → ${nodeTitles.get(edge.targetId) || edge.targetId}`,
         animated: isRunning,
         zIndex: edgeZ,
         data: {
@@ -869,16 +902,18 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         },
       };
     });
-  }, [storeEdges, storeNodes, nodeMetaMap, wiresVisible, hoveredNodeId, selectedNodeIds, handleCutEdge, handleRerouteEdge]);
+  }, [storeEdges, storeNodes, nodeMetaMap, wiresVisible, hoveredNodeId, selectedNodeIds, graphRepairEpoch, handleCutEdge, handleRerouteEdge]);
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
+      const removed = changes.flatMap((change) => change.type === 'remove' ? [change.id] : []);
+      if (removed.length) void canvasStore.removeNodes(sessionId, removed).catch((cause) => {
+        setGraphRepairEpoch((epoch) => epoch + 1);
+        flash(cause instanceof Error ? cause.message : '删除失败，请稍后重试');
+      });
       const liveGeometry = new Map<string, Partial<Pick<CanvasNode, 'x' | 'y' | 'w' | 'h'>>>();
       const resizing = new Set(changes.flatMap((change) => change.type === 'dimensions' && change.resizing ? [change.id] : []));
       for (const change of changes) {
-        if (change.type === 'remove') {
-          void canvasStore.removeNode(sessionId, change.id);
-        }
         if (change.type === 'dimensions' && change.resizing && change.dimensions) {
           liveGeometry.set(change.id, { ...liveGeometry.get(change.id), w: change.dimensions.width, h: change.dimensions.height });
         }
@@ -891,7 +926,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       // Group→members follow is handled in onNodeDrag (rf.getNode is already
       // updated here, so a delta computed from it would always be zero).
     },
-    [sessionId, rf],
+    [sessionId, rf, flash],
   );
 
   const onEdgesChange = useCallback(
@@ -904,16 +939,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
   );
 
   const connectingNode = useRef<{ nodeId: string; handleId: string | null; handleType: 'source' | 'target' } | null>(null);
-  const [dropConnectMenu, setDropConnectMenu] = useState<{
-    nodeId: string;
-    handleId: string | null;
-    handleType: 'source' | 'target';
-    flowX: number;
-    flowY: number;
-    screenX: number;
-    screenY: number;
-    isDragDrop?: boolean;
-  } | null>(null);
+  const [dropConnectMenu, setDropConnectMenu] = useState<HandleDropIntent | null>(null);
   const dropConnectMenuOpenedAt = useRef<number>(0);
   const [addNodesModal, setAddNodesModal] = useState<{
     x: number;
@@ -925,7 +951,9 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
 
   const openAddNodesModal = useCallback(
     (screenX: number, screenY: number, flowX?: number, flowY?: number) => {
-      if (menu) setMenu(null);
+      setMenu(null);
+      setDropConnectMenu(null);
+      setOpenTool(null);
       addNodesModalOpenedAt.current = Date.now();
       const flow =
         flowX !== undefined && flowY !== undefined
@@ -964,6 +992,24 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
   );
 
   useEffect(() => {
+    if (!pendingExportNodeId || !storeNodes.some((node) => node.id === pendingExportNodeId)) return;
+    selectNode(pendingExportNodeId);
+    canvasStore.focusNode(sessionId, pendingExportNodeId);
+    setPendingExportNodeId(null);
+  }, [pendingExportNodeId, storeNodes, selectNode, sessionId]);
+
+  useEffect(() => {
+    const openJobs = (event: Event) => {
+      const detail = (event as CustomEvent<{ sessionId?: string; nodeId?: string }>).detail;
+      if (detail?.sessionId !== sessionId) return;
+      setUtilityPanel('jobs');
+      if (detail.nodeId) setPendingExportNodeId(detail.nodeId);
+    };
+    window.addEventListener('canvas-open-jobs', openJobs);
+    return () => window.removeEventListener('canvas-open-jobs', openJobs);
+  }, [sessionId]);
+
+  useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (e.button !== 0) return;
       if (isPickingReference) return;
@@ -999,15 +1045,14 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
 
   const handleCreateAndSelect = useCallback(
     async (promise: Promise<string | null>) => {
-      setDropConnectMenu(null);
-      const newId = await promise;
-      if (newId) {
-        setTimeout(() => {
-          selectNode(newId);
-        }, 50);
+      try {
+        const newId = await promise;
+        if (newId) requestAnimationFrame(() => selectNode(newId));
+      } catch (cause) {
+        flash(cause instanceof Error ? cause.message : '创建失败，请稍后重试');
       }
     },
-    [selectNode],
+    [selectNode, flash],
   );
 
   const handleUploadFileAt = useCallback(
@@ -1084,9 +1129,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       const pos =
         targetPos ??
         (() => {
-          const cx = window.innerWidth / 2;
-          const cy = window.innerHeight / 2;
-          const flow = rf.screenToFlowPosition({ x: cx, y: cy });
+          const flow = rf.screenToFlowPosition(canvasScreenCenter());
           return { x: Math.round(flow.x), y: Math.round(flow.y) };
         })();
 
@@ -1162,7 +1205,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         /* ignore */
       }
     },
-    [rf, sessionId, handleUploadFileAt, flash, selectNode],
+    [rf, sessionId, handleUploadFileAt, flash, selectNode, canvasScreenCenter],
   );
 
   const selectedNodes = useMemo(
@@ -1195,7 +1238,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
   const isMoodboard = useCanvasStore((s) => s.moodboardBySession[sessionId] ?? false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchMatchIdx, setSearchMatchIdx] = useState(0);
+  const [searchMatchIdx, setSearchMatchIdx] = useState(-1);
 
   const matchedNodes = useMemo(() => {
     if (!searchQuery.trim()) return [];
@@ -1233,125 +1276,10 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
 
   const goToPrevMatch = useCallback(() => {
     if (matchedNodes.length === 0) return;
-    const prevIdx = (searchMatchIdx - 1 + matchedNodes.length) % matchedNodes.length;
+    const prevIdx = searchMatchIdx <= 0 ? matchedNodes.length - 1 : (searchMatchIdx - 1) % matchedNodes.length;
     setSearchMatchIdx(prevIdx);
     focusNodeAt(matchedNodes[prevIdx]);
   }, [matchedNodes, searchMatchIdx, focusNodeAt]);
-
-  // Global Canvas shortcuts: H (Moodboard), I / V / T (Instant downstream creation), Cmd/Ctrl+F (Search)
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      const activeTag = (document.activeElement?.tagName || '').toLowerCase();
-      const isInput =
-        activeTag === 'input' ||
-        activeTag === 'textarea' ||
-        (document.activeElement as HTMLElement)?.isContentEditable;
-
-      // Cmd/Ctrl+F -> Toggle Search
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
-        e.preventDefault();
-        setSearchOpen((v) => !v);
-        return;
-      }
-
-      if (e.key === 'Escape') {
-        if (searchOpen) {
-          setSearchOpen(false);
-          return;
-        }
-        if (isPickingReference) {
-          chatStore.setPickingReference(sessionId, false);
-          return;
-        }
-      }
-
-      // Alt+W -> Toggle Workflow Wires
-      if (!isInput && e.altKey && e.key.toLowerCase() === 'w') {
-        e.preventDefault();
-        toggleWires();
-        return;
-      }
-
-      // Ctrl/Cmd+G -> Create Group from selection
-      if (!isInput && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'g' && !e.shiftKey) {
-        e.preventDefault();
-        void createGroupFromSelection();
-        return;
-      }
-
-      if (isInput || e.ctrlKey || e.metaKey || e.altKey) return;
-
-      // H -> Moodboard
-      if (e.key.toLowerCase() === 'h') {
-        e.preventDefault();
-        canvasStore.toggleMoodboard(sessionId);
-        flash(canvasStore.isMoodboard(sessionId) ? '已切换至情绪板模式 (按 H 退出)' : '已退出情绪板模式');
-        return;
-      }
-
-      // I / V / T -> Create downstream connected node when 1 node is selected
-      if (['i', 'v', 't'].includes(e.key.toLowerCase()) && selectedNodeIds.length === 1) {
-        const srcNode = storeNodes.find((n) => n.id === selectedNodeIds[0]);
-        if (!srcNode) return;
-        e.preventDefault();
-        const key = e.key.toLowerCase();
-        if (key === 'i') {
-          void handleCreateAndSelect(
-            canvasStore.addNodeAndConnect(
-              sessionId,
-              {
-                type: 'image',
-                x: srcNode.x + srcNode.w + 60,
-                y: srcNode.y,
-                title: srcNode.title ? `${srcNode.title} · 衍生` : '图片',
-              },
-              srcNode.id,
-              null,
-              'ref_1',
-            ),
-          );
-        } else if (key === 'v') {
-          if (srcNode.type === 'image') {
-            void canvasStore.animateFromImage(sessionId, srcNode.id);
-          } else {
-            void handleCreateAndSelect(
-              canvasStore.addNodeAndConnect(
-                sessionId,
-                {
-                  type: 'video',
-                  x: srcNode.x + srcNode.w + 60,
-                  y: srcNode.y,
-                  title: srcNode.title ? `${srcNode.title} · 运镜` : '视频生成',
-                  params: { prompt: '', duration: '5s', ratio: '16:9' },
-                },
-                srcNode.id,
-                null,
-                'start_frame',
-              ),
-            );
-          }
-        } else if (key === 't') {
-          void handleCreateAndSelect(
-            canvasStore.addNodeAndConnect(
-              sessionId,
-              {
-                type: 'note',
-                x: srcNode.x + srcNode.w + 60,
-                y: srcNode.y,
-                title: '分镜便签',
-              },
-              srcNode.id,
-              null,
-              null,
-            ),
-          );
-        }
-      }
-    };
-
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [sessionId, searchOpen, selectedNodeIds, storeNodes, flash, handleCreateAndSelect]);
 
   const lastConnectTimeRef = useRef<number>(0);
 
@@ -1459,6 +1387,9 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
 
       dropConnectMenuOpenedAt.current = Date.now();
 
+      setMenu(null);
+      setAddNodesModal(null);
+      setOpenTool(null);
       setDropConnectMenu({
         nodeId: fromNodeId,
         handleId: fromHandleId,
@@ -1492,6 +1423,9 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
 
       dropConnectMenuOpenedAt.current = Date.now();
 
+      setMenu(null);
+      setAddNodesModal(null);
+      setOpenTool(null);
       setDropConnectMenu({
         nodeId: detail.nodeId,
         handleId: detail.handleId,
@@ -1572,9 +1506,70 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     [sessionId, storeNodes, rf],
   );
 
+  const prepareCreationAt = (type: CanvasNodeType, position: { x: number; y: number }, params?: Record<string, unknown>) => {
+    const key = JSON.stringify([type, position, params]);
+    let run = preparedSimpleCreations.current.get(key);
+    if (!run) {
+      const commit = canvasStore.prepareNodeCreation(sessionId, { type, ...position, params, ...(typeof params?.title === 'string' ? { title: params.title } : {}) });
+      run = async () => {
+        const id = await commit();
+        preparedSimpleCreations.current.delete(key);
+        requestAnimationFrame(() => selectNode(id));
+      };
+      preparedSimpleCreations.current.set(key, run);
+    }
+    return run;
+  };
+
   const addNode = (type: CanvasNodeType, at?: { x: number; y: number }) => {
-    const offset = storeNodes.length * 24;
-    void canvasStore.addNode(sessionId, type, at ?? { x: 60 + offset, y: 60 + offset });
+    const center = rf.screenToFlowPosition(canvasScreenCenter());
+    try {
+      void prepareCreationAt(type, at ?? { x: Math.round(center.x - 160), y: Math.round(center.y - 100) })().catch((cause) => flash(cause instanceof Error ? cause.message : '创建失败'));
+    } catch (cause) {
+      flash(cause instanceof Error ? cause.message : '创建失败');
+    }
+  };
+
+  const createEmptyCanvas = async (kind: 'video' | 'image' | 'image-video' | 'audio-video' | 'template') => {
+    if (emptyCreationPending.current) return;
+    emptyCreationPending.current = true;
+    setEmptyCreating('正在创建画布内容…');
+    setEmptyCreationError(null);
+    try {
+      let commit = preparedEmptyCreations.current.get(kind);
+      if (!commit) {
+        const center = rf.screenToFlowPosition(canvasScreenCenter());
+        if (kind === 'image' || kind === 'video') {
+          const create = canvasStore.prepareNodeCreation(sessionId, { type: kind, x: Math.round(center.x - 160), y: Math.round(center.y - 100), params: { prompt: '' } });
+          commit = async () => [await create()];
+        } else if (kind === 'template') {
+          const create = canvasStore.prepareStarterFlow(sessionId, { x: Math.round(center.x - 550), y: Math.round(center.y - 260) });
+          commit = async () => { await create(); return []; };
+        } else {
+          const x = Math.round(center.x - 360);
+          const y = Math.round(center.y - 120);
+          commit = canvasStore.prepareStarterPair(sessionId,
+            kind === 'image-video'
+              ? { type: 'image', x, y, title: '首帧参考', params: { prompt: '' } }
+              : { type: 'audio', x, y, title: '音频参考' },
+            { type: 'video', x: x + 400, y, title: '视频生成', params: { prompt: '', duration: '5s', ratio: '16:9' } },
+            { sourceHandle: kind === 'image-video' ? 'image_out' : 'audio_out', targetHandle: kind === 'image-video' ? 'start_frame' : 'audio_in' });
+        }
+        preparedEmptyCreations.current.set(kind, commit);
+      }
+      const ids = await commit();
+      preparedEmptyCreations.current.delete(kind);
+      if (ids.length) requestAnimationFrame(() => selectNode(ids[ids.length - 1]));
+      if (ids.length !== 1) requestAnimationFrame(() => rf.fitView({ padding: 0.25, duration: 250, maxZoom: 1 }));
+      flash(kind === 'template' ? '已载入雨夜影视分镜模板' : '已创建画布内容');
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : '创建失败，请稍后重试';
+      setEmptyCreationError(message);
+      flash(message);
+    } finally {
+      emptyCreationPending.current = false;
+      setEmptyCreating(null);
+    }
   };
 
   const toggleNavMode = useCallback(() => {
@@ -1684,90 +1679,105 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     [sessionId, rf, flash],
   );
 
+  // Canvas commands only run inside this focus boundary. Text editors retain
+  // their own undo/paste/select-all; menus and dialogs own their keyboard input.
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key === 'Escape' && canvasStore.getSnapshot().pickingCanvasRefsBySession[sessionId]) {
+      const target = e.target as HTMLElement;
+      if (e.defaultPrevented || e.nativeEvent.isComposing || target.closest('[role="dialog"], [role="menu"]')) return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
         e.preventDefault();
-        canvasStore.stopPickingCanvasRefs(sessionId);
+        setSearchOpen(true);
         return;
       }
-      const activeEl = document.activeElement;
-      const isInput =
-        activeEl &&
-        (activeEl.tagName === 'INPUT' ||
-          activeEl.tagName === 'TEXTAREA' ||
-          (activeEl as HTMLElement).isContentEditable);
-
-      // Meta / Ctrl shortcuts
-      if (e.metaKey || e.ctrlKey) {
-        const k = e.key.toLowerCase();
-        if (k === 'z' && !e.shiftKey) {
-          e.preventDefault();
-          void canvasStore.undo(sessionId);
-        } else if ((k === 'z' && e.shiftKey) || k === 'y') {
-          e.preventDefault();
-          void canvasStore.redo(sessionId);
-        } else if (k === 'c' && !isInput && selectedNodeIds.length > 0) {
-          e.preventDefault();
-          handleCopyNodes(selectedNodeIds);
-        } else if (k === 'v' && !isInput) {
-          e.preventDefault();
-          void handlePasteAt();
-        } else if (k === 'a' && !isInput) {
-          e.preventDefault();
-          const allIds = storeNodes.map((n) => n.id);
-          setSelectedNodeIds(allIds);
-          canvasStore.setSelection(sessionId, allIds);
-        } else if (k === '=' || k === '+') {
-          e.preventDefault();
-          rf.zoomIn({ duration: 150 });
-        } else if (k === '-' || k === '_') {
-          e.preventDefault();
-          rf.zoomOut({ duration: 150 });
-        } else if (k === '0') {
-          e.preventDefault();
-          rf.zoomTo(1, { duration: 150 });
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (openTool) setOpenTool(null);
+        else if (dropConnectMenu) setDropConnectMenu(null);
+        else if (addNodesModal) setAddNodesModal(null);
+        else if (searchOpen) { setSearchOpen(false); canvasRootRef.current?.focus({ preventScroll: true }); }
+        else if (showShortcuts) setShowShortcuts(false);
+        else if (utilityPanel) setUtilityPanel(null);
+        else if (canvasStore.getSnapshot().pickingCanvasRefsBySession[sessionId]) canvasStore.stopPickingCanvasRefs(sessionId);
+        else if (isPickingReference) chatStore.setPickingReference(sessionId, false);
+        else {
+          canvasStore.clearMentionComposer(sessionId);
+          setSelectedNodeIds([]);
+          canvasStore.setSelection(sessionId, []);
+          rf.setNodes((nodes) => nodes.map((node) => node.selected ? { ...node, selected: false } : node));
         }
         return;
       }
-
-      // Single key shortcuts when not typing
-      if (!isInput) {
-        const k = e.key.toLowerCase();
-        if (k === 'f') {
+      const isInput = Boolean(target.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]'));
+      if (isInput) return;
+      const key = e.key.toLowerCase();
+      if (e.ctrlKey || e.metaKey) {
+        if (key === 'z' && !e.shiftKey) { e.preventDefault(); void canvasStore.undo(sessionId); }
+        else if ((key === 'z' && e.shiftKey) || key === 'y') { e.preventDefault(); void canvasStore.redo(sessionId); }
+        else if (key === 'c' && selectedNodeIds.length) { e.preventDefault(); handleCopyNodes(selectedNodeIds); }
+        else if (key === 'v') { e.preventDefault(); void handlePasteAt(); }
+        else if (key === 'a') {
           e.preventDefault();
-          rf.fitView({ padding: 0.2, duration: 250 });
-          flash('全景居中 (F)');
-        } else if (k === 'm') {
-          e.preventDefault();
-          setToolMode('select');
-          flash('选择工具：空白处拖拽框选 · 按住空格拖动画布');
-        } else if (k === 'v' && selectedNodeIds.length !== 1) {
-          // Bare V only reasserts the select tool; with one node selected it is
-          // the "new video node" shortcut handled by the window listener.
-          e.preventDefault();
-          setToolMode('select');
-        } else if (k === 'z') {
-          e.preventDefault();
-          zoomToSelection();
-        } else if (k === 'r') {
-          if (selectedNodeIds.length === 1) {
-            e.preventDefault();
-            void canvasStore.runNode(sessionId, selectedNodeIds[0]);
-            flash('开始运行选中节点 (R)');
-          }
+          const ids = storeNodes.map((node) => node.id);
+          setSelectedNodeIds(ids);
+          canvasStore.setSelection(sessionId, ids);
+          rf.setNodes((nodes) => nodes.map((node) => node.selected ? node : { ...node, selected: true }));
+        }
+        else if (key === 'g' && !e.shiftKey) { e.preventDefault(); void createGroupFromSelection().catch((cause) => flash(cause instanceof Error ? cause.message : '编组失败')); }
+        else if (key === '=' || key === '+') { e.preventDefault(); rf.zoomIn({ duration: 150 }); }
+        else if (key === '-' || key === '_') { e.preventDefault(); rf.zoomOut({ duration: 150 }); }
+        else if (key === '0') { e.preventDefault(); rf.zoomTo(1, { duration: 150 }); }
+        return;
+      }
+      if (e.altKey) {
+        if (key === 'w') { e.preventDefault(); toggleWires(); }
+        return;
+      }
+      if (e.repeat || e.shiftKey) return;
+      if (key === 'f') { e.preventDefault(); rf.fitView({ padding: 0.2, duration: 250 }); }
+      else if (key === 'm' || key === 'v' && selectedNodeIds.length !== 1) { e.preventDefault(); setToolMode('select'); }
+      else if (key === 'z') { e.preventDefault(); zoomToSelection(); }
+      else if (key === 'h') {
+        e.preventDefault(); canvasStore.toggleMoodboard(sessionId);
+        flash(canvasStore.isMoodboard(sessionId) ? '已进入情绪板模式，按 H 退出' : '已退出情绪板模式');
+      }
+      else if (key === 'r' && selectedNodeIds.length === 1) { e.preventDefault(); void canvasStore.runNode(sessionId, selectedNodeIds[0]); }
+      else if (['i', 'v', 't'].includes(key) && selectedNodeIds.length === 1) {
+        const source = storeNodes.find((node) => node.id === selectedNodeIds[0]);
+        if (!source) return;
+        e.preventDefault();
+        if (key === 'v' && source.type === 'image') void handleCreateAndSelect(canvasStore.animateFromImage(sessionId, source.id));
+        else {
+          const type = key === 'i' ? 'image' : key === 'v' ? 'video' : 'note';
+          void handleCreateAndSelect(canvasStore.addNodeAndConnect(sessionId,
+            { type, x: source.x + source.w + 140, y: source.y, title: type === 'image' ? '图片' : type === 'video' ? '视频生成' : '文本便签', ...(type === 'video' ? { params: { prompt: '', duration: '5s', ratio: '16:9' } } : {}) },
+            source.id, null, type === 'note' ? 'text_in' : 'prompt'));
         }
       }
     },
-    [sessionId, storeNodes, selectedNodeIds, rf, flash, zoomToSelection, handleCopyNodes, handlePasteAt, setToolMode],
+    [sessionId, storeNodes, selectedNodeIds, rf, flash, zoomToSelection, handleCopyNodes, handlePasteAt, setToolMode, openTool, dropConnectMenu, addNodesModal, searchOpen, showShortcuts, utilityPanel, isPickingReference, createGroupFromSelection, toggleWires, handleCreateAndSelect],
   );
 
   return (
     <div
+      ref={canvasRootRef}
+      role="region"
+      aria-label="创作画布"
+      onPointerDownCapture={(event) => {
+        const target = event.target as HTMLElement;
+        if (event.currentTarget.contains(target) && !target.closest('input, textarea, select, button, a, [contenteditable="true"], [role="textbox"], video, audio')) {
+          canvasRootRef.current?.focus({ preventScroll: true });
+        }
+      }}
+      onDoubleClick={(event) => {
+        if ((event.target as HTMLElement).classList.contains('react-flow__pane')) openAddNodesModal(event.clientX, event.clientY);
+      }}
       data-dragging={isInteracting ? 'true' : undefined}
+      data-held-pan={isHeldViewportGesture ? 'true' : undefined}
       data-lowzoom={isLowZoom ? 'true' : undefined}
       className={cn(
-        "h-full w-full outline-none",
+        "h-full w-full outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40",
         isPickingReference && "!cursor-crosshair",
         Boolean(pickingCanvasRefs) && "!cursor-crosshair",
         Boolean(pickingCanvasRefs) && "canvas-mention-pick",
@@ -1782,7 +1792,6 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         if (menu) setMenu(null);
         if (dropConnectMenu) setDropConnectMenu(null);
         if (addNodesModal) setAddNodesModal(null);
-        if (openTool) setOpenTool(null);
       }}
     >
       <ReactFlow
@@ -1921,6 +1930,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         onMoveStart={(event, v) => {
           if (!event || applyingCoastRef.current) return;
           stopInertia();
+          setIsHeldViewportGesture(pointerDownRef.current && !isDraggingRef.current && !connectingNode.current);
           isPanningRef.current = true;
           setIsInteracting(true);
           panSamplesRef.current = [];
@@ -1942,27 +1952,33 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           }
         }}
         onMoveEnd={(event, v) => {
-          if (!event || applyingCoastRef.current) return;
-          isPanningRef.current = false;
+          if (applyingCoastRef.current) return;
           try {
-            localStorage.setItem(VIEWPORT_KEY(sessionId), JSON.stringify(v));
+            if (restoredRef.current) localStorage.setItem(VIEWPORT_KEY(sessionId), JSON.stringify(v));
           } catch {
             /* ignore */
           }
+          if (!event) return;
+          isPanningRef.current = false;
           if (coastingRef.current) return;
           startCoast();
         }}
         onNodeContextMenu={(e, node) => {
           e.preventDefault();
-          if (addNodesModal) setAddNodesModal(null);
+          setAddNodesModal(null);
+          setDropConnectMenu(null);
+          setOpenTool(null);
+          if (!selectedNodeIds.includes(node.id)) selectNode(node.id);
           setMenu({ kind: 'node', x: e.clientX, y: e.clientY, nodeId: node.id });
         }}
         onPaneContextMenu={(e) => {
           e.preventDefault();
           const pe = e as unknown as MouseEvent;
           const flow = rf.screenToFlowPosition({ x: pe.clientX, y: pe.clientY });
-          if (menu) setMenu(null);
-          openAddNodesModal(pe.clientX, pe.clientY, flow.x, flow.y);
+          setAddNodesModal(null);
+          setDropConnectMenu(null);
+          setOpenTool(null);
+          setMenu({ kind: 'pane', x: pe.clientX, y: pe.clientY, flowX: Math.round(flow.x), flowY: Math.round(flow.y) });
         }}
         proOptions={{ hideAttribution: true }}
         deleteKeyCode={['Backspace', 'Delete']}
@@ -1986,6 +2002,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           color="var(--canvas-dot, rgba(255, 255, 255, 0.22))"
         />
         <MiniMap
+          ariaLabel="画布缩略导航图"
           pannable
           zoomable
           className="!bg-paper-inset"
@@ -1994,7 +2011,9 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           nodeBorderRadius={3}
           maskColor="rgba(0, 0, 0, 0.2)"
         />
-        <AssetShelf sessionId={sessionId} selectedTargetIds={selectedNodeIds} flash={flash} />
+        <AssetShelf sessionId={sessionId} selectedTargetIds={selectedNodeIds} flash={flash}
+          open={utilityPanel === 'assets'} onOpenChange={(open) => setUtilityPanel((current) => open ? 'assets' : current === 'assets' ? null : current)} hideTrigger position="top-left" initialMode="library" />
+        <CanvasJobsPanel sessionId={sessionId} open={utilityPanel === 'jobs'} onClose={() => setUtilityPanel(null)} />
         <AgentActivityStrip sessionId={sessionId} />
         <AlignmentGuides sessionId={sessionId} enabled={snapEnabled} />
         <ReturnToNodesToast sessionId={sessionId} />
@@ -2019,10 +2038,13 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
             flash(`已启动执行 ${runnables.length} 个节点`);
           }}
           onDelete={() => {
-            for (const n of selectedNodes) {
-              void canvasStore.removeNode(sessionId, n.id);
-            }
-            flash(`已删除 ${selectedNodes.length} 个节点`);
+            const ids = selectedNodes.map((node) => node.id);
+            void canvasStore.removeNodes(sessionId, ids)
+              .then(() => flash(`已删除 ${ids.length} 个节点`))
+              .catch((cause) => {
+                setGraphRepairEpoch((epoch) => epoch + 1);
+                flash(cause instanceof Error ? cause.message : '删除失败，请稍后重试');
+              });
           }}
           draftCount={
             selectedNodes.filter(
@@ -2059,184 +2081,69 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         {storeNodes.length === 0 ? (
           <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center select-none">
             <CanvasEmptyPrompt
+              pending={emptyCreating}
+              error={emptyCreationError}
               onOpenAddModal={() => {
-                const cx = window.innerWidth / 2;
-                const cy = window.innerHeight / 2;
-                openAddNodesModal(cx, Math.max(80, cy - 140));
+                const center = canvasScreenCenter();
+                openAddNodesModal(center.x, center.y - 120);
               }}
-              onCreateTextToVideo={() => {
-                const cx = window.innerWidth / 2;
-                const cy = window.innerHeight / 2;
-                const flow = rf.screenToFlowPosition({ x: cx, y: cy });
-                void canvasStore
-                  .addNode(
-                    sessionId,
-                    'video',
-                    { x: Math.round(flow.x - 170), y: Math.round(flow.y - 100) },
-                    { prompt: '' } as Record<string, unknown>,
-                  )
-                  .then(() => {
-                    flash('已创建「文字生视频」卡片');
-                  });
-              }}
-              onCreateImageNode={() => {
-                const cx = window.innerWidth / 2;
-                const cy = window.innerHeight / 2;
-                const flow = rf.screenToFlowPosition({ x: cx, y: cy });
-                void canvasStore
-                  .addNode(
-                    sessionId,
-                    'image',
-                    { x: Math.round(flow.x - 160), y: Math.round(flow.y - 100) },
-                    { prompt: '' } as Record<string, unknown>,
-                  )
-                  .then(() => {
-                    flash('已创建「图片换背景」卡片');
-                  });
-              }}
-              onCreateFirstFrameToVideo={async () => {
-                const cx = window.innerWidth / 2;
-                const cy = window.innerHeight / 2;
-                const flow = rf.screenToFlowPosition({ x: cx, y: cy });
-                const startX = Math.round(flow.x - 360);
-                const startY = Math.round(flow.y - 120);
-                const imageId = await canvasStore.addNode(
-                  sessionId,
-                  'image',
-                  { x: startX, y: startY },
-                  { prompt: '电影首帧概念设计，35mm 胶片质感，冷暖对比光影，8k' } as Record<string, unknown>,
-                );
-                const videoId = await canvasStore.addNode(
-                  sessionId,
-                  'video',
-                  { x: startX + 380, y: startY },
-                  { prompt: '镜头向前平滑推近，环境光微动' } as Record<string, unknown>,
-                );
-                if (imageId && videoId) {
-                  await canvasStore.connectNodes(sessionId, imageId, videoId, 'image_out', 'start_frame');
-                }
-                flash('已创建「首帧生成视频」流水线');
-                setTimeout(() => rf.fitView({ padding: 0.25, duration: 300 }), 120);
-              }}
-              onCreateAudioToVideo={async () => {
-                const cx = window.innerWidth / 2;
-                const cy = window.innerHeight / 2;
-                const flow = rf.screenToFlowPosition({ x: cx, y: cy });
-                const startX = Math.round(flow.x - 340);
-                const startY = Math.round(flow.y - 100);
-                const audioId = await canvasStore.addNode(sessionId, 'audio', { x: startX, y: startY });
-                const videoId = await canvasStore.addNode(sessionId, 'video', { x: startX + 380, y: startY });
-                if (audioId && videoId) {
-                  await canvasStore.connectNodes(sessionId, audioId, videoId, 'audio_out', 'reference');
-                }
-                flash('已创建「音频生视频」卡片');
-                setTimeout(() => rf.fitView({ padding: 0.25, duration: 300 }), 120);
-              }}
-              onLoadTemplate={() => {
-                void canvasStore.loadStarterFlow(sessionId).then(() => {
-                  flash('已载入「雨夜霓虹街头」影视分镜工作流');
-                  setTimeout(() => rf.fitView({ padding: 0.2, duration: 400 }), 150);
-                });
-              }}
+              onCreateTextToVideo={() => { void createEmptyCanvas('video'); }}
+              onCreateImageNode={() => { void createEmptyCanvas('image'); }}
+              onCreateFirstFrameToVideo={() => { void createEmptyCanvas('image-video'); }}
+              onCreateAudioToVideo={() => { void createEmptyCanvas('audio-video'); }}
+              onLoadTemplate={() => { void createEmptyCanvas('template'); }}
             />
           </div>
         ) : null}
 
-        {/* Left rail — create / organise / run (Runway RW-2). */}
-        <Panel position="top-left" className="flex flex-col items-center gap-1">
-          <ToolbarDropdown
-            open={openTool === 'create'}
-            onToggle={() => setOpenTool((v) => (v === 'create' ? null : 'create'))}
-            icon={<Plus size={14} />}
-            primary
-            compact
-            items={[
-              { icon: <ImageIcon size={13} />, label: '图片生成', onClick: () => addNode('image') },
-              { icon: <Video size={13} />, label: '运镜视频', onClick: () => addNode('video') },
-              { icon: <Type size={13} />, label: '文本便签', onClick: () => addNode('note') },
-              { icon: <Volume2 size={13} />, label: '音频播放', onClick: () => addNode('audio') },
-            ]}
-          />
-          <button
-            type="button"
-            onClick={tidy}
-            disabled={storeNodes.length === 0}
-            className="canvas-tool !px-1.5"
-            title="按依赖分层自动整理布局"
-          >
-            <LayoutGrid size={13} />
-          </button>
-          <button
-            type="button"
-            onClick={toggleSnap}
-            className={cn(
-              'canvas-tool !px-1.5 transition-colors',
-              snapEnabled
-                ? '!border-accent/50 !bg-accent/15 !text-accent'
-                : 'text-ink-muted/60 hover:text-ink',
+        {/* Creation and project utilities stay in one quiet command rail. */}
+        <Panel position="top-left" className="!m-3">
+          <div role="group" aria-label="画布工具" className="flex flex-col items-center gap-1.5 rounded-xl border border-line bg-paper-raised p-1.5 shadow-md">
+            <ToolbarDropdown
+              open={openTool === 'create'}
+              onToggle={() => { setMenu(null); setAddNodesModal(null); setDropConnectMenu(null); setOpenTool((value) => value === 'create' ? null : 'create'); }}
+              icon={Plus}
+              label="添加节点"
+              primary
+              items={[
+                { icon: ImageIcon, label: '图片', onClick: () => addNode('image') },
+                { icon: Video, label: '视频', onClick: () => addNode('video') },
+                { icon: Type, label: '文本便签', onClick: () => addNode('note') },
+                { icon: Volume2, label: '音频', onClick: () => addNode('audio') },
+                { icon: Bot, label: 'Agent', onClick: () => addNode('agent') },
+              ]}
+            />
+            <NavButton title="素材库" side="right" active={utilityPanel === 'assets'} onClick={() => setUtilityPanel((value) => value === 'assets' ? null : 'assets')}><Layers /></NavButton>
+            <NavButton title="任务历史" side="right" active={utilityPanel === 'jobs'} onClick={() => setUtilityPanel((value) => value === 'jobs' ? null : 'jobs')}><Clock /></NavButton>
+            <NavButton title="搜索画布 (Ctrl+F)" side="right" active={searchOpen} onClick={() => setSearchOpen((value) => !value)}><Search /></NavButton>
+            <Separator className="my-0.5" />
+            <NavButton title="按依赖整理布局" side="right" disabled={!storeNodes.length} onClick={tidy}><LayoutGrid /></NavButton>
+            <NavButton title={snapEnabled ? '智能对齐已开启，点击关闭' : '智能对齐已关闭，点击开启'} side="right" active={snapEnabled} onClick={toggleSnap}><Magnet /></NavButton>
+            <Separator className="my-0.5" />
+            {graphRun?.running ? (
+              <NavButton title={`停止运行 (${graphRun.done}/${graphRun.total})`} side="right" primary onClick={() => { void canvasStore.stopGraph(sessionId); }}><Square /></NavButton>
+            ) : (
+              <NavButton title={confirmAll ? `再次点击确认：${costEstimate.runnableCount} 个节点，约 ${costEstimate.totalPoints} 算力点` : `运行整图 (${costEstimate.runnableCount} 个待生成节点，约 ${costEstimate.totalPoints} 算力点)`} side="right" primary active={confirmAll} disabled={!hasRunnable} onClick={runAll}><PlayCircle /></NavButton>
             )}
-            title={
-              snapEnabled
-                ? '智能对齐与磁吸吸附已开启 (点击关闭)'
-                : '智能对齐与磁吸吸附已关闭 (点击开启)'
-            }
-          >
-            <Magnet size={13} />
-          </button>
-
-          <span className="my-0.5 h-px w-5 bg-line" aria-hidden />
-
-          {graphRun?.running ? (
-            <button
-              type="button"
-              onClick={() => void canvasStore.stopGraph(sessionId)}
-              className="canvas-tool !px-1.5 !border-danger/30 !bg-danger/10 !text-danger"
-              title={`停止 · ${graphRun.done}/${graphRun.total}`}
-            >
-              <Square size={12} />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={runAll}
-              disabled={!hasRunnable}
-              className={cn(
-                'canvas-tool !px-1.5',
-                confirmAll ? '!border-accent !bg-accent !text-accent-ink' : '!bg-ink !text-paper-raised',
-              )}
-              title={
-                confirmAll
-                  ? `确认运行：${costEstimate.runnableCount} 个待跑${costEstimate.cachedCount > 0 ? ` (${costEstimate.cachedCount} 已缓存)` : ''}，消耗 ~${costEstimate.totalPoints} 算力点`
-                  : `运行整图 (${costEstimate.runnableCount} 待跑 · ~${costEstimate.totalPoints} 点)`
-              }
-            >
-              <PlayCircle size={13} />
-            </button>
-          )}
-          <ToolbarDropdown
-            open={openTool === 'more'}
-            onToggle={() => setOpenTool((v) => (v === 'more' ? null : 'more'))}
-            icon={<MoreHorizontal size={13} />}
-            compact
-            items={[
-              ...(storeNodes.some((n) => n.type === 'video')
-                ? [{ icon: <Film size={13} />, label: '串联审片', onClick: () => setShowStoryboard(true) }]
-                : []),
-              {
-                icon: <FileDown size={13} />,
-                label: '导出工程 .zip',
-                disabled: storeNodes.length === 0,
-                onClick: () => {
-                  void canvasStore
-                    .exportWorkflow(sessionId)
-                    .then(() => flash('已导出工程 .reizo.zip'))
-                    .catch((err: unknown) => flash(err instanceof Error ? err.message : '导出失败'));
+            <ToolbarDropdown
+              open={openTool === 'more'}
+              onToggle={() => { if (openTool !== 'more') { preloadPresentationExport(); if (storeNodes.some((node) => node.type === 'video')) preloadStoryboard(); } setMenu(null); setAddNodesModal(null); setDropConnectMenu(null); setOpenTool((value) => value === 'more' ? null : 'more'); }}
+              icon={MoreHorizontal}
+              label="更多画布操作"
+              items={[
+                ...(storeNodes.some((node) => node.type === 'video') ? [{ icon: Film, label: '串联审片', onClick: () => setShowStoryboard(true) }] : []),
+                { icon: FileDown, label: '导出演示稿 .pptx', disabled: !storeNodes.some((node) => ['image', 'anchor', 'frameExtractor'].includes(node.type) && node.output?.assets?.length), onClick: () => setShowPresentationExport(true) },
+                {
+                  icon: FileDown,
+                  label: '导出工程 .zip',
+                  disabled: !storeNodes.length,
+                  onClick: () => { void canvasStore.exportWorkflow(sessionId).then(() => flash('已导出工程 .reizo.zip')).catch((cause) => flash(cause instanceof Error ? cause.message : '导出失败')); },
                 },
-              },
-              { icon: <FileUp size={13} />, label: '导入工程 .zip', onClick: () => workflowFileRef.current?.click() },
-              { icon: <HelpCircle size={13} />, label: '快捷键速查', onClick: () => setShowShortcuts((s) => !s) },
-            ]}
-          />
+                { icon: FileUp, label: '导入工程 .zip', onClick: () => workflowFileRef.current?.click() },
+                { icon: HelpCircle, label: '快捷键速查', onClick: () => setShowShortcuts((value) => !value) },
+              ]}
+            />
+          </div>
           <input
             ref={workflowFileRef}
             type="file"
@@ -2263,12 +2170,12 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         </Panel>
 
         {/* Bottom nav bar — pan/marquee + zoom + history (Runway RW-1). */}
-        <Panel position="bottom-center" className="pb-3">
-          <div className="flex items-center gap-0.5 rounded-xl border border-line bg-paper-raised/95 px-1 py-1 shadow-xl backdrop-blur-md">
+        <Panel position="bottom-center" className="!my-3 !mx-0" style={{ width: 'max-content', maxWidth: 'calc(100% - 24px)' }}>
+          <div role="group" aria-label="画布导航与历史" className="flex max-w-full flex-wrap items-center justify-center gap-0.5 rounded-xl border border-line bg-paper-raised p-1.5 shadow-md">
             <NavButton
               active={mode === 'select'}
               onClick={() => setToolMode('select')}
-              title="选择工具：空白处拖拽框选，按住空格拖动画布 (V)"
+              title="选择工具：空白拖拽框选 (M)"
             >
               <MousePointer2 size={14} />
             </NavButton>
@@ -2301,22 +2208,8 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
             >
               {navMode === 'trackpad' ? <Laptop size={14} /> : <Mouse size={14} />}
             </NavButton>
-            <span className="mx-0.5 h-4 w-px bg-line" aria-hidden />
-            <NavButton onClick={() => rf.zoomOut({ duration: 150 })} title="缩小 (Ctrl + -)">
-              <ZoomOut size={14} />
-            </NavButton>
-            <Tooltip content="重置为 100% (Ctrl+0)" side="top">
-              <button
-                type="button"
-                onClick={() => rf.zoomTo(1, { duration: 150 })}
-                className="flex h-7 min-w-[42px] items-center justify-center rounded-lg px-1 text-[11px] font-mono font-medium text-ink-muted transition-colors hover:bg-paper-inset hover:text-ink select-none"
-              >
-                {currentZoom}%
-              </button>
-            </Tooltip>
-            <NavButton onClick={() => rf.zoomIn({ duration: 150 })} title="放大 (Ctrl + +)">
-              <ZoomIn size={14} />
-            </NavButton>
+            <Separator orientation="vertical" className="mx-1 h-4" />
+            <CanvasZoomControls />
             <NavButton onClick={() => rf.fitView({ padding: 0.2, duration: 250 })} title="适应全景 (F)">
               <Maximize size={14} />
             </NavButton>
@@ -2327,7 +2220,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
             >
               <Focus size={14} />
             </NavButton>
-            <span className="mx-0.5 h-4 w-px bg-line" aria-hidden />
+            <Separator orientation="vertical" className="mx-1 h-4" />
             <NavButton onClick={() => void canvasStore.undo(sessionId)} disabled={!history?.canUndo} title="撤销 (Ctrl+Z)">
               <Undo2 size={14} />
             </NavButton>
@@ -2378,7 +2271,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
                 value={searchQuery}
                 onChange={(e) => {
                   setSearchQuery(e.target.value);
-                  setSearchMatchIdx(0);
+                  setSearchMatchIdx(-1);
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
@@ -2386,15 +2279,19 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
                     if (e.shiftKey) goToPrevMatch();
                     else goToNextMatch();
                   } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    e.stopPropagation();
                     setSearchOpen(false);
+                    canvasRootRef.current?.focus({ preventScroll: true });
                   }
                 }}
+                aria-label="搜索节点名称或提示词"
                 placeholder="搜索节点名称、提示词…"
                 className="h-6 w-52 bg-transparent text-xs text-ink placeholder:text-ink-muted/60 focus:outline-hidden"
               />
               {matchedNodes.length > 0 ? (
                 <span className="text-[10px] text-ink-muted px-1 shrink-0">
-                  {searchMatchIdx + 1} / {matchedNodes.length}
+                  {searchMatchIdx >= 0 ? `${searchMatchIdx + 1} / ${matchedNodes.length}` : `${matchedNodes.length} 个匹配`}
                 </span>
               ) : searchQuery.trim() ? (
                 <span className="text-[10px] text-danger/80 px-1 shrink-0">无匹配</span>
@@ -2404,7 +2301,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
                 onClick={goToPrevMatch}
                 disabled={matchedNodes.length === 0}
                 className="rounded p-1 hover:bg-paper-inset text-ink-muted hover:text-ink disabled:opacity-30"
-                title="上一个 (Shift+Enter)"
+                aria-label="上一个匹配" title="上一个 (Shift+Enter)"
               >
                 <ChevronUp size={12} />
               </button>
@@ -2413,15 +2310,15 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
                 onClick={goToNextMatch}
                 disabled={matchedNodes.length === 0}
                 className="rounded p-1 hover:bg-paper-inset text-ink-muted hover:text-ink disabled:opacity-30"
-                title="下一个 (Enter)"
+                aria-label="下一个匹配" title="下一个 (Enter)"
               >
                 <ChevronDown size={12} />
               </button>
               <button
                 type="button"
-                onClick={() => setSearchOpen(false)}
+                onClick={() => { setSearchOpen(false); canvasRootRef.current?.focus({ preventScroll: true }); }}
                 className="rounded p-1 hover:bg-paper-inset text-ink-muted hover:text-ink"
-                title="关闭 (Esc)"
+                aria-label="关闭搜索" title="关闭 (Esc)"
               >
                 <X size={12} />
               </button>
@@ -2431,13 +2328,14 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
 
         {toast ? (
           <Panel position="top-center" className="pointer-events-none mt-3">
-            <div className="rounded-lg bg-ink px-3 py-1.5 text-xs text-paper-raised shadow-lg">{toast}</div>
+            <div role="status" aria-live="polite" className="rounded-lg bg-ink px-3 py-1.5 text-xs text-paper-raised shadow-lg">{toast}</div>
           </Panel>
         ) : null}
       </ReactFlow>
 
       {menu ? (
         <CanvasContextMenu
+          key={`${menu.kind}:${menu.x}:${menu.y}`}
           menu={menu}
           onClose={() => setMenu(null)}
           onUploadClick={() => {
@@ -2446,53 +2344,8 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
               paneFileInputRef.current?.click();
             }
           }}
-          onAddAssetClick={() => {
-            if (menu.kind === 'pane') {
-              void canvasStore
-                .addNode(sessionId, 'anchor', { x: menu.flowX, y: menu.flowY }, {
-                  role: 'character',
-                  label: '资产图钉',
-                } as Record<string, unknown>)
-                .then((id) => {
-                  if (id) {
-                    selectNode(id);
-                    flash('已添加资产图钉');
-                  }
-                });
-            }
-          }}
-          onOpenAddNodesModal={() => {
-            if (menu.kind === 'pane') {
-              setAddNodesModal({
-                x: menu.x,
-                y: menu.y,
-                flowX: menu.flowX,
-                flowY: menu.flowY,
-              });
-            }
-          }}
-          onAddNode={(type, initialParams) => {
-            if (menu.kind === 'pane') {
-              void canvasStore
-                .addNode(sessionId, type, { x: menu.flowX, y: menu.flowY }, initialParams as Record<string, unknown>)
-                .then((id) => {
-                  if (id) selectNode(id);
-                });
-            }
-          }}
+          prepareType={(type, params) => prepareCreationAt(type, { x: menu.kind === 'pane' ? menu.flowX : 0, y: menu.kind === 'pane' ? menu.flowY : 0 }, params)}
           onOpenTimeline={() => setShowStoryboard(true)}
-          onOpen3DStudio={() => {
-            if (menu.kind === 'pane') {
-              void canvasStore
-                .addNode(sessionId, 'section', { x: menu.flowX, y: menu.flowY }, {
-                  title: '3D 片场',
-                  description: '场景多机位与空间编排',
-                } as Record<string, unknown>)
-                .then((id) => {
-                  if (id) selectNode(id);
-                });
-            }
-          }}
           onTidyLayout={tidy}
           onFitView={() => rf.fitView({ padding: 0.2, duration: 200 })}
           onUndo={() => {
@@ -2528,359 +2381,30 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       ) : null}
 
       {dropConnectMenu ? (
-        <div
-          className="fixed z-[180] flex w-[250px] flex-col rounded-2xl border border-line/60 bg-[#161618]/95 p-2 text-xs shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150 select-none cursor-default"
-          style={{
-            left: Math.max(16, Math.min(dropConnectMenu.screenX, window.innerWidth - 266)),
-            top: Math.max(16, Math.min(dropConnectMenu.screenY, window.innerHeight - 300)),
+        <HandleDropMenu
+          key={`${dropConnectMenu.nodeId}:${dropConnectMenu.screenX}:${dropConnectMenu.screenY}`}
+          sessionId={sessionId}
+          intent={dropConnectMenu}
+          anchorNode={storeNodes.find((node) => node.id === dropConnectMenu.nodeId)}
+          onClose={() => setDropConnectMenu(null)}
+          onCreated={(newId) => {
+            requestAnimationFrame(() => selectNode(newId));
+            flash('已创建节点并连接');
           }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {(() => {
-            const anchorNode = storeNodes.find((n) => n.id === dropConnectMenu.nodeId);
-            const isBackward = dropConnectMenu.handleType === 'target';
-            const nodeTitle = anchorNode?.title || (anchorNode?.type === 'image' ? '图片' : anchorNode?.type === 'video' ? '视频' : anchorNode?.type === 'audio' ? '音频' : '节点');
-
-            const getSpawnPos = (type: CanvasNodeType) => {
-              const box = defaultNodeBox(type);
-              if (dropConnectMenu.isDragDrop) {
-                if (isBackward) {
-                  return {
-                    x: Math.round(dropConnectMenu.flowX - box.w),
-                    y: Math.round(dropConnectMenu.flowY - box.h / 2),
-                  };
-                } else {
-                  return {
-                    x: Math.round(dropConnectMenu.flowX),
-                    y: Math.round(dropConnectMenu.flowY - box.h / 2),
-                  };
-                }
-              } else {
-                // Clicked plus handle directly without dragging: generous spacing for clean layout
-                if (isBackward) {
-                  const anchor = anchorNode || { x: dropConnectMenu.flowX, y: dropConnectMenu.flowY, w: 320 };
-                  return {
-                    x: Math.round(anchor.x - box.w - 120),
-                    y: Math.round(anchor.y),
-                  };
-                } else {
-                  const anchor = anchorNode || { x: dropConnectMenu.flowX, y: dropConnectMenu.flowY, w: 320 };
-                  return {
-                    x: Math.round(anchor.x + anchor.w + 140),
-                    y: Math.round(anchor.y),
-                  };
-                }
-              }
-            };
-
-            if (isBackward) {
-              return (
-                <>
-                  <div className="flex items-center justify-between px-2.5 pt-1.5 pb-1 text-[11px] font-medium text-ink-muted/70">
-                    <span>接入上游输入源 (Input)</span>
-                    <span className="text-[10px] text-accent/80 truncate max-w-[80px]">➔ {nodeTitle}</span>
-                  </div>
-
-                  <div className="flex flex-col gap-0.5 mt-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void handleCreateAndSelect(
-                          canvasStore.addNodeAndConnectToTarget(
-                            sessionId,
-                            {
-                              type: 'note',
-                              ...getSpawnPos('note'),
-                              title: '提示词',
-                            },
-                            dropConnectMenu.nodeId,
-                            'prompt',
-                            'prompt_out',
-                          ),
-                        );
-                      }}
-                      className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left transition-all hover:bg-white/10 active:scale-[0.98] cursor-pointer"
-                    >
-                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-400 group-hover:bg-emerald-500/25 transition-colors">
-                        <Type size={14} />
-                      </div>
-                      <div className="flex flex-col min-w-0">
-                        <span className="text-xs font-medium text-ink group-hover:text-white">Text / 提示词</span>
-                        <span className="text-[10px] text-ink-muted truncate">提供提示词或剧本文本</span>
-                      </div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void handleCreateAndSelect(
-                          canvasStore.addNodeAndConnectToTarget(
-                            sessionId,
-                            {
-                              type: 'image',
-                              ...getSpawnPos('image'),
-                              title: '参考图',
-                            },
-                            dropConnectMenu.nodeId,
-                            'prompt',
-                            'image_out',
-                          ),
-                        );
-                      }}
-                      className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left transition-all hover:bg-white/10 active:scale-[0.98] cursor-pointer"
-                    >
-                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-indigo-500/15 text-indigo-400 group-hover:bg-indigo-500/25 transition-colors">
-                        <ImageIcon size={14} />
-                      </div>
-                      <div className="flex flex-col min-w-0">
-                        <span className="text-xs font-medium text-ink group-hover:text-white">Image / 参考图</span>
-                        <span className="text-[10px] text-ink-muted truncate">提供首帧或画面参考</span>
-                      </div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void handleCreateAndSelect(
-                          canvasStore.addNodeAndConnectToTarget(
-                            sessionId,
-                            {
-                              type: 'video',
-                              ...getSpawnPos('video'),
-                              title: '前序视频',
-                              params: { prompt: '', duration: '5s', ratio: '16:9' },
-                            },
-                            dropConnectMenu.nodeId,
-                            'prompt',
-                            'video_out',
-                          ),
-                        );
-                      }}
-                      className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left transition-all hover:bg-white/10 active:scale-[0.98] cursor-pointer"
-                    >
-                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-rose-500/15 text-rose-400 group-hover:bg-rose-500/25 transition-colors">
-                        <Video size={14} />
-                      </div>
-                      <div className="flex flex-col min-w-0">
-                        <span className="text-xs font-medium text-ink group-hover:text-white">Video / 前序视频</span>
-                        <span className="text-[10px] text-ink-muted truncate">作为前序镜头继续接戏</span>
-                      </div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void handleCreateAndSelect(
-                          canvasStore.addNodeAndConnectToTarget(
-                            sessionId,
-                            {
-                              type: 'audio',
-                              ...getSpawnPos('audio'),
-                              title: '配乐音频',
-                            },
-                            dropConnectMenu.nodeId,
-                            'prompt',
-                            'audio_out',
-                          ),
-                        );
-                      }}
-                      className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left transition-all hover:bg-white/10 active:scale-[0.98] cursor-pointer"
-                    >
-                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-400 group-hover:bg-amber-500/25 transition-colors">
-                        <Volume2 size={14} />
-                      </div>
-                      <div className="flex flex-col min-w-0">
-                        <span className="text-xs font-medium text-ink group-hover:text-white">Audio / 配乐</span>
-                        <span className="text-[10px] text-ink-muted truncate">提供背景音频轨道</span>
-                      </div>
-                    </button>
-                  </div>
-                </>
-              );
-            }
-
-            return (
-              <>
-                <div className="flex items-center justify-between px-2.5 pt-1.5 pb-1 text-[11px] font-medium text-ink-muted/70">
-                  <span>Generate from this node</span>
-                  <span className="text-[10px] text-accent/80 truncate max-w-[80px]">➔ {nodeTitle}</span>
-                </div>
-
-                <div className="flex flex-col gap-0.5 mt-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void handleCreateAndSelect(
-                        canvasStore.addNodeAndConnect(
-                          sessionId,
-                          {
-                            type: 'note',
-                            ...getSpawnPos('note'),
-                            title: '提示词',
-                          },
-                          dropConnectMenu.nodeId,
-                          dropConnectMenu.handleId,
-                          'text_in',
-                        ),
-                      );
-                    }}
-                    className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left transition-all hover:bg-white/10 active:scale-[0.98] cursor-pointer"
-                  >
-                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-400 group-hover:bg-emerald-500/25 transition-colors">
-                      <Type size={14} />
-                    </div>
-                    <div className="flex flex-col min-w-0">
-                      <span className="text-xs font-medium text-ink group-hover:text-white">Text Generation</span>
-                      <span className="text-[10px] text-ink-muted truncate">Script, Ad copy, Brand text</span>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void handleCreateAndSelect(
-                        canvasStore.addNodeAndConnect(
-                          sessionId,
-                          {
-                            type: 'image',
-                            ...getSpawnPos('image'),
-                            title: '图片',
-                          },
-                          dropConnectMenu.nodeId,
-                          dropConnectMenu.handleId,
-                          'prompt',
-                        ),
-                      );
-                    }}
-                    className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left transition-all hover:bg-white/10 active:scale-[0.98] cursor-pointer"
-                  >
-                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-indigo-500/15 text-indigo-400 group-hover:bg-indigo-500/25 transition-colors">
-                      <ImageIcon size={14} />
-                    </div>
-                    <div className="flex flex-col min-w-0">
-                      <span className="text-xs font-medium text-ink group-hover:text-white">图片</span>
-                      <span className="text-[10px] text-ink-muted truncate">基于上游画面或提示词生成图片</span>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void handleCreateAndSelect(
-                        canvasStore.addNodeAndConnect(
-                          sessionId,
-                          {
-                            type: 'video',
-                            ...getSpawnPos('video'),
-                            title: '视频生成',
-                            params: { prompt: '', duration: '5s', ratio: '16:9' },
-                          },
-                          dropConnectMenu.nodeId,
-                          dropConnectMenu.handleId,
-                          'prompt',
-                        ),
-                      );
-                    }}
-                    className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left transition-all hover:bg-white/10 active:scale-[0.98] cursor-pointer"
-                  >
-                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-rose-500/15 text-rose-400 group-hover:bg-rose-500/25 transition-colors">
-                      <Video size={14} />
-                    </div>
-                    <div className="flex flex-col min-w-0">
-                      <span className="text-xs font-medium text-ink group-hover:text-white">Video Generation</span>
-                      <span className="text-[10px] text-ink-muted truncate">首帧动效与运镜生成</span>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void handleCreateAndSelect(
-                        canvasStore.addNodeAndConnect(
-                          sessionId,
-                          {
-                            type: 'audio',
-                            ...getSpawnPos('audio'),
-                            title: '音频播放',
-                          },
-                          dropConnectMenu.nodeId,
-                          dropConnectMenu.handleId,
-                          'prompt',
-                        ),
-                      );
-                    }}
-                    className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left transition-all hover:bg-white/10 active:scale-[0.98] cursor-pointer"
-                  >
-                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-400 group-hover:bg-amber-500/25 transition-colors">
-                      <Volume2 size={14} />
-                    </div>
-                    <div className="flex flex-col min-w-0">
-                      <span className="text-xs font-medium text-ink group-hover:text-white">Audio</span>
-                      <span className="text-[10px] text-ink-muted truncate">配乐与声音生成</span>
-                    </div>
-                  </button>
-
-                  {anchorNode?.type === 'image' && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void handleCreateAndSelect(
-                          canvasStore.addNodeAndConnect(
-                            sessionId,
-                            {
-                              type: 'image',
-                              ...getSpawnPos('image'),
-                              title: `${anchorNode.title || '图片'} (变体)`,
-                              params: { ...(anchorNode.params as Record<string, unknown>) },
-                            },
-                            dropConnectMenu.nodeId,
-                            dropConnectMenu.handleId,
-                            'prompt',
-                          ),
-                        );
-                      }}
-                      className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left transition-all hover:bg-white/10 active:scale-[0.98] cursor-pointer"
-                    >
-                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-accent/15 text-accent group-hover:bg-accent/25 transition-colors">
-                        <GitBranchPlus size={14} />
-                      </div>
-                      <div className="flex flex-col min-w-0">
-                        <span className="text-xs font-medium text-ink group-hover:text-white">派生变体分支</span>
-                        <span className="text-[10px] text-ink-muted truncate">快速生成画面变体</span>
-                      </div>
-                    </button>
-                  )}
-                </div>
-              </>
-            );
-          })()}
-        </div>
+        />
       ) : null}
 
       {addNodesModal ? (
         <AddNodesModal
+          key={`${addNodesModal.x}:${addNodesModal.y}`}
           x={addNodesModal.x}
           y={addNodesModal.y}
           flowX={addNodesModal.flowX}
           flowY={addNodesModal.flowY}
           onClose={() => setAddNodesModal(null)}
-          onSelectType={(type, pos, initialParams) => {
-            void canvasStore.addNode(sessionId, type, pos, initialParams as Record<string, unknown>).then((newNodeId) => {
-              if (newNodeId) {
-                selectNode(newNodeId);
-              }
-            });
-          }}
+          prepareType={prepareCreationAt}
           onUploadFile={handleUploadFileAt}
           onOpenTimeline={() => setShowStoryboard(true)}
-          onOpen3DStudio={() => {
-            void canvasStore.addNode(sessionId, 'section', { x: addNodesModal.flowX, y: addNodesModal.flowY }, {
-              title: '3D 片场',
-              description: '场景多机位与空间编排',
-            } as Record<string, unknown>).then((id) => {
-              if (id) selectNode(id);
-            });
-          }}
         />
       ) : null}
 
@@ -2890,9 +2414,10 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex items-center justify-between mb-2">
-            <span className="font-semibold text-ink">画布效率快捷键指南</span>
+            <span className="font-semibold text-ink">画布快捷键</span>
             <button
               type="button"
+              aria-label="关闭快捷键指南"
               onClick={() => setShowShortcuts(false)}
               className="text-ink-muted hover:text-ink text-xs px-1"
             >
@@ -2913,7 +2438,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
               <kbd className="rounded bg-paper-inset px-1.5 py-0.5 font-mono text-[10px]">I / V / T</kbd>
             </div>
             <div className="flex justify-between items-center py-0.5 border-b border-line/60">
-              <span className="text-ink-muted">全局搜索节点与提示词</span>
+              <span className="text-ink-muted">搜索画布节点与提示词</span>
               <kbd className="rounded bg-paper-inset px-1.5 py-0.5 font-mono text-[10px]">Ctrl / ⌘ + F</kbd>
             </div>
             <div className="flex justify-between items-center py-0.5 border-b border-line/60">
@@ -2925,7 +2450,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
               <kbd className="rounded bg-paper-inset px-1.5 py-0.5 font-mono text-[10px]">R</kbd>
             </div>
             <div className="flex justify-between items-center py-0.5 border-b border-line/60">
-              <span className="text-ink-muted">抓手拖映画布</span>
+              <span className="text-ink-muted">临时抓手平移画布</span>
               <kbd className="rounded bg-paper-inset px-1.5 py-0.5 font-mono text-[10px]">Space + 拖拽</kbd>
             </div>
             <div className="flex justify-between items-center py-0.5 border-b border-line/60">
@@ -2957,11 +2482,20 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       ) : null}
 
       {showStoryboard ? (
-        <StoryboardModal
+        <LazyStoryboardModal
+          sessionId={sessionId}
+          onComposeAccepted={() => { setShowStoryboard(false); setUtilityPanel('jobs'); }}
           nodes={selectedNodes.some((n) => n.type === 'video') ? selectedNodes : storeNodes}
           onClose={() => setShowStoryboard(false)}
         />
       ) : null}
+
+      {showPresentationExport ? <LazyPresentationExportModal sessionId={sessionId} selectedNodeIds={selectedNodeIds}
+        onClose={() => setShowPresentationExport(false)} onQueued={({ nodeId }) => {
+          setShowPresentationExport(false);
+          setUtilityPanel('jobs');
+          setPendingExportNodeId(nodeId);
+        }} /> : null}
 
       <input
         ref={paneFileInputRef}
@@ -2981,32 +2515,6 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
   );
 }
 
-function MenuItem({
-  icon,
-  label,
-  onClick,
-  danger,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  onClick: () => void;
-  danger?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        'flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-paper-inset',
-        danger ? 'text-danger' : 'text-ink',
-      )}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-}
-
 /** Small progress pill under the ProposalBar while the director is laying out
  * ghost nodes — the text rhythm between "planning" and "awaiting approval". */
 function DirectorPhasePill({ sessionId }: { sessionId: string }) {
@@ -3021,112 +2529,6 @@ function DirectorPhasePill({ sessionId }: { sessionId: string }) {
           {phase.step}/{phase.total}
         </span>
       ) : null}
-    </div>
-  );
-}
-
-/** A single icon button in the bottom nav bar. */
-function NavButton({
-  children,
-  onClick,
-  title,
-  active,
-  disabled,
-}: {
-  children: React.ReactNode;
-  onClick: () => void;
-  title: string;
-  active?: boolean;
-  disabled?: boolean;
-}) {
-  return (
-    <Tooltip content={title} side="top">
-      <button
-        type="button"
-        onClick={onClick}
-        disabled={disabled}
-        aria-label={title}
-        aria-pressed={active}
-        className={cn(
-          'flex h-7 w-7 items-center justify-center rounded-lg text-ink-muted transition-colors hover:bg-paper-inset hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent',
-          active && '!bg-paper-inset !text-ink',
-        )}
-      >
-        {children}
-      </button>
-    </Tooltip>
-  );
-}
-
-type ToolbarItem = { icon: React.ReactNode; label: string; onClick: () => void; disabled?: boolean };
-
-/**
- * A toolbar button that opens a small dropdown of {@link ToolbarItem}s below it.
- * `primary` renders it as the filled accent action (the `＋节点` create button);
- * `compact` drops the text label (the `⋯更多` overflow button). Closing is
- * handled by the pane-level click handler in `CanvasInner` (`openTool` reset).
- */
-function ToolbarDropdown({
-  open,
-  onToggle,
-  icon,
-  label,
-  items,
-  primary,
-  compact,
-}: {
-  open: boolean;
-  onToggle: () => void;
-  icon: React.ReactNode;
-  label?: string;
-  items: ToolbarItem[];
-  primary?: boolean;
-  compact?: boolean;
-}) {
-  return (
-    <div className="relative" onClick={(e) => e.stopPropagation()}>
-      <button
-        type="button"
-        onClick={onToggle}
-        className={cn(
-          'canvas-tool transition-colors',
-          compact && '!px-1.5',
-          primary && '!bg-ink !text-paper-raised',
-          open && !primary && '!bg-paper-inset !text-ink',
-        )}
-        aria-expanded={open}
-      >
-        {icon}
-        {label && !compact ? label : null}
-        {!compact ? <ChevronDown size={11} className={cn('transition-transform duration-150', open && 'rotate-180')} /> : null}
-      </button>
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            initial={{ opacity: 0, y: 6, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 4, scale: 0.96 }}
-            transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
-            className="absolute left-0 top-full z-50 mt-1 min-w-40 overflow-hidden rounded-xl border border-line bg-paper-raised p-1 text-xs shadow-xl backdrop-blur-xl"
-          >
-            {items.map((item) => (
-              <button
-                key={item.label}
-                type="button"
-                disabled={item.disabled}
-                onClick={() => {
-                  onToggle();
-                  item.onClick();
-                }}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-ink hover:bg-paper-inset disabled:opacity-40 disabled:hover:bg-transparent transition-colors"
-              >
-                {item.icon}
-                <span>{item.label}</span>
-              </button>
-            ))}
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }

@@ -1,7 +1,17 @@
+import { splitPresentationContext } from '../../../shared/presentationReferences';
+import { selectPresentation } from '../../state/presentationWorkspace';
+import { splitHtmlContext } from '../../../shared/htmlReferences';
+import { selectHtml } from '../../state/htmlWorkspace';
+import { splitDocumentContext } from '../../../shared/documentReferences';
+import { selectDocument } from '../../state/documentWorkspace';
 import { useMemo, useState } from 'react';
 import { Check, Copy, Pencil } from 'lucide-react';
 import { HighlightedText } from '../../lib/highlightText';
 import CanvasRefChips, { splitCanvasRefs } from './CanvasRefChips';
+import { splitSheetContext } from '../../../shared/sheetReferences';
+import { selectWorkbook } from '../../state/sheetWorkspace';
+import { setRightPanelTab } from '../../state/uiStore';
+import { Button } from '../ui/button';
 
 export default function UserMessage({
   content,
@@ -21,7 +31,13 @@ export default function UserMessage({
   const [copied, setCopied] = useState(false);
   // The agent-facing node-ref block (raw ids + prompt dumps) is split out and
   // rendered as thumbnail chips — users shouldn't read machine identifiers.
-  const { text, nodeIds } = useMemo(() => splitCanvasRefs(content), [content]);
+  const { text, nodeIds, sheetRefs, documentRefs, htmlRefs, presentationRefs } = useMemo(() => {
+    const presentation = splitPresentationContext(content);
+    const html = splitHtmlContext(presentation.text);
+    const document = splitDocumentContext(html.text);
+    const sheet = splitSheetContext(document.text);
+    return { ...splitCanvasRefs(sheet.text), sheetRefs: sheet.refs, documentRefs: document.refs, htmlRefs: html.refs, presentationRefs: presentation.refs };
+  }, [content]);
 
   function copy() {
     void navigator.clipboard.writeText(text || content).then(() => {
@@ -42,6 +58,10 @@ export default function UserMessage({
           <HighlightedText text={text} query={searchQuery} />
         </div>
         <CanvasRefChips nodeIds={nodeIds} sessionId={sessionId} />
+        {documentRefs.length > 0 && <div className="mt-1.5 flex flex-wrap justify-end gap-1.5">{documentRefs.map((ref, index) => <Button key={index} variant="outline" size="xs" onClick={() => { if (sessionId) { selectDocument(sessionId, ref.artifactId); setRightPanelTab('documents'); } }}>{ref.name}{ref.selection ? ` · ${ref.selection.text?.slice(0, 35)}` : ''}</Button>)}</div>}
+        {htmlRefs.length > 0 && <div className="mt-1.5 flex flex-wrap justify-end gap-1.5">{htmlRefs.map((ref, index) => <Button key={index} variant="outline" size="xs" onClick={() => { if (sessionId) { selectHtml(sessionId, ref.artifactId); setRightPanelTab('html'); } }}>{ref.name}{ref.selection ? ` · ${ref.selection.text?.slice(0, 35)}` : ''}</Button>)}</div>}
+        {presentationRefs.length > 0 && <div className="mt-1.5 flex flex-wrap justify-end gap-1.5">{presentationRefs.map((ref, index) => <Button key={index} variant="outline" size="xs" onClick={() => { if (sessionId) { selectPresentation(sessionId, ref.artifactId); setRightPanelTab('presentations'); } }}>{ref.name}{ref.elementIds?.length ? ` · ${ref.elementIds.length} 个元素` : ''}</Button>)}</div>}
+        {sheetRefs.length > 0 && <div className="mt-1.5 flex flex-wrap justify-end gap-1.5">{sheetRefs.map((ref, index) => <Button key={`${ref.artifactId}:${index}`} variant="outline" size="xs" onClick={() => { if (sessionId) { selectWorkbook(sessionId, ref.artifactId); setRightPanelTab('sheets'); } }}>{ref.name}{ref.range ? ` · ${ref.sheetName ?? ''}!${ref.range}` : ''}</Button>)}</div>}
         <div className="mt-1 flex justify-end gap-2 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
           {canEdit && (
             <button

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { SCHEDULE_PRESETS } from '../../../shared/schedule';
-import type { ScheduleStore } from '../storage/scheduleStore';
+import { ScheduleValidationError, validateScheduleInterval, type ScheduleStore } from '../storage/scheduleStore';
 import type { ThoughtStore } from '../storage/thoughtStore';
 
 export function createSchedulesRouter(scheduleStore: ScheduleStore, thoughtStore: ThoughtStore) {
@@ -29,26 +29,42 @@ export function createSchedulesRouter(scheduleStore: ScheduleStore, thoughtStore
     if (typeof body?.prompt !== 'string' || !body.prompt.trim()) {
       return c.json({ error: 'prompt is required' }, 400);
     }
-    const intervalMs = typeof body.intervalMs === 'number' ? body.intervalMs : 60 * 60 * 1000;
-    const schedule = await scheduleStore.create({
+    const intervalMs: unknown = body.intervalMs === undefined ? 60 * 60 * 1000 : body.intervalMs;
+    try { validateScheduleInterval(intervalMs); }
+    catch (error) { if (error instanceof ScheduleValidationError) return c.json({ error: error.message }, 400); throw error; }
+    let schedule;
+    try { schedule = await scheduleStore.create({
       name: typeof body.name === 'string' ? body.name : body.prompt.slice(0, 40),
       prompt: body.prompt.trim(),
       intervalMs,
       skillId: typeof body.skillId === 'string' ? body.skillId : undefined,
-    });
+      once: body.once === true,
+      operationId: body.operationId,
+    }); } catch (error) { if (error instanceof ScheduleValidationError) return c.json({ error: error.message }, error.status); throw error; }
     return c.json({ schedule }, 201);
   });
 
   router.patch('/:id', async (c) => {
     const body = await c.req.json().catch((): null => null);
-    const schedule = await scheduleStore.update(c.req.param('id'), body ?? {});
+    let schedule;
+    try { schedule = await scheduleStore.update(c.req.param('id'), body ?? {}); }
+    catch (error) { if (error instanceof ScheduleValidationError) return c.json({ error: error.message }, error.status); throw error; }
     if (!schedule) return c.json({ error: 'Not found' }, 404);
     return c.json({ schedule });
   });
 
   router.delete('/:id', async (c) => {
-    await scheduleStore.remove(c.req.param('id'));
+    try { await scheduleStore.remove(c.req.param('id')); }
+    catch (error) { if (error instanceof ScheduleValidationError) return c.json({ error: error.message }, error.status); throw error; }
     return c.body(null, 204);
+  });
+
+  router.post('/:id/run', async (c) => {
+    const body = await c.req.json().catch((): null => null);
+    try {
+      const schedule = await scheduleStore.requestRun(c.req.param('id'), body?.operationId);
+      return schedule ? c.json({ schedule }) : c.json({ error: 'Not found' }, 404);
+    } catch (error) { if (error instanceof ScheduleValidationError) return c.json({ error: error.message }, error.status); throw error; }
   });
 
   return router;

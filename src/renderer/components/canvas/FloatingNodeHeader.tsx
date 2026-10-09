@@ -62,6 +62,7 @@ export function NodeTitle({
       title="双击重命名"
       onDoubleClick={(e) => {
         e.stopPropagation();
+        canvasStore.setSelection(sessionId, [nodeId]);
         setDraft(title);
         setEditing(true);
       }}
@@ -123,6 +124,9 @@ function FloatingNodeHeader({
   // At low zoom, hide minor details and badges to match TapNow's clean bird's-eye view
   const isLowZoom = zoom < 0.5;
   const showDetails = !isLowZoom || selected || hovered;
+
+  // At the widest overview, fixed-size labels would overlap adjacent cards.
+  if (zoom < 0.15 && !selected && !hovered) return null;
 
   return (
     <div

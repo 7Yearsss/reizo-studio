@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { CANVAS_BUDGET_TOOL } from '../../../shared/stream';
 import type { PendingPermission } from '../../state/chatStore';
 import { ToolApproval } from '../agents/tool-approval';
-import DiffView from './DiffView';
+import DiffView from './LazyDiffView';
 
 /** Params whose value is already shown by the diff view — hide them from the list. */
 const DIFF_REDUNDANT_KEYS = new Set(['content', 'oldString', 'newString', 'path']);

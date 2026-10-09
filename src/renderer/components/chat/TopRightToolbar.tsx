@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   FolderKanban,
+  FileSpreadsheet,
+  FileText,
+  Code2,
+  Presentation,
   FolderTree,
   GitBranch,
   MoreVertical,
@@ -92,6 +96,13 @@ export default function TopRightToolbar({
         <Workflow size={compact ? 14 : 13} />
         {!compact && <span>画布</span>}
       </button>
+      <button type="button" disabled={!sessionId} onClick={() => uiStore.toggleRightPanelTab('documents')} aria-label="Doc 工作区" title="Doc 工作区" className={cn('inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors disabled:opacity-50', rightPanelTab === 'documents' ? 'bg-accent/15 text-accent' : 'text-ink-muted hover:bg-paper-inset/70 hover:text-ink')}><FileText size={13} />{!compact && <span>Doc</span>}</button>
+      <button type="button" disabled={!sessionId} onClick={() => uiStore.toggleRightPanelTab('html')} aria-label="HTML 工作区" title="HTML 工作区" className={cn('inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors disabled:opacity-50', rightPanelTab === 'html' ? 'bg-accent/15 text-accent' : 'text-ink-muted hover:bg-paper-inset/70 hover:text-ink')}><Code2 size={13} />{!compact && <span>HTML</span>}</button>
+      <button type="button" disabled={!sessionId} onClick={() => uiStore.toggleRightPanelTab('presentations')} aria-label="PPT 工作区" title="PPT 工作区" className={cn('inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors disabled:opacity-50', rightPanelTab === 'presentations' ? 'bg-accent/15 text-accent' : 'text-ink-muted hover:bg-paper-inset/70 hover:text-ink')}><Presentation size={13} />{!compact && <span>PPT</span>}</button>
+      {!compact && (
+        <button type="button" disabled={!sessionId} onClick={() => uiStore.toggleRightPanelTab('sheets')} aria-label="Excel 工作区" title="Excel 工作区" className={cn('inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors disabled:opacity-50', rightPanelTab === 'sheets' ? 'bg-accent/15 text-accent' : 'text-ink-muted hover:bg-paper-inset/70 hover:text-ink')}><FileSpreadsheet size={13} /><span>Excel</span></button>
+      )}
+      {compact && <button type="button" disabled={!sessionId} onClick={() => uiStore.toggleRightPanelTab('sheets')} aria-label="Excel 工作区" title="Excel 工作区" className={cn('inline-flex size-7 items-center justify-center rounded-full disabled:opacity-50', rightPanelTab === 'sheets' ? 'bg-accent/15 text-accent' : 'text-ink-muted hover:bg-paper-inset/70')}><FileSpreadsheet size={14} /></button>}
       {!compact && (
         <>
           <button

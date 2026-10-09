@@ -62,6 +62,7 @@ export async function importWorkflowZip(options: {
   }
   const staged = await stageCanvasAssets(dataRoot, canvasId, files, canvasWorkSignal(store));
   try {
+    staged.prepareCommit();
     return app.batch(canvasId, { kind: 'import_workflow', contentHash: createHash('sha256').update(zip).digest('hex'), offset }, () => {
       const ids = new Map<string, string>();
       const nodeIds: string[] = []; const edgeIds: string[] = [];

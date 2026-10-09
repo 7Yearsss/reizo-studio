@@ -50,6 +50,9 @@ export interface CanvasJobFinish {
   cancelReason?: string;
 }
 
+export type CanvasJobSummary = Omit<CanvasJob, 'input' | 'result'> & { nodeTitle?: string; isCurrent?: boolean; nodeExists?: boolean };
+export interface CanvasJobPage { jobs: CanvasJobSummary[]; nextCursor?: string }
+
 export function isCanvasJobTerminal(status: CanvasJobStatus): status is CanvasJobTerminalStatus {
   return status === 'succeeded' || status === 'failed' || status === 'cancelled' || status === 'interrupted';
 }

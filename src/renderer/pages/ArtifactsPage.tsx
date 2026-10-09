@@ -8,6 +8,8 @@ import { Loader } from '../components/motion/loader';
 import { toast } from '../lib/toast';
 
 const KIND_LABELS: Record<ArtifactKind, string> = {
+  doc: '文档',
+  presentation: '演示稿',
   markdown: 'Markdown',
   html: 'HTML',
   text: '文本',

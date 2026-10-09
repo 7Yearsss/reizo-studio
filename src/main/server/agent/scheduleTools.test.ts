@@ -73,4 +73,15 @@ describe('scheduleTools', () => {
     await scheduleStore.remove(dueSoon[0]!.id);
     expect(await scheduleStore.due(Date.now() + 2 * MIN_INTERVAL_MS)).toHaveLength(0);
   });
+
+  it('replays the same agent tool call without arranging a second automation', async () => {
+    const { scheduleStore } = setup();
+    const tools = createScheduleTools({ scheduleStore, sessionId: 'fixture-session' });
+    const input = { prompt: 'stable fixture', intervalMinutes: 1, once: true };
+    const execute = tools.create_schedule.execute as unknown as (request: typeof input, options: { toolCallId: string }) => Promise<{ ok: boolean; schedule: { id: string } }>;
+    const first = await execute(input, { toolCallId: 'same-call' });
+    const replay = await execute(input, { toolCallId: 'same-call' });
+    expect(replay.schedule.id).toBe(first.schedule.id);
+    expect(await scheduleStore.list()).toHaveLength(1);
+  });
 });

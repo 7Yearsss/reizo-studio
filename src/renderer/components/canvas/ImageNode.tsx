@@ -5,6 +5,7 @@ import type { CanvasImageParams, CanvasNode } from '../../../shared/canvas';
 import { editNodeTitle, type ImageEditKind } from '../../../shared/canvasImageEdit';
 import { estimateNodeCost } from '../../../shared/canvasPricing';
 import * as canvasStore from '../../state/canvasStore';
+import { canvasInputSources, indexedCanvasNode } from '../../state/canvasInputSources';
 import * as chatStore from '../../state/chatStore';
 import { useCanvasStore } from '../../state/useCanvasStore';
 import { cn } from '../../lib/cn';
@@ -180,6 +181,8 @@ function VariantThumbnail({
       <Tooltip content={`变体 ${index + 1} / ${total}（点击切换）`} side="top" wrapperClassName="inline-flex">
       <button
         type="button"
+        aria-label={`切换到变体 ${index + 1} / ${total}`}
+        aria-pressed={isSelected}
         onClick={(e) => {
           e.stopPropagation();
           onSelect();
@@ -208,6 +211,7 @@ function VariantThumbnail({
         <Tooltip content="删除该变体" side="top" wrapperClassName="absolute -top-1 -right-1 z-20 hidden group-hover/thumb:flex">
         <button
           type="button"
+          aria-label={`删除变体 ${index + 1}`}
           onClick={(e) => {
             e.stopPropagation();
             onRemove();
@@ -253,28 +257,15 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
   const running = node.runState === 'running';
   const assets = node.output?.assets ?? [];
   const current = assets[Math.min(assetIdx, assets.length - 1)];
-  const edges = useCanvasStore((s) => s.edgesBySession[sessionId] ?? canvasStore.EMPTY_EDGES);
-  const allNodes = useCanvasStore((s) => s.nodesBySession[sessionId] ?? canvasStore.EMPTY_NODES);
   const assetUrl = useAssetUrl(current);
   const hasImage = Boolean(assetUrl);
-  const sourceNode = allNodes.find((n) => n.id === edit?.sourceNodeId);
+  const sourceNode = useCanvasStore((s) => indexedCanvasNode(s.nodesBySession[sessionId] ?? canvasStore.EMPTY_NODES, edit?.sourceNodeId));
   const sourceRel =
     sourceNode?.output?.assets?.[sourceNode.output.activeAssetIndex ?? 0] ?? sourceNode?.output?.assets?.[0];
   const sourceUrl = useAssetUrl(sourceRel);
 
-  const upstreamSources = useMemo(() => {
-    const inEdges = edges.filter((e) => e.targetId === node.id);
-    return inEdges.map((e) => {
-      const srcNode = allNodes.find((n) => n.id === e.sourceId);
-      return {
-        edgeId: e.id,
-        sourceNodeId: e.sourceId,
-        sourceType: srcNode?.type || 'node',
-        sourceTitle: srcNode?.title || (srcNode?.type === 'note' ? '提示词' : srcNode?.type === 'image' ? '图片' : '节点'),
-        handleId: e.targetHandle,
-      };
-    });
-  }, [edges, allNodes, node.id]);
+  const upstreamSources = useCanvasStore((s) => canvasInputSources(s.nodesBySession[sessionId] ?? canvasStore.EMPTY_NODES,
+    s.edgesBySession[sessionId] ?? canvasStore.EMPTY_EDGES, node.id, '图片'));
 
   const solo = useIsSoloSelected(selected);
   const composing = useCanvasStore((s) => s.mentionComposerBySession[sessionId] === node.id);
@@ -787,7 +778,7 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
       <NodeFloatingPanel
         sessionId={sessionId}
         node={node}
-        visible={Boolean((solo || showConfig || composing) && !hasImage)}
+        visible={Boolean(solo || showConfig || composing)}
         prompt={prompt}
         onPromptChange={handlePromptChange}
         onPromptCommit={commitPrompt}
@@ -799,9 +790,9 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
         onSizeChange={(s) => {
           void canvasStore.updateNodeParams(sessionId, node.id, { ...params, size: s });
         }}
-        model={params.model || 'flux-schnell'}
+        model={params.model}
         onModelChange={(m) => {
-          void canvasStore.updateNodeParams(sessionId, node.id, { ...params, model: m });
+          void canvasStore.updateNodeParams(sessionId, node.id, { ...params, model: m || undefined });
         }}
         variationsCount={variationsCount}
         onVariationsCountChange={setVariationsCount}

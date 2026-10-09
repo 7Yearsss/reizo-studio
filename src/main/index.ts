@@ -9,6 +9,7 @@ import { importLegacySessions } from './server/db/importLegacySessions';
 import { createSqliteSessionStore } from './server/storage/sqliteSessionStore';
 import { createSettingsStore } from './server/storage/settingsStore';
 import { createScheduleStore } from './server/storage/scheduleStore';
+import { createUsageStore } from './server/storage/usageStore';
 import { createThoughtStore } from './server/storage/thoughtStore';
 import { createMainWindow, setQuitting } from './window';
 import { registerWindowIpc } from './windowIpc';
@@ -48,7 +49,7 @@ if (process.env.REIZO_DEV_NO_SANDBOX === '1') {
 let runningServer: RunningServer | null = null;
 let dbHandle: DbHandle | null = null;
 let freezeTurnMarkers: (() => void) | null = null;
-let stopScheduler: (() => void) | null = null;
+let stopScheduler: (() => Promise<void>) | null = null;
 let shuttingDown = false;
 // Recovery assumes exclusive ownership of this data directory.
 const primaryInstance = !started && app.requestSingleInstanceLock();
@@ -68,7 +69,8 @@ async function bootstrap(): Promise<void> {
   const settingsStore = createSettingsStore(dataRoot);
   const scheduleStore = createScheduleStore(dataRoot);
   const thoughtStore = createThoughtStore(dataRoot);
-  const skillsDirs = [path.join(process.cwd(), 'skills'), path.join(app.getAppPath(), 'skills'), path.join(dataRoot, 'skills')];
+  const skillsDirs = [path.join(process.cwd(), 'skills'), path.join(app.getAppPath(), 'skills'),
+    ...(app.isPackaged ? [path.join(process.resourcesPath, 'skills')] : []), path.join(dataRoot, 'skills')];
 
   dbHandle = openDb(path.join(dataRoot, 'reizo.db'));
   const importedCount = importLegacySessions(dataRoot, dbHandle.raw);
@@ -86,7 +88,7 @@ async function bootstrap(): Promise<void> {
     db: dbHandle,
     devServerOrigin: devServerOrigin(),
   });
-  stopScheduler = startScheduler({ dataRoot, scheduleStore, settingsStore, skillsDirs, sessionStore });
+  stopScheduler = startScheduler({ dataRoot, scheduleStore, settingsStore, skillsDirs, sessionStore, usageStore: createUsageStore(dbHandle) });
 
   ipcMain.handle(IPC.GET_API_ORIGIN, () => runningServer?.origin);
   ipcMain.handle(IPC.EXPORT_PDF, async (_e, html: string) => {
@@ -114,7 +116,7 @@ async function shutdown(): Promise<void> {
   freezeTurnMarkers?.();
   freezeTurnMarkers = null;
   runningServer?.stopCanvasJobs();
-  stopScheduler?.();
+  await stopScheduler?.().catch((error) => console.warn('[main] schedule interruption could not be persisted; records were retained', error));
   stopScheduler = null;
   globalShortcut.unregisterAll();
   await Promise.race([

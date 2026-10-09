@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { RotateCcw, Video } from 'lucide-react';
+import { Popover } from 'radix-ui';
 import {
   CAMERA_AXES,
   CAMERA_LIMIT,
@@ -34,45 +35,45 @@ function sameMotion(a: CameraControl, b: CameraControl): boolean {
 export default function CameraDial({
   value,
   onChange,
+  portalBoundary,
+  restoreInputFocus,
+  disabled = false,
 }: {
   value: CameraControl | undefined;
   onChange: (next: CameraControl) => void;
+  portalBoundary?: HTMLElement | null;
+  restoreInputFocus?: () => void;
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [draft, setDraft] = useState<CameraControl>(value ?? {});
-  const rootRef = useRef<HTMLDivElement>(null);
+  const closingByEscape = useRef(false);
 
   // Resync from props while the popover is closed (agent edits, undo, etc.).
   useEffect(() => {
     if (!open) setDraft(value ?? {});
   }, [value, open]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onDocPointerDown = (e: PointerEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('pointerdown', onDocPointerDown, true);
-    return () => document.removeEventListener('pointerdown', onDocPointerDown, true);
-  }, [open]);
+  useEffect(() => { if (disabled) setOpen(false); }, [disabled]);
 
   const summary = useMemo(() => cameraSummary(open ? draft : value), [open, draft, value]);
   const active = summary !== '默认运镜';
 
   const commit = (next: CameraControl) => {
+    if (disabled) return;
     setDraft(next);
     onChange(normalizeCamera(next));
   };
 
   return (
-    <div ref={rootRef} className="nodrag relative">
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>
       <button
         type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((o) => !o);
-        }}
+        disabled={disabled}
+        aria-label="可视化运镜控制器"
+        onClick={(event) => event.stopPropagation()}
         title="可视化运镜控制器"
         className={cn(
           'flex h-7 max-w-[150px] items-center gap-1 rounded-lg border px-2 py-1 text-[11px] transition-colors',
@@ -84,12 +85,15 @@ export default function CameraDial({
         <Video size={11} className="shrink-0 opacity-70" />
         <span className="truncate">{summary}</span>
       </button>
+      </Popover.Trigger>
+      <Popover.Portal container={portalBoundary ?? undefined}>
+        <Popover.Content side="bottom" align="start" sideOffset={8} collisionBoundary={portalBoundary ?? undefined} collisionPadding={12} updatePositionStrategy="always"
+          aria-label="运镜参数" className="nodrag nopan nowheel z-[120] max-h-[var(--radix-popover-content-available-height)] w-64 overflow-y-auto rounded-xl border border-border bg-card p-3 text-xs text-foreground shadow-xl outline-none"
+          style={portalBoundary ? { maxWidth: Math.max(0, portalBoundary.clientWidth - 24) } : undefined}
+          onEscapeKeyDown={() => { closingByEscape.current = true; }}
+          onCloseAutoFocus={(event) => { if (closingByEscape.current && restoreInputFocus) { event.preventDefault(); restoreInputFocus(); } closingByEscape.current = false; }}
+          onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
 
-      {open ? (
-        <div
-          className="absolute left-0 top-full z-30 mt-1 w-64 rounded-xl border border-line bg-paper-raised/95 p-2.5 text-xs shadow-xl backdrop-blur-xl"
-          onClick={(e) => e.stopPropagation()}
-        >
           <div className="mb-2 flex items-center justify-between">
             <span className="font-semibold text-ink">运镜</span>
             <button
@@ -163,9 +167,9 @@ export default function CameraDial({
           <p className="mt-1.5 text-[10px] leading-snug text-ink-muted/80">
             可灵仅采用主导轴，其余轴自动转为文字描述随提示词下发。
           </p>
-        </div>
-      ) : null}
-    </div>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }
 

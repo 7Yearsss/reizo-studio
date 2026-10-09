@@ -1,3 +1,6 @@
+import { presentationMentions, usePresentationWorkspace, referencePresentation, selectPresentation } from '../../state/presentationWorkspace';
+import { htmlMentions, useHtmlWorkspace, referenceHtml } from '../../state/htmlWorkspace';
+import { documentMentions, useDocumentWorkspace, referenceDocument, selectDocument } from '../../state/documentWorkspace';
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import { AtSign, Clapperboard, FolderTree, Paperclip, Image as ImageIcon, Video, Type, Volume2, Bot, Sparkles, BoxSelect, Layers, Pin, Wrench } from 'lucide-react';
 import { isImeComposingEvent } from '../../lib/ime';
@@ -22,6 +25,14 @@ import * as canvasStore from '../../state/canvasStore';
 import { getCanvasNodeThumbnail } from '../canvas/canvasThumbnail';
 import type { PermissionMode } from '../../../shared/settings';
 import type { TurnOutcome } from '../../../shared/stream';
+import { useSheetWorkspace, sheetMentions, pinSheetSelection, clearPinnedSheets, removePinnedSheet, flushSheetEdits, selectWorkbook } from '../../state/sheetWorkspace';
+import { serializeSheetReference } from '../../../shared/sheetReferences';
+import { MAX_SHEET_UPLOAD_BYTES } from '../../../shared/sheetFile';
+import { importSheet, importDocument, importPresentation } from '../../api';
+import * as artifactStore from '../../state/artifactStore';
+import * as uiStore from '../../state/uiStore';
+import { Button } from '../ui/button';
+import { toast } from '../../lib/toast';
 
 const MODE_LABEL: Record<PermissionMode, string> = {
   ask: '每次询问',
@@ -75,6 +86,13 @@ export default function Composer({
   onOverlayHeight?: (height: number) => void;
 }) {
   const [draft, setDraft] = useState('');
+  const presentationRef = usePresentationWorkspace((s) => sessionId ? s.references[sessionId] : undefined);
+  const htmlRef = useHtmlWorkspace((s) => sessionId ? s.references[sessionId] : undefined);
+  const documentRef = useDocumentWorkspace((s) => sessionId ? s.references[sessionId] : undefined);
+  const activeSheet = useSheetWorkspace((s) => sessionId ? s.activeBySession[sessionId] : undefined);
+  const pinnedSheets = useSheetWorkspace((s) => sessionId ? s.pinnedBySession[sessionId] : undefined);
+  const [syncingSheet, setSyncingSheet] = useState(false);
+  const preparing = useRef(false);
   const [mentions, setMentions] = useState<string[]>([]);
   const [localSkillId, setLocalSkillId] = useState<string | undefined>();
   const [attachments, setAttachments] = useState<{ name: string; content: string }[]>([]);
@@ -136,7 +154,7 @@ export default function Composer({
         : `canvas:${r.id}`,
     );
     return {
-      mentions: [...mentions, ...refMentions, ...selectionMentions],
+      mentions: [...mentions, ...refMentions, ...selectionMentions, ...(sessionId ? [...sheetMentions(sessionId), ...documentMentions(sessionId), ...htmlMentions(sessionId), ...presentationMentions(sessionId)] : [])],
       extra: { skillId, attachments, replaceFromId: replaceFromIdRef.current },
     };
   }
@@ -150,12 +168,17 @@ export default function Composer({
     if (sessionId) {
       chatStore.clearComposerSeed(sessionId);
       chatStore.clearNodeRefs(sessionId);
+      clearPinnedSheets(sessionId);
       chatStore.setPickingReference(sessionId, false);
     }
   }
 
-  function submit() {
-    if (!draft.trim() || disabled) return;
+  async function submit() {
+    if (!draft.trim() || disabled || preparing.current) return;
+    preparing.current = true;
+    setSyncingSheet(true);
+    try {
+    if (sessionId) await flushSheetEdits(sessionId);
     const { mentions: allMentions, extra } = buildSubmitPayload();
     // Busy-Enter lane: while a turn runs, Enter follows the user's preference —
     // queue (default, next turn) or steer (inject into the live turn).
@@ -165,11 +188,17 @@ export default function Composer({
       onSend(draft, allMentions, extra);
     }
     resetAfterSubmit();
+    } catch (error) { toast.error(error instanceof Error ? error.message : '表格同步失败'); }
+    finally { preparing.current = false; setSyncingSheet(false); }
   }
 
   /** Ctrl/Cmd+Enter while a turn is live — the opposite of the busyEnter lane. */
-  function submitNow() {
-    if (!draft.trim() || disabled || !sessionId) return;
+  async function submitNow() {
+    if (!draft.trim() || disabled || !sessionId || preparing.current) return;
+    preparing.current = true;
+    setSyncingSheet(true);
+    try {
+    await flushSheetEdits(sessionId);
     const { mentions: allMentions, extra } = buildSubmitPayload();
     if (busyEnter === 'steer') {
       // Opposite lane = queue it like a normal send-while-busy.
@@ -178,6 +207,8 @@ export default function Composer({
       void chatStore.steerNow(sessionId, draft, allMentions, extra);
     }
     resetAfterSubmit();
+    } catch (error) { toast.error(error instanceof Error ? error.message : '表格同步失败'); }
+    finally { preparing.current = false; setSyncingSheet(false); }
   }
 
   /** Empty draft + Ctrl/Cmd+Enter while busy — steer every queued message at once (DSH). */
@@ -216,6 +247,42 @@ export default function Composer({
   async function addDroppedFiles(files: FileList | File[]) {
     const next = [...attachments];
     for (const file of Array.from(files)) {
+      if (/\.pptx$|\.reizo-ppt\.json$/i.test(file.name)) {
+        try {
+          if (!sessionId) throw new Error('请先打开一个会话，再导入 PPT');
+          await flushSheetEdits(sessionId);
+          const artifact = await importPresentation(sessionId, file);
+          artifactStore.upsertArtifact(artifact); selectPresentation(sessionId, artifact.id);
+          referencePresentation(sessionId, { artifactId: artifact.id, name: artifact.name, version: artifact.version });
+          uiStore.setRightPanelTab('presentations');
+        } catch (error) { toast.error(error instanceof Error ? error.message : 'PPT 导入失败'); }
+        continue;
+      }
+      if (/\.docx$/i.test(file.name)) {
+        try {
+          if (!sessionId) throw new Error('请先打开一个会话，再导入 Doc');
+          if (file.size > 8 * 1024 * 1024) throw new Error('文档超过 8 MB 上限');
+          await flushSheetEdits(sessionId);
+          const artifact = await importDocument(sessionId, file);
+          artifactStore.upsertArtifact(artifact); selectDocument(sessionId, artifact.id);
+          referenceDocument(sessionId, { artifactId: artifact.id, name: artifact.name, version: artifact.version });
+          uiStore.setRightPanelTab('documents');
+        } catch (error) { toast.error(error instanceof Error ? error.message : 'Doc 导入失败'); }
+        continue;
+      }
+      if (/\.(xlsx|xls|xlsm)$/i.test(file.name)) {
+        try {
+          if (!sessionId) throw new Error('请先打开一个会话，再导入 Excel');
+          if (!/\.xlsx$/i.test(file.name)) throw new Error('请先另存为 .xlsx 后导入');
+          if (file.size > MAX_SHEET_UPLOAD_BYTES) throw new Error('表格超过 8 MB 上限');
+          const artifact = await importSheet(sessionId, file);
+          artifactStore.upsertArtifact(artifact);
+          selectWorkbook(sessionId, artifact.id);
+          setMentions((previous) => [...previous, serializeSheetReference({ artifactId: artifact.id })]);
+          uiStore.setRightPanelTab('sheets');
+        } catch (error) { toast.error(error instanceof Error ? error.message : 'Excel 导入失败'); }
+        continue;
+      }
       // Images land on this session's canvas as a node and get @-referenced in
       // the draft — the composer text path can't carry binaries.
       if (sessionId && file.type.startsWith('image/')) {
@@ -385,6 +452,14 @@ export default function Composer({
           }}
         >
             {sessionId && <ComposerDock todos={todos} />}
+            {sessionId && documentRef && <div className="mb-2"><Button type="button" variant="outline" size="xs" className="max-w-full" title="移除文档引用" onClick={() => referenceDocument(sessionId)}><span className="truncate">{documentRef.name} · {documentRef.selection ? documentRef.selection.text : '全文'}</span> ×</Button></div>}
+            {sessionId && htmlRef && <div className="mb-2"><Button type="button" variant="outline" size="xs" className="max-w-full" title="移除 HTML 引用" onClick={() => referenceHtml(sessionId)}><span className="truncate">{htmlRef.name} · {htmlRef.selection ? htmlRef.selection.text : '整页'}</span> ×</Button></div>}
+            {sessionId && presentationRef && <div className="mb-2"><Button type="button" variant="outline" size="xs" className="max-w-full" title="移除 PPT 引用" onClick={() => referencePresentation(sessionId)}><span className="truncate">{presentationRef.name} · {presentationRef.elementIds?.length ? `${presentationRef.elementIds.length} 个元素` : presentationRef.slideId ? '当前页' : '整份演示稿'}</span> ×</Button></div>}
+            {sessionId && Boolean(activeSheet || pinnedSheets?.length) && <div className="mb-2 flex flex-wrap items-center gap-1.5">
+              {activeSheet && <Button type="button" variant="outline" size="xs" title="发送时自动引用；点击固定此选区" onClick={() => pinSheetSelection(sessionId)}><Pin data-icon="inline-start" />{activeSheet.name}{activeSheet.range ? ` · ${activeSheet.sheetName}!${activeSheet.range}` : ''}</Button>}
+              {pinnedSheets?.map((ref, index) => <Button key={`${ref.artifactId}:${index}`} type="button" variant="secondary" size="xs" title="移除固定引用" onClick={() => removePinnedSheet(sessionId, index)}>{ref.name}{ref.range ? ` · ${ref.sheetName}!${ref.range}` : ''} ×</Button>)}
+            </div>}
+            {syncingSheet && <p role="status" className="mb-2 text-xs text-ink-muted">正在保存工作区内容…</p>}
             {(attachments.length > 0 || nodeRefs.length > 0 || mentions.length > 0 || unpinnedSelectionNodes.length > 0) && (
               <div className={cn("mb-2 flex flex-wrap gap-1.5", compact && "max-h-24 overflow-y-auto pr-0.5")}>
                 {sessionId && unpinnedSelectionNodes.length > 0 && (
@@ -585,7 +660,7 @@ export default function Composer({
                     ? 'Enter 插话（本轮生效）· Ctrl+Enter 排队'
                     : 'Enter 排队 · Ctrl+Enter 插话（本轮生效）'
                 }
-                disabled={disabled}
+                disabled={disabled || syncingSheet}
                 autoFocus={autoFocus}
                 minRows={2}
                 placeholder={

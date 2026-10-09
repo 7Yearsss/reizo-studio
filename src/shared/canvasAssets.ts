@@ -18,6 +18,9 @@ export interface CanvasAsset {
   providerId?: string;
   model?: string;
   inputHash?: string;
+  name?: string;
+  folder?: string;
+  tags?: string[];
 }
 
 /** Generated provenance is always read from the owning job, never accepted from a request. */
@@ -36,6 +39,10 @@ export interface CanvasAssetRegisterInput {
 
 /** Lightweight library projection; execution input snapshots stay in the detail record. */
 export type CanvasAssetSummary = Omit<CanvasAsset, 'inputHash'> & { label: string };
+
+export interface CanvasAssetLibraryPage { assets: CanvasAssetSummary[]; nextCursor?: string; folders: string[] }
+export interface CanvasAssetLibraryQuery { kind?: 'image' | 'video' | 'audio'; limit?: number; search?: string; folder?: string; tag?: string; cursor?: string }
+export interface CanvasAssetMetadataPatch { name?: string; folder?: string; tags?: string[] }
 
 export interface CanvasAssetReuseInput {
   assetId?: string;

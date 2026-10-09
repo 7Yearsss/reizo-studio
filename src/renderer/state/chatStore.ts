@@ -1,3 +1,9 @@
+import { selectPresentation, refreshPresentationReviews, referencePresentation } from './presentationWorkspace';
+import { splitPresentationContext } from '../../shared/presentationReferences';
+import { selectHtml, refreshHtmlReviews, referenceHtml } from './htmlWorkspace';
+import { splitHtmlContext } from '../../shared/htmlReferences';
+import { selectDocument, refreshDocumentReviews, referenceDocument } from './documentWorkspace';
+import { splitDocumentContext } from '../../shared/documentReferences';
 import * as api from '../api';
 import type { ChatMessage, ReplyActivity, SessionSummary, ToolCallPart } from '../../shared/chat';
 import type {
@@ -18,6 +24,8 @@ import * as uiStore from './uiStore';
 import * as canvasStore from './canvasStore';
 import { isCanvasTool, trailEntryFromTool, UNDOABLE_TRAIL_VERBS } from '../../shared/agentTrail';
 import * as artifactStore from './artifactStore';
+import { flushSheetEdits, selectWorkbook, restoreSheetReferences } from './sheetWorkspace';
+import { splitSheetContext } from '../../shared/sheetReferences';
 import { recordRecentSkill } from './skillStore';
 import { appendTerminalLine } from './terminalStore';
 import { notifyNeedsInput } from '../lib/notify';
@@ -764,7 +772,15 @@ export function editLastUserMessage(sessionId: string): void {
   const messages = state.messagesBySession[sessionId] ?? [];
   const lastUser = [...messages].reverse().find((m) => m.role === 'user');
   if (!lastUser) return;
-  seedComposer(sessionId, lastUser.content, { replaceFromId: lastUser.id });
+  const presentation = splitPresentationContext(lastUser.content);
+  referencePresentation(sessionId, presentation.refs[0]);
+  const html = splitHtmlContext(presentation.text);
+  referenceHtml(sessionId, html.refs[0]);
+  const document = splitDocumentContext(html.text);
+  referenceDocument(sessionId, document.refs[0]);
+  const sheet = splitSheetContext(document.text);
+  restoreSheetReferences(sessionId, sheet.refs);
+  seedComposer(sessionId, sheet.text, { replaceFromId: lastUser.id });
 }
 
 function notifyIfHidden(title: string): void {
@@ -914,6 +930,31 @@ function makeEventFolder(
         break;
       }
       case 'tool': {
+        if ((event.name === 'generate_presentation' || event.name === 'propose_presentation_edits') && event.result) {
+          try { const result = JSON.parse(event.result) as { ok?: boolean; artifactId?: string };
+            if (result.ok && result.artifactId) { selectPresentation(sessionId, result.artifactId); refreshPresentationReviews(result.artifactId); uiStore.setRightPanelTab('presentations'); void artifactStore.loadSessionArtifacts(sessionId); }
+          } catch { /* Incomplete tool output. */ }
+        }
+        if ((event.name === 'generate_html' || event.name === 'propose_html_edits') && event.result) {
+          try { const result = JSON.parse(event.result) as { ok?: boolean; artifactId?: string };
+            if (result.ok && result.artifactId) { selectHtml(sessionId, result.artifactId); refreshHtmlReviews(result.artifactId); uiStore.setRightPanelTab('html'); void artifactStore.loadSessionArtifacts(sessionId); }
+          } catch { /* Incomplete tool output. */ }
+        }
+        if ((event.name === 'generate_document' || event.name === 'propose_document_edits') && event.result) {
+          try { const result = JSON.parse(event.result) as { ok?: boolean; artifactId?: string };
+            if (result.ok && result.artifactId) { selectDocument(sessionId, result.artifactId); refreshDocumentReviews(result.artifactId); uiStore.setRightPanelTab('documents'); void artifactStore.loadSessionArtifacts(sessionId); }
+          } catch { /* Incomplete tool output. */ }
+        }
+        if (event.name === 'generate_sheet' && event.result) {
+          try {
+            const result = JSON.parse(event.result) as { ok?: boolean; artifactId?: string };
+            if (result.ok && result.artifactId) {
+              selectWorkbook(sessionId, result.artifactId);
+              uiStore.setRightPanelTab('sheets');
+              void artifactStore.loadSessionArtifacts(sessionId);
+            }
+          } catch { /* Incomplete streamed tool output. */ }
+        }
         finishThinkingActivity(acc);
         const part = upsertToolPart(acc, event);
         upsertToolActivity(acc, part);
@@ -930,7 +971,7 @@ function makeEventFolder(
           const trail = trailEntryFromTool(event);
           if (trail) {
             canvasStore.pushTrail(sessionId, trail);
-            if (trail.nodeIds.length > 0) canvasStore.spotlight(sessionId, trail.nodeIds);
+            if (trail.nodeIds.length > 0) canvasStore.spotlight(sessionId, trail.nodeIds, 'automatic');
             if (trail.status === 'done' && UNDOABLE_TRAIL_VERBS.has(trail.verb)) {
               canvasStore.recordAgentBatch(sessionId, trail, turnSeqBySession.get(sessionId));
               if (trail.nodeIds.length > 0) {
@@ -1131,6 +1172,12 @@ async function dispatchTurn(
     optimisticMessages?: ChatMessage[];
   } = {},
 ): Promise<void> {
+  try { await flushSheetEdits(sessionId); }
+  catch (error) {
+    setState({ errorBySession: { ...state.errorBySession, [sessionId]: error instanceof Error ? error.message : '表格同步失败' } });
+    seedComposer(sessionId, text);
+    return;
+  }
   const existing = turn.optimisticMessages ?? (() => {
     const current = state.messagesBySession[sessionId] ?? [];
     if (!turn.truncateAfterId) return current;

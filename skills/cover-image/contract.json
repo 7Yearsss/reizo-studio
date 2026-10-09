@@ -1,0 +1,29 @@
+{
+  "fields": {
+    "objective": {
+      "type": "text"
+    },
+    "aspectRatio": {
+      "type": "choice",
+      "options": [
+        "16:9",
+        "1:1",
+        "9:16",
+        "3:4"
+      ]
+    },
+    "style": {
+      "type": "text"
+    }
+  },
+  "outputs": {
+    "kinds": [
+      "image"
+    ],
+    "requiredRoles": [
+      "final"
+    ],
+    "requireFinal": true
+  },
+  "version": 1
+}

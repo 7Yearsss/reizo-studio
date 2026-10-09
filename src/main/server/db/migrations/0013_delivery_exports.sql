@@ -1,0 +1,3 @@
+CREATE TABLE delivery_exports (id text PRIMARY KEY NOT NULL, plan_id text NOT NULL REFERENCES delivery_plans(id) ON DELETE CASCADE, artifact_id text NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE, artifact_version integer NOT NULL, format text NOT NULL, job_id text NOT NULL UNIQUE, source_asset_ids_json text NOT NULL, page_count integer NOT NULL, content_hash text NOT NULL, created_at integer NOT NULL);
+CREATE INDEX delivery_exports_plan_idx ON delivery_exports(plan_id, created_at DESC);
+CREATE TRIGGER delivery_export_removed AFTER DELETE ON delivery_exports BEGIN UPDATE delivery_plans SET complete = 0, issues_json = '["交付文件已移除，请重新核验"]' WHERE id = OLD.plan_id; END;

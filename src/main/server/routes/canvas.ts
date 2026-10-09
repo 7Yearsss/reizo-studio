@@ -16,11 +16,14 @@ import type { CanvasAssetKind, CanvasAssetSummary } from '../../../shared/canvas
 import { CanvasAssetStoreError } from '../storage/canvasAssetStore';
 import { CanvasJobStoreError } from '../storage/canvasJobStore';
 import { NodeJobsClosedError } from '../canvas/nodeJobs';
-import { canvasWorkSignal } from '../canvas/workLifecycle';
+import { canvasWorkSignal, canvasWorkStopped } from '../canvas/workLifecycle';
 import type { CanvasJob } from '../../../shared/canvasJobs';
 import { isCanvasRunning, runGraph, stopCanvasRun } from '../canvas/graphExecutor';
+import { nodeJobsFor } from '../canvas/nodeJobs';
+import { cancelVideoJob } from '../canvas/asyncJobManager';
 import { isImportedMedia } from '../../../shared/canvasGraph';
-import { runAgentNode } from '../canvas/agentExecutor';
+import { startAgentNode } from '../canvas/agentExecutor';
+import { startComposition } from '../canvas/composition';
 import { startVideoNode } from '../canvas/videoExecutor';
 import { startAudioNode } from '../canvas/audioExecutor';
 import { setCanvasSelection } from '../canvas/selection';
@@ -28,7 +31,11 @@ import { exportWorkflowZip } from '../canvas/exportWorkflow';
 import { importWorkflowZip } from '../canvas/importWorkflow';
 import { generateText } from 'ai';
 import { createOpenAiModel } from '../agent/provider/openai';
-import { getProviderPreset } from '../../../shared/providers';
+import { resolveSettingsModel } from '../providerResolver';
+import { usageFetch } from '../agent/provider/usageFetch';
+import { quotaFetch, llmSchedulerFor } from '../agent/provider/quotaFetch';
+import { startPresentationExport } from '../canvas/presentationExport';
+import { isPresentationExportNode } from '../../../shared/canvasPresentation';
 
 const NODE_TYPES = new Set<CanvasNodeType>([
   'image',
@@ -91,6 +98,54 @@ export function createCanvasRouter(
     return c.json({ error: 'Canvas request failed' }, 500);
   });
 
+  router.post('/:canvasId/edits', async (c) => {
+    const body = await c.req.json().catch((): null => null);
+    const operationId = c.req.header('Idempotency-Key');
+    if (!operationId || !body || !Array.isArray(body.edits)) return c.json({ error: 'edits and Idempotency-Key are required' }, 400);
+    const canvasId = c.req.param('canvasId');
+    if (body.uploads === undefined) return c.json({ snapshot: canvasApp.edit(canvasId, body.edits, operationId, body.expectedRevision) });
+    const parsed = z.array(z.object({ nodeId: z.string().min(1), name: z.string().min(1).max(160),
+      dataBase64: z.string().min(1).max(IMPORT_MAX_BYTES * 1.4), mimeType: z.string(), role: z.enum(['output', 'mask']).default('output') })).min(1).max(32).safeParse(body.uploads);
+    if (!parsed.success) return c.json({ error: '上传清单无效' }, 400);
+    const uploads = parsed.data;
+    const identities = uploads.map((file) => `${file.nodeId}:${file.role}`);
+    if (new Set(identities).size !== identities.length) return c.json({ error: '同一节点不能重复上传同类文件' }, 400);
+    const files = uploads.map((file) => ({ ...file, bytes: Buffer.from(file.dataBase64, 'base64') }));
+    if (files.some((file) => !file.bytes.length || file.bytes.length > IMPORT_MAX_BYTES || !SAFE_MEDIA_MIMES.has(file.mimeType) || file.role === 'mask' && file.mimeType !== 'image/png') ||
+      files.reduce((total, file) => total + file.bytes.length, 0) > 64 * 1024 * 1024) return c.json({ error: '文件类型或大小无效，单次最多 64 MB' }, 400);
+    const request = { kind: 'edit_with_assets', edits: body.edits, expectedRevision: body.expectedRevision,
+      files: files.map((file) => ({ nodeId: file.nodeId, name: file.name, mimeType: file.mimeType, role: file.role,
+        hash: createHash('sha256').update(file.bytes).digest('hex') })) };
+    const replay = canvasApp.replay<unknown>(canvasId, request, operationId);
+    if (replay) return c.json({ snapshot: canvasStore.getSnapshot(canvasId) });
+    const extensionFor = (mimeType: string) => Object.entries(MEDIA_MIMES).find(([, mime]) => mime === mimeType)?.[0];
+    const staged = await stageCanvasAssets(dataRoot, canvasId, files.map((file) => ({
+      name: `${nanoid()}.${extensionFor(file.mimeType)}`, bytes: file.bytes, mimeType: file.mimeType,
+      kind: file.role === 'mask' ? 'mask' : kindForMime(file.mimeType),
+    })), AbortSignal.any([canvasWorkSignal(canvasStore), c.req.raw.signal]));
+    try {
+      staged.prepareCommit();
+      canvasApp.batch(canvasId, request, () => {
+        canvasApp.edit(canvasId, body.edits, undefined, body.expectedRevision);
+        files.forEach((file, index) => {
+          const node = canvasStore.getNode(canvasId, file.nodeId);
+          if (!node || !['image', 'video', 'audio', 'anchor', 'frameExtractor'].includes(node.type)) throw new CanvasCommandError('素材节点不存在或类型不支持', 400);
+          const asset = canvasStore.assets.register({ ...staged.files[index], canvasId, nodeId: node.id, source: file.role === 'mask' ? 'mask' : 'imported' });
+          canvasStore.assets.updateMetadata(asset.id, { name: file.name });
+          if (file.role === 'mask') {
+            const params = node.params as Record<string, unknown>;
+            if (!params.edit || typeof params.edit !== 'object') throw new CanvasCommandError('蒙版需要图片编辑节点');
+            canvasApp.updateNode(canvasId, node.id, { params: { ...params, edit: { ...params.edit, maskAsset: asset.path } } });
+          } else canvasApp.updateNode(canvasId, node.id, { runState: 'done', output: { assets: [asset.path], activeAssetIndex: 0,
+            resultSet: [{ asset: asset.path, assetId: asset.id, createdAt: asset.createdAt }] } });
+        });
+        canvasApp.afterCommit(() => staged.keep());
+        return { revision: canvasStore.getCanvas(canvasId).liveRevision };
+      }, operationId);
+      return c.json({ snapshot: canvasStore.getSnapshot(canvasId) });
+    } finally { await staged.discard(); }
+  });
+
   /** 轻量级 Prompt 润色（不走完整 Agent Turn 与消息历史） */
   router.post('/refine-prompt', async (c) => {
     const body = await c.req.json().catch((): null => null);
@@ -100,31 +155,19 @@ export function createCanvasRouter(
     }
     const mode: 'image' | 'video' = body?.mode === 'video' ? 'video' : 'image';
 
-    const settings = await settingsStore.get();
-    const providerId = settings.activeProviderId;
-    const preset = getProviderPreset(providerId);
-    const stored = settings.providers[providerId];
-    const apiKey = stored?.apiKey;
-    if (!apiKey) {
-      return c.json(
-        { error: `未配置 ${preset?.name || providerId} 的 API Key，请先在设置中配置。` },
-        400,
-      );
-    }
-
-    const modelId = stored?.model || preset?.defaultModel;
-    const baseUrl = stored?.baseUrl || preset?.baseUrl;
-    if (!baseUrl || !modelId) {
-      return c.json({ error: '当前 Provider 缺少有效的 Base URL 或模型 ID。' }, 400);
-    }
+    let resolved: ReturnType<typeof resolveSettingsModel>;
+    try { resolved = resolveSettingsModel(await settingsStore.get(), { category: 'llm' }); }
+    catch (error) { return c.json({ error: error instanceof Error ? error.message : String(error) }, 400); }
+    const { providerId, modelId, apiKey, baseUrl } = resolved;
 
     try {
-      const model = createOpenAiModel({ apiKey, modelId, baseUrl });
+      const model = createOpenAiModel({ apiKey, modelId, baseUrl, fetch: quotaFetch(llmSchedulerFor(canvasStore), providerId,
+        usageFetch(canvasStore.usage, { providerId, model: modelId, category: 'llm', accepting: () => !canvasWorkStopped(canvasStore) }), true) });
       const { text } = await generateText({
         model,
         system: REFINEMENT_PROMPTS[mode],
         prompt: rawPrompt,
-        abortSignal: c.req.raw.signal,
+        abortSignal: AbortSignal.any([c.req.raw.signal, canvasWorkSignal(canvasStore)]),
       });
 
       const refined = text
@@ -167,19 +210,82 @@ export function createCanvasRouter(
     const id = c.req.param('canvasId');
     if (!canvasStore.getCanvas(id)) return c.json({ error: 'Canvas not found' }, 404);
     const limit = Number(c.req.query('limit') ?? 100);
-    const jobs = canvasStore.jobs.list(id, limit).map((job): Omit<CanvasJob, 'input' | 'result'> => {
-      const summary = { ...job };
-      Reflect.deleteProperty(summary, 'input');
-      Reflect.deleteProperty(summary, 'result');
-      return summary;
+    const page = canvasStore.jobs.page(id, { limit, status: c.req.query('status'), search: c.req.query('search'), cursor: c.req.query('cursor') });
+    const jobs = page.jobs.map((job) => {
+      const node = canvasStore.getNode(id, job.nodeId);
+      return { ...job, nodeTitle: node?.title, nodeExists: Boolean(node), isCurrent: canvasStore.jobs.current(id, job.nodeId)?.id === job.id };
     });
-    return c.json({ jobs });
+    return c.json({ ...page, jobs });
+  });
+
+  router.post('/:canvasId/jobs/:jobId/cancel', (c) => {
+    const canvasId = c.req.param('canvasId');
+    const job = canvasStore.jobs.get(c.req.param('jobId'));
+    if (!job || job.canvasId !== canvasId) return c.json({ error: 'Job not found' }, 404);
+    if (!['queued', 'running'].includes(job.status)) return c.json({ job });
+    if (canvasStore.jobs.current(canvasId, job.nodeId)?.id !== job.id) return c.json({ error: '此任务已被新的执行替代' }, 409);
+    const cancelled = (job.nodeType === 'video' && cancelVideoJob(canvasId, job.nodeId, canvasStore)) || nodeJobsFor(canvasStore).cancelNode(canvasId, job.nodeId);
+    if (!cancelled) return c.json({ error: '任务状态已变化，请刷新后重试' }, 409);
+    const result = canvasStore.jobs.get(job.id);
+    if (result.status !== 'cancelled') return c.json({ error: '取消未能保存，请重试' }, 500);
+    return c.json({ job: result });
+  });
+
+  router.post('/:canvasId/jobs/:jobId/retry', async (c) => {
+    const canvasId = c.req.param('canvasId');
+    const job = canvasStore.jobs.get(c.req.param('jobId'));
+    if (!job || job.canvasId !== canvasId) return c.json({ error: 'Job not found' }, 404);
+    const operationId = c.req.header('Idempotency-Key');
+    if (!operationId) return c.json({ error: 'Idempotency-Key is required' }, 400);
+    // A retry receipt is checked before the latest-generation guard, so a lost response is safe to retry.
+    const previous = canvasStore.jobs.findByOperationId(canvasId, operationId);
+    if (previous && previous.nodeId !== job.nodeId) return c.json({ error: 'Retry identity belongs to another node' }, 409);
+    if (!previous && (!['failed', 'interrupted', 'cancelled'].includes(job.status) || canvasStore.jobs.current(canvasId, job.nodeId)?.id !== job.id))
+      return c.json({ error: '只能重试该节点最新的失败、中断或取消任务' }, 409);
+    const body = await c.req.json().catch((): null => null);
+    if (job.input.presentationRequest) {
+      if (!artifactStore) return c.json({ error: 'Artifact store is unavailable' }, 400);
+      const accepted = startPresentationExport({ store: canvasStore, artifactStore, dataRoot, canvasId, operationId, targetNodeId: job.nodeId,
+        request: job.input.presentationRequest as import('../../../shared/canvasPresentation').PresentationExportRequest, fixedSources: job.input.sources as import('../../../shared/canvasPresentation').PresentationSource[] });
+      return c.json({ jobId: accepted.job.id, nodeId: accepted.job.nodeId, status: accepted.job.status }, 202);
+    }
+    if (job.input.compositionRequest) {
+      const accepted = startComposition(canvasStore, dataRoot, canvasId, job.input.compositionRequest, operationId, job.nodeId);
+      return c.json({ jobId: accepted.job.id, nodeId: accepted.job.nodeId, status: accepted.job.status }, 202);
+    }
+    return router.request(`/${canvasId}/nodes/${job.nodeId}/run`, { method: 'POST',
+      headers: { 'content-type': 'application/json', 'Idempotency-Key': operationId }, body: JSON.stringify(body ?? {}) });
   });
 
   router.get('/:canvasId/jobs/:jobId', (c) => {
     const job = canvasStore.jobs.get(c.req.param('jobId'));
     if (!job || job.canvasId !== c.req.param('canvasId')) return c.json({ error: 'Job not found' }, 404);
     return c.json({ job });
+  });
+
+  router.get('/:canvasId/deliveries', (c) => {
+    if (!canvasStore.getCanvas(c.req.param('canvasId'))) return c.json({ error: 'Canvas not found' }, 404);
+    return c.json({ deliveries: canvasStore.deliveries.list(c.req.param('canvasId')) });
+  });
+  router.get('/:canvasId/deliveries/:planId/exports', (c) => {
+    const plan = canvasStore.deliveries.get(c.req.param('planId'));
+    if (!plan || plan.canvasId !== c.req.param('canvasId')) return c.json({ error: 'Plan not found' }, 404);
+    return c.json({ exports: canvasStore.deliveryExports.list(plan.id) });
+  });
+  router.post('/:canvasId/presentation-export', async (c) => {
+    if (!artifactStore) return c.json({ error: 'Artifact store is unavailable' }, 400);
+    const operationId = c.req.header('Idempotency-Key');
+    if (!operationId) return c.json({ error: 'Idempotency-Key is required' }, 400);
+    const accepted = startPresentationExport({ store: canvasStore, artifactStore, dataRoot, canvasId: c.req.param('canvasId'), operationId,
+      request: await c.req.json().catch((): null => null) });
+    return c.json({ jobId: accepted.job.id, nodeId: accepted.job.nodeId, status: accepted.job.status }, 202);
+  });
+
+  router.post('/:canvasId/compose', async (c) => {
+    const operationId = c.req.header('Idempotency-Key');
+    if (!operationId) return c.json({ error: 'Idempotency-Key is required' }, 400);
+    const accepted = startComposition(canvasStore, dataRoot, c.req.param('canvasId'), await c.req.json().catch((): null => null), operationId);
+    return c.json({ jobId: accepted.job.id, nodeId: accepted.job.nodeId, status: accepted.job.status }, 202);
   });
 
   router.get('/:canvasId/assets', (c) => {
@@ -191,14 +297,20 @@ export function createCanvasRouter(
   router.get('/assets/library', (c) => {
     const kind = c.req.query('kind');
     if (kind !== undefined && !['image', 'video', 'audio'].includes(kind)) return c.json({ error: 'Unknown media kind' }, 400);
-    const assets = canvasStore.assets.recent({ kind: kind as 'image' | 'video' | 'audio' | undefined,
-      limit: Number(c.req.query('limit') ?? 80) }).map((asset): CanvasAssetSummary => {
+    const page = canvasStore.assets.page({ kind: kind as 'image' | 'video' | 'audio' | undefined,
+      limit: Number(c.req.query('limit') ?? 80), search: c.req.query('search'), folder: c.req.query('folder'),
+      tag: c.req.query('tag'), cursor: c.req.query('cursor') });
+    const assets = page.assets.map((asset): CanvasAssetSummary => {
       const source = asset.nodeId ? canvasStore.getNode(asset.canvasId, asset.nodeId) : null;
-      const summary = { ...asset, label: source?.title || (asset.kind === 'audio' ? '音频素材' : asset.kind === 'video' ? '视频素材' : '图片素材') };
+      const summary = { ...asset, label: asset.name || source?.title || (asset.kind === 'audio' ? '音频素材' : asset.kind === 'video' ? '视频素材' : '图片素材') };
       Reflect.deleteProperty(summary, 'inputHash');
       return summary;
     });
-    return c.json({ assets });
+    return c.json({ ...page, assets });
+  });
+
+  router.patch('/assets/library/:assetId', async (c) => {
+    return c.json({ asset: canvasStore.assets.updateMetadata(c.req.param('assetId'), await c.req.json().catch((): null => null)) });
   });
 
   router.post('/:canvasId/assets/reuse', async (c) => {
@@ -271,6 +383,7 @@ export function createCanvasRouter(
     }
     const box = defaultNodeBox(type);
     const { node } = canvasApp.addNode(canvasId, {
+      id: body.id,
       type,
       x: typeof body.x === 'number' ? body.x : 0,
       y: typeof body.y === 'number' ? body.y : 0,
@@ -353,6 +466,13 @@ export function createCanvasRouter(
     if (!node) return c.json({ error: 'Node not found' }, 404);
     const body = await c.req.json().catch((): Record<string, unknown> => ({}));
 
+    if (isPresentationExportNode(node)) {
+      if (!artifactStore) return c.json({ error: 'Artifact store is unavailable' }, 400);
+      const local = (node.params as any).localExport;
+      const accepted = startPresentationExport({ store: canvasStore, artifactStore, dataRoot, canvasId, request: local.request, fixedSources: local.sources,
+        operationId: c.req.header('Idempotency-Key') ?? nanoid(), targetNodeId: node.id });
+      return c.json({ jobId: accepted.job.id, nodeId: node.id, status: accepted.job.status }, 202);
+    }
     if (isImportedMedia(node)) return c.json({ ok: true, status: 'done', node, note: '已有素材可以直接引用；填写提示词后可生成新版本。' });
 
     if (node.type === 'image') {
@@ -379,6 +499,7 @@ export function createCanvasRouter(
       const accepted = startVideoNode({
         canvasStore,
         settingsStore,
+        providerStore,
         dataRoot,
         canvasId,
         node,
@@ -403,17 +524,12 @@ export function createCanvasRouter(
       return c.json({ ok: true, jobId: accepted.job.id, status: accepted.job.status }, 202);
     }
 
-    // Agent node: a headless read-only sub-agent pass. Cheap (text only), so
-    // no spend gate — it streams its answer onto the node.
-    void runAgentNode({
-      canvasStore,
-      settingsStore,
-      dataRoot,
-      canvasId,
-      node,
+    if (node.type !== 'agent') return c.json({ error: '此节点类型不支持执行' }, 400);
+    const accepted = startAgentNode({ canvasStore, settingsStore, dataRoot, canvasId, node,
       providerId: typeof body.providerId === 'string' ? body.providerId : undefined,
-    });
-    return c.json({ ok: true }, 202);
+      operationId: c.req.header('Idempotency-Key') ?? (typeof body.operationId === 'string' ? body.operationId : undefined) });
+    void accepted.completion.catch((error) => console.error('[canvas] accepted Agent job failed', error));
+    return c.json({ ok: true, jobId: accepted.job.id, status: accepted.job.status }, 202);
   });
 
   /**
@@ -443,6 +559,7 @@ export function createCanvasRouter(
       nodeIds,
       providerId: typeof body.providerId === 'string' ? body.providerId : undefined,
       providerStore,
+      artifactStore,
     });
     return c.json({ ok: true }, 202);
   });
@@ -492,6 +609,7 @@ export function createCanvasRouter(
     const staged = await stageCanvasAssets(dataRoot, canvasId, [{ name: `import-${nanoid(6)}.${ext}`, bytes, kind: kindForMime(mimeType), mimeType }],
       AbortSignal.any([c.req.raw.signal, canvasWorkSignal(canvasStore)]));
     try {
+      staged.prepareCommit();
       const file = staged.files[0];
       const imported = canvasApp.batch(canvasId, { kind: 'import_asset', nodeInput, contentHash: file.contentHash, mimeType }, () => {
         const { node } = canvasApp.addNode(canvasId, nodeInput);
@@ -526,6 +644,7 @@ export function createCanvasRouter(
     const staged = await stageCanvasAssets(dataRoot, canvasId, [{ name: `${id}-frame-${nanoid(6)}.${ext}`, bytes, kind: kindForMime(mimeType), mimeType }],
       AbortSignal.any([c.req.raw.signal, canvasWorkSignal(canvasStore)]));
     try {
+      staged.prepareCommit();
       const file = staged.files[0];
       const attached = canvasApp.batch(canvasId, { kind: 'attach_asset', id, contentHash: file.contentHash, mimeType }, () => {
         const asset = canvasStore.assets.register({ ...file, canvasId, nodeId: id, source: 'imported' });
@@ -555,6 +674,7 @@ export function createCanvasRouter(
     const staged = await stageCanvasAssets(dataRoot, canvasId, [{ name: `${id}-mask-${nanoid(6)}.png`, bytes, kind: 'mask', mimeType: 'image/png' }],
       AbortSignal.any([c.req.raw.signal, canvasWorkSignal(canvasStore)]));
     try {
+      staged.prepareCommit();
       const file = staged.files[0];
       const asset = canvasApp.batch(canvasId, { kind: 'upload_mask', id, contentHash: file.contentHash }, () => {
         const saved = canvasStore.assets.register({ ...file, canvasId, nodeId: id, source: 'mask' });

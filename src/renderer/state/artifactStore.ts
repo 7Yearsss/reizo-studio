@@ -31,6 +31,16 @@ export function getSnapshot(): ArtifactState {
   return state;
 }
 
+export function upsertArtifact(artifact: ArtifactWithContent): void {
+  const list = state.bySession[artifact.sessionId] ?? [];
+  const current = list.find((item) => item.id === artifact.id);
+  if (current && current.version > artifact.version) return;
+  setState({
+    bySession: { ...state.bySession, [artifact.sessionId]: current ? list.map((item) => item.id === artifact.id ? artifact : item) : [artifact, ...list] },
+    contentByKey: { ...state.contentByKey, [key(artifact.id, artifact.version)]: artifact },
+  });
+}
+
 export async function loadSessionArtifacts(sessionId: string): Promise<void> {
   setState({ loadingBySession: { ...state.loadingBySession, [sessionId]: true } });
   try {

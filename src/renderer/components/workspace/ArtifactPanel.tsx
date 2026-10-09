@@ -25,6 +25,8 @@ import { Loader } from '../motion/loader';
 import { toast } from '../../lib/toast';
 
 const KIND_LABELS: Record<ArtifactKind, string> = {
+  doc: '文档',
+  presentation: '演示稿',
   markdown: 'Markdown',
   html: 'HTML',
   text: '文本',
@@ -131,9 +133,26 @@ export default function ArtifactPanel({ sessionId }: { sessionId: string }) {
   async function upload(files: FileList | File[]) {
     const list = Array.from(files);
     if (list.length === 0) return;
+    let uploaded = 0;
     await Promise.all(
       list.map(async (file) => {
         try {
+          if (/\.pptx$|\.reizo-ppt\.json$/i.test(file.name)) {
+            await api.importPresentation(sessionId, file);
+            uploaded++;
+            return;
+          }
+          if (/\.docx$/i.test(file.name)) {
+            await api.importDocument(sessionId, file);
+            uploaded++;
+            return;
+          }
+          if (/\.xlsx$/i.test(file.name)) {
+            await api.importSheet(sessionId, file);
+            uploaded++;
+            return;
+          }
+          if (/\.(xls|xlsm|csv)$/i.test(file.name)) throw new Error('请先将文件另存为 .xlsx 后导入');
           const { content, mimeType, kind } = await readFileForUpload(file);
           await api.createSessionArtifact(sessionId, {
             name: file.name,
@@ -142,13 +161,14 @@ export default function ArtifactPanel({ sessionId }: { sessionId: string }) {
             kind,
             source: 'attachment',
           });
-        } catch {
-          /* skip unreadable file */
+          uploaded++;
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : `无法导入 ${file.name}`);
         }
       }),
     );
     await artifactStore.loadSessionArtifacts(sessionId);
-    toast.success(`已上传 ${list.length} 个作品`);
+    if (uploaded) toast.success(`已上传 ${uploaded} 个作品`);
   }
 
   function toggleCheck(id: string) {

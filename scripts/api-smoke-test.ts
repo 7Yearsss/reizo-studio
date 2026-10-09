@@ -281,7 +281,7 @@ async function main() {
       body: JSON.stringify({ text: 'hello', providerId: 'openai' }),
     });
     const body = await res.json();
-    check('chat-requires-key', res.status === 400 && /API key/.test(body.error), body);
+    check('chat-requires-key', res.status === 400 && /API key/i.test(body.error), body);
   }
 
   {
@@ -302,26 +302,26 @@ async function main() {
   }
 
   {
-    const root = path.resolve('work', 'reizo');
+    const root = await mkdtemp(path.join(tmpdir(), 'reizo-workspace-'));
     const inside = resolveInsideWorkspace(root, path.join('src', 'app.ts'));
     check('workspace-inside', inside === path.join(root, 'src', 'app.ts'), inside);
     let escaped = false;
     try {
-      resolveInsideWorkspace('C:\\work\\reizo', '..\\Windows\\System32');
+      resolveInsideWorkspace(root, path.join('..', 'outside', 'System32'));
     } catch {
       escaped = true;
     }
     check('workspace-escape', escaped);
     let writeEscaped = false;
     try {
-      await writeWorkspaceFile('C:\\work\\reizo', '..\\Windows\\evil.txt', 'nope');
+      await writeWorkspaceFile(root, path.join('..', 'outside', 'evil.txt'), 'nope');
     } catch {
       writeEscaped = true;
     }
     check('workspace-write-escape', writeEscaped);
     let deleteEscaped = false;
     try {
-      await deleteWorkspacePath('C:\\work\\reizo', '..\\Windows');
+      await deleteWorkspacePath(root, path.join('..', 'outside'));
     } catch {
       deleteEscaped = true;
     }

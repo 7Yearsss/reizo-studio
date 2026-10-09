@@ -7,6 +7,9 @@ import { startVideoNode } from './videoExecutor';
 import { nanoid } from 'nanoid';
 import { startAudioNode } from './audioExecutor';
 import type { ProviderStore } from '../storage/providerStore';
+import type { ArtifactStore } from '../storage/artifactStore';
+import { isPresentationExportNode } from '../../../shared/canvasPresentation';
+import { startPresentationExport } from './presentationExport';
 import { descendants, directUpstream, topoOrder, buildPipelineWaves, inputHash, isImportedMedia } from './graph';
 import { nodeJobsFor, type NodeJobSubmission } from './nodeJobs';
 import { canvasWorkStopped } from './workLifecycle';
@@ -67,6 +70,7 @@ export async function runGraph(options: {
   nodeIds?: string[];
   providerId?: string;
   providerStore?: ProviderStore;
+  artifactStore?: ArtifactStore;
   onJob?: (submission: NodeJobSubmission) => void;
 }): Promise<void> {
   const { canvasStore, settingsStore, dataRoot, canvasId, fromNodeId, nodeIds, providerId, providerStore } = options;
@@ -100,7 +104,7 @@ export async function runGraph(options: {
   const waves = buildPipelineWaves(
     nodes,
     edges,
-    (type) => RUNNABLE.has(type),
+    (type, id) => RUNNABLE.has(type) || isPresentationExportNode(byId.get(id)),
     inScope,
   );
 
@@ -124,7 +128,7 @@ export async function runGraph(options: {
     const runOne = async (id: string): Promise<void> => {
       if (!canRun()) return;
       const node = byId.get(id);
-      if (!node || !RUNNABLE.has(node.type)) return;
+      if (!node || !RUNNABLE.has(node.type) && !isPresentationExportNode(node)) return;
 
       const brokenUpstream = directUpstream(edges, id).some((u) => failed.has(u));
       if (brokenUpstream) {
@@ -178,7 +182,13 @@ export async function runGraph(options: {
 
       let jobId: string | undefined;
       try {
-        if (fresh.type === 'agent') {
+        if (isPresentationExportNode(fresh)) {
+          if (!options.artifactStore) throw new Error('本地演示稿导出需要 Artifact store');
+          const local = (fresh.params as any).localExport;
+          const accepted = startPresentationExport({ store: canvasStore, artifactStore: options.artifactStore, dataRoot, canvasId, request: local.request,
+            fixedSources: local.sources, targetNodeId: fresh.id, operationId: `graph:${runId}:${id}`, signal: abort.signal });
+          jobId = accepted.job.id; options.onJob?.(accepted); await accepted.completion;
+        } else if (fresh.type === 'agent') {
           await runAgentNode({
             canvasStore,
             settingsStore,

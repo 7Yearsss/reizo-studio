@@ -3,7 +3,7 @@ import { generateImage, tool } from 'ai';
 import { z } from 'zod';
 import { defaultNodeBox } from '../../../shared/canvas';
 import { editNodeTitle, isLocalEdit, type ImageEditKind } from '../../../shared/canvasImageEdit';
-import { getProviderPreset } from '../../../shared/providers';
+import { resolveSettingsModel } from '../providerResolver';
 import { classifyMediaError } from '../canvas/mediaError';
 import { startImageNode } from '../canvas/imageExecutor';
 import { stageCanvasAssets } from '../canvas/assets';
@@ -110,39 +110,10 @@ export function createImageTools(options: {
           }
         }
 
-        const settings = await settingsStore.get();
-        const activeProviderId = settings.activeProviderId;
-        const activeStored = settings.providers[activeProviderId];
-        const reizoStored = settings.providers['reizo'];
-        const openaiStored = settings.providers['openai'];
-
-        let targetProviderId = activeProviderId;
-        let apiKey = activeStored?.apiKey;
-        let baseUrl = activeStored?.baseUrl;
-
-        // 若当前激活的 provider 未配置 key，优先尝试默认的 reizo 或 openai
-        if (!apiKey && reizoStored?.apiKey) {
-          targetProviderId = 'reizo';
-          apiKey = reizoStored.apiKey;
-          baseUrl = reizoStored.baseUrl;
-        } else if (!apiKey && openaiStored?.apiKey) {
-          targetProviderId = 'openai';
-          apiKey = openaiStored.apiKey;
-          baseUrl = openaiStored.baseUrl;
-        }
-
-        const preset = getProviderPreset(targetProviderId);
-        const effectiveBaseUrl = baseUrl || preset?.baseUrl || 'https://v2api.top/v1';
-
-        if (!apiKey) {
-          return {
-            ok: false,
-            error: '请先在系统设置中配置 API Key（Reizo 预设已支持 gpt-image-2 等全模型）。',
-          };
-        }
-
-        const isOfficial = !effectiveBaseUrl || effectiveBaseUrl.includes('api.openai.com');
-        const effectiveModel = model || (isOfficial ? 'dall-e-3' : 'gpt-image-2');
+        let resolved: ReturnType<typeof resolveSettingsModel>;
+        try { resolved = resolveSettingsModel(await settingsStore.get(), { category: 'image', model }); }
+        catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; }
+        const { apiKey, baseUrl: effectiveBaseUrl, modelId: effectiveModel } = resolved;
 
         try {
           const provider = createOpenAiProvider({ apiKey, baseUrl: effectiveBaseUrl, retryTransport: false });

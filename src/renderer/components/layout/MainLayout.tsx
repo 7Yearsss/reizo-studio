@@ -1,5 +1,6 @@
 import { cn } from '../../lib/cn';
 import { AnimatePresence } from 'motion/react';
+import { Suspense } from 'react';
 import CustomTitleBar from './CustomTitleBar';
 import Sidebar from './Sidebar';
 import RightPanel from '../workspace/RightPanel';
@@ -8,12 +9,21 @@ import { useUiStore } from '../../state/useUiStore';
 import * as uiStore from '../../state/uiStore';
 import HomePage from '../../pages/HomePage';
 import ChatPage from '../../pages/ChatPage';
-import SettingsPage from '../../pages/SettingsPage';
-import AutomationPage from '../../pages/AutomationPage';
-import PluginsPage from '../../pages/PluginsPage';
-import ArtifactsPage from '../../pages/ArtifactsPage';
+import { lazyWithRetry } from '../../lib/lazyWithRetry';
 import ToastContainer from '../ui/ToastContainer';
 import GlobalCommandPalette from './GlobalCommandPalette';
+
+// Keep the creative workspace ready; secondary modes load their editors only
+// when opened. In particular, the artifact route must not boot the sheet engine.
+const SettingsPage = lazyWithRetry(() => import('../../pages/SettingsPage'));
+const AutomationPage = lazyWithRetry(() => import('../../pages/AutomationPage'));
+const PluginsPage = lazyWithRetry(() => import('../../pages/PluginsPage'));
+const ArtifactsPage = lazyWithRetry(() => import('../../pages/ArtifactsPage'));
+
+function ModePageLoading({ mode }: { mode: string }) {
+  const labels: Record<string, string> = { settings: '设置', automation: '自动化', skills: '技能', artifacts: '作品' };
+  return <div role="status" aria-busy className="flex h-full items-center justify-center text-xs text-ink-muted">正在打开{labels[mode] || '页面'}…</div>;
+}
 
 const toggleFilesPanel = () => uiStore.toggleRightPanelTab('files');
 
@@ -28,7 +38,7 @@ export default function MainLayout() {
   const rightPanelTab = useUiStore((s) => s.rightPanelTab);
   const rightPanelMaximized = useUiStore((s) => s.rightPanelMaximized);
   const isChatView = mode === 'chat' || mode === 'projects';
-  const showRight = isChatView && rightPanelTab !== null;
+  const showRight = isChatView && rightPanelTab !== null && (rightPanelTab !== 'canvas' || activeTab?.kind === 'chat');
   const isRightMaximized = showRight && rightPanelMaximized;
 
   return (
@@ -66,10 +76,12 @@ export default function MainLayout() {
           </div>
           {!isChatView && (
             <div className="min-h-0 min-w-0 flex-1">
+              <Suspense fallback={<ModePageLoading mode={mode} />}>
               {mode === 'settings' && <SettingsPage />}
               {mode === 'automation' && <AutomationPage />}
               {mode === 'skills' && <PluginsPage />}
               {mode === 'artifacts' && <ArtifactsPage />}
+              </Suspense>
             </div>
           )}
         </main>

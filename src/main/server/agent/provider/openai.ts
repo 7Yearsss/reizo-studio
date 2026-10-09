@@ -82,7 +82,7 @@ function isRetryableStatus(status: number): boolean {
  * pick the surface: `.chat(id)` / `(id)` for language models, `.image(id)` for
  * `generateImage`.
  */
-function createLoggedFetch(retryTransport = true): typeof globalThis.fetch {
+function createLoggedFetch(retryTransport = true, transport: typeof globalThis.fetch = globalThis.fetch): typeof globalThis.fetch {
   const loggedFetch: typeof globalThis.fetch = async (input, init) => {
     const url = input instanceof Request ? input.url : String(input);
     const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
@@ -91,7 +91,7 @@ function createLoggedFetch(retryTransport = true): typeof globalThis.fetch {
 
     for (let attempt = 0; ; attempt++) {
       try {
-        const response = await globalThis.fetch(input, init);
+        const response = await transport(input, init);
         console.info(
           `[chat] provider response status=${response.status} durationMs=${Date.now() - startedAt}${attempt > 0 ? ` attempt=${attempt}` : ''}`,
         );
@@ -102,6 +102,7 @@ function createLoggedFetch(retryTransport = true): typeof globalThis.fetch {
         }
 
         if (retryTransport && isRetryableStatus(response.status) && attempt < MAX_TRANSPORT_RETRIES) {
+          await response.body?.cancel();
           const delay = getRetryDelay(response.status, attempt, response.headers);
           console.warn(
             `[chat] retryable HTTP ${response.status}, backing off ${Math.round(delay)}ms before retry ${attempt + 1}`,
@@ -136,15 +137,15 @@ function createLoggedFetch(retryTransport = true): typeof globalThis.fetch {
  * pick the surface: `.chat(id)` / `(id)` for language models, `.image(id)` for
  * `generateImage`.
  */
-export function createOpenAiProvider(options: { apiKey: string; baseUrl?: string; retryTransport?: boolean }) {
+export function createOpenAiProvider(options: { apiKey: string; baseUrl?: string; retryTransport?: boolean; fetch?: typeof globalThis.fetch }) {
   return createOpenAI({
     apiKey: options.apiKey,
     baseURL: options.baseUrl || undefined,
-    fetch: createLoggedFetch(options.retryTransport !== false),
+    fetch: createLoggedFetch(options.retryTransport !== false, options.fetch),
   });
 }
 
-export function createOpenAiModel(options: { apiKey: string; modelId: string; baseUrl?: string }) {
+export function createOpenAiModel(options: { apiKey: string; modelId: string; baseUrl?: string; fetch?: typeof globalThis.fetch }) {
   // Default `openai(model)` is the Responses API (`/v1/responses`). new-api
   // gateways (v2api.top) stream that poorly with tools: each step resends
   // every function_call item and nginx returns HTTP 524 after ~165s.
@@ -160,6 +161,6 @@ export function createOpenAiModel(options: { apiKey: string; modelId: string; ba
     name: 'openai-compatible',
     apiKey: options.apiKey,
     baseURL: options.baseUrl || 'https://api.openai.com/v1',
-    fetch: createLoggedFetch(),
+    fetch: createLoggedFetch(true, options.fetch),
   }).chatModel(options.modelId);
 }

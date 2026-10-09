@@ -12,6 +12,7 @@ import {
 export const DEFAULT_ADMIN_PASSKEY = 'admin888';
 
 interface StoredDiskConfig {
+  defaultProviderByCategory?: Partial<Record<ProviderCategory, string>>;
   providers: Record<
     string,
     Omit<ManagedProviderConfig, 'credentials'> & {
@@ -124,8 +125,10 @@ export function createProviderStore(root: string) {
     providers: Record<string, ManagedProviderConfig>,
     adminPasskey?: string,
     deletedIds?: string[],
+    defaults?: Partial<Record<ProviderCategory, string>>,
   ): Promise<void> {
     const disk: StoredDiskConfig = {
+      defaultProviderByCategory: defaults ?? (await readRaw()).defaultProviderByCategory,
       adminPasskey,
       deletedIds,
       providers: {},
@@ -146,7 +149,21 @@ export function createProviderStore(root: string) {
     await writeRaw(disk);
   }
 
+  async function defaultSelection(category: ProviderCategory): Promise<{ id?: string; configured: boolean }> {
+    const raw = await readRaw();
+    const explicit = raw.defaultProviderByCategory?.[category];
+    if (explicit) return { id: explicit, configured: true };
+    const saved = Object.values(raw.providers ?? {}).filter((provider) => provider.category === category);
+    if (!saved.length) return { configured: false };
+    const chosen = saved.find((provider) => provider.isDefault);
+    const baseline = DEFAULT_PROVIDER_TEMPLATES.find((provider) => provider.category === category && provider.isDefault);
+    const flagsChanged = saved.some((provider) => provider.isDefault !== (DEFAULT_PROVIDER_TEMPLATES.find((item) => item.id === provider.id)?.isDefault ?? false));
+    const changed = chosen && (chosen.id !== baseline?.id || !chosen.enabled || Boolean(chosen.credentials?.apiKeyEncrypted) || chosen.updatedAt !== chosen.createdAt);
+    return { id: chosen?.id, configured: Boolean(flagsChanged || changed) };
+  }
+
   return {
+    getDefaultSelection: defaultSelection,
     async verifyAdminPasskey(candidate: string): Promise<boolean> {
       const raw = await readRaw();
       const currentPasskey = process.env.REIZO_ADMIN_PASSKEY || raw.adminPasskey || DEFAULT_ADMIN_PASSKEY;
@@ -204,6 +221,8 @@ export function createProviderStore(root: string) {
           defaultProviderByCategory[item.category] = item.id;
         }
       }
+      const explicitDefaults = (await readRaw()).defaultProviderByCategory;
+      Object.assign(defaultProviderByCategory, explicitDefaults ?? {});
 
       return {
         providers: publicItems,
@@ -263,7 +282,8 @@ export function createProviderStore(root: string) {
       };
 
       providers[config.id] = updated;
-      await saveAll(providers, raw.adminPasskey, Array.from(deletedSet));
+      const defaults = { ...raw.defaultProviderByCategory, ...(config.isDefault ? { [config.category]: config.id } : {}) };
+      await saveAll(providers, raw.adminPasskey, Array.from(deletedSet), defaults);
 
       return {
         ...updated,
@@ -292,6 +312,7 @@ export function createProviderStore(root: string) {
     async setDefault(category: ProviderCategory, id: string): Promise<void> {
       const providers = await initDefaultsIfNeeded();
       if (!providers[id]) throw new Error(`Provider ${id} not found`);
+      if (providers[id].category !== category) throw new Error(`Provider ${id} does not support ${category}`);
 
       for (const p of Object.values(providers)) {
         if (p.category === category) {
@@ -300,7 +321,7 @@ export function createProviderStore(root: string) {
       }
 
       const raw = await readRaw();
-      await saveAll(providers, raw.adminPasskey, raw.deletedIds);
+      await saveAll(providers, raw.adminPasskey, raw.deletedIds, { ...raw.defaultProviderByCategory, [category]: id });
     },
   };
 }

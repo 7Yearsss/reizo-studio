@@ -49,6 +49,10 @@ export default function NodeActionBar({
   if (actions.length === 0) return null;
   return (
     <div
+      role="group"
+      aria-label="节点操作"
+      aria-hidden={!visible}
+      inert={!visible}
       className={cn(
         'node-action-bar nodrag cursor-default absolute bottom-[calc(100%+6px)] left-1/2 z-20 flex items-center gap-1 rounded-lg border border-line bg-paper-raised/95 px-1 py-0.5 shadow-md backdrop-blur-sm whitespace-nowrap transition-opacity',
         visible ? 'opacity-100' : 'pointer-events-none opacity-0',

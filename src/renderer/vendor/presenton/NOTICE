@@ -1,0 +1,11 @@
+Presenton slide editor
+Source: https://github.com/presenton/presenton
+Revision: 2b5078ba266c67b16bc4f97943081e46d6dc0f21
+Copyright Presenton contributors. Licensed under Apache License 2.0 (see LICENSE).
+
+This directory contains a modified subset of the Presenton slide editor.
+UPSTREAM.json records original file paths and hashes.
+Reizo modifications: local relative module boundaries, host-managed persistence,
+local image/icon pickers, bundled chart runtime, removal of Redux publishing and
+analytics calls, and compatibility with Reizo's React/Tiptap versions.
+The separately distributed Presenton export-core is not included or used.

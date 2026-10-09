@@ -1,7 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { GitBranch, RotateCw } from 'lucide-react';
 import { toast } from '../../lib/toast';
-import Tooltip from '../ui/Tooltip';
+import { Tooltip } from '../ui/Tooltip';
+import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
+import { Button } from '../ui/button';
+import { useSettingsStore } from '../../state/useSettingsStore';
 import { CodeBlock } from '../agents/code-block';
 
 interface ParsedGitEntry {
@@ -23,32 +26,44 @@ function parseGitLine(line: string): ParsedGitEntry {
 }
 
 export default function GitPanel() {
+  const workspacePath = useSettingsStore((state) => state.settings.workspacePath);
   const [status, setStatus] = useState<Awaited<ReturnType<typeof window.reizo.gitStatus>> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const sequence = useRef(0);
+  const mounted = useRef(true);
+  const scope = useRef(workspacePath); scope.current = workspacePath;
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
   async function refresh(showToast = false) {
+    if (!workspacePath) return;
+    const actionScope = workspacePath;
+    const attempt = ++sequence.current;
     setLoading(true);
     try {
       const res = await window.reizo.gitStatus();
+      if (!mounted.current || scope.current !== actionScope || attempt !== sequence.current) return;
       setStatus(res);
       setError(null);
       if (showToast) toast.success('Git 状态已更新');
     } catch (err) {
+      if (!mounted.current || scope.current !== actionScope || attempt !== sequence.current) return;
       setError((err as Error).message);
       if (showToast) toast.error('获取 Git 状态失败');
     } finally {
-      setLoading(false);
+      if (mounted.current && scope.current === actionScope && attempt === sequence.current) setLoading(false);
     }
   }
 
   useEffect(() => {
+    ++sequence.current; setStatus(null); setError(null); setLoading(Boolean(workspacePath));
     void refresh();
-  }, []);
+  }, [workspacePath]);
 
-  if (error) return <p className="px-3 py-2 text-xs text-danger">{error}</p>;
+  if (!workspacePath) return <p className="px-3 py-2 text-xs text-ink-muted">选择工作区后可查看 Git 状态。</p>;
+  if (error) return <div className="p-3"><Alert variant="destructive"><AlertTitle>Git 状态未能读取</AlertTitle><AlertDescription className="min-w-0 [overflow-wrap:anywhere]">{error}<Button type="button" variant="outline" size="xs" disabled={loading} onClick={() => void refresh(true)}>{loading ? '正在读取' : '重新读取'}</Button></AlertDescription></Alert></div>;
   if (!status) return <p className="px-3 py-2 text-xs text-ink-muted">读取 Git 状态…</p>;
-  if (!status.available) return <p className="px-3 py-2 text-xs text-ink-muted">当前工作区不是 Git 仓库。</p>;
+  if (!status.available) return <div className="flex flex-col gap-2 px-3 py-2"><p className="text-xs text-ink-muted">当前工作区不是 Git 仓库，或 Git 尚不可用。</p><Button type="button" variant="ghost" size="xs" disabled={loading} onClick={() => void refresh(true)}>重新读取</Button></div>;
 
   const lines = status.porcelain
     .split('\n')

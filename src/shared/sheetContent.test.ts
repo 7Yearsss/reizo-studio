@@ -11,6 +11,15 @@ import {
 } from './sheetContent';
 
 describe('sheetContent', () => {
+  it('invalidates cached formula values after an agent changes an input cell', () => {
+    const book = emptyWorkbook();
+    book.sheets[0].cells = { '0': { '0': { v: 1 }, '1': { f: '=A1+1', v: 2 } } };
+    book.univerSnapshot = compactToUniverSnapshot(book, 'Test');
+    const result = applySheetOperations(book, [{ op: 'setValues', start: 'A1', values: [[10]] }]);
+    if ('error' in result) throw new Error(result.error);
+    expect(result.content.sheets[0].cells['0']['1']).toEqual({ f: '=A1+1' });
+    expect(univerSnapshotToCompact(result.content.univerSnapshot, result.content).sheets[0].cells['0']['1']).toEqual({ f: '=A1+1' });
+  });
   it('creates an empty workbook', () => {
     const wb = emptyWorkbook('Budget');
     expect(wb.sheets).toHaveLength(1);

@@ -34,6 +34,7 @@ export default function MessageList({
   onEditLastUser,
   onRetryLastAssistant,
   onPickHint,
+  emptyContext = 'chat',
   compact = false,
   sessionId,
   bottomInset,
@@ -52,6 +53,7 @@ export default function MessageList({
   onEditLastUser?: () => void;
   onRetryLastAssistant?: () => void;
   onPickHint?: (text: string) => void;
+  emptyContext?: 'chat' | 'canvas';
   compact?: boolean;
   /** Rendered height of the composer overlay — the viewport pads this much so docked cards (plan/ask/queue) never cover scrolled content. */
   bottomInset?: number;
@@ -135,7 +137,7 @@ export default function MessageList({
           },
         }}
       >
-        {empty && onPickHint ? <EmptyChatHints onPick={onPickHint} /> : null}
+        {empty && onPickHint ? <EmptyChatHints context={emptyContext} onPick={onPickHint} /> : null}
         {hasOlder && (
           <div className="pt-2 text-center text-[11px] text-ink-muted">向上滚动加载更早的消息…</div>
         )}

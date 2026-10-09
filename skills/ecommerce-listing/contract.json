@@ -1,0 +1,35 @@
+{
+  "fields": {
+    "objective": {
+      "type": "text"
+    },
+    "platform": {
+      "type": "text"
+    },
+    "sourceAssetIds": {
+      "type": "assetIds"
+    },
+    "style": {
+      "type": "text"
+    },
+    "shots": {
+      "type": "stringList",
+      "min": 2,
+      "max": 30
+    },
+    "language": {
+      "type": "text"
+    }
+  },
+  "outputs": {
+    "kinds": [
+      "image"
+    ],
+    "requiredRoles": [
+      "main"
+    ],
+    "rolesFrom": "shots",
+    "requireFinal": true
+  },
+  "version": 1
+}

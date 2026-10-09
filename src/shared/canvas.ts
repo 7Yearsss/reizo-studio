@@ -119,6 +119,7 @@ export interface CanvasSectionParams {
 }
 
 export interface CanvasSubgraphParams {
+  boundaryEdges?: CanvasEdge[];
   collapsed?: boolean;
   innerNodeIds?: string[];
   description?: string;
@@ -174,6 +175,11 @@ export interface CanvasNode {
 }
 
 export interface CanvasNodeOutput {
+  /** Native local export, independent of image/video/audio asset paths. */
+  artifactId?: string;
+  artifactVersion?: number;
+  downloadUrl?: string;
+  pageCount?: number;
   /** Relative asset paths served by `GET /api/canvas/assets/:canvasId/:file`. */
   assets?: string[];
   text?: string;

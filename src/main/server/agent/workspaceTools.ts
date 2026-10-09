@@ -23,7 +23,8 @@ import {
 import {
   editWorkspaceFile,
   previewDiff,
-  readWorkspaceFileOrEmpty,
+  readWorkspaceFileSnapshot,
+  type WorkspaceFileVersion,
   writeWorkspaceFile,
 } from '../../workspaceWrite';
 import { runWorkspaceCommand } from '../../workspaceShell';
@@ -38,6 +39,12 @@ function applyEdit(before: string, oldString: string, newString: string, replace
 function asRecord(value: unknown): Record<string, unknown> {
   if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
   return { value };
+}
+
+function approvedVersion(args: Record<string, unknown>): WorkspaceFileVersion {
+  if (!(args.expectedHash === null || typeof args.expectedHash === 'string' && /^[a-f0-9]{64}$/.test(args.expectedHash)) || typeof args.expectedPath !== 'string' || !args.expectedPath)
+    throw new Error('审批缺少文件版本，请重新读取并重新审批；本次未写入');
+  return { expectedHash: args.expectedHash as string | null, expectedPath: args.expectedPath };
 }
 
 /**
@@ -107,7 +114,7 @@ export function createWorkspaceTools(options: {
         case 'write_file': {
           const path = String(args.path ?? '');
           const content = String(args.content ?? '');
-          const result = await writeWorkspaceFile(workspacePath, path, content);
+          const result = await writeWorkspaceFile(workspacePath, path, content, approvedVersion(args));
           if (onFileWritten) await onFileWritten(path, content);
           const { before, ...rest } = result;
           return {
@@ -125,6 +132,7 @@ export function createWorkspaceTools(options: {
             String(args.oldString ?? ''),
             String(args.newString ?? ''),
             Boolean(args.replaceAll),
+            approvedVersion(args),
           );
           if (onFileWritten) await onFileWritten(result.path, result.after);
           return {
@@ -235,12 +243,13 @@ function buildTools(options: {
         content: z.string().describe('Full file contents to write.'),
       }),
       execute: async (input, toolOptions) => {
-        const priorContent = await readWorkspaceFileOrEmpty(workspacePath, input.path);
-        await approve(sessionId, 'write_file', input, permissionMode, {
+        const snapshot = await readWorkspaceFileSnapshot(workspacePath, input.path);
+        const version = { expectedHash: snapshot.expectedHash, expectedPath: snapshot.expectedPath };
+        await approve(sessionId, 'write_file', { ...input, ...version }, permissionMode, {
           ...toolOptions,
-          preview: buildFileDiffPreview(input.path, priorContent, input.content),
+          preview: { ...buildFileDiffPreview(input.path, snapshot.content, input.content), ...version },
         });
-        const result = await writeWorkspaceFile(workspacePath, input.path, input.content);
+        const result = await writeWorkspaceFile(workspacePath, input.path, input.content, version);
         if (onFileWritten) await onFileWritten(input.path, input.content);
         const { before, ...rest } = result;
         return {
@@ -260,7 +269,9 @@ function buildTools(options: {
         replaceAll: z.boolean().optional(),
       }),
       execute: async (input, toolOptions) => {
-        const priorContent = await readWorkspaceFileOrEmpty(workspacePath, input.path);
+        const snapshot = await readWorkspaceFileSnapshot(workspacePath, input.path);
+        const priorContent = snapshot.content;
+        const version = { expectedHash: snapshot.expectedHash, expectedPath: snapshot.expectedPath };
         const count = input.oldString ? priorContent.split(input.oldString).length - 1 : 0;
         if (count === 0) throw new Error('oldString was not found in the file');
         if (count > 1 && !input.replaceAll) {
@@ -268,13 +279,13 @@ function buildTools(options: {
             `Found ${count} occurrences of oldString. oldString must uniquely match exactly one block of text, or set replaceAll to true. Include more surrounding lines in oldString to make it unique.`,
           );
         }
-        await approve(sessionId, 'edit_file', input, permissionMode, {
+        await approve(sessionId, 'edit_file', { ...input, ...version }, permissionMode, {
           ...toolOptions,
-          preview: buildFileDiffPreview(
+          preview: { ...buildFileDiffPreview(
             input.path,
             priorContent,
             applyEdit(priorContent, input.oldString, input.newString, Boolean(input.replaceAll)),
-          ),
+          ), ...version },
         });
         const result = await editWorkspaceFile(
           workspacePath,
@@ -282,6 +293,7 @@ function buildTools(options: {
           input.oldString,
           input.newString,
           input.replaceAll,
+          version,
         );
         if (onFileWritten) await onFileWritten(input.path, result.after);
         return {

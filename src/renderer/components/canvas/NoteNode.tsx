@@ -13,9 +13,12 @@ import { useIsSoloSelected } from './useSelectionCount';
 import MagneticHandle from './MagneticHandle';
 import AgentMark from './AgentMark';
 import NodeCornerResizer from './NodeCornerResizer';
-import NodeFloatingPanel, { type UpstreamSourceItem } from './NodeFloatingPanel';
+import NodeFloatingPanel from './NodeFloatingPanel';
+import { canvasInputSources } from '../../state/canvasInputSources';
+import { isPresentationExportNode } from '../../../shared/canvasPresentation';
+import PresentationExportNote from './PresentationExportNote';
 
-function NoteNode({ id, data, selected }: NodeProps) {
+function PlainNoteNode({ data, selected }: NodeProps) {
   const { sessionId, node, highlighted, agentMark, isProposal } = data as CanvasNodeData;
   const params = (node.params as CanvasNoteParams) || { content: '' };
   const [content, setContent] = useState(params.content || '');
@@ -103,28 +106,8 @@ function NoteNode({ id, data, selected }: NodeProps) {
     );
   };
 
-  const edges = useCanvasStore((s) => s.edgesBySession[sessionId] ?? canvasStore.EMPTY_EDGES);
-  const allNodes = useCanvasStore((s) => s.nodesBySession[sessionId] ?? canvasStore.EMPTY_NODES);
-
-  const upstreamSources = useMemo<UpstreamSourceItem[]>(() => {
-    const inEdges = edges.filter((e) => e.targetId === node.id);
-    return inEdges.map((e) => {
-      const srcNode = allNodes.find((n) => n.id === e.sourceId);
-      return {
-        edgeId: e.id,
-        sourceNodeId: e.sourceId,
-        sourceType: srcNode?.type || 'node',
-        sourceTitle:
-          srcNode?.title ||
-          (srcNode?.type === 'note'
-            ? '提示词'
-            : srcNode?.type === 'image'
-              ? '参考图'
-              : '节点'),
-        handleId: e.targetHandle,
-      };
-    });
-  }, [edges, allNodes, node.id]);
+  const upstreamSources = useCanvasStore((s) => canvasInputSources(s.nodesBySession[sessionId] ?? canvasStore.EMPTY_NODES,
+    s.edgesBySession[sessionId] ?? canvasStore.EMPTY_EDGES, node.id));
 
   const candidates = useMemo(() => {
     if (!solo && !composing) return [];
@@ -237,6 +220,10 @@ function NoteNode({ id, data, selected }: NodeProps) {
       />
     </div>
   );
+}
+
+function NoteNode(props: NodeProps) {
+  return isPresentationExportNode((props.data as CanvasNodeData).node) ? <PresentationExportNote {...props} /> : <PlainNoteNode {...props} />;
 }
 
 export default memo(NoteNode, (prev, next) => {

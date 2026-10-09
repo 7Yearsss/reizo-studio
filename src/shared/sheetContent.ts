@@ -280,6 +280,16 @@ export function emptyWorkbook(name = 'Sheet1'): SheetArtifactContent {
   };
 }
 
+export function emptyGrid(id: string, name: string): SheetGrid {
+  return { id, name, rowCount: 100, columnCount: 20, cells: {} };
+}
+
+export function putSheetCell(sheet: SheetGrid, row: number, col: number, cell: SheetCell): { ok: true } | { error: string } {
+  if (!Number.isInteger(row) || !Number.isInteger(col) || row < 0 || col < 0 || row >= MAX_ROWS || col >= MAX_COLS) return { error: 'Cell outside workbook limits' };
+  writeCell(sheet, row, col, cell);
+  return { ok: true };
+}
+
 export function workbookFromCreateSheets(
   sheets: SheetCreateSheet[],
 ): { content: SheetArtifactContent } | { error: string } {
@@ -353,6 +363,10 @@ export function applySheetOperations(
     next = applied.content;
   }
 
+  // Server-side edits invalidate cached formula results; Univer/Excel computes the next values.
+  for (const sheet of next.sheets) for (const row of Object.values(sheet.cells)) for (const cell of Object.values(row)) if (cell.f) delete cell.v;
+  const snapshot = asUniverWorkbook(next.univerSnapshot);
+  for (const sheet of Object.values(snapshot?.sheets ?? {})) for (const row of Object.values(sheet.cellData ?? {})) for (const cell of Object.values(row)) if (cell?.f) delete cell.v;
   return { content: next };
 }
 
@@ -848,4 +862,24 @@ export function replaceUniverSnapshot(
     revision: content.revision,
     univerSnapshot: snapshot,
   };
+}
+
+/** Reject unsupported live grids before storing a silently truncated compact projection. */
+export function sheetSnapshotLimitsError(snapshot: unknown): string | null {
+  const workbook = asUniverWorkbook(snapshot);
+  if (!workbook?.sheets) return null;
+  const sheets = Object.values(workbook.sheets);
+  if (sheets.length > MAX_SHEETS) return `当前最多支持 ${MAX_SHEETS} 张工作表，请减少工作表后保存`;
+  let cells = 0;
+  for (const sheet of sheets) {
+    if ((sheet.rowCount ?? 0) > MAX_ROWS || (sheet.columnCount ?? 0) > MAX_COLS) return `当前最多支持 ${MAX_ROWS} 行、${MAX_COLS} 列，请缩小网格后保存`;
+    for (const [rowKey, row] of Object.entries(sheet.cellData ?? {})) {
+      for (const [colKey, cell] of Object.entries(row)) {
+        if (!cell) continue;
+        if (Number(rowKey) >= MAX_ROWS || Number(colKey) >= MAX_COLS) return '单元格超出当前表格容量，尚未保存';
+        if (++cells > MAX_GRID_CELLS) return `当前最多支持 ${MAX_GRID_CELLS} 个单元格，请缩小内容后保存`;
+      }
+    }
+  }
+  return null;
 }

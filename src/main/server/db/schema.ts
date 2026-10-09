@@ -1,5 +1,14 @@
 import { sql } from 'drizzle-orm';
-import { check, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { check, index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+
+export const artifactReviews = sqliteTable('artifact_reviews', {
+  id: text('id').primaryKey(),
+  artifactId: text('artifact_id').notNull().references(() => artifacts.id, { onDelete: 'cascade' }),
+  reviewVersion: integer('review_version').notNull().default(1),
+  payloadJson: text('payload_json').notNull(),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (t) => ({ byArtifact: index('artifact_reviews_artifact_idx').on(t.artifactId, t.createdAt) }));
 
 /**
  * SQLite schema for sessions + messages. Timestamps are unix-ms integers;
@@ -273,6 +282,9 @@ export const canvasAssets = sqliteTable('canvas_assets', {
   providerId: text('provider_id'),
   model: text('model'),
   inputHash: text('input_hash'),
+  name: text('name').notNull().default(''),
+  folder: text('folder').notNull().default(''),
+  tagsJson: text('tags_json').notNull().default('[]'),
 }, (t) => ({
   pathKey: uniqueIndex('canvas_assets_path_unique').on(t.path),
   byOrigin: index('canvas_assets_origin_idx').on(t.canvasId, t.createdAt),
@@ -280,6 +292,13 @@ export const canvasAssets = sqliteTable('canvas_assets', {
   sourceCheck: check('canvas_assets_source_check', sql`${t.source} IN ('generated', 'imported', 'mask')`),
   sizeCheck: check('canvas_assets_size_check', sql`${t.byteSize} >= 0`),
 }));
+
+export const deliveryPlans = sqliteTable('delivery_plans', {
+  id: text('id').primaryKey(), canvasId: text('canvas_id').notNull().references(() => canvases.id, { onDelete: 'cascade' }),
+  skillId: text('skill_id').notNull(), contractJson: text('contract_json').notNull(), planJson: text('plan_json').notNull(),
+  manifestJson: text('manifest_json').notNull(), complete: integer('complete').notNull().default(0), issuesJson: text('issues_json').notNull(),
+  createdAt: integer('created_at').notNull(), updatedAt: integer('updated_at').notNull(),
+}, (t) => ({ byCanvas: index('delivery_plans_canvas_idx').on(t.canvasId, t.updatedAt) }));
 
 export type SessionRow = typeof sessions.$inferSelect;
 export type MessageRow = typeof messages.$inferSelect;
@@ -290,3 +309,30 @@ export type CanvasJobRow = typeof canvasJobs.$inferSelect;
 export type CanvasAssetRow = typeof canvasAssets.$inferSelect;
 export type ArtifactRow = typeof artifacts.$inferSelect;
 export type ArtifactVersionRow = typeof artifactVersions.$inferSelect;
+
+export const usagePricing = sqliteTable('usage_pricing', {
+  id: text('id').primaryKey(), providerId: text('provider_id').notNull(), model: text('model').notNull(), category: text('category').notNull(),
+  effectiveAt: integer('effective_at').notNull(), snapshotJson: text('snapshot_json').notNull(), createdAt: integer('created_at').notNull(),
+}, (t) => ({ byModel: index('usage_pricing_model_idx').on(t.providerId, t.model, t.category, t.effectiveAt) }));
+export const usageExecutions = sqliteTable('usage_executions', {
+  id: text('id').primaryKey(), executionId: text('execution_id').notNull().unique(), jobId: text('job_id'), sessionId: text('session_id'),
+  canvasId: text('canvas_id'), nodeId: text('node_id'), category: text('category').notNull(), providerId: text('provider_id').notNull(), model: text('model').notNull(),
+  pricingJson: text('pricing_json'), metricsJson: text('metrics_json').notNull().default('[]'), usageState: text('usage_state').notNull().default('unknown'),
+  reportCount: integer('report_count').notNull().default(0), unknownReportCount: integer('unknown_report_count').notNull().default(0),
+  estimateAmount: real('estimate_amount'), estimateCurrency: text('estimate_currency'), estimateReason: text('estimate_reason'), createdAt: integer('created_at').notNull(),
+}, (t) => ({ byJob: index('usage_execution_job_idx').on(t.jobId, t.createdAt), byCreated: index('usage_execution_created_idx').on(t.createdAt, t.id) }));
+export const usageReports = sqliteTable('usage_reports', {
+  executionId: text('execution_id').notNull().references(() => usageExecutions.executionId), reportId: text('report_id').notNull(), metricsJson: text('metrics_json').notNull(),
+  requestId: text('request_id'), reportedModel: text('reported_model'), outcome: text('outcome'), updatedAt: integer('updated_at').notNull(),
+}, (t) => ({ key: primaryKey({ columns: [t.executionId, t.reportId] }) }));
+export const usageBills = sqliteTable('usage_bills', {
+  id: text('id').primaryKey(), executionId: text('execution_id').notNull().unique().references(() => usageExecutions.executionId),
+  amount: real('amount').notNull(), currency: text('currency').notNull(), source: text('source').notNull(), reference: text('reference').notNull(), createdAt: integer('created_at').notNull(),
+}, (t) => ({ amountCheck: check('usage_bill_amount_check', sql`${t.amount} >= 0`), evidenceKey: uniqueIndex('usage_bill_evidence_unique').on(t.source, t.reference) }));
+
+export const deliveryExports = sqliteTable('delivery_exports', {
+  id: text('id').primaryKey(), planId: text('plan_id').notNull().references(() => deliveryPlans.id, { onDelete: 'cascade' }),
+  artifactId: text('artifact_id').notNull().references(() => artifacts.id, { onDelete: 'cascade' }), artifactVersion: integer('artifact_version').notNull(),
+  format: text('format').notNull(), jobId: text('job_id').notNull().unique(), sourceAssetIdsJson: text('source_asset_ids_json').notNull(),
+  pageCount: integer('page_count').notNull(), contentHash: text('content_hash').notNull(), createdAt: integer('created_at').notNull(),
+}, (t) => ({ byPlan: index('delivery_exports_plan_idx').on(t.planId, t.createdAt) }));

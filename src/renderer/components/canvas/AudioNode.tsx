@@ -31,7 +31,8 @@ import AgentMark from './AgentMark';
 import MissingInputWarning from './MissingInputWarning';
 import Tooltip from '../ui/Tooltip';
 import { useAssetUrl } from './useAssetUrl';
-import NodeFloatingPanel, { type UpstreamSourceItem } from './NodeFloatingPanel';
+import NodeFloatingPanel from './NodeFloatingPanel';
+import { canvasInputSources } from '../../state/canvasInputSources';
 
 
 function formatTime(sec: number): string {
@@ -131,28 +132,8 @@ function AudioNode({ id, data, selected }: NodeProps) {
     return snapshot.filter((n) => n.id !== node.id && n.type !== 'anchor');
   }, [expanded, sessionId, node.id]);
 
-  const edges = useCanvasStore((s) => s.edgesBySession[sessionId] ?? canvasStore.EMPTY_EDGES);
-  const allNodes = useCanvasStore((s) => s.nodesBySession[sessionId] ?? canvasStore.EMPTY_NODES);
-
-  const upstreamSources = useMemo<UpstreamSourceItem[]>(() => {
-    const inEdges = edges.filter((e) => e.targetId === node.id);
-    return inEdges.map((e) => {
-      const srcNode = allNodes.find((n) => n.id === e.sourceId);
-      return {
-        edgeId: e.id,
-        sourceNodeId: e.sourceId,
-        sourceType: srcNode?.type || 'node',
-        sourceTitle:
-          srcNode?.title ||
-          (srcNode?.type === 'note'
-            ? '提示词'
-            : srcNode?.type === 'image'
-              ? '参考图'
-              : '节点'),
-        handleId: e.targetHandle,
-      };
-    });
-  }, [edges, allNodes, node.id]);
+  const upstreamSources = useCanvasStore((s) => canvasInputSources(s.nodesBySession[sessionId] ?? canvasStore.EMPTY_NODES,
+    s.edgesBySession[sessionId] ?? canvasStore.EMPTY_EDGES, node.id));
 
   const promptDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestPromptRef = useRef(prompt);

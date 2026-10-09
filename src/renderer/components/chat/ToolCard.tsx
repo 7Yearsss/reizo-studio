@@ -2,7 +2,7 @@ import type { ToolCallPart } from '../../../shared/chat';
 import { ToolResult, ToolResultOutput } from '../agents/tool-result';
 import { ImageGeneration } from '../agents/image-generation';
 import { getResolvedApiOrigin } from '../../api';
-import DiffView from './DiffView';
+import DiffView from './LazyDiffView';
 import { toolDetail, toolDiffPreview, toolLabel, toolTarget } from './toolDisplay';
 
 export default function ToolCard({ part, collapsed = false }: { part: ToolCallPart; collapsed?: boolean }) {

@@ -13,6 +13,8 @@ import { nodeJobsFor, NodeJobsClosedError, type NodeJobContext, type NodeJobSubm
 import { generationSchedulerFor } from './generationScheduler';
 import { inputHash } from './graph';
 import { classifyMediaError } from './mediaError';
+import { resolveAudioProvider, ProviderResolutionError } from '../providerResolver';
+import { providerUsageMetrics } from '../../../shared/usage';
 
 export interface AudioRunOptions {
   canvasStore: CanvasStore;
@@ -49,7 +51,7 @@ function canCommit(options: AudioRunOptions, job: NodeJobContext): boolean {
 }
 
 function failureMessage(error: unknown): string {
-  return error instanceof AudioPreparationError ? error.message : classifyMediaError(error).message;
+  return error instanceof AudioPreparationError || error instanceof ProviderResolutionError ? error.message : classifyMediaError(error).message;
 }
 
 function failAudioJob(options: AudioRunOptions, job: NodeJobContext, message: string): void {
@@ -136,27 +138,9 @@ async function executeAudioNode(options: AudioRunOptions, input: AudioJobInput, 
     getCanvasChannel(canvasId).broadcast(running.rev, { type: 'node_updated', node: running.node });
     const params = input.node.params as AudioParameters;
     const requestedProvider = input.request.providerId !== undefined ? input.request.providerId : params.providerId;
-    let provider;
-    if (requestedProvider !== undefined) {
-      if (!requestedProvider.trim()) throw new AudioPreparationError('指定的音频 Provider 不存在。');
-      provider = await providerStore.getByIdWithSecret(requestedProvider);
-      if (!canCommit(options, job)) return;
-      if (!provider) throw new AudioPreparationError('指定的音频 Provider 不存在。');
-    } else {
-      const catalog = await providerStore.getPublicCatalog('audio');
-      if (!canCommit(options, job)) return;
-      const defaultId = catalog.defaultProviderByCategory.audio || catalog.providers.find((candidate) => candidate.category === 'audio' && candidate.enabled)?.id;
-      if (!defaultId) throw new AudioPreparationError('未配置可用的音频 Provider。');
-      provider = await providerStore.getByIdWithSecret(defaultId);
-      if (!canCommit(options, job)) return;
-      if (!provider) throw new AudioPreparationError('默认音频 Provider 不存在。');
-    }
-    if (provider.category !== 'audio' || !provider.enabled || !provider.id) throw new AudioPreparationError('所选 Provider 未启用或不支持音频生成。');
-    const prepared = structuredClone(provider);
-    let driver: ReturnType<typeof getAudioDriver>;
-    try { driver = getAudioDriver(prepared.driverType); }
-    catch { throw new AudioPreparationError('音频 Provider 使用了不支持的驱动。'); }
-    if (driver.id !== 'mock' && !prepared.credentials?.apiKey?.trim()) throw new AudioPreparationError('音频 Provider 未配置 API Key。');
+    const resolved = await resolveAudioProvider(providerStore, requestedProvider);
+    if (!canCommit(options, job)) return;
+    const { provider: prepared, driver } = resolved;
     const sample = prepared.sampleParams ?? {};
     const format = params.format ?? sample.format ?? 'mp3';
     if (format !== 'mp3' && format !== 'wav') throw new AudioPreparationError('不支持的音频输出格式。');
@@ -167,20 +151,25 @@ async function executeAudioNode(options: AudioRunOptions, input: AudioJobInput, 
       vol: numberValue(params.vol) ?? numberValue(sample.vol), emotion: stringValue(params.emotion) ?? stringValue(sample.emotion),
       format,
     };
-    const model = driver.modelForRequest?.(generateParams, prepared.credentials) ?? generateParams.model ?? driver.defaultModel ?? (driver.id === 'mock' ? 'mock-synth-1' : undefined);
-    if (!stringValue(model)) throw new AudioPreparationError('音频服务未配置生成模型。');
+    const model = resolved.modelFor(generateParams);
     generateParams.model = model;
     const signal = AbortSignal.any([job.signal, canvasWorkSignal(store)]);
     const result = await generationSchedulerFor(store).run(prepared.id, async (submittedSignal) => {
       if (!canCommit(options, job) || !job.markSubmitted({ providerId: prepared.id, model })) throw new Error('Audio job lost submission ownership');
+      store.usage.setReport(`job:${job.id}`, 'audio', []);
       return driver.synthesize(generateParams, prepared.credentials ?? {}, { signal: submittedSignal });
     }, signal);
+    if (!canvasWorkStopped(store)) store.usage.setReport(`job:${job.id}`, 'audio', [
+      ...providerUsageMetrics(result?.usage), ...(result?.durationSec !== undefined && driver.id !== 'mock' ?
+        [{ metric: 'audio_seconds' as const, unit: 'second' as const, quantity: result.durationSec, source: 'provider_reported' as const }] : []),
+    ]);
     if (!canCommit(options, job)) return;
     if (!result || !Buffer.isBuffer(result.audioBuffer) || result.audioBuffer.byteLength === 0) throw new AudioPreparationError('音频服务未返回有效音频数据。');
     if (result.format !== 'mp3' && result.format !== 'wav') throw new AudioPreparationError('音频服务返回了不支持的格式。');
     staged = await stageCanvasAssets(dataRoot, canvasId, [{ name: `${node.id}-${job.id}.${result.format}`, bytes: result.audioBuffer,
       mimeType: result.format === 'wav' ? 'audio/wav' : 'audio/mpeg', kind: 'audio' }], signal);
     if (!canCommit(options, job)) return;
+    staged.prepareCommit();
     const details: CanvasJobFinish = {};
     const done = job.finish('succeeded', () => {
       const asset = store.assets.register({ ...staged.files[0], canvasId, nodeId: node.id, jobId: job.id, source: 'generated' });

@@ -1,8 +1,9 @@
 import { generateImage } from 'ai';
-import { DEFAULT_DRAFT_IMAGE_MODEL } from '../../../shared/canvas';
+import { nanoid } from 'nanoid';
 import type { AnchorRole, AnchorStrength, CanvasEdge, CanvasImageParams, CanvasNode } from '../../../shared/canvas';
 import { buildEditPrompt } from '../../../shared/canvasImageEdit';
-import { getProviderPreset } from '../../../shared/providers';
+import { resolveSettingsModel } from '../providerResolver';
+import { providerUsageMetrics } from '../../../shared/usage';
 import { createOpenAiProvider } from '../agent/provider/openai';
 import type { SettingsStore } from '../storage/settingsStore';
 import type { CanvasStore } from '../storage/canvasStore';
@@ -17,6 +18,7 @@ import { CanvasJobStoreError } from '../storage/canvasJobStore';
 import { generationSchedulerFor } from './generationScheduler';
 import { readCanvasAsset, stageCanvasAssets } from './assets';
 import type { CanvasJobFinish } from '../../../shared/canvasJobs';
+import { canvasWorkStopped } from './workLifecycle';
 
 export { canvasAssetsDir, readCanvasAsset } from './assets';
 
@@ -52,7 +54,7 @@ async function generateImageViaChat(options: {
   images?: Uint8Array[];
   size?: string;
   signal?: AbortSignal;
-}): Promise<{ images: RawImage[] }> {
+}): Promise<{ images: RawImage[]; usage?: unknown }> {
   const content: Array<Record<string, unknown>> = [
     { type: 'text', text: options.size ? `${options.prompt}\n\nImage size: ${options.size}` : options.prompt },
   ];
@@ -72,6 +74,7 @@ async function generateImageViaChat(options: {
   });
   if (!res.ok) throw new Error(`image model ${options.modelId} failed: HTTP ${res.status} ${(await res.text()).slice(0, 300)}`);
   const body = (await res.json()) as {
+    usage?: unknown;
     choices?: Array<{ message?: { content?: unknown; images?: Array<{ image_url?: { url?: string } }> } }>;
   };
   const msg = body.choices?.[0]?.message ?? {};
@@ -89,7 +92,7 @@ async function generateImageViaChat(options: {
     }
   }
   if (!images.length) throw new Error(`${options.modelId} returned no image`);
-  return { images };
+  return { images, usage: body.usage };
 }
 
 /** Route to chat/completions for Gemini image models, /images otherwise. */
@@ -103,18 +106,25 @@ async function generateOne(
   onFailure?: (error: unknown) => void,
 ): Promise<{ images: RawImage[] }> {
   return generationSchedulerFor(canvasStore).run(resolved.providerId, async (signal) => {
+    const reportId = nanoid();
     try {
       if (!job.markSubmitted({ providerId: resolved.providerId, model: resolved.modelId })) {
         throw new Error('Image job no longer owns provider submission');
       }
+      canvasStore.usage.setReport(`job:${job.id}`, reportId, []);
+      let result: { images: RawImage[]; usage?: unknown };
       if (isChatCompletionsImageModel(resolved.modelId)) {
-        return await generateImageViaChat({
+        result = await generateImageViaChat({
           baseUrl: resolved.baseUrl, apiKey: resolved.apiKey, modelId: resolved.modelId,
           prompt: typeof prompt === 'string' ? prompt : prompt.text,
           images: typeof prompt === 'string' ? [] : prompt.images, size, signal,
         });
-      }
-      return await generateImage({ model: resolved.provider.image(resolved.modelId), prompt, size: size as `${number}x${number}`, abortSignal: signal, maxRetries: 0 }) as { images: RawImage[] };
+      } else result = await generateImage({ model: resolved.provider.image(resolved.modelId), prompt, size: size as `${number}x${number}`, abortSignal: signal, maxRetries: 0 });
+      const imageCount = result.images.filter((image) => image.uint8Array?.byteLength > 0).length;
+      if (!canvasWorkStopped(canvasStore)) canvasStore.usage.setReport(`job:${job.id}`, reportId, [
+        ...providerUsageMetrics(result.usage), ...(imageCount ? [{ metric: 'images' as const, unit: 'image' as const, quantity: imageCount, source: 'observed_output' as const }] : []),
+      ]);
+      return result;
     } catch (error) {
       onFailure?.(error); // Revoke sibling permits before this request releases capacity.
       throw error;
@@ -147,29 +157,10 @@ async function resolveImageProvider(
   providerId: string | undefined,
   params: CanvasImageParams,
 ): Promise<{ provider: ReturnType<typeof createOpenAiProvider>; providerId: string; modelId: string; apiKey: string; baseUrl?: string } | { error: string }> {
-  const settings = await settingsStore.get();
-  let resolvedId = providerId || settings.activeProviderId || 'openai';
-  let stored = settings.providers[resolvedId];
-  if (!stored?.apiKey) {
-    for (const alt of ['reizo', 'openai']) {
-      if (alt !== resolvedId && settings.providers[alt]?.apiKey) {
-        resolvedId = alt;
-        stored = settings.providers[alt];
-        break;
-      }
-    }
-  }
-  const preset = getProviderPreset(resolvedId);
-  if (!preset || !stored?.apiKey) {
-    return { error: `No API key configured for ${preset?.name ?? resolvedId}. Add one in Settings.` };
-  }
-  const baseUrl = stored.baseUrl || preset.baseUrl;
-  const isOfficial = !baseUrl || baseUrl.includes('api.openai.com');
-  const modelId = params.draft
-    ? settings.mediaModels?.draft || DEFAULT_DRAFT_IMAGE_MODEL
-    : params.model || settings.mediaModels?.image || (isOfficial ? 'dall-e-3' : 'gpt-image-2');
-  const provider = createOpenAiProvider({ apiKey: stored.apiKey, baseUrl, retryTransport: false });
-  return { provider, providerId: resolvedId, modelId, apiKey: stored.apiKey, baseUrl };
+  try {
+    const resolved = resolveSettingsModel(await settingsStore.get(), { category: 'image', providerId, model: params.model, draft: params.draft });
+    return { ...resolved, provider: createOpenAiProvider({ apiKey: resolved.apiKey, baseUrl: resolved.baseUrl, retryTransport: false }) };
+  } catch (error) { return { error: error instanceof Error ? error.message : String(error) }; }
 }
 
 async function writeImageAssetsAndBroadcast(options: {
@@ -199,6 +190,7 @@ async function writeImageAssetsAndBroadcast(options: {
   }), job.signal);
   try {
     if (!canCommit()) return;
+    staged.prepareCommit();
     const details: CanvasJobFinish = {};
     const done = job.finish('succeeded', () => {
       const registered = staged.files.map((file) => canvasStore.assets.register({ ...file, canvasId, nodeId: node.id, jobId: job.id, source: 'generated' }));

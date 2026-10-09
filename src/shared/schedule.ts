@@ -12,8 +12,15 @@ export interface Schedule {
   prompt: string;
   skillId?: string;
   intervalMs: number;
-  /** One-shot schedules delete themselves after their first fire. */
+  /** One-shot schedules pause after one attempt; their result and failures remain visible. */
   once?: boolean;
+  createOperationId?: string;
+  pendingRun?: { operationId: string; requestedAt: string };
+  activeExecution?: { id: string; startedAt: string; kind: 'scheduled' | 'manual'; sessionId?: string; operationId?: string };
+  lastExecutionId?: string;
+  lastSessionId?: string;
+  lastRunOperationId?: string;
+  lastOutcome?: 'succeeded' | 'failed' | 'interrupted';
   enabled: boolean;
   lastRunAt: string | null;
   nextRunAt: string;

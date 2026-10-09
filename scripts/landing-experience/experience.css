@@ -1,0 +1,19 @@
+@import '../../src/renderer/index.css';
+/* Match the renderer's class-controlled tokens instead of the host OS theme.
+   The homepage bridge explicitly selects light appearance. */
+@custom-variant dark (&:where(.dark, .dark *));
+/* The website build has a separate Vite root; scan the actual desktop renderer. */
+@source '../../src/renderer/**/*.{ts,tsx}';
+
+.landing-sample{height:100%;--canvas-dot:rgba(255,255,255,.1)}
+/* The homepage keeps the canvas open; desktop-only panel actions are omitted. */
+.landing-sample [data-titlebar-slot='right']{display:none}
+.landing-sample [aria-label='画布工具']{display:none}
+/* Keep the original product sidebar; the inline sample has no expand action. */
+.landing-sample button:is([aria-label='最大化面板'],[aria-label='还原宽度']){display:none}
+.landing-sample [aria-label='画布导航与历史'] button[aria-label^='导航：']{display:none}
+.landing-sample button[aria-label='适应全景 (F)'] svg{display:none}
+.landing-sample button[aria-label='适应全景 (F)']::after{content:'适应';font-size:11px}
+.landing-sample .react-flow__node-note .text-xs{font-size:15px;line-height:1.65}
+/* A canvas detail view is the real editor, without another desktop shell. */
+html[data-experience-view=canvas] .landing-sample .titlebar{display:none}

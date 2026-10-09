@@ -249,12 +249,12 @@ export function inputHash(node: CanvasNode, upstream: CanvasNode[]): string {
 export function buildPipelineWaves(
   nodes: { id: string; type: string }[],
   edges: { sourceId: string; targetId: string }[],
-  isRunnable: (type: string) => boolean,
+  isRunnable: (type: string, id?: string) => boolean,
   inScope?: Set<string>,
 ): string[][] {
   const runnableIds = new Set(
     nodes
-      .filter((n) => isRunnable(n.type) && (!inScope || inScope.has(n.id)))
+      .filter((n) => isRunnable(n.type, n.id) && (!inScope || inScope.has(n.id)))
       .map((n) => n.id),
   );
   if (runnableIds.size === 0) return [];

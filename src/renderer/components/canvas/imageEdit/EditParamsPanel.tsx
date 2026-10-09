@@ -40,7 +40,7 @@ export default function EditParamsPanel({
 }) {
   const zoom = useStore((s) => s.transform[2]) || 1;
   const floatScale = chromeScale(zoom);
-  const isDragging = useStore((s) => s.nodes.find((n) => n.id === node.id)?.dragging ?? false);
+  const isDragging = useStore((s) => s.nodeLookup.get(node.id)?.dragging ?? false);
   const [shouldRender, setShouldRender] = useState(false);
 
   const params = node.params as CanvasImageParams;

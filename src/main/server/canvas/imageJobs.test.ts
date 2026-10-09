@@ -290,14 +290,19 @@ describe('durable image jobs', () => {
     expect(generate).toHaveBeenCalledTimes(1);
   });
 
-  it('records the effective fallback provider rather than the missing requested provider', async () => {
+  it('records an implicit fallback provider but refuses to change an explicit paid provider', async () => {
     const { canvas, options } = await fixture();
     const fallback = { get: async () => ({ activeProviderId: 'openai', providers: { reizo: { apiKey: 'fallback-secret', baseUrl: 'https://example.test/v1' } } }) } as unknown as SettingsStore;
     generate.mockResolvedValue(result);
-    const accepted = startImageNode({ ...options, providerId: 'openai', settingsStore: fallback });
+    const accepted = startImageNode({ ...options, settingsStore: fallback });
     await accepted.completion;
     expect(canvas.jobs.get(accepted.job.id)).toMatchObject({ providerId: 'reizo', model: 'gpt-image-2', status: 'succeeded' });
     expect(JSON.stringify(canvas.jobs.get(accepted.job.id))).not.toContain('fallback-secret');
+    generate.mockClear();
+    const explicit = startImageNode({ ...options, providerId: 'openai', settingsStore: fallback });
+    await explicit.completion;
+    expect(canvas.jobs.get(explicit.job.id)).toMatchObject({ status: 'failed' });
+    expect(generate).not.toHaveBeenCalled();
   });
 
   it('does not report success for invalid counts or an empty provider result', async () => {

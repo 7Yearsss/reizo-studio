@@ -1,0 +1,6 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "types": ["vite/client", "node"] },
+  "include": ["landing-experience/**/*.ts", "landing-experience/**/*.tsx", "../src/shared/window.d.ts", "../src/wgsl-env.d.ts"],
+  "exclude": ["../node_modules"]
+}

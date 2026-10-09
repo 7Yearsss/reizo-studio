@@ -2,8 +2,10 @@ import type { Artifact } from '../../../../shared/artifact';
 import type { ArtifactRendererDef, ArtifactRenderProps } from './types';
 import MarkdownRenderer from './MarkdownRenderer';
 import PreviewFrame from './PreviewFrame';
-import DiagramRenderer from './DiagramRenderer';
-import SheetRenderer from './SheetRenderer';
+import { createDeferredView } from '../../DeferredView';
+
+const DiagramRenderer = createDeferredView<ArtifactRenderProps>(() => import('./DiagramRenderer'), { label: '图表编辑器', minHeight: 320 });
+const SheetRenderer = createDeferredView<ArtifactRenderProps>(() => import('./SheetRenderer'), { label: '表格编辑器', minHeight: 320 });
 
 const HtmlRenderer: React.FC<ArtifactRenderProps> = ({ artifact, text }) => (
   // `sandbox=""` blocks scripts entirely, which is the safe default for a

@@ -5,6 +5,7 @@ vi.mock('../../api', async (importOriginal) => {
   return {
     ...actual,
     getCanvas: vi.fn(),
+    editCanvas: vi.fn(),
     readCanvasStream: vi.fn(
       (_id: string, _rev: number, _cb: unknown, signal: AbortSignal) =>
         new Promise<void>((resolve) => {
@@ -161,7 +162,15 @@ describe('Group Drag & Smart Guides Isolation', () => {
       nodes: [g, m1, m2],
       edges: [],
     });
-    vi.mocked(api.patchCanvasNode).mockResolvedValue({} as any);
+    let revision = 1;
+    vi.mocked(api.editCanvas).mockImplementation(async (_canvasId, edits) => {
+      const nodes = canvasStore.getSnapshot().nodesBySession[sessionId];
+      return { canvas: { id: 'c1', sessionId, liveRevision: ++revision, createdAt: '', updatedAt: '' },
+        nodes: nodes.map((node) => {
+          const edit = edits.find((edit) => edit.kind === 'update_node' && edit.id === node.id);
+          return edit?.kind === 'update_node' ? { ...node, ...edit.patch } : node;
+        }), edges: [] };
+    });
 
     await canvasStore.openCanvas(sessionId);
 
@@ -187,7 +196,8 @@ describe('Group Drag & Smart Guides Isolation', () => {
     expect(m2Now?.y).toBe(380);
 
     // Undo should restore all positions synchronously
-    canvasStore.undo(sessionId);
+    await vi.waitFor(() => expect(canvasStore.getSnapshot().historyBySession[sessionId]?.canUndo).toBe(true));
+    await canvasStore.undo(sessionId);
 
     const snapshotUndo = canvasStore.getSnapshot().nodesBySession[sessionId] ?? [];
     const gUndo = snapshotUndo.find((n) => n.id === 'g1');

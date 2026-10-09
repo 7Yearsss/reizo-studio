@@ -25,7 +25,7 @@ export function shouldSyncMentionOnEdge(
   if (targetHandle === 'reference' || targetHandle === 'image' || (targetHandle?.startsWith('ref_') ?? false)) {
     return true;
   }
-  if (targetHandle === 'prompt') return true;
+  if (targetHandle === 'prompt' || targetHandle === 'text_in') return true;
   return false;
 }
 

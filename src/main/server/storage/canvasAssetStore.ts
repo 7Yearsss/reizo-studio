@@ -1,4 +1,5 @@
-import type { CanvasAsset, CanvasAssetRegisterInput } from '../../../shared/canvasAssets';
+import type { CanvasAsset, CanvasAssetRegisterInput, CanvasAssetLibraryQuery, CanvasAssetMetadataPatch } from '../../../shared/canvasAssets';
+import { z } from 'zod';
 import type { DbHandle } from '../db/client';
 
 type Transaction = <T>(fn: () => T) => T;
@@ -6,6 +7,7 @@ interface AssetRow {
   id: string; path: string; canvas_id: string; node_id: string | null; kind: CanvasAsset['kind']; mime_type: string;
   byte_size: number; content_hash: string; source: CanvasAsset['source']; created_at: number; job_id: string | null;
   generation: number | null; provider_id: string | null; model: string | null; input_hash: string | null;
+  name: string; folder: string; tags_json: string; ordinal?: number;
 }
 interface ProvenanceRow {
   id: string; canvas_id: string; node_id: string; node_type: string; generation: number;
@@ -20,6 +22,7 @@ function toAsset(row: AssetRow): CanvasAsset {
   return {
     id: row.id, path: row.path, canvasId: row.canvas_id, kind: row.kind, mimeType: row.mime_type,
     byteSize: row.byte_size, contentHash: row.content_hash, source: row.source, createdAt: new Date(row.created_at).toISOString(),
+    name: row.name, folder: row.folder, tags: JSON.parse(row.tags_json),
     ...(row.node_id !== null ? { nodeId: row.node_id } : {}),
     ...(row.job_id !== null ? { jobId: row.job_id } : {}),
     ...(row.generation !== null ? { generation: row.generation } : {}),
@@ -55,7 +58,7 @@ export function createCanvasAssetStore(handle: DbHandle, transaction: Transactio
   const byId = raw.prepare('SELECT * FROM canvas_assets WHERE id = ?');
   const byPath = raw.prepare('SELECT * FROM canvas_assets WHERE path = ?');
   const origin = raw.prepare('SELECT id FROM canvases WHERE id = ?');
-  const node = raw.prepare('SELECT id FROM canvas_nodes WHERE canvas_id = ? AND id = ?');
+  const node = raw.prepare('SELECT id, title FROM canvas_nodes WHERE canvas_id = ? AND id = ?');
   const job = raw.prepare('SELECT id, canvas_id, node_id, node_type, generation, provider_id, model, input_hash FROM canvas_jobs WHERE id = ?');
   const existing = (input: CanvasAssetRegisterInput) => (byId.get(input.id) ?? byPath.get(input.path)) as unknown as AssetRow | undefined;
   function replay(input: CanvasAssetRegisterInput, row: AssetRow): CanvasAsset {
@@ -92,6 +95,8 @@ export function createCanvasAssetStore(handle: DbHandle, transaction: Transactio
           input.source, Date.now(), provenance?.id ?? null, provenance?.generation ?? null,
           provenance?.provider_id ?? null, provenance?.model ?? null, provenance?.input_hash ?? null,
         );
+        const title = nodeId ? (node.get(input.canvasId, nodeId) as { title: string } | undefined)?.title : '';
+        if (title) raw.prepare('UPDATE canvas_assets SET name = ? WHERE id = ?').run(title, input.id);
         return toAsset(byId.get(input.id) as unknown as AssetRow);
       });
     },
@@ -105,6 +110,50 @@ export function createCanvasAssetStore(handle: DbHandle, transaction: Transactio
     },
     list(canvasId: string): CanvasAsset[] {
       return (raw.prepare('SELECT * FROM canvas_assets WHERE canvas_id = ? ORDER BY created_at, rowid').all(canvasId) as unknown as AssetRow[]).map(toAsset);
+    },
+    updateMetadata(id: string, patch: CanvasAssetMetadataPatch): CanvasAsset {
+      const checked = z.object({ name: z.string().trim().min(1).max(160).optional(),
+        folder: z.string().trim().max(160).optional(), tags: z.array(z.string().trim().min(1).max(40)).max(20).optional() }).strict().safeParse(patch);
+      if (!checked.success || !Object.keys(checked.data).length) throw new CanvasAssetStoreError('素材名称、目录或标签无效');
+      return transaction(() => {
+        const current = byId.get(id) as unknown as AssetRow | undefined;
+        if (!current) throw new CanvasAssetStoreError('素材不存在', 404);
+        raw.prepare('UPDATE canvas_assets SET name = ?, folder = ?, tags_json = ? WHERE id = ?').run(
+          checked.data.name ?? current.name, checked.data.folder ?? current.folder,
+          checked.data.tags ? JSON.stringify([...new Set(checked.data.tags)]) : current.tags_json, id);
+        return toAsset(byId.get(id) as unknown as AssetRow);
+      });
+    },
+    page(options: CanvasAssetLibraryQuery = {}) {
+      const parsed = z.object({ kind: z.enum(['image', 'video', 'audio']).optional(), limit: z.number().int().min(1).max(200).default(80),
+        search: z.string().max(200).optional(), folder: z.string().max(160).optional(), tag: z.string().max(40).optional(),
+        cursor: z.string().max(200).optional() }).safeParse(options);
+      if (!parsed.success) throw new CanvasAssetStoreError('素材筛选参数无效');
+      const query = parsed.data;
+      const where = ["kind IN ('image', 'video', 'audio')"];
+      const values: Array<string | number> = [];
+      if (query.kind) { where.push('kind = ?'); values.push(query.kind); }
+      if (query.folder !== undefined) { where.push('folder = ?'); values.push(query.folder); }
+      if (query.tag) { where.push('EXISTS (SELECT 1 FROM json_each(tags_json) WHERE value = ?)'); values.push(query.tag); }
+      if (query.search?.trim()) {
+        where.push("instr(lower(name || ' ' || folder || ' ' || tags_json || ' ' || COALESCE(model, '') || ' ' || COALESCE(provider_id, '')), lower(?)) > 0");
+        values.push(query.search.trim());
+      }
+      if (query.cursor) {
+        let cursor: unknown;
+        try { cursor = JSON.parse(Buffer.from(query.cursor, 'base64url').toString()); } catch { throw new CanvasAssetStoreError('素材分页游标无效'); }
+        if (!Array.isArray(cursor) || cursor.length !== 2 || !cursor.every((value) => Number.isSafeInteger(value) && value >= 0))
+          throw new CanvasAssetStoreError('素材分页游标无效');
+        where.push('(created_at < ? OR (created_at = ? AND rowid < ?))'); values.push(cursor[0], cursor[0], cursor[1]);
+      }
+      const rows = raw.prepare(`SELECT *, rowid AS ordinal FROM canvas_assets WHERE ${where.join(' AND ')} ORDER BY created_at DESC, rowid DESC LIMIT ?`)
+        .all(...values, query.limit + 1) as unknown as AssetRow[];
+      const more = rows.length > query.limit;
+      const visible = rows.slice(0, query.limit);
+      const last = visible.at(-1);
+      const folders = (raw.prepare("SELECT DISTINCT folder FROM canvas_assets WHERE kind != 'mask' AND folder != '' ORDER BY folder").all() as { folder: string }[]).map((row) => row.folder);
+      return { assets: visible.map(toAsset), folders,
+        ...(more && last ? { nextCursor: Buffer.from(JSON.stringify([last.created_at, last.ordinal])).toString('base64url') } : {}) };
     },
     recent(options: { kind?: 'image' | 'video' | 'audio'; limit?: number } = {}): CanvasAsset[] {
       const limit = options.limit ?? 80;

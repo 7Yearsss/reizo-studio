@@ -41,6 +41,8 @@ export interface MentionTextAreaProps {
   /** Pinned upstream source node IDs to prioritize at top of mention menu */
   pinnedNodeIds?: string[];
   autoFocus?: boolean;
+  ariaLabel?: string;
+  menuPortalContainer?: HTMLElement | null;
   /** 'flat' removes all outer borders, backgrounds, and focus rings for seamless integration inside floating panels */
   variant?: 'default' | 'flat';
 }
@@ -70,6 +72,8 @@ const MentionTextArea = forwardRef<MentionTextAreaHandle, MentionTextAreaProps>(
       onChipClick,
       pinnedNodeIds,
       autoFocus = false,
+      ariaLabel,
+      menuPortalContainer,
       variant = 'default',
     },
     refHandle,
@@ -437,6 +441,7 @@ const MentionTextArea = forwardRef<MentionTextAreaHandle, MentionTextAreaProps>(
         suppressContentEditableWarning
         role="textbox"
         aria-multiline="true"
+        aria-label={ariaLabel}
         data-placeholder={placeholder ?? ''}
         onInput={onInput}
         onKeyDown={onKeyDown}
@@ -478,6 +483,8 @@ const MentionTextArea = forwardRef<MentionTextAreaHandle, MentionTextAreaProps>(
           query={menu.query}
           onSelect={insertMention}
           onClose={() => setMenu(null)}
+          anchorElement={menuPortalContainer ? ref.current : undefined}
+          portalContainer={menuPortalContainer ?? undefined}
         />
       )}
     </div>

@@ -1,19 +1,21 @@
-import { useState, useSyncExternalStore } from 'react';
+import { useRef, useState, useSyncExternalStore } from 'react';
 import { getSnapshot, subscribe, appendTerminalLine } from '../../state/terminalStore';
 
 export default function TerminalPanel() {
   const lines = useSyncExternalStore(subscribe, getSnapshot);
   const [command, setCommand] = useState('');
   const [running, setRunning] = useState(false);
+  const draftRevision = useRef(0);
 
   async function run() {
     const trimmed = command.trim();
     if (!trimmed || running) return;
+    const submittedRevision = draftRevision.current;
     setRunning(true);
     try {
       const result = await window.reizo.runCommand(trimmed);
       appendTerminalLine(result);
-      setCommand('');
+      if (result.exitCode === 0 && draftRevision.current === submittedRevision) setCommand('');
     } catch (err) {
       appendTerminalLine({
         command: trimmed,
@@ -43,7 +45,7 @@ export default function TerminalPanel() {
         <span className="text-xs text-ink-muted">$</span>
         <input
           value={command}
-          onChange={(e) => setCommand(e.target.value)}
+          onChange={(e) => { ++draftRevision.current; setCommand(e.target.value); }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') void run();
           }}

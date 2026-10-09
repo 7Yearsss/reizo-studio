@@ -13,7 +13,10 @@ const mocks = vi.hoisted(() => ({
   submit: vi.fn(), poll: vi.fn(), synthesize: vi.fn(), streamText: vi.fn(), mkdir: vi.fn(), writeFile: vi.fn(),
 }));
 vi.mock('./videoDrivers', async (original) => ({ ...await original<typeof import('./videoDrivers')>(), getVideoDriver: () => ({ id: 'mock', submit: mocks.submit, poll: mocks.poll }) }));
-vi.mock('./audioDrivers', () => ({ getAudioDriver: () => ({ id: 'mock', synthesize: mocks.synthesize }) }));
+vi.mock('./audioDrivers', async (original) => {
+  const actual = await original<typeof import('./audioDrivers')>();
+  return { ...actual, getAudioDriver: () => ({ ...actual.getAudioDriver('mock'), synthesize: mocks.synthesize }) };
+});
 vi.mock('node:fs/promises', async (original) => ({
   ...await original<typeof import('node:fs/promises')>(), mkdir: mocks.mkdir, writeFile: mocks.writeFile,
 }));
@@ -29,7 +32,7 @@ vi.mock('./assets', async (original) => ({
       files.push({ id: 'fixture-' + index, path: canvasId + '/' + input.name, byteSize: input.bytes.byteLength,
         contentHash: createHash('sha256').update(input.bytes).digest('hex'), mimeType: input.mimeType, kind: input.kind });
     }
-    return { files, keep: (): void => undefined, discard: async (): Promise<void> => undefined };
+    return { files, prepareCommit: (): void => undefined, keep: (): void => undefined, discard: async (): Promise<void> => undefined };
   },
 }));
 vi.mock('ai', async (original) => ({

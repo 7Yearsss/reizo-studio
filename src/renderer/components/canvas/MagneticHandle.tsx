@@ -1,10 +1,12 @@
 import React, { useState, useRef, useCallback, useEffect, memo } from 'react';
-import { Handle, Position, type HandleType, useReactFlow, useStore, useUpdateNodeInternals } from '@xyflow/react';
+import { Handle, Position, type HandleType, useReactFlow, useStore, useStoreApi } from '@xyflow/react';
 import { Plus } from 'lucide-react';
 import { cn } from '../../lib/cn';
 import Tooltip from '../ui/Tooltip';
 import { colorForKind, type EdgeKind } from './edges/edgeStyles';
 import { chromeScale } from './chromeScale';
+import { scheduleNodeInternals } from './batchNodeInternals';
+import { hasHandleConnection } from './handleConnection';
 
 export const OPEN_HANDLE_MENU_EVENT = 'reizo:open-handle-menu';
 
@@ -64,15 +66,15 @@ function MagneticHandle({
   const [offset, setOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isHovered, setIsHovered] = useState(false);
   const [approachHover, setApproachHover] = useState(false);
+  const [keyboardFocused, setKeyboardFocused] = useState(false);
   const hitRef = useRef<HTMLDivElement>(null);
   const handleRef = useRef<HTMLDivElement>(null);
   const pointerStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
   const hasDraggedRef = useRef(false);
   const rf = useReactFlow();
-  const updateNodeInternals = useUpdateNodeInternals();
+  const flowStore = useStoreApi();
 
   const isLeft = position === Position.Left;
-  const isRight = position === Position.Right;
   const activeColor = colorForKind(kind);
 
   // Read current canvas zoom level from React Flow store
@@ -85,35 +87,28 @@ function MagneticHandle({
   // internally, so it flips to true the instant the drag starts with zero lag.
   // This prevents the button from briefly popping out at the start of a drag.
   const isDragging = useStore((s) => {
-    const node = s.nodes.find((n) => n.id === nodeId);
+    const node = s.nodeLookup.get(nodeId);
     return node?.dragging ?? false;
   });
 
   // Check if any edge is currently connected to this handle
   const isConnected = useStore(
     useCallback(
-      (s) =>
-        s.edges.some((e) => {
-          if (type === 'source') {
-            if (e.source !== nodeId) return false;
-            return !e.sourceHandle || !id || e.sourceHandle === id;
-          } else {
-            if (e.target !== nodeId) return false;
-            return !e.targetHandle || !id || e.targetHandle === id;
-          }
-        }),
+      (s) => hasHandleConnection(s.connectionLookup, nodeId, type, id),
       [type, nodeId, id],
     ),
   );
 
-  // Visible when the node is hovered/selected, OR the cursor is already on the
-  // side rail — that's the "approach from outside" path.
-  const visible = (nodeHovered || approachHover) && !isDragging;
+  // Reveal for node hover/selection, the approach rail, or keyboard focus.
+  const visible = (nodeHovered || approachHover || keyboardFocused) && !isDragging;
+  // Overview keeps the native port mounted for measurement and connections.
+  // Node hover/selection restores the same detailed control; never remove a focused button.
+  const showDetails = zoom >= 0.15 || nodeHovered || approachHover || keyboardFocused || isHovered || visible;
 
-  // Immediately notify React Flow to measure this handle geometry on mount and on connection changes
+  // Sibling handles share the next-frame geometry update for this provider.
   useEffect(() => {
-    updateNodeInternals(nodeId);
-  }, [nodeId, updateNodeInternals, isConnected, visible]);
+    scheduleNodeInternals(flowStore, nodeId);
+  }, [nodeId, flowStore, isConnected, visible]);
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
@@ -194,14 +189,15 @@ function MagneticHandle({
     (e: React.MouseEvent) => {
       e.stopPropagation();
       if (disabled) return;
+      const keyboardActivation = e.detail === 0;
 
-      if (hasDraggedRef.current) {
+      if (!keyboardActivation && hasDraggedRef.current) {
         // Handled as a drag connection, do not open menu
         hasDraggedRef.current = false;
         pointerStartRef.current = null;
         return;
       }
-      if (pointerStartRef.current && Date.now() - pointerStartRef.current.time > 300) {
+      if (!keyboardActivation && pointerStartRef.current && Date.now() - pointerStartRef.current.time > 300) {
         hasDraggedRef.current = false;
         pointerStartRef.current = null;
         return;
@@ -209,8 +205,10 @@ function MagneticHandle({
       pointerStartRef.current = null;
       hasDraggedRef.current = false;
 
-      const screenX = e.clientX;
-      const screenY = e.clientY;
+      const button = (e.target as Element).closest?.('button');
+      const rect = keyboardActivation ? (button || hitRef.current)?.getBoundingClientRect() : undefined;
+      const screenX = rect ? rect.left + rect.width / 2 : e.clientX;
+      const screenY = rect ? rect.top + rect.height / 2 : e.clientY;
       const flowPos = rf.screenToFlowPosition({ x: screenX, y: screenY });
 
       const detail: HandleMenuEventDetail = {
@@ -230,7 +228,7 @@ function MagneticHandle({
 
   const tooltipText = label
     ? label
-    : isRight
+    : type === 'source'
       ? '继续生成 / 引用该节点'
       : '添加上下文输入';
 
@@ -272,7 +270,7 @@ function MagneticHandle({
 
       {/* Approach rail: hangs off the node edge even while the plus is hidden, so
           nearing the node from the side is enough to pop the button. */}
-      <div
+      {showDetails ? <div
         data-magnetic-handle="true"
         data-handle-approach="true"
         data-node-id={nodeId}
@@ -329,7 +327,11 @@ function MagneticHandle({
             >
               <button
                 type="button"
-                tabIndex={-1}
+                disabled={disabled}
+                aria-label={tooltipText}
+                aria-haspopup="menu"
+                onFocus={() => setKeyboardFocused(true)}
+                onBlur={() => setKeyboardFocused(false)}
                 data-magnetic-handle="true"
                 data-node-id={nodeId}
                 data-handle-type={type}
@@ -340,7 +342,7 @@ function MagneticHandle({
                   transition: 'background-color 150ms, border-color 150ms, box-shadow 150ms',
                 }}
                 className={cn(
-                  'group relative flex h-5 w-5 items-center justify-center rounded-full border bg-paper-raised text-ink active:scale-90 shadow-xs',
+                  'group relative flex h-5 w-5 items-center justify-center rounded-full border bg-paper-raised text-ink active:scale-90 shadow-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
                   isHovered ? 'scale-125 bg-paper' : 'hover:scale-110',
                 )}
               >
@@ -353,7 +355,7 @@ function MagneticHandle({
             </div>
           </div>
         </Tooltip>
-      </div>
+      </div> : null}
     </>
   );
 }

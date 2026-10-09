@@ -1,4 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { Popover } from 'radix-ui';
+import { cn } from '../../lib/cn';
 import type { CanvasNode } from '../../../shared/canvas';
 import { useAssetUrl } from './useAssetUrl';
 import { ImageIcon, Video, Bot, Type, Volume2, Search } from 'lucide-react';
@@ -10,6 +12,8 @@ interface MentionMenuProps {
   onClose: () => void;
   position?: { top: number; left: number };
   pinnedNodeIds?: string[];
+  anchorElement?: HTMLElement | null;
+  portalContainer?: HTMLElement;
 }
 
 function NodeIcon({ type, size = 12 }: { type: string; size?: number }) {
@@ -127,9 +131,12 @@ export default function MentionMenu({
   onClose,
   position,
   pinnedNodeIds = [],
+  anchorElement,
+  portalContainer,
 }: MentionMenuProps) {
   const [selectedIdx, setSelectedIdx] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  const closingByEscape = useRef(false);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   const filtered = candidates.filter((n) => {
@@ -184,8 +191,10 @@ export default function MentionMenu({
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (portalContainer && e.target instanceof Node && !anchorElement?.contains(e.target) && !containerRef.current?.contains(e.target)) return;
       if (e.key === 'Escape') {
         e.preventDefault();
+        if (portalContainer) { closingByEscape.current = true; e.stopPropagation(); }
         onClose();
       } else if (e.key === 'ArrowDown') {
         e.preventDefault();
@@ -206,11 +215,15 @@ export default function MentionMenu({
       }
     };
 
-    window.addEventListener('keydown', onKeyDown, { capture: true });
-    return () => window.removeEventListener('keydown', onKeyDown, { capture: true });
-  }, [flat, connected, selectedIdx, onSelect, onClose]);
+    const isolated = new Set(['ArrowDown', 'ArrowUp', 'Enter', 'Tab']);
+    const isolatedKeyDown = (event: KeyboardEvent) => { onKeyDown(event); if (portalContainer && isolated.has(event.key) && event.defaultPrevented) event.stopPropagation(); };
+    window.addEventListener('keydown', isolatedKeyDown, { capture: true });
+    return () => window.removeEventListener('keydown', isolatedKeyDown, { capture: true });
+  }, [flat, connected, selectedIdx, onSelect, onClose, portalContainer, anchorElement]);
 
   useEffect(() => {
+    // Portaled menus use Radix's outside/focus handling, including the editor anchor.
+    if (portalContainer) return;
     const onPointerDown = (e: PointerEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         onClose();
@@ -218,13 +231,13 @@ export default function MentionMenu({
     };
     window.addEventListener('pointerdown', onPointerDown);
     return () => window.removeEventListener('pointerdown', onPointerDown);
-  }, [onClose]);
+  }, [onClose, portalContainer]);
 
   if (flat.length === 0) {
     return null;
   }
 
-  return (
+  const content = (
     <div
       ref={containerRef}
       onWheel={(e) => e.stopPropagation()}
@@ -233,14 +246,16 @@ export default function MentionMenu({
         e.preventDefault();
         e.stopPropagation();
       }}
-      className="nodrag nopan nowheel overscroll-contain absolute z-50 flex max-h-80 w-[22rem] flex-col overflow-y-auto rounded-2xl border border-line/70 bg-[#1a1a1c]/96 p-2 shadow-2xl text-xs backdrop-blur-xl"
+      className={portalContainer
+        ? 'nodrag nopan nowheel overscroll-contain z-[120] flex max-h-[min(20rem,var(--radix-popover-content-available-height))] w-[22rem] max-w-[var(--radix-popover-content-available-width)] flex-col overflow-y-auto rounded-xl border border-border bg-card p-2 text-xs text-foreground shadow-xl outline-none'
+        : 'nodrag nopan nowheel overscroll-contain absolute z-50 flex max-h-80 w-[22rem] flex-col overflow-y-auto rounded-2xl border border-line/70 bg-[#1a1a1c]/96 p-2 shadow-2xl text-xs backdrop-blur-xl'}
       style={
-        position
+        portalContainer ? undefined : position
           ? { top: position.top, left: position.left }
           : { bottom: 'calc(100% + 6px)', left: 0 }
       }
     >
-      <div className="mb-2 flex items-center gap-2 rounded-xl bg-black/35 px-2.5 py-2 text-ink-muted">
+      <div className={cn('mb-2 flex items-center gap-2 rounded-xl px-2.5 py-2 text-ink-muted', portalContainer ? 'bg-muted/40' : 'bg-black/35')}>
         <Search size={14} className="shrink-0 opacity-70" />
         <span className="text-[13px]">{query || '搜索'}</span>
       </div>
@@ -284,9 +299,8 @@ export default function MentionMenu({
                       onSelect(node);
                     }}
                     onMouseEnter={() => setSelectedIdx(i)}
-                    className={`group flex items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition-all cursor-pointer ${
-                      isSelected ? 'bg-white/8' : 'hover:bg-white/5'
-                    }`}
+                    className={cn('group flex items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition-all cursor-pointer',
+                      portalContainer ? isSelected ? 'bg-muted' : 'hover:bg-muted/70' : isSelected ? 'bg-white/8' : 'hover:bg-white/5')}
                   >
                     <CandidateThumbnail node={node} />
                     <div className="min-w-0 flex-1">
@@ -309,4 +323,18 @@ export default function MentionMenu({
       </div>
     </div>
   );
+  if (!portalContainer || !anchorElement) return content;
+  return <Popover.Root open onOpenChange={(open) => { if (!open) onClose(); }} modal={false}>
+    <Popover.Anchor virtualRef={{ current: anchorElement }} />
+    <Popover.Portal container={portalContainer}>
+      <Popover.Content asChild side="top" align="start" sideOffset={8} collisionBoundary={portalContainer} collisionPadding={12} updatePositionStrategy="always"
+        aria-label="选择引用节点" onOpenAutoFocus={(event) => event.preventDefault()}
+        onCloseAutoFocus={(event) => { event.preventDefault(); if (closingByEscape.current && anchorElement.isConnected) anchorElement.focus({ preventScroll: true }); }}
+        onPointerDownOutside={(event) => { if (anchorElement.contains(event.target as Node)) event.preventDefault(); }}
+        onFocusOutside={(event) => { if (anchorElement.contains(event.target as Node)) event.preventDefault(); }}
+        onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+        {content}
+      </Popover.Content>
+    </Popover.Portal>
+  </Popover.Root>;
 }

@@ -11,9 +11,10 @@ const harness = vi.hoisted(() => ({
 vi.mock('./tabStore', () => ({ activeSessionId: () => harness.active, subscribe: (listener: () => void) => { harness.tabListeners.add(listener); return () => harness.tabListeners.delete(listener); } }));
 vi.mock('./settingsStore', () => ({ getSnapshot: () => ({ settings: {} }) }));
 vi.mock('../lib/notify', () => ({ primeNotifications: vi.fn(), notifyJobDone: vi.fn() }));
-vi.mock('../lib/toast', () => ({ toast: { info: vi.fn() } }));
+vi.mock('../lib/toast', () => ({ toast: { info: vi.fn(), error: vi.fn() } }));
 vi.mock('../api', () => ({
   getCanvas: vi.fn(),
+  editCanvas: vi.fn(),
   addCanvasNode: vi.fn(),
   addCanvasEdge: vi.fn(),
   patchCanvasNode: vi.fn(),
@@ -63,6 +64,63 @@ afterEach(async () => {
 });
 
 describe('canvas store commit synchronization', () => {
+  it('keeps a linked creation and its mention in one undo even after its input panel synchronizes', async () => {
+    const source = node('source');
+    vi.mocked(api.getCanvas).mockResolvedValue(snapshot(1, [source], []));
+    await store.ensureCanvasLoaded('s1');
+    vi.mocked(api.editCanvas).mockImplementationOnce(async (_canvasId, edits) => {
+      const add = edits.find((edit) => edit.kind === 'add_node');
+      const link = edits.find((edit) => edit.kind === 'add_edge');
+      if (add?.kind !== 'add_node' || link?.kind !== 'add_edge') throw new Error('linked creation missing');
+      return snapshot(2, [source, { ...node(add.id), ...add.node } as CanvasNode],
+        [{ canvasId: 'c1', ...link.edge }]);
+    });
+    const created = await store.prepareNodeCreation('s1', { type: 'note', x: 400, y: 0, params: { content: '' } },
+      { sourceId: source.id, targetHandle: 'text_in' })();
+    expect(store.nodeById('s1', created)?.params).toMatchObject({ content: '@[source](canvas:source)', refNodeIds: ['source'] });
+    await store.syncMentionWires('s1', created);
+    expect(api.editCanvas).toHaveBeenCalledTimes(1);
+    vi.mocked(api.editCanvas).mockResolvedValueOnce(snapshot(3, [source], []));
+    expect(await store.undo('s1')).toBe(true);
+    expect(vi.mocked(api.editCanvas).mock.calls[1][1]).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'delete_node', id: created }), expect.objectContaining({ kind: 'delete_edge' }),
+    ]));
+    expect(store.getSnapshot().nodesBySession.s1).toEqual([source]);
+    expect(store.getSnapshot().historyBySession.s1).toMatchObject({ canUndo: false, canRedo: true });
+  });
+
+  it('keeps a failed undo available and preserves the committed node until deletion succeeds', async () => {
+    await store.ensureCanvasLoaded('s1');
+    vi.mocked(api.addCanvasNode).mockResolvedValue(node('created'));
+    await store.addNode('s1', 'image', { x: 0, y: 0 });
+    vi.mocked(api.getCanvas).mockRejectedValueOnce(new Error('offline'));
+    vi.mocked(api.deleteCanvasNode).mockRejectedValueOnce(new Error('offline'));
+    expect(await store.undo('s1')).toBe(false);
+    expect(store.nodeById('s1', 'created')).toBeDefined();
+    expect(store.getSnapshot().historyBySession.s1).toMatchObject({ canUndo: true, canRedo: false });
+    vi.mocked(api.deleteCanvasNode).mockResolvedValueOnce(undefined);
+    expect(await store.undo('s1')).toBe(true);
+    expect(store.nodeById('s1', 'created')).toBeUndefined();
+    expect(store.getSnapshot().historyBySession.s1).toMatchObject({ canUndo: false, canRedo: true });
+  });
+
+  it('does not consume redo on a failed create and serializes overlapping undo requests', async () => {
+    await store.ensureCanvasLoaded('s1');
+    vi.mocked(api.addCanvasNode).mockResolvedValue(node('created'));
+    await store.addNode('s1', 'image', { x: 0, y: 0 });
+    let finish: () => void;
+    vi.mocked(api.deleteCanvasNode).mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const first = store.undo('s1');
+    const overlapping = store.undo('s1');
+    await settle();
+    expect(api.deleteCanvasNode).toHaveBeenCalledTimes(1);
+    finish();
+    await Promise.all([first, overlapping]);
+    vi.mocked(api.addCanvasNode).mockRejectedValueOnce(new Error('offline'));
+    expect(await store.redo('s1')).toBe(false);
+    expect(store.getSnapshot().historyBySession.s1).toMatchObject({ canUndo: false, canRedo: true });
+  });
+
   it('preserves live drag and resize geometry when a provider commits a full result row', async () => {
     await store.openCanvas('s1');
     store.moveNodesGeometryLive('s1', new Map([['a', { x: 150, y: 160, w: 500, h: 550 }]]));
@@ -140,7 +198,7 @@ describe('canvas store commit synchronization', () => {
     harness.streams[0].emit(commit(2, [{ type: 'node_updated', node: authority }]));
     vi.mocked(api.getCanvas).mockResolvedValue(snapshot(2, [authority, node('b')], []));
     rejectPatch(new Error('Rejected'));
-    await resizing;
+    await expect(resizing).rejects.toThrow('Rejected');
     expect(store.nodeById('s1', 'a')).toMatchObject({ w: 320, h: 380, runState: 'done', output: authority.output });
   });
 
@@ -340,7 +398,7 @@ describe('canvas store commit synchronization', () => {
     await store.openCanvas('s1');
     let resolveAdd!: (value: CanvasNode) => void;
     vi.mocked(api.addCanvasNode).mockImplementationOnce(() => new Promise((resolve) => { resolveAdd = resolve; }));
-    vi.mocked(api.deleteCanvasNode).mockResolvedValue(undefined);
+    vi.mocked(api.editCanvas).mockResolvedValue(snapshot(2, [node('b')], []));
     const adding = store.addNode('s1', 'image', { x: 0, y: 0 });
     await store.removeNode('s1', 'a');
     vi.mocked(api.getCanvas).mockResolvedValue(snapshot(3, [node('b'), node('added')], []));

@@ -5,7 +5,7 @@ import type { ScheduleStore } from '../storage/scheduleStore';
 /** Floor for recurring intervals — below this a schedule is a cost footgun. */
 export const MIN_INTERVAL_MS = 60_000;
 
-export function createScheduleTools(options: { scheduleStore: ScheduleStore }) {
+export function createScheduleTools(options: { scheduleStore: ScheduleStore; sessionId?: string }) {
   const { scheduleStore } = options;
 
   return {
@@ -18,15 +18,16 @@ export function createScheduleTools(options: { scheduleStore: ScheduleStore }) {
           .number()
           .describe('Minutes between runs. For once:true schedules this is the delay before the single run.'),
         name: z.string().optional().describe('Short label shown in the automation list. Defaults to the prompt start.'),
-        once: z.boolean().optional().describe('If true, runs exactly once then removes itself.'),
+        once: z.boolean().optional().describe('If true, attempts once then pauses; the result and failure remain in history.'),
       }),
-      execute: async ({ prompt, intervalMinutes, name, once }) => {
+      execute: async ({ prompt, intervalMinutes, name, once }, toolOptions) => {
         const intervalMs = Math.max(Math.round(intervalMinutes * 60_000), MIN_INTERVAL_MS);
         const schedule = await scheduleStore.create({
           name: (name ?? prompt).slice(0, 60),
           prompt,
           intervalMs,
           once: once === true,
+          operationId: options.sessionId && toolOptions?.toolCallId ? `schedule-tool:${options.sessionId}:${toolOptions.toolCallId}` : undefined,
         });
         return { ok: true, schedule };
       },

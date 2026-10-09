@@ -1,3 +1,9 @@
+import { presentationReviewAdapter } from './agent/presentationTools';
+import { htmlReviewAdapter } from './agent/htmlTools';
+import { createArtifactReviewStore } from './storage/artifactReviewStore';
+import { documentReviewAdapter } from './agent/documentReviewAdapter';
+import { createDocumentsRouter } from './routes/documents';
+import { createPresentationsRouter } from './routes/presentations';
 import { Hono, type MiddlewareHandler } from 'hono';
 import type { SessionStore } from '../../shared/chat';
 import { createFileSessionStore } from './storage/fileSessionStore';
@@ -32,6 +38,8 @@ import { nodeJobsFor } from './canvas/nodeJobs';
 import { stopCanvasWork } from './canvas/workLifecycle';
 import { stopCanvasRun, stopCanvasRunsForStore } from './canvas/graphExecutor';
 import { resumeVideoJobs, stopVideoJobsForStore } from './canvas/asyncJobManager';
+import { createCanvasMaintenanceRouter } from './routes/canvasMaintenance';
+import { createUsageRouter } from './routes/usage';
 
 export interface CreateAppOptions {
   /** Directory the local session/settings JSON files live under. */
@@ -148,6 +156,7 @@ export function createApp(options: CreateAppOptions) {
   // features work under `test:api` too.
   const db = options.db ?? openDb(':memory:');
   const artifactStore = createArtifactStore(db, options.dataRoot);
+  const artifactReviews = createArtifactReviewStore(db, artifactStore, options.dataRoot, { doc: documentReviewAdapter, html: htmlReviewAdapter, presentation: presentationReviewAdapter });
   const canvasStore = createCanvasStore(db);
   recoverCanvasJobs(canvasStore);
   let canvasJobsStopped = false;
@@ -156,7 +165,7 @@ export function createApp(options: CreateAppOptions) {
   const startCanvasJobs = () => {
     if (canvasJobsStarted || canvasJobsStopped) return;
     canvasJobsStarted = true;
-    resumeVideoJobs({ canvasStore, settingsStore, dataRoot: options.dataRoot });
+    resumeVideoJobs({ canvasStore, settingsStore, providerStore, dataRoot: options.dataRoot });
   };
   const stopCanvasJobs = () => {
     if (canvasJobsStopped) return;
@@ -204,11 +213,14 @@ export function createApp(options: CreateAppOptions) {
       },
       memoryEventsStore,
       scheduleStore,
+      artifactReviews,
     ),
   );
   app.route('/api/memory', createMemoryRouter(memoryEventsStore, settingsStore));
   app.route('/api/sessions', createSessionArtifactsRouter(artifactStore, sessionStore));
   app.route('/api/artifacts', createArtifactsRouter(artifactStore));
+  app.route('/api', createDocumentsRouter(artifactStore, sessionStore, artifactReviews));
+  app.route('/api/sessions', createPresentationsRouter(artifactStore, sessionStore));
   app.route('/api/refs', createRefsRouter(largeValueStore));
   app.route('/api/projects', createProjectsRouter(projectStore, sessionStore));
   app.route('/api/settings', createSettingsRouter(settingsStore));
@@ -218,6 +230,8 @@ export function createApp(options: CreateAppOptions) {
   app.route('/api/computer-use', createComputerUseRouter(options.dataRoot, settingsStore));
   app.route('/api/schedules', createSchedulesRouter(scheduleStore, thoughtStore));
   app.route('/api/matting', createMattingRouter(options.dataRoot));
+  app.route('/api/canvas-maintenance', createCanvasMaintenanceRouter(db, options.dataRoot));
+  app.route('/api/usage', createUsageRouter(db));
 
   if (canvasStore) {
     app.route(

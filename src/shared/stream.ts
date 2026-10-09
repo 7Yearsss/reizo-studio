@@ -64,6 +64,10 @@ export interface FileDiffPreview {
   after: string;
   /** Either side was clipped to a size limit; the diff is indicative only. */
   truncated?: boolean;
+  /** Full-file content version frozen before approval; null means the file did not exist. */
+  expectedHash?: string | null;
+  /** Canonical filesystem target frozen with the preview. */
+  expectedPath?: string;
 }
 
 export const FILE_DIFF_PREVIEW_MAX_CHARS = 60_000;

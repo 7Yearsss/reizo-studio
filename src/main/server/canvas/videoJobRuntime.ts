@@ -2,6 +2,9 @@ import type { CanvasNode, CanvasNodeOutput } from '../../../shared/canvas';
 import type { CanvasJob, CanvasJobFinish, CanvasJobTerminalStatus } from '../../../shared/canvasJobs';
 import type { CanvasStore } from '../storage/canvasStore';
 import type { SettingsStore } from '../storage/settingsStore';
+import type { ProviderStore } from '../storage/providerStore';
+import { resolveVideoExecution } from '../providerResolver';
+import { providerUsageMetrics } from '../../../shared/usage';
 import { CanvasJobStoreError } from '../storage/canvasJobStore';
 import { getCanvasChannel } from './channel';
 import { broadcastDownstreamDirty } from './imageExecutor';
@@ -20,7 +23,7 @@ interface ActiveJob {
   resolveCompletion: () => void; resolveSubmitted: () => void;
 }
 export interface VideoJobSubmission extends NodeJobSubmission { submitted: Promise<void> }
-export interface VideoRuntimeOptions { canvasStore: CanvasStore; settingsStore: SettingsStore; dataRoot: string }
+export interface VideoRuntimeOptions { canvasStore: CanvasStore; settingsStore: SettingsStore; dataRoot: string; providerStore?: ProviderStore }
 const activeJobs = new Map<string, ActiveJob>();
 const byId = new Map<string, ActiveJob>();
 const storeIds = new WeakMap<CanvasStore, number>();
@@ -173,24 +176,25 @@ function launch(entry: ActiveJob, options: VideoRuntimeOptions, loadParams?: (si
       if (!isCurrent(entry)) return;
       const settings = await settingsStore.get();
       if (!isCurrent(entry)) return;
-      const driver = getVideoDriver(entry.driverId);
       const requested = (entry.job.input.request as { providerId?: string } | undefined)?.providerId;
-      const providerId = entry.job.providerId || (requested && settings.providers?.[requested] ? requested : driver.id);
-      const stored = settings.providers?.[providerId];
-      if (driver.id !== 'mock' && !stored?.apiKey) throw new Error(`No video API key configured for ${providerId}`);
+      const resolved = await resolveVideoExecution(settings, { driverId: entry.driverId, providerId: requested, submittedProviderId: entry.job.providerId,
+        params: entry.job.input.params as unknown as VideoGenerateParams, signal: entry.signal, autoProvider: entry.job.input.autoProvider === true }, options.providerStore);
+      if (!isCurrent(entry)) return;
+      const { driver, providerId, credentials: credentialOptions } = resolved;
+      entry.driverId = driver.id;
       entry.releasePermit = await generationSchedulerFor(store).acquire(providerId, entry.signal);
       if (!isCurrent(entry)) return;
-      const credentialOptions = { apiKey: stored?.apiKey, baseUrl: stored?.baseUrl, signal: entry.signal };
       if (!entry.job.remoteTask) {
         const params = loadParams ? await loadParams(entry.signal) : entry.job.input.params as unknown as VideoGenerateParams;
         if (!isCurrent(entry)) return;
-        const actualModel = driver.modelForRequest?.(params, credentialOptions) || params.model || driver.defaultModel || driver.id;
-        if (!store.jobs.markSubmitted(entry.job.id, { providerId, model: actualModel })) {
+        const submittedParams = { ...params, model: resolved.model };
+        if (!store.jobs.markSubmitted(entry.job.id, { providerId, model: resolved.model })) {
           if (isCurrent(entry)) fail('视频提交状态不确定，未重新提交。', 'interrupted');
           return;
         }
+        store.usage.setReport(`job:${entry.job.id}`, 'video', []);
         submitting = true;
-        const submitted = await driver.submit(params, credentialOptions);
+        const submitted = await driver.submit(submittedParams, credentialOptions);
         if (!isCurrent(entry)) return;
         if (!submitted.taskId?.trim()) throw new Error('Video provider returned no task identifier');
         if (driver.supportsRecovery && !driver.validateRemoteContext?.(submitted.taskId, submitted.context)) throw new Error('Video provider returned an invalid recovery context');
@@ -207,6 +211,7 @@ function launch(entry: ActiveJob, options: VideoRuntimeOptions, loadParams?: (si
         let staged: StagedCanvasAssets | undefined;
         try {
           const result = await driver.poll(remote.taskId, { ...credentialOptions, context: remote.context });
+          if (!canvasWorkStopped(store) && result.usage && result.status === 'succeed') store.usage.setReport(`job:${entry.job.id}`, 'video', providerUsageMetrics(result.usage));
           if (!isCurrent(entry)) return;
           if (result.status === 'failed') { fail(result.error || 'Video generation failed'); return; }
           if (result.status !== 'succeed') {
@@ -231,6 +236,7 @@ function launch(entry: ActiveJob, options: VideoRuntimeOptions, loadParams?: (si
             bytes: videoBuffer, mimeType: 'video/mp4', kind: 'video' }], entry.signal);
           if (!isCurrent(entry)) return;
           const params = entry.job.input.params as unknown as VideoGenerateParams;
+          staged.prepareCommit();
           finish(entry, 'succeeded', {}, () => {
             const asset = store.assets.register({ ...staged.files[0], canvasId: entry.canvasId, nodeId: entry.nodeId, jobId: entry.job.id, source: 'generated' });
             const previous = store.getNode(entry.canvasId, entry.nodeId)?.output ?? {};

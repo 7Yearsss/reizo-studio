@@ -1,0 +1,32 @@
+{
+  "fields": {
+    "brandName": {
+      "type": "text"
+    },
+    "industry": {
+      "type": "text"
+    },
+    "style": {
+      "type": "text"
+    },
+    "materials": {
+      "type": "stringList"
+    },
+    "slogan": {
+      "type": "text",
+      "required": false
+    }
+  },
+  "outputs": {
+    "kinds": [
+      "image"
+    ],
+    "requiredRoles": [
+      "logo",
+      "palette"
+    ],
+    "rolesFrom": "materials",
+    "requireFinal": true
+  },
+  "version": 1
+}

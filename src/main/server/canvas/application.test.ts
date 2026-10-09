@@ -34,6 +34,50 @@ async function setup(dbPath = ':memory:') {
 }
 
 describe('CanvasApplication command interface', () => {
+  it('rolls a reroute edit back on the second edge failure and replays one durable revision after a lost response', async () => {
+    const { app, canvas, store, events } = await setup();
+    const a = app.addNode(canvas.id, image).node;
+    const b = app.addNode(canvas.id, image).node;
+    const original = app.addEdge(canvas.id, { sourceId: a.id, targetId: b.id }).edge;
+    const before = store.getSnapshot(canvas.id);
+    events.length = 0;
+    const edits: import('../../../shared/canvasEdits').CanvasEdit[] = [
+      { kind: 'delete_edge', id: original.id },
+      { kind: 'add_node', id: 'reroute', node: { type: 'reroute', x: 10, y: 10 } },
+      { kind: 'add_edge', edge: { id: 'first', sourceId: a.id, targetId: 'reroute', sourceHandle: null, targetHandle: null } },
+      { kind: 'add_edge', edge: { id: 'second', sourceId: 'reroute', targetId: 'missing', sourceHandle: null, targetHandle: null } },
+    ];
+    expect(() => app.edit(canvas.id, edits, 'reroute-edit', before.canvas.liveRevision)).toThrow('missing');
+    expect(store.getSnapshot(canvas.id)).toEqual(before);
+    expect(events).toEqual([]);
+    expect(store.getReceipt(canvas.id, 'reroute-edit')).toBeNull();
+    (edits[3] as Extract<typeof edits[number], { kind: 'add_edge' }>).edge.targetId = b.id;
+    const result = app.edit(canvas.id, edits, 'reroute-edit', before.canvas.liveRevision);
+    expect(result.canvas.liveRevision).toBe(before.canvas.liveRevision + 1);
+    expect(result.nodes).toHaveLength(3);
+    expect(result.edges).toHaveLength(2);
+    expect(store.getReceipt(canvas.id, 'reroute-edit').resultJson.length).toBeLessThan(100);
+    expect(app.edit(canvas.id, edits, 'reroute-edit', before.canvas.liveRevision)).toEqual(result);
+    expect(store.getSnapshot(canvas.id)).toEqual(result);
+  });
+
+  it('restores deleted nodes and reference edges with their original identities and rejects stale edits', async () => {
+    const { app, canvas, store } = await setup();
+    const source = app.addNode(canvas.id, image).node;
+    const target = app.addNode(canvas.id, { ...image, params: { prompt: `@[product](canvas:${source.id})` } }).node;
+    app.addEdge(canvas.id, { sourceId: source.id, targetId: target.id });
+    const before = store.getSnapshot(canvas.id);
+    const forward = [{ kind: 'delete_node' as const, id: source.id }];
+    const { inverseEdits } = await import('../../../shared/canvasEdits');
+    const inverse = inverseEdits(forward, before.nodes, before.edges);
+    app.edit(canvas.id, forward, 'delete', before.canvas.liveRevision);
+    expect(() => app.edit(canvas.id, inverse, 'stale-undo', before.canvas.liveRevision)).toThrow('画布已更新');
+    const after = app.edit(canvas.id, inverse, 'undo', store.getCanvas(canvas.id).liveRevision);
+    expect(after.edges).toEqual(before.edges);
+    expect(after.nodes.map((n) => n.id).sort()).toEqual(before.nodes.map((n) => n.id).sort());
+    expect(store.getNode(canvas.id, target.id).params).toEqual(target.params);
+  });
+
   it('rolls back the entire compound command and publishes nothing on validation failure', async () => {
     const { app, canvas, store, events } = await setup();
     expect(() => app.batch(canvas.id, { kind: 'compound' }, () => {

@@ -1,6 +1,7 @@
 import type { AnchorRole, AnchorStrength, CanvasNode, CanvasVideoParams } from '../../../shared/canvas';
 import type { CanvasStore } from '../storage/canvasStore';
 import type { SettingsStore } from '../storage/settingsStore';
+import type { ProviderStore } from '../storage/providerStore';
 import { CanvasJobStoreError } from '../storage/canvasJobStore';
 import { readCanvasAsset } from './assets';
 import { replayVideoJob, startVideoJob, type VideoJobSubmission } from './asyncJobManager';
@@ -16,6 +17,7 @@ export { replayVideoJob } from './asyncJobManager';
 export interface VideoNodeOptions {
   canvasStore: CanvasStore; settingsStore: SettingsStore; dataRoot: string; canvasId: string; node: CanvasNode;
   providerId?: string; operationId?: string; signal?: AbortSignal; waitForCompletion?: boolean;
+  providerStore?: ProviderStore;
 }
 interface Reference { asset: string; type: string; targetHandle: string | null; role?: string }
 
@@ -82,7 +84,7 @@ export function startVideoNode(options: VideoNodeOptions): VideoJobSubmission {
   const prepared: VideoGenerateParams = { prompt: hint ? `${prompt}\n${hint}` : prompt, duration: params.duration || '5s', ratio: params.ratio || '16:9', model: params.model, cameraMotion: params.cameraMotion || 'none', camera };
   const driverId = params.provider || providerId || 'mock';
   const input = JSON.parse(JSON.stringify({ request: { providerId }, driverId, node, params: prepared, references,
-    requiredAssetPaths: captured.requiredAssetPaths })) as Record<string, unknown>;
+    requiredAssetPaths: captured.requiredAssetPaths, autoProvider: !params.provider && !providerId })) as Record<string, unknown>;
   return startVideoJob({ ...options, nodeId: node.id, driverId, input, inputHash: inputHash(node, upstream),
     loadParams: async (signal) => {
       const saved = input.params as unknown as VideoGenerateParams;

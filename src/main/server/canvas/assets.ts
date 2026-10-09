@@ -6,7 +6,7 @@ import type { CanvasAssetKind } from '../../../shared/canvasAssets';
 
 export interface CanvasAssetFileInput { name: string; bytes: Uint8Array; mimeType: string; kind: CanvasAssetKind }
 export interface StagedCanvasAsset { id: string; path: string; byteSize: number; contentHash: string; mimeType: string; kind: CanvasAssetKind }
-export interface StagedCanvasAssets { files: StagedCanvasAsset[]; keep(): void; discard(): Promise<void> }
+export interface StagedCanvasAssets { files: StagedCanvasAsset[]; prepareCommit(): void; keep(): void; discard(): Promise<void> }
 
 function segment(value: string): void {
   if (!value || value === '.' || value === '..' || /[\\/:<>"|?*%#]/.test(value) || [...value].some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127) || /[. ]$/.test(value) ||
@@ -161,6 +161,13 @@ export async function stageCanvasAssets(dataRoot: string, canvasId: string, file
     signal?.addEventListener('abort', abortListener, { once: true });
     return {
       files: staged,
+      prepareCommit() {
+        signal?.throwIfAborted();
+        if (disposal) throw new Error('Discarded assets cannot be committed');
+        // Commit observers may abort the request after SQLite has committed. At this boundary,
+        // only the caller's finally block owns rollback cleanup; abort must not erase a committed file.
+        signal?.removeEventListener('abort', abortListener);
+      },
       keep() {
         if (kept) return;
         if (disposal) throw new Error('Discarded assets cannot be published');

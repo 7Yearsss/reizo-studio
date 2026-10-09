@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Play, Plus, Trash2 } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Play, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import type { Schedule, Thought } from '../../shared/schedule';
 import { SCHEDULE_PRESETS } from '../../shared/schedule';
 import * as api from '../api';
@@ -8,6 +8,9 @@ import * as tabStore from '../state/tabStore';
 import * as uiStore from '../state/uiStore';
 import { useSkillStore } from '../state/useSkillStore';
 import { cn } from '../lib/cn';
+import { nanoid } from 'nanoid';
+import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert';
+import { Button } from '../components/ui/button';
 
 export default function AutomationPage() {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
@@ -17,16 +20,51 @@ export default function AutomationPage() {
   const [intervalMs, setIntervalMs] = useState(SCHEDULE_PRESETS[2].intervalMs);
   const skills = useSkillStore().skills;
   const [skillId, setSkillId] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  const [readError, setReadError] = useState('');
+  const inFlight = useRef(false);
+  const mounted = useRef(true);
+  const readSequence = useRef(0);
+  const createAttempt = useRef<{ signature: string; id: string } | null>(null);
+  const runAttempts = useRef(new Map<string, string>());
+  const promptRevision = useRef(0);
+  const thoughtRevision = useRef(0);
+  const [confirmRun, setConfirmRun] = useState('');
 
-  async function refresh() {
-    const [scheduleData, thoughtData] = await Promise.all([api.listSchedules(), api.listThoughts()]);
-    setSchedules(scheduleData.schedules);
-    setThoughts(thoughtData);
-  }
+  const refresh = useCallback(async (background = false) => {
+    const sequence = ++readSequence.current;
+    if (!background) setLoading(true);
+    const [scheduleData, thoughtData] = await Promise.allSettled([api.listSchedules(), api.listThoughts()]);
+    if (!mounted.current || sequence !== readSequence.current) return;
+    if (scheduleData.status === 'fulfilled') {
+      setSchedules(scheduleData.value.schedules);
+      for (const schedule of scheduleData.value.schedules) {
+        const id = runAttempts.current.get(schedule.id);
+        if (id && [schedule.pendingRun?.operationId, schedule.activeExecution?.operationId, schedule.lastRunOperationId].includes(id)) { runAttempts.current.delete(schedule.id); setConfirmRun((current) => current === schedule.id ? '' : current); }
+      }
+    }
+    if (thoughtData.status === 'fulfilled') setThoughts(thoughtData.value);
+    const failed = [scheduleData, thoughtData].find((result) => result.status === 'rejected');
+    setReadError(failed?.status === 'rejected' ? failed.reason instanceof Error ? failed.reason.message : '列表读取失败，请重试' : '');
+    setLoading(false);
+  }, []);
+
+  const perform = async (key: string, action: () => Promise<void>) => {
+    if (inFlight.current) return;
+    inFlight.current = true; setBusy(key); setError('');
+    try { await action(); }
+    catch (error) { if (mounted.current) setError(error instanceof Error ? error.message : '操作未完成，请重试'); }
+    finally { inFlight.current = false; if (mounted.current) setBusy(''); }
+  };
 
   useEffect(() => {
+    mounted.current = true;
     void refresh();
-  }, []);
+    const timer = setInterval(() => { if (document.visibilityState !== 'hidden' && !inFlight.current) void refresh(true); }, 15_000);
+    return () => { mounted.current = false; clearInterval(timer); };
+  }, [refresh]);
 
   return (
     <div className="flex h-full min-w-0">
@@ -37,8 +75,9 @@ export default function AutomationPage() {
         </header>
         <div className="px-3 pb-3">
           <textarea
+            aria-label="新想法"
             value={thoughtDraft}
-            onChange={(e) => setThoughtDraft(e.target.value)}
+            onChange={(e) => { ++thoughtRevision.current; setThoughtDraft(e.target.value); }}
             placeholder="记一条想法…"
             rows={3}
             className="w-full resize-none rounded-2xl bg-paper px-3 py-2 text-sm text-ink outline-none"
@@ -46,17 +85,22 @@ export default function AutomationPage() {
           <button
             type="button"
             className="mt-2 text-xs text-accent"
-            onClick={async () => {
+            disabled={!thoughtDraft.trim() || Boolean(busy)}
+            onClick={() => void perform('thought:create', async () => {
               if (!thoughtDraft.trim()) return;
-              await api.createThought(thoughtDraft.trim());
-              setThoughtDraft('');
+              const revision = thoughtRevision.current;
+              const thought = await api.createThought(thoughtDraft.trim());
+              if (!mounted.current) return;
+              ++readSequence.current; setThoughts((current) => [thought, ...current]);
+              if (thoughtRevision.current === revision) setThoughtDraft('');
               await refresh();
-            }}
+            })}
           >
-            保存想法
+            {busy === 'thought:create' ? '正在保存' : '保存想法'}
           </button>
         </div>
         <div className="min-h-0 flex-1 space-y-2 overflow-auto px-3 pb-4">
+          {loading && !thoughts.length ? <p role="status" className="px-1 text-xs text-ink-muted">正在读取想法…</p> : null}
           {thoughts.map((thought) => (
             <div key={thought.id} className="rounded-2xl border border-line bg-paper-raised p-3">
               <p className="text-sm text-ink">{thought.content}</p>
@@ -64,22 +108,26 @@ export default function AutomationPage() {
                 <button
                   type="button"
                   className="text-[11px] text-accent"
-                  onClick={async () => {
+                  disabled={Boolean(busy)}
+                  onClick={() => void perform(`thought:${thought.id}`, async () => {
                     const session = await chatStore.createSession(thought.content.slice(0, 40));
                     uiStore.setMode('chat');
                     tabStore.openChatTab(session.id, session.title);
                     void chatStore.sendMessage(session.id, thought.content);
-                  }}
+                  })}
                 >
                   讨论
                 </button>
                 <button
                   type="button"
                   className="text-[11px] text-danger"
-                  onClick={async () => {
+                  disabled={Boolean(busy)}
+                  onClick={() => void perform(`thought:${thought.id}`, async () => {
                     await api.deleteThought(thought.id);
+                    if (!mounted.current) return;
+                    ++readSequence.current; setThoughts((current) => current.filter((item) => item.id !== thought.id));
                     await refresh();
-                  }}
+                  })}
                 >
                   删除
                 </button>
@@ -93,22 +141,26 @@ export default function AutomationPage() {
         <header className="flex items-center justify-between px-6 py-4">
           <div>
             <h1 className="text-lg font-semibold">自动化</h1>
-            <p className="mt-1 text-xs text-ink-muted">按间隔在本机自动跑一轮对话。</p>
+            <p className="mt-1 text-xs text-ink-muted">按间隔在本机调度，使用当前模型供应商，费用以其账单为准。</p>
           </div>
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="刷新自动化和想法" disabled={loading || Boolean(busy)} onClick={() => void refresh()}><RefreshCw /></Button>
         </header>
+        {error || readError ? <div className="px-6 pb-3"><Alert variant="destructive"><AlertTitle>{error ? '操作未完成' : '自动化列表未能更新'}</AlertTitle><AlertDescription className="min-w-0 [overflow-wrap:anywhere]">{error || readError}<Button type="button" variant="ghost" size="xs" disabled={loading || Boolean(busy)} onClick={() => { setError(''); void refresh(); }}>重新读取</Button></AlertDescription></Alert></div> : null}
         <div className="border-b border-line px-6 pb-4">
           <textarea
+            aria-label="自动化任务内容"
             value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
+            onChange={(e) => { ++promptRevision.current; setPrompt(e.target.value); }}
             placeholder="到期后让 Agent 做什么…"
             rows={2}
-            className="w-full resize-none rounded-2xl bg-sidebar px-3 py-2 text-sm text-ink outline-none"
+            className="w-full resize-none rounded-2xl bg-sidebar px-3 py-2 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <select
+              aria-label="自动化运行间隔"
               value={intervalMs}
               onChange={(e) => setIntervalMs(Number(e.target.value))}
-              className="rounded-full bg-sidebar px-3 py-1.5 text-xs text-ink outline-none"
+              className="rounded-full bg-sidebar px-3 py-1.5 text-xs text-ink outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               {SCHEDULE_PRESETS.map((preset) => (
                 <option key={preset.id} value={preset.intervalMs}>
@@ -117,9 +169,10 @@ export default function AutomationPage() {
               ))}
             </select>
             <select
+              aria-label="自动化使用的技能"
               value={skillId}
               onChange={(e) => setSkillId(e.target.value)}
-              className="rounded-full bg-sidebar px-3 py-1.5 text-xs text-ink outline-none"
+              className="rounded-full bg-sidebar px-3 py-1.5 text-xs text-ink outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <option value="">不绑定技能</option>
               {skills.map((skill) => (
@@ -131,20 +184,28 @@ export default function AutomationPage() {
             <button
               type="button"
               className="inline-flex items-center gap-1 rounded-full bg-ink px-3 py-1.5 text-xs text-paper-raised"
-              onClick={async () => {
+              disabled={!prompt.trim() || Boolean(busy)}
+              onClick={() => void perform('schedule:create', async () => {
                 if (!prompt.trim()) return;
-                await api.createSchedule({ prompt: prompt.trim(), intervalMs, skillId: skillId || undefined });
-                setPrompt('');
+                const input = { prompt: prompt.trim(), intervalMs, skillId: skillId || undefined };
+                const signature = JSON.stringify(input);
+                if (!createAttempt.current || createAttempt.current.signature !== signature) createAttempt.current = { signature, id: nanoid() };
+                const revision = promptRevision.current;
+                const schedule = await api.createSchedule({ ...input, operationId: createAttempt.current.id });
+                if (!mounted.current) return;
+                ++readSequence.current; setSchedules((current) => [schedule, ...current.filter((item) => item.id !== schedule.id)]);
+                createAttempt.current = null;
+                if (promptRevision.current === revision) setPrompt('');
                 await refresh();
-              }}
+              })}
             >
               <Plus size={12} />
-              新建自动化
+              {busy === 'schedule:create' ? '正在创建' : '新建自动化'}
             </button>
           </div>
         </div>
         <div className="min-h-0 flex-1 space-y-2 overflow-auto px-6 py-4">
-          {schedules.length === 0 && <p className="text-sm text-ink-muted">还没有定时任务。</p>}
+          {schedules.length === 0 && <p role={loading ? 'status' : undefined} className="text-sm text-ink-muted">{loading ? '正在读取自动化…' : readError ? '重新读取后可查看已有自动化。' : '还没有定时任务。'}</p>}
           {schedules.map((schedule) => (
             <div key={schedule.id} className="rounded-2xl border border-line bg-paper-raised p-4">
               <div className="flex items-start gap-3">
@@ -152,44 +213,57 @@ export default function AutomationPage() {
                   <p className="font-medium text-ink">{schedule.name}</p>
                   <p className="mt-1 text-sm text-ink-muted">{schedule.prompt}</p>
                   <p className="mt-2 text-[11px] text-ink-muted">
-                    {schedule.enabled ? '运行中' : '已暂停'} · 下次 {new Date(schedule.nextRunAt).toLocaleString()} · 已跑 {schedule.runCount} 次
+                    {!Number.isSafeInteger(schedule.intervalMs) || schedule.intervalMs < 60_000 ? '配置无效，不会运行' : schedule.activeExecution ? '执行中' : schedule.pendingRun ? '等待手动执行' : schedule.lastOutcome === 'interrupted' && !schedule.enabled ? '已中断并暂停' : schedule.enabled ? '已启用' : '已暂停'}{schedule.enabled && !schedule.activeExecution && !schedule.pendingRun ? ` · 下次 ${new Date(schedule.nextRunAt).toLocaleString()}` : ''} · 已尝试 {schedule.runCount} 次{schedule.once ? ' · 仅运行一次' : ''}
                     {schedule.lastError ? ` · 上次失败：${schedule.lastError}` : ''}
                   </p>
+                  {(schedule.activeExecution ? schedule.activeExecution.sessionId : schedule.lastSessionId) ? <Button type="button" variant="ghost" size="xs" className="mt-2" onClick={() => { const sessionId = schedule.activeExecution ? schedule.activeExecution.sessionId : schedule.lastSessionId; if (!sessionId) return; uiStore.setMode('chat'); tabStore.openChatTab(sessionId, schedule.name); }}>{schedule.activeExecution ? '查看本次会话' : '查看上次结果'}</Button> : null}
+                  {schedule.lastOutcome === 'interrupted' && !schedule.activeExecution ? <p className="mt-2 text-xs leading-relaxed text-ink-muted">上次结果尚未确认，未自动重新提交。先查看关联会话，再决定是否重试。</p> : null}
+                  {confirmRun === schedule.id && !schedule.activeExecution && !schedule.pendingRun ? <div className="mt-3 flex flex-col gap-2 rounded-lg bg-paper p-3"><p className="text-xs leading-relaxed text-ink-muted">按当前自动化配置手动运行一次，可能产生模型费用。已暂停的周期计划保持暂停。</p><div className="flex justify-end gap-1"><Button type="button" variant="ghost" size="xs" disabled={Boolean(busy)} onClick={() => setConfirmRun('')} autoFocus>取消</Button><Button type="button" size="xs" disabled={Boolean(busy)} onClick={() => void perform(`schedule:${schedule.id}`, async () => {
+                    let id = runAttempts.current.get(schedule.id); if (!id) { id = nanoid(); runAttempts.current.set(schedule.id, id); }
+                    const updated = await api.requestScheduleRun(schedule.id, id);
+                    if (!mounted.current) return;
+                    runAttempts.current.delete(schedule.id); setConfirmRun('');
+                    ++readSequence.current; setSchedules((current) => current.map((item) => item.id === updated.id ? updated : item));
+                    await refresh();
+                  })}>{busy === `schedule:${schedule.id}` ? '正在提交' : schedule.lastOutcome === 'failed' || schedule.lastOutcome === 'interrupted' ? '确认手动重试' : '确认运行一次'}</Button></div></div> : null}
                 </div>
                 <button
                   type="button"
-                  title="立即运行一次（把下次时间提前到现在）"
+                  title={schedule.lastOutcome === 'failed' || schedule.lastOutcome === 'interrupted' ? '手动重试，先确认费用' : '运行一次，先确认费用'}
+                  aria-label={`手动运行${schedule.name}`}
+                  disabled={Boolean(busy) || Boolean(schedule.activeExecution || schedule.pendingRun) || !Number.isSafeInteger(schedule.intervalMs) || schedule.intervalMs < 60_000}
                   className="rounded-full p-2 text-ink-muted hover:bg-paper-inset hover:text-ink"
-                  onClick={async () => {
-                    await api.updateSchedule(schedule.id, {
-                      enabled: true,
-                      nextRunAt: new Date().toISOString(),
-                    });
-                    await refresh();
-                  }}
+                  onClick={() => setConfirmRun((current) => current === schedule.id ? '' : schedule.id)}
                 >
                   <Play size={14} />
                 </button>
                 <button
                   type="button"
-                  onClick={async () => {
-                    await api.updateSchedule(schedule.id, { enabled: !schedule.enabled });
+                  disabled={Boolean(busy) || !schedule.enabled && (!Number.isSafeInteger(schedule.intervalMs) || schedule.intervalMs < 60_000)}
+                  onClick={() => void perform(`schedule:${schedule.id}`, async () => {
+                    const updated = await api.updateSchedule(schedule.id, { enabled: schedule.pendingRun ? false : !schedule.enabled });
+                    if (!mounted.current) return;
+                    ++readSequence.current; setSchedules((current) => current.map((item) => item.id === updated.id ? updated : item));
                     await refresh();
-                  }}
+                  })}
                   className={cn(
                     'rounded-full px-3 py-1 text-[11px]',
                     schedule.enabled ? 'bg-success-bg text-success' : 'bg-paper-inset text-ink-muted',
                   )}
                 >
-                  {schedule.enabled ? '暂停' : '启用'}
+                  {schedule.pendingRun && !schedule.enabled ? '取消待执行' : schedule.enabled ? '暂停后续执行' : '启用'}
                 </button>
                 <button
                   type="button"
                   className="rounded-full p-2 text-ink-muted hover:text-danger"
-                  onClick={async () => {
+                  disabled={Boolean(busy) || Boolean(schedule.activeExecution)}
+                  aria-label={`删除${schedule.name}`}
+                  onClick={() => void perform(`schedule:${schedule.id}`, async () => {
                     await api.deleteSchedule(schedule.id);
+                    if (!mounted.current) return;
+                    ++readSequence.current; setSchedules((current) => current.filter((item) => item.id !== schedule.id));
                     await refresh();
-                  }}
+                  })}
                 >
                   <Trash2 size={14} />
                 </button>

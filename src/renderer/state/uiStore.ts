@@ -1,5 +1,5 @@
 export type SidebarMode = 'chat' | 'projects' | 'skills' | 'artifacts' | 'automation' | 'settings';
-export type RightPanelTab = 'canvas' | 'artifacts' | 'files' | 'git' | 'terminal';
+export type RightPanelTab = 'canvas' | 'sheets' | 'documents' | 'html' | 'presentations' | 'artifacts' | 'files' | 'git' | 'terminal';
 
 export interface UiState {
   mode: SidebarMode;
@@ -67,7 +67,7 @@ function readSidebarWidth(): number {
 function readRightTab(): RightPanelTab | null {
   if (typeof localStorage === 'undefined') return null;
   const raw = localStorage.getItem(RIGHT_TAB_KEY);
-  if (raw === 'canvas' || raw === 'artifacts' || raw === 'files' || raw === 'git' || raw === 'terminal') {
+  if (raw === 'canvas' || raw === 'sheets' || raw === 'documents' || raw === 'html' || raw === 'presentations' || raw === 'artifacts' || raw === 'files' || raw === 'git' || raw === 'terminal') {
     return raw;
   }
   if (localStorage.getItem(CANVAS_KEY) === '1') return 'canvas';

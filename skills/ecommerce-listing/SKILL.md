@@ -17,7 +17,7 @@ category: marketing
 - **不碰记忆**：不调用 `memory_read`/`memory_write`——旧记忆会带进别的产品信息。
 - **输出要短**：耗时大头是你自己吐字。Listing 文案紧凑写（标题一行、五点每条 ≤25 词）；每张图的 `add_node` prompt 控制在 80 个英文词以内；推理别展开写草稿。
 - 每一张成品图都是一个画布 image 节点（**严禁 asProposal**），prompt 里必须内嵌 `@[产品图](canvas:<原产品图节点id>)` + 按需的资产节点引用。`add_node` 会按引用自动连边，**不需要再 `connect_nodes`**。
-- **成品一律 `draft: true`**：所有成品节点建 `add_node` 时传 `draft: true`（走快档草稿模型秒出预览）；**资产节点不传 draft**（身份证/人物/场景是一致性锚点，必须精渲档）。出完后告诉用户：图上标「草稿」，点节点上「精渲」可换精渲模型重渲染；用户要「全部精渲」就对其 `update_node` 传 `draft: false` 再 `run_node`（或 `run_graph` 批量）。
+- **完整交付使用精渲版本**：成品节点传 `draft: false`，与 `contract.json` 的 `requireFinal: true` 一致；资产节点也使用精渲档。只有用户明确要求快速预览时才传 `draft: true`，并说明它仍是草稿、尚未满足最终交付条件。不要默认先草稿再精渲而重复生成；方向已确认时直接生成最终版本。已有草稿在用户要求交付成品后，才用 `update_node` 设置 `draft: false` 并补跑对应节点，再执行 `check_delivery`。
 
 ## 槽位
 
@@ -136,3 +136,10 @@ category: marketing
 - 拼多多/抖音风促销词放副图，主图保持合规白底。
 - 图上文字质检由用户画布肉眼完成：出图后**不要**用 `read_file` 或脚本读图片二进制（只支持 UTF-8，必报错）。
 - 语言默认跟随销售区域（美/乐→英/日，国内→中文）。
+
+
+## 程序化交付
+
+每项产物可附 `geometry: { aspectRatio?, width?, height?, minWidth?, minHeight? }`。按用户确认的平台与镜头目录中的明确规格填写：指定正方形最低 800px 时填 `aspectRatio: '1:1', minWidth: 800, minHeight: 800`；指定 750×750、1080×1440 或 1464×600 时填相应 `width`、`height`。不要仅凭角色名字、自由文本平台名或视觉印象猜规格；未明确的条件留空。`check_delivery` 从真实图片字节核对这些条件，产品语义、图中文字、白底/水印与视觉合规仍需人工验收。
+
+收齐上述选择后，先调用 `plan_delivery` 保存 `contract.json` 规定的输入和明确的产物角色、数量及必要素材引用。中断后使用 `read_delivery_plans` 读取原计划。成品就绪后，调用 `check_delivery` 提交真实 `assetId` 清单；仅当 `complete: true` 时报告交付完成，否则说明缺项并只修复相应产物。不得把草稿、缺失文件或同一文件重复计为多个成品。

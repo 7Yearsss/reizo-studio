@@ -1,0 +1,472 @@
+{
+  "repository": "https://github.com/presenton/presenton",
+  "commit": "2b5078ba266c67b16bc4f97943081e46d6dc0f21",
+  "license": "Apache-2.0",
+  "files": [
+    {
+      "source": "components/slide-editor/types.ts",
+      "target": "types.ts",
+      "sourceSha256": "7b4d22da4d93838ba9b60e627d643f767b1fdcdf33602367431ba88f865b9072"
+    },
+    {
+      "source": "components/slide-editor/charts/chart-data.ts",
+      "target": "charts/chart-data.ts",
+      "sourceSha256": "c5f5e9d6f26c2b4bc37634e2ffbc9ca908a551bd09459798af946af22eb9c547"
+    },
+    {
+      "source": "components/slide-editor/charts/ChartColorPalette.tsx",
+      "target": "charts/ChartColorPalette.tsx",
+      "sourceSha256": "39d63ad582cd9410ed2d1b9e3f51d5cfe5df59815d5de05eb63c047d5cf1a1d8"
+    },
+    {
+      "source": "components/slide-editor/charts/ChartEditorContent.tsx",
+      "target": "charts/ChartEditorContent.tsx",
+      "sourceSha256": "eaddfb801b8017571a8e6302464a4d55f20f8ab20c0301170b9d8458cd96a858"
+    },
+    {
+      "source": "components/slide-editor/charts/ChartToolbar.tsx",
+      "target": "charts/ChartToolbar.tsx",
+      "sourceSha256": "7eefa369e25564fc9972ddd55b81699498ca919789ea9fd52c976a30e258cc46"
+    },
+    {
+      "source": "components/slide-editor/charts/TemplateV2ChartJsElement.tsx",
+      "target": "charts/TemplateV2ChartJsElement.tsx",
+      "sourceSha256": "7b6b39a093ce9358cbd645d892bbe99d8611fba3b9b9ca98f6bcb3c4bae1633d"
+    },
+    {
+      "source": "components/slide-editor/clipboard/clipboard.ts",
+      "target": "clipboard/clipboard.ts",
+      "sourceSha256": "23252eb4405a9cf60e4d5dda859964d1209290a85f14f8479e587bda86c40a7d"
+    },
+    {
+      "source": "components/slide-editor/clipboard/useClipboard.ts",
+      "target": "clipboard/useClipboard.ts",
+      "sourceSha256": "88ae1b07b74b2978895a41c81c5bb1fb5e16726521316d42031daa7f45f8e77e"
+    },
+    {
+      "source": "components/slide-editor/events/events.ts",
+      "target": "events/events.ts",
+      "sourceSha256": "1b56df65ce618e788aacf5f267abe1a9837ce7f7be46aed9e83c6bb1ee21b21d"
+    },
+    {
+      "source": "components/slide-editor/images/IconToolbar.tsx",
+      "target": "images/IconToolbar.tsx",
+      "sourceSha256": "f0b946f444d2e93d2a2f48cd002a38e6e04fe2cbaf25210c7e6dbae28cf7d23d"
+    },
+    {
+      "source": "components/slide-editor/images/ImageToolbar.tsx",
+      "target": "images/ImageToolbar.tsx",
+      "sourceSha256": "30bc6501479a8858ff889c59f9b97a7161b64336430b3840246edf44b338cfeb"
+    },
+    {
+      "source": "components/slide-editor/importing/template-v2-import.ts",
+      "target": "importing/template-v2-import.ts",
+      "sourceSha256": "e602b01378b9ce481a72aa403651d49b0d9e301b1f42ed7a0ed1aa1150d3dc4c"
+    },
+    {
+      "source": "components/slide-editor/infographics/infographic-canvas-target.ts",
+      "target": "infographics/infographic-canvas-target.ts",
+      "sourceSha256": "10d67d8c86a305bee7376ffcc37045bd1fcd49a1a5630634a5dd0a86c3d40a37"
+    },
+    {
+      "source": "components/slide-editor/infographics/infographic-editing.ts",
+      "target": "infographics/infographic-editing.ts",
+      "sourceSha256": "4dd9e59eb7ca75f2a97db9a0db0c9a0ee083c57ef831997a012256391a01eebc"
+    },
+    {
+      "source": "components/slide-editor/infographics/infographic-icons.ts",
+      "target": "infographics/infographic-icons.ts",
+      "sourceSha256": "6d0e0b63c3331823c0af6c8287bc61b407895c353f1d660c49d54a7517847dab"
+    },
+    {
+      "source": "components/slide-editor/infographics/infographic-sizing.ts",
+      "target": "infographics/infographic-sizing.ts",
+      "sourceSha256": "70acca4b20e5f7aba594baa63dedcd5a18821021721b91e702d8dca259f402e2"
+    },
+    {
+      "source": "components/slide-editor/infographics/InfographicEditorContent.tsx",
+      "target": "infographics/InfographicEditorContent.tsx",
+      "sourceSha256": "b1cdb9a93177bd7ec70cb9c34f57bc01cb55fac7272ceca2413d36fee9b9cd93"
+    },
+    {
+      "source": "components/slide-editor/infographics/InfographicItemToolbar.tsx",
+      "target": "infographics/InfographicItemToolbar.tsx",
+      "sourceSha256": "23ac49e3ce5780b1ed857ce3d33af5657fcaa015585699724dbbb1754fe2f1f5"
+    },
+    {
+      "source": "components/slide-editor/infographics/InfographicPlainTextEditor.tsx",
+      "target": "infographics/InfographicPlainTextEditor.tsx",
+      "sourceSha256": "e9009f5a1ce23c20bd22c2d623fd526432d84e393bfaa78fd78ac4c558bcfaf9"
+    },
+    {
+      "source": "components/slide-editor/insert/insert-elements.ts",
+      "target": "insert/insert-elements.ts",
+      "sourceSha256": "6529c05e30edb3741de8c8187f8a384cd7051186e107a2d58518c75bf8b2d945"
+    },
+    {
+      "source": "components/slide-editor/layout/ContainerToolbarControls.tsx",
+      "target": "layout/ContainerToolbarControls.tsx",
+      "sourceSha256": "37afa07b4672826097d439ac52ba2909526b0d0b4924e1a61b44f2be3fddcbb1"
+    },
+    {
+      "source": "components/slide-editor/layout/flowLayout.ts",
+      "target": "layout/flowLayout.ts",
+      "sourceSha256": "abb5c161b228a598853b77b162566943e74fd41563794fb4e797727546f1d4f9"
+    },
+    {
+      "source": "components/slide-editor/layout/InfographicToolbarControls.tsx",
+      "target": "layout/InfographicToolbarControls.tsx",
+      "sourceSha256": "dac7651572600ec141542ca28bdaf67136d6521b05d3e20ad0c591a551ab1f17"
+    },
+    {
+      "source": "components/slide-editor/layout/layoutItems.ts",
+      "target": "layout/layoutItems.ts",
+      "sourceSha256": "2e6c2a43877fc1771580c16b71bd6c7d5549417cc5d68fadf83cf0da3abbacd4"
+    },
+    {
+      "source": "components/slide-editor/layout/layoutResize.ts",
+      "target": "layout/layoutResize.ts",
+      "sourceSha256": "92811f8978b8ef9aab079bd6cafbc322d57ffa55ee27591ec7eeec2ee88bed14"
+    },
+    {
+      "source": "components/slide-editor/layout/LayoutToolbar.tsx",
+      "target": "layout/LayoutToolbar.tsx",
+      "sourceSha256": "ba78c171d47cbe86a828a8443f0998c833828d7ca220c68281de5df64542e961"
+    },
+    {
+      "source": "components/slide-editor/layout/layoutToolbarTarget.ts",
+      "target": "layout/layoutToolbarTarget.ts",
+      "sourceSha256": "81b512f4b11582b75640ff1dc9bfe93792ec7abc13ab51149a241ba6f41b4982"
+    },
+    {
+      "source": "components/slide-editor/layout/wrappedFlexLayout.ts",
+      "target": "layout/wrappedFlexLayout.ts",
+      "sourceSha256": "bc069473c1dc78da647bf442dbe7df9493dcd5cbe115e4d82983ff1ad64772b1"
+    },
+    {
+      "source": "components/slide-editor/math/LatexRunNode.tsx",
+      "target": "math/LatexRunNode.tsx",
+      "sourceSha256": "869e4ee1d650255dd9e3d26d4e44383b7bfe65467868cad76ab0263cccdabecc"
+    },
+    {
+      "source": "components/slide-editor/model/chart-model.ts",
+      "target": "model/chart-model.ts",
+      "sourceSha256": "ece88d7f053c310908f3c4978ee2b08712fcc052b16106f975b4643bf83cee35"
+    },
+    {
+      "source": "components/slide-editor/model/component-resize.ts",
+      "target": "model/component-resize.ts",
+      "sourceSha256": "8234bb80399d24fef9f2b07b433364581155d6e2c06c0ea527427b98f43570cd"
+    },
+    {
+      "source": "components/slide-editor/model/core.ts",
+      "target": "model/core.ts",
+      "sourceSha256": "6159bda86df6b7fcc366339adb45a750a562ce27698af063bf4960608cda70f5"
+    },
+    {
+      "source": "components/slide-editor/model/design-variables.ts",
+      "target": "model/design-variables.ts",
+      "sourceSha256": "49672e11211bd70ec1bc74ff75e11be70bacf9188ae46a2b82193a3f82b76baf"
+    },
+    {
+      "source": "components/slide-editor/model/element-model.ts",
+      "target": "model/element-model.ts",
+      "sourceSha256": "9ab0235ca15d4b3a35264f1283542caca6afe4b4944383f7493519a5d882e75f"
+    },
+    {
+      "source": "components/slide-editor/model/inserted-content.ts",
+      "target": "model/inserted-content.ts",
+      "sourceSha256": "4357eaaa0db9893efaea7781a88aad0838bbee3c8e71896230c4dc81ae51fc44"
+    },
+    {
+      "source": "components/slide-editor/model/model.ts",
+      "target": "model/model.ts",
+      "sourceSha256": "ab19529cf1e7a5345c9ddb5b13d31177859f704b552c8c6ccd631e4df804d63e"
+    },
+    {
+      "source": "components/slide-editor/model/render-style.ts",
+      "target": "model/render-style.ts",
+      "sourceSha256": "b1e01e0e39b3d5d4e5f99983cc1c1520670421d0ad5fed12f7a0b3555cab146c"
+    },
+    {
+      "source": "components/slide-editor/model/template-v2-group.ts",
+      "target": "model/template-v2-group.ts",
+      "sourceSha256": "ec44e79ea0fffe982ef4cd535998ba8d1c46900374f30e7fc5bcb3172356d969"
+    },
+    {
+      "source": "components/slide-editor/model/template-v2-ungroup.ts",
+      "target": "model/template-v2-ungroup.ts",
+      "sourceSha256": "ca89abf149cc6159b8698696ca3d5ab46f79b1dd66f48a02a5a004875abb2666"
+    },
+    {
+      "source": "components/slide-editor/selection/ComponentActionsMenu.tsx",
+      "target": "selection/ComponentActionsMenu.tsx",
+      "sourceSha256": "641cd5b90bd08b75d20517440e5f50e039e08f07c450e95371ad0e38393588fb"
+    },
+    {
+      "source": "components/slide-editor/selection/layering.ts",
+      "target": "selection/layering.ts",
+      "sourceSha256": "fe3af6f29ced508ec2e41c9b3b2ecc43364065c197c1dd408c43fdbcc3d561d1"
+    },
+    {
+      "source": "components/slide-editor/selection/MultiSelectionToolbar.tsx",
+      "target": "selection/MultiSelectionToolbar.tsx",
+      "sourceSha256": "a463f04afa12534a328dc92f67d580e2e3d79f9b8b720c238842442718d66a32"
+    },
+    {
+      "source": "components/slide-editor/selection/SelectionToolbar.tsx",
+      "target": "selection/SelectionToolbar.tsx",
+      "sourceSha256": "9c12ee7773a4e0fd835cf5d0525f2ba21d02b39526fa34c4c793036102478e80"
+    },
+    {
+      "source": "components/slide-editor/selection/SelectionTransformers.tsx",
+      "target": "selection/SelectionTransformers.tsx",
+      "sourceSha256": "42d7709752dc86b79912ad3787cc35f22fe3528539ea6e55597386ffbc8db55e"
+    },
+    {
+      "source": "components/slide-editor/selection/toolbarPosition.ts",
+      "target": "selection/toolbarPosition.ts",
+      "sourceSha256": "e535383aa3d5485c4e55dfdfb1b3f7c2016c669a61659519f390e059c2c4f467"
+    },
+    {
+      "source": "components/slide-editor/selection/toolbarTarget.ts",
+      "target": "selection/toolbarTarget.ts",
+      "sourceSha256": "6988b8c95cc7daed6abdb05364b5e2f544cd749c06274a56c0f257b4440e0551"
+    },
+    {
+      "source": "components/slide-editor/selection/toolbarTypes.ts",
+      "target": "selection/toolbarTypes.ts",
+      "sourceSha256": "7a752e5babd5f70eac6b6b8f922c1c017c8f388ff9b07b639e9840bdff3f07fe"
+    },
+    {
+      "source": "components/slide-editor/selection/transformSession.ts",
+      "target": "selection/transformSession.ts",
+      "sourceSha256": "bd098e6dd784561b9873ff7337c3bf7df8903069cb83ac19f3a6df0b52e651db"
+    },
+    {
+      "source": "components/slide-editor/shapes/ShapeToolbar.tsx",
+      "target": "shapes/ShapeToolbar.tsx",
+      "sourceSha256": "60b0060a2a147acaddc41769fadd6555abf07e15bb0b87acbd5072dbfe46cbd8"
+    },
+    {
+      "source": "components/slide-editor/shortcuts/editorShortcuts.ts",
+      "target": "shortcuts/editorShortcuts.ts",
+      "sourceSha256": "6eec9556dfe0c83b1e18620ab8a337a88bd2476c74a3ed86f7541e7682829037"
+    },
+    {
+      "source": "components/slide-editor/shortcuts/ShortcutKeys.tsx",
+      "target": "shortcuts/ShortcutKeys.tsx",
+      "sourceSha256": "f17c912990e413753cc2191c14087bf4a7544637bdc87a3f27372809329f60cb"
+    },
+    {
+      "source": "components/slide-editor/state/state.ts",
+      "target": "state/state.ts",
+      "sourceSha256": "7f2052d798dfbf4b1d60534cd4bdfbb80abe468b44107c4969130df1a1cf98dc"
+    },
+    {
+      "source": "components/slide-editor/state/useTemplateV2InlineEditing.ts",
+      "target": "state/useTemplateV2InlineEditing.ts",
+      "sourceSha256": "24b03b1cef591f0c49e946fa56c98bdc3bc32c106676b77840e1b833d4afbd56"
+    },
+    {
+      "source": "components/slide-editor/surface/alignmentGuides.ts",
+      "target": "surface/alignmentGuides.ts",
+      "sourceSha256": "e4368608a94952762fcd9dd46a67a03eb8b923577b2c2523fff00b827cb1ff45"
+    },
+    {
+      "source": "components/slide-editor/surface/componentFrameBounds.ts",
+      "target": "surface/componentFrameBounds.ts",
+      "sourceSha256": "b62e449e77d928ea85081f62024cd7ed2aae12d255f5cd0d58ce155699aa7ae8"
+    },
+    {
+      "source": "components/slide-editor/surface/exportAssets.ts",
+      "target": "surface/exportAssets.ts",
+      "sourceSha256": "5e50a9afc2ba4b7393288a2d412afa96374ab13c553feac49d3f3d972c033d1a"
+    },
+    {
+      "source": "components/slide-editor/surface/fontLoading.ts",
+      "target": "surface/fontLoading.ts",
+      "sourceSha256": "bf4089e7e8e1f928859220c9df67cb865840e8ceff9ae04fd0939fcb563e41cc"
+    },
+    {
+      "source": "components/slide-editor/surface/latestFrameBatch.ts",
+      "target": "surface/latestFrameBatch.ts",
+      "sourceSha256": "7d5fc89574837e89e09b8a457228852e6a8170171e9fa038c000eb2492d438be"
+    },
+    {
+      "source": "components/slide-editor/surface/nodes.tsx",
+      "target": "surface/nodes.tsx",
+      "sourceSha256": "07e4b9d4630a49739b47df52e54fb0e55e79b12bb07865ec0e602fea27f9703d"
+    },
+    {
+      "source": "components/slide-editor/surface/pixelRatio.ts",
+      "target": "surface/pixelRatio.ts",
+      "sourceSha256": "beba6fd3312f351e693cf4f9173fc52386663bdaef6ae36ee30cd075ffcb8141"
+    },
+    {
+      "source": "components/slide-editor/surface/TemplateV2KonvaSlide.tsx",
+      "target": "surface/TemplateV2KonvaSlide.tsx",
+      "sourceSha256": "fd141d513df31dfcaf1659054c2c0c8aad55891b6f502725022f9ed2005440c4"
+    },
+    {
+      "source": "components/slide-editor/tables/table-colors.ts",
+      "target": "tables/table-colors.ts",
+      "sourceSha256": "2fe53b9664bfafb184c5200907c558003080c427ced4aa8bf7a21a9a858f5b12"
+    },
+    {
+      "source": "components/slide-editor/tables/TableInlineEditor.tsx",
+      "target": "tables/TableInlineEditor.tsx",
+      "sourceSha256": "b339c7872e767c8a746a4a7f235ed763dc5defea06f065fb0c003d182392c8ff"
+    },
+    {
+      "source": "components/slide-editor/tables/TableToolbar.tsx",
+      "target": "tables/TableToolbar.tsx",
+      "sourceSha256": "19cb6b11fe8179ba74e3b9f2366b16798e52374c2c63dbbfffe8d90019091198"
+    },
+    {
+      "source": "components/slide-editor/tables/TemplateV2TableElement.tsx",
+      "target": "tables/TemplateV2TableElement.tsx",
+      "sourceSha256": "c8354459e4221b88b7be2852c0bb91937d79c55cfb0ebe258014c2d9d8c4b249"
+    },
+    {
+      "source": "components/slide-editor/tables/useTableCellSelection.ts",
+      "target": "tables/useTableCellSelection.ts",
+      "sourceSha256": "6ddb74356cc6918aeb85096f2d37a1c547f174bddfc0eba3b2f67b9f4bb13cb5"
+    },
+    {
+      "source": "components/slide-editor/text/BulletsToolbar.tsx",
+      "target": "text/BulletsToolbar.tsx",
+      "sourceSha256": "b3126f305a579bfd2276bb2f588e94ae3d0b5c639912868e26b6ed3652478dfd"
+    },
+    {
+      "source": "components/slide-editor/text/css-text.ts",
+      "target": "text/css-text.ts",
+      "sourceSha256": "045432770e6a0fe989536110640f6672f679d43c61b38adaf554f4177922f7bf"
+    },
+    {
+      "source": "components/slide-editor/text/html-text-attrs.ts",
+      "target": "text/html-text-attrs.ts",
+      "sourceSha256": "59f27a8f13a8bb24342d08b984bd3719f174b4a490d04d2d31327564652e694c"
+    },
+    {
+      "source": "components/slide-editor/text/local-fonts.ts",
+      "target": "text/local-fonts.ts",
+      "sourceSha256": "306aca9892642425b35dd4da10cc39b1f044701e403cc05b34416eea0db4ca06"
+    },
+    {
+      "source": "components/slide-editor/text/markdown-text.ts",
+      "target": "text/markdown-text.ts",
+      "sourceSha256": "f1a56cdcb39baa401fdb9d40d972553d821ec044cf0661b33bee2f4c65286ae2"
+    },
+    {
+      "source": "components/slide-editor/text/StaticHtmlTextLayer.tsx",
+      "target": "text/StaticHtmlTextLayer.tsx",
+      "sourceSha256": "ac64e349d31500121c793d8a343353e676823bda04c1e895bf098792a9042738"
+    },
+    {
+      "source": "components/slide-editor/text/template-v2-text-editing.ts",
+      "target": "text/template-v2-text-editing.ts",
+      "sourceSha256": "7f6d96a158d9dd370916bf9384654d4a9ebc8eafd7dbaffb2a8efe3f0ba8235e"
+    },
+    {
+      "source": "components/slide-editor/text/template-v2-text.ts",
+      "target": "text/template-v2-text.ts",
+      "sourceSha256": "d9d78115070e7fb76a21f3c2e2d1fdbd23568e62e704c13a8b43dc7afdc140e3"
+    },
+    {
+      "source": "components/slide-editor/text/TemplateV2InlineEditor.tsx",
+      "target": "text/TemplateV2InlineEditor.tsx",
+      "sourceSha256": "da9d4fc91cc2c403a5587ef7f6ae0d6fcc85a1f48585fb2ec1c837620dc2a967"
+    },
+    {
+      "source": "components/slide-editor/text/text-line-height.ts",
+      "target": "text/text-line-height.ts",
+      "sourceSha256": "68f8d20091f6a95f12396bf99caa3d7d00a16ab0d3623b3eb8b886b587c337c3"
+    },
+    {
+      "source": "components/slide-editor/text/text-runs.ts",
+      "target": "text/text-runs.ts",
+      "sourceSha256": "98f01ad0c7112473a55c0d58fdcbc592a6e9ba669b11d882548860d2d5f278d1"
+    },
+    {
+      "source": "components/slide-editor/text/TextToolbar.tsx",
+      "target": "text/TextToolbar.tsx",
+      "sourceSha256": "5dda0910f8ead89d8391777eb80602a0b35d2095317be3ea37f3ff5ba3a58169"
+    },
+    {
+      "source": "components/slide-editor/text/TiptapInlineTextEditor.tsx",
+      "target": "text/TiptapInlineTextEditor.tsx",
+      "sourceSha256": "41efc4e3e8c82ce9269c270a4adf5585a6ba4a650fc92f0f20c32a6b0b6cc9c3"
+    },
+    {
+      "source": "components/slide-editor/toolbar/DeferredColorInput.tsx",
+      "target": "toolbar/DeferredColorInput.tsx",
+      "sourceSha256": "0297fb5c70aab00bdc75fa7831d5e2a57dcd3e402c2637da72e3b15563917fce"
+    },
+    {
+      "source": "components/slide-editor/toolbar/DesignVariablesToolbar.tsx",
+      "target": "toolbar/DesignVariablesToolbar.tsx",
+      "sourceSha256": "044a922346f509b74fbe2f285b9cd38df1eb8384e48782a51e71c93ebfe1dc35"
+    },
+    {
+      "source": "components/slide-editor/toolbar/ElementToolbar.tsx",
+      "target": "toolbar/ElementToolbar.tsx",
+      "sourceSha256": "6dc98ce521ca4732972ed94054452bafb5577ff8251844caaa70f73efe6b12f9"
+    },
+    {
+      "source": "components/slide-editor/toolbar/FloatingToolbar.tsx",
+      "target": "toolbar/FloatingToolbar.tsx",
+      "sourceSha256": "2d28c7c7f824b0ae1c87d1110cc17f4918fa56bc5bab3a1f014ed7f71cf79561"
+    },
+    {
+      "source": "components/slide-editor/toolbar/inlineStyles.ts",
+      "target": "toolbar/inlineStyles.ts",
+      "sourceSha256": "04e53feaacc333cdcdda742ea8f001d085efed98da8ff2a78e7ff9a9a2f76c8d"
+    },
+    {
+      "source": "components/slide-editor/toolbar/numericInput.ts",
+      "target": "toolbar/numericInput.ts",
+      "sourceSha256": "af4e65bcee01b1bc3bb8f59264e3fcd51d3fbb53fe4963bb41312aa80e05360d"
+    },
+    {
+      "source": "components/slide-editor/toolbar/OpacitySwatchIcon.tsx",
+      "target": "toolbar/OpacitySwatchIcon.tsx",
+      "sourceSha256": "3b8ed7f95e3358845f94fc6884072b77bfa7e443e519d2392c764641e2f2c4ef"
+    },
+    {
+      "source": "components/slide-editor/utils/color.ts",
+      "target": "utils/color.ts",
+      "sourceSha256": "9207f62dd77701e8d7073a1398a0d9565dfcef73c5dd68e0cfaecaf4e8042b16"
+    },
+    {
+      "source": "lib/math.ts",
+      "target": "lib/math.ts",
+      "sourceSha256": "8f4e0f4de67c69891e1030b7f0ef46cfe771d76411f54dffd5d2d054931acbfd"
+    },
+    {
+      "source": "lib/template-theme.ts",
+      "target": "lib/template-theme.ts",
+      "sourceSha256": "4fe29bca14fcfab6af8b469d778fd80035c27515bd8557f10e37775d3aa0bd47"
+    },
+    {
+      "source": "lib/svg-color.ts",
+      "target": "lib/svg-color.ts",
+      "sourceSha256": "9f7f735f3ea7d4ebe54dd3476f59f5916e44404661946876a0e1a0586ee429c9"
+    },
+    {
+      "source": "app/hooks/useNearViewport.ts",
+      "target": "hooks/useNearViewport.ts",
+      "sourceSha256": "ac32cb1978c9b8de13cff6f86ff9ae795294d9750b3f312a8a288fc35f411a8d"
+    },
+    {
+      "source": "components/ui/dropdown-menu.tsx",
+      "target": "ui/dropdown-menu.tsx",
+      "sourceSha256": "54e9a0bdf36a44725b2e98ebfa2944f2dcddbf08540b7a1ac44b48f4bd746ac1"
+    },
+    {
+      "source": "lib/chart-browser.ts",
+      "target": "lib/chart-browser.ts",
+      "sourceSha256": "4fe35b0d5ad73e3883da0209f3f19efaea5b34aa2e9c4c0037a54e49a1f593a4"
+    }
+  ]
+}

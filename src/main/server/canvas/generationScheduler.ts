@@ -4,6 +4,7 @@ import { canvasWorkSignal } from './workLifecycle';
 export interface GenerationSchedulerOptions {
   globalLimit?: number;
   providerLimit?: number;
+  reservedInteractiveSlots?: number;
   signal?: AbortSignal;
 }
 
@@ -15,6 +16,7 @@ export class GenerationSchedulerClosedError extends Error {
 type Release = () => void;
 interface WaitingPermit {
   providerId: string;
+  interactive: boolean;
   signal?: AbortSignal;
   resolve: (release: Release) => void;
   reject: (error: unknown) => void;
@@ -31,9 +33,11 @@ function abortError(signal: AbortSignal): unknown {
 export function createGenerationScheduler(options: GenerationSchedulerOptions = {}) {
   const globalLimit = options.globalLimit ?? 8;
   const providerLimit = options.providerLimit ?? 4;
+  const reserved = options.reservedInteractiveSlots ?? 0;
   if (!Number.isSafeInteger(globalLimit) || globalLimit < 1 || !Number.isSafeInteger(providerLimit) || providerLimit < 1) {
     throw new RangeError('Generation limits must be positive integers');
   }
+  if (!Number.isSafeInteger(reserved) || reserved < 0 || reserved >= globalLimit) throw new RangeError('Reserved slots must be below the global limit');
   const waiting: WaitingPermit[] = [];
   const active = new Set<WaitingPermit>();
   const byProvider = new Map<string, number>();
@@ -43,7 +47,11 @@ export function createGenerationScheduler(options: GenerationSchedulerOptions = 
   function drain(): void {
     while (!closed && active.size < globalLimit) {
       // Preserve FIFO among eligible requests, allowing another provider to use free capacity.
-      const index = waiting.findIndex((entry) => !entry.signal?.aborted && (byProvider.get(entry.providerId) ?? 0) < providerLimit);
+      const backgroundCount = [...active].filter((entry) => !entry.interactive).length;
+      const eligible = (entry: WaitingPermit) => !entry.signal?.aborted && (byProvider.get(entry.providerId) ?? 0) < providerLimit &&
+        (entry.interactive || backgroundCount < globalLimit - reserved);
+      const interactiveIndex = waiting.findIndex((entry) => entry.interactive && eligible(entry));
+      const index = interactiveIndex >= 0 ? interactiveIndex : waiting.findIndex(eligible);
       if (index < 0) return;
       const entry = waiting.splice(index, 1)[0];
       entry.state = 'active';
@@ -64,11 +72,11 @@ export function createGenerationScheduler(options: GenerationSchedulerOptions = 
     }
   }
 
-  function acquire(providerId: string, signal?: AbortSignal): Promise<Release> {
+  function acquire(providerId: string, signal?: AbortSignal, interactive = false): Promise<Release> {
     if (closed) return Promise.reject(new GenerationSchedulerClosedError());
     if (signal?.aborted) return Promise.reject(abortError(signal));
     return new Promise((resolve, reject) => {
-      const entry: WaitingPermit = { providerId, signal, resolve, reject, state: 'waiting', onAbort: () => undefined };
+      const entry: WaitingPermit = { providerId, interactive, signal, resolve, reject, state: 'waiting', onAbort: () => undefined };
       entry.onAbort = () => {
         if (entry.state === 'active') { entry.release?.(); return; }
         if (entry.state !== 'waiting') return;

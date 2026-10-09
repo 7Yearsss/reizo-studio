@@ -1,3 +1,4 @@
+import type { ArtifactReviewStore } from '../storage/artifactReviewStore';
 import { Hono } from 'hono';
 import type { SessionStore } from '../../../shared/chat';
 import type { SettingsStore } from '../storage/settingsStore';
@@ -31,6 +32,7 @@ export function createChatRouter(
   canvas?: { canvasStore?: CanvasStore; dataRoot: string; providerStore?: ProviderStore },
   memoryEventsStore?: MemoryEventsStore,
   scheduleStore?: ScheduleStore,
+  artifactReviews?: ArtifactReviewStore,
 ) {
   const router = new Hono();
 
@@ -91,6 +93,7 @@ export function createChatRouter(
       skill,
       attachments,
       artifactStore,
+      artifactReviews,
       projectStore,
       truncateAfterId: typeof body.truncateAfterId === 'string' ? body.truncateAfterId : undefined,
       regenerate: body.regenerate === true,

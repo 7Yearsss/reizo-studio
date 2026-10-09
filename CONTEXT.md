@@ -1,5 +1,13 @@
 # Reizo Conversation Lifecycle
 
+## Product layout
+
+Keep Reizo's original conversation-first workspace: navigation on the far left,
+Agent conversation in the main area, and canvas/tools in the resizable right panel.
+Preserve its single title bar, panel resize/maximize/close behavior, and existing
+visual identity. Competitor research informs individual interactions, not a new
+global layout, unless the user explicitly asks to redesign it.
+
 This context defines the language used by the desktop conversation runtime. It keeps provider output, user controls, and renderer state aligned around one explicit turn lifecycle.
 
 ## Turn Lifecycle

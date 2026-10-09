@@ -1,4 +1,7 @@
 import * as api from '../api';
+import { CanvasHistory, type HistoryEntry, type HistoryFlags } from './canvasHistory';
+import { CanvasEditCommands } from './canvasEditCommands';
+import { restoreNodeEdit, type CanvasEdit, type CanvasNodeSpec, type CanvasEditUpload } from '../../shared/canvasEdits';
 import { nanoid } from 'nanoid';
 import * as settingsStore from './settingsStore';
 import {
@@ -57,10 +60,10 @@ export interface CanvasState {
   loadedBySession: Record<string, boolean>;
   graphRunBySession: Record<string, GraphRun | undefined>;
   /** Node(s) the agent just touched — the canvas pans / fits to them briefly. */
-  spotlightBySession: Record<string, { ids: string[]; at: number } | undefined>;
+  spotlightBySession: Record<string, { ids: string[]; at: number; source?: 'automatic' | 'user' } | undefined>;
   /** Recent agent canvas writes (newest last), derived from chat tool events. */
   trailBySession: Record<string, AgentTrailEntry[]>;
-  historyBySession: Record<string, { canUndo: boolean; canRedo: boolean; agentRollback: number }>;
+  historyBySession: Record<string, HistoryFlags>;
   /** When true, canvas nodes hide form widgets and show pure media. */
   moodboardBySession: Record<string, boolean>;
   /** Node(s) currently in Agent proposal diff state (rendered with glowing dashed border). */
@@ -130,14 +133,18 @@ export function queueAgentNodesToast(sessionId: string, count: number): void {
   );
 }
 
-interface HistoryEntry {
-  undo: () => Promise<void>;
-  redo: () => Promise<void>;
-  /** Set on agent-driven batches; entries sharing a turn tag roll back together. */
-  agentTurn?: number;
-}
-const historyStacks = new Map<string, { undo: HistoryEntry[]; redo: HistoryEntry[] }>();
-const HISTORY_CAP = 60;
+const history = new CanvasHistory((sessionId, flags) => {
+  setState({ historyBySession: { ...state.historyBySession, [sessionId]: flags } });
+}, async (sessionId, error) => {
+  toast.error('历史操作失败，已保留重试入口', error instanceof Error ? error.message : String(error));
+  try {
+    const fence = captureProjectionFence(sessionId);
+    const { snap, acknowledgedVersion } = await readCanvasSnapshot(sessionId);
+    const current = captureProjectionFence(sessionId);
+    if (current.canvasId === fence.canvasId && current.generation === fence.generation && current.revision === fence.revision)
+      ingestSnapshot(sessionId, snap, current.epoch ?? null, false, acknowledgedVersion);
+  } catch { /* Existing committed projection remains available while offline. */ }
+});
 
 function setState(patch: Partial<CanvasState>): void {
   const documentSessions = new Set([...Object.keys(patch.nodesBySession ?? {}), ...Object.keys(patch.edgesBySession ?? {})]);
@@ -164,71 +171,23 @@ export function edgesForSession(sessionId: string): CanvasEdge[] {
   return state.edgesBySession[sessionId] ?? [];
 }
 
-function stacksFor(sessionId: string) {
-  let s = historyStacks.get(sessionId);
-  if (!s) {
-    s = { undo: [], redo: [] };
-    historyStacks.set(sessionId, s);
-  }
-  return s;
-}
+function record(sessionId: string, entry: HistoryEntry): void { history.record(sessionId, entry); }
+export function undo(sessionId: string): Promise<boolean> { return history.undo(sessionId); }
+export function redo(sessionId: string): Promise<boolean> { return history.redo(sessionId); }
+export function rollbackAgentTurn(sessionId: string): Promise<number> { return history.rollbackAgentTurn(sessionId); }
 
-function syncHistoryFlags(sessionId: string): void {
-  const s = stacksFor(sessionId);
-  let agentRollback = 0;
-  const topTag = s.undo[s.undo.length - 1]?.agentTurn;
-  if (topTag !== undefined) {
-    for (let i = s.undo.length - 1; i >= 0 && s.undo[i].agentTurn === topTag; i -= 1) agentRollback += 1;
-  }
-  setState({
-    historyBySession: {
-      ...state.historyBySession,
-      [sessionId]: { canUndo: s.undo.length > 0, canRedo: s.redo.length > 0, agentRollback },
-    },
-  });
-}
+const editCommands = new CanvasEditCommands((sessionId) => {
+  const id = canvasId(sessionId);
+  if (!id) throw new Error('画布尚未加载');
+  return { snapshot: { canvas: { id, sessionId, liveRevision: syncCursorBySession.get(sessionId)?.revision ?? 0,
+    createdAt: '', updatedAt: '' }, nodes: state.nodesBySession[sessionId] ?? [], edges: state.edgesBySession[sessionId] ?? [] },
+    accept: (snapshot) => {
+      if (canvasId(sessionId) === id) ingestSnapshot(sessionId, snapshot, syncCursorBySession.get(sessionId)?.epoch ?? null);
+    } };
+}, (...args) => api.editCanvas(...args), record);
 
-function record(sessionId: string, entry: HistoryEntry): void {
-  const s = stacksFor(sessionId);
-  s.undo.push(entry);
-  if (s.undo.length > HISTORY_CAP) s.undo.shift();
-  s.redo.length = 0;
-  syncHistoryFlags(sessionId);
-}
-
-export async function undo(sessionId: string): Promise<void> {
-  const s = stacksFor(sessionId);
-  const entry = s.undo.pop();
-  if (!entry) return;
-  s.redo.push(entry);
-  syncHistoryFlags(sessionId);
-  await entry.undo().catch((): void => undefined);
-}
-
-export async function redo(sessionId: string): Promise<void> {
-  const s = stacksFor(sessionId);
-  const entry = s.redo.pop();
-  if (!entry) return;
-  s.undo.push(entry);
-  syncHistoryFlags(sessionId);
-  await entry.redo().catch((): void => undefined);
-}
-
-/**
- * Undo every agent batch from the newest contiguous turn — "回滚这一轮".
- * Stops at the first non-agent (or older-turn) entry so user edits after the
- * turn survive. Returns how many batches were rolled back.
- */
-export async function rollbackAgentTurn(sessionId: string): Promise<number> {
-  const s = stacksFor(sessionId);
-  const tag = s.undo[s.undo.length - 1]?.agentTurn;
-  if (tag === undefined) return 0;
-  let n = 0;
-  while (s.undo.length > 0 && s.undo[s.undo.length - 1].agentTurn === tag) {
-    await undo(sessionId);
-    n += 1;
-  }
-  return n;
+function edgeEdit(sourceId: string, targetId: string, sourceHandle?: string | null, targetHandle?: string | null): CanvasEdit {
+  return { kind: 'add_edge', edge: { id: nanoid(), sourceId, targetId, sourceHandle: sourceHandle ?? null, targetHandle: targetHandle ?? null } };
 }
 
 function setNodes(sessionId: string, nodes: CanvasNode[]): void {
@@ -262,6 +221,7 @@ function confirmLocalAcknowledgements(sessionId: string, acknowledgedVersion: nu
 }
 
 function ingestSnapshot(sessionId: string, snap: CanvasSnapshot, epoch: string | null = null, resetActivity = false, acknowledgedVersion = 0): void {
+  if (canvasId(sessionId) && canvasId(sessionId) !== snap.canvas.id) history.clear(sessionId);
   const cursor = syncCursorBySession.get(sessionId);
   if (!resetActivity && cursor?.canvasId === snap.canvas.id && snap.canvas.liveRevision < cursor.revision) {
     confirmLocalAcknowledgements(sessionId, acknowledgedVersion);
@@ -626,9 +586,9 @@ async function writeNodePatches(sessionId: string, writes: { nodeId: string; pat
           }
         } catch { /* Durable replay or the next fresh snapshot confirms the accepted edit. */ }
       }
-    } catch {
+    } catch (error) {
       const restored = edits.fail(nodeId, id, mutationId);
-      if (!restored || canvasId(sessionId) !== id) return;
+      if (!restored || canvasId(sessionId) !== id) throw error;
       setNodes(sessionId, (state.nodesBySession[sessionId] ?? EMPTY_NODES).map((node) => node.id === nodeId ? restored : node));
       const fence = captureProjectionFence(sessionId);
       try {
@@ -637,6 +597,7 @@ async function writeNodePatches(sessionId: string, writes: { nodeId: string; pat
         if (current.canvasId === fence.canvasId && current.generation === fence.generation && current.revision === fence.revision &&
           current.epoch === fence.epoch) ingestSnapshot(sessionId, snap, current.epoch ?? null, false, acknowledgedVersion);
       } catch { /* Latest committed fields were already restored above. */ }
+      throw error;
     }
   })));
 }
@@ -656,11 +617,11 @@ export function nodeById(sessionId: string, nodeId: string): CanvasNode | undefi
 }
 
 /** Pan (single) or fit (multi) the canvas to these nodes with a brief pulse. */
-export function spotlight(sessionId: string, ids: string[]): void {
+export function spotlight(sessionId: string, ids: string[], source: 'automatic' | 'user' = 'user'): void {
   const present = ids.filter((id) => nodeById(sessionId, id));
   if (present.length === 0) return;
   setState({
-    spotlightBySession: { ...state.spotlightBySession, [sessionId]: { ids: present, at: Date.now() } },
+    spotlightBySession: { ...state.spotlightBySession, [sessionId]: { ids: present, at: Date.now(), source } },
   });
 }
 
@@ -732,104 +693,74 @@ export async function removeComposerRef(sessionId: string, composerId: string, s
   await updateNodeParams(sessionId, composerId, { ...p, refNodeIds: ids.filter((id) => id !== sourceId) });
 }
 
-export async function connectMention(
-  sessionId: string,
-  targetId: string,
-  source: CanvasNode,
-  opts?: { preserveSelection?: boolean },
-): Promise<void> {
-  const target = nodeById(sessionId, targetId);
-  if (!target) return;
-  await addComposerRef(sessionId, targetId, source.id);
+export async function connectMention(sessionId: string, targetId: string, source: CanvasNode,
+  opts?: { preserveSelection?: boolean }): Promise<void> {
+  const target = nodeById(sessionId, targetId); if (!target) return;
+  const ids = [...new Set([...composerRefIds(target), source.id])];
+  const wire = planMentionWire(source, target);
+  const connection = wire ? planConnection(sessionId, source, target, wire.sourceHandle, wire.targetHandle) : { edits: [] as CanvasEdit[] };
+  const paramsEdit = connection.edits.find((edit) => edit.kind === 'update_node' && edit.id === targetId);
+  const params = paramsEdit?.kind === 'update_node' ? paramsEdit.patch.params : target.params;
+  const edits = connection.edits.filter((edit) => edit !== paramsEdit);
+  if (JSON.stringify(composerRefIds(target)) !== JSON.stringify(ids) || paramsEdit)
+    edits.push({ kind: 'update_node', id: targetId, patch: { params: { ...params, refNodeIds: ids } } });
+  await editCommands.commit(sessionId, edits);
   if (!opts?.preserveSelection) setSelection(sessionId, [targetId]);
-  const edges = state.edgesBySession[sessionId] ?? [];
-  if (edges.some((e) => e.sourceId === source.id && e.targetId === targetId)) {
-    return;
+  if (connection.extractorId && source.output?.assets?.length) void extractFrameForNode(sessionId, connection.extractorId).catch((error) => toast.error('抽帧失败', String(error)));
+}
+
+function mentionRemovalEdits(sessionId: string, targetId: string, sourceId: string): CanvasEdit[] {
+  const edges = edgesForSession(sessionId);
+  const removals: CanvasEdit[] = edges.filter((edge) => edge.sourceId === sourceId && edge.targetId === targetId && !isStructuralTargetHandle(edge.targetHandle))
+    .map((edge) => ({ kind: 'delete_edge', id: edge.id }));
+  for (const inbound of edges.filter((edge) => edge.sourceId === sourceId)) {
+    const middle = nodeById(sessionId, inbound.targetId);
+    if (middle?.type !== 'frameExtractor') continue;
+    const outbound = edges.find((edge) => edge.sourceId === middle.id && edge.targetId === targetId);
+    if (!outbound) continue;
+    const shared = edges.some((edge) => edge.id !== inbound.id && edge.id !== outbound.id && (edge.sourceId === middle.id || edge.targetId === middle.id));
+    removals.push(shared ? { kind: 'delete_edge', id: outbound.id } : { kind: 'delete_node', id: middle.id });
   }
-  const plan = planMentionWire(source, target);
-  if (!plan) return;
-  try {
-    await connectNodes(sessionId, source.id, targetId, plan.sourceHandle, plan.targetHandle);
-  } catch {
-    try {
-      await connectNodes(sessionId, source.id, targetId, plan.sourceHandle, 'prompt');
-    } catch {
-      /* mention chip is already in the prompt; graph can stay unwired */
-    }
-  }
-  if (!opts?.preserveSelection) setSelection(sessionId, [targetId]);
+  return removals;
 }
 
 export async function disconnectMention(sessionId: string, targetId: string, sourceId: string): Promise<void> {
-  const all = state.edgesBySession[sessionId] ?? [];
-  const edgeIds = new Set<string>();
-  const extractors: string[] = [];
-
-  for (const e of all) {
-    if (e.sourceId === sourceId && e.targetId === targetId && !isStructuralTargetHandle(e.targetHandle)) {
-      edgeIds.add(e.id);
-    }
-  }
-
-  // @video onto an image/video inserts a frame-extractor in between.
-  for (const inbound of all) {
-    if (inbound.sourceId !== sourceId) continue;
-    const mid = nodeById(sessionId, inbound.targetId);
-    if (mid?.type !== 'frameExtractor') continue;
-    const outbound = all.find((e) => e.sourceId === mid.id && e.targetId === targetId);
-    if (!outbound) continue;
-    edgeIds.add(inbound.id);
-    edgeIds.add(outbound.id);
-    const leftover = all.some(
-      (e) => e.id !== inbound.id && e.id !== outbound.id && (e.sourceId === mid.id || e.targetId === mid.id),
-    );
-    if (!leftover) extractors.push(mid.id);
-  }
-
-  for (const id of edgeIds) {
-    await removeEdge(sessionId, id);
-  }
-  for (const id of extractors) {
-    await removeNode(sessionId, id);
-  }
+  const target = nodeById(sessionId, targetId); if (!target) return;
+  const params = { ...target.params, refNodeIds: composerRefIds(target).filter((id) => id !== sourceId) } as Record<string, unknown>;
+  const key = mentionPromptKey(target.type);
+  if (key && typeof params[key] === 'string') params[key] = stripMentionToken(params[key] as string, sourceId);
+  await editCommands.commit(sessionId, [...mentionRemovalEdits(sessionId, targetId, sourceId), { kind: 'update_node', id: targetId, patch: { params } }]);
 }
 
-/** Graph twins of inline @ chips. Reference-strip items without @ are not wired. */
 export async function syncMentionWires(sessionId: string, nodeId: string, livePrompt?: string): Promise<void> {
-  const node = nodeById(sessionId, nodeId);
-  if (!node) return;
-  const key = mentionPromptKey(node.type);
-  const raw = key ? (node.params as Record<string, unknown>)[key] : '';
-  const text = livePrompt !== undefined ? livePrompt : typeof raw === 'string' ? raw : '';
-  const mentioned = new Set(
-    parseMentionTokens(text)
-      .filter((t): t is { type: 'mention'; id: string; label: string } => t.type === 'mention')
-      .map((t) => t.id),
-  );
-
-  const all = state.edgesBySession[sessionId] ?? [];
-  const wiredSources = new Set<string>();
-  for (const e of all) {
-    if (e.targetId !== nodeId || isStructuralTargetHandle(e.targetHandle)) continue;
-    const src = nodeById(sessionId, e.sourceId);
-    if (src?.type === 'frameExtractor') {
-      const inbound = all.find((x) => x.targetId === src.id);
-      if (inbound) wiredSources.add(inbound.sourceId);
-    }
-    wiredSources.add(e.sourceId);
+  const target = nodeById(sessionId, nodeId); if (!target) return;
+  const key = mentionPromptKey(target.type); if (!key) return;
+  const prompt = livePrompt ?? ((target.params as Record<string, unknown>)[key] as string) ?? '';
+  const mentioned = new Set(parseMentionTokens(prompt).flatMap((token) => token.type === 'mention' ? [token.id] : []));
+  const all = edgesForSession(sessionId);
+  const wired = new Set<string>();
+  for (const edge of all) {
+    if (edge.targetId !== nodeId || isStructuralTargetHandle(edge.targetHandle)) continue;
+    const source = nodeById(sessionId, edge.sourceId);
+    const inbound = source?.type === 'frameExtractor' && !mentioned.has(source.id) ? all.find((edge) => edge.targetId === source.id) : undefined;
+    wired.add(inbound ? inbound.sourceId : edge.sourceId);
   }
-
-  for (const sourceId of wiredSources) {
-    if (!mentioned.has(sourceId)) {
-      await disconnectMention(sessionId, nodeId, sourceId);
-    }
+  const edits: CanvasEdit[] = [];
+  for (const sourceId of wired) if (!mentioned.has(sourceId)) edits.push(...mentionRemovalEdits(sessionId, nodeId, sourceId));
+  for (const sourceId of mentioned) {
+    const source = nodeById(sessionId, sourceId);
+    const wire = source ? planMentionWire(source, target) : null;
+    if (wire) edits.push(...planConnection(sessionId, source, { ...target, params: { ...target.params, [key]: prompt } }, wire.sourceHandle, wire.targetHandle).edits.filter((edit) => edit.kind !== 'update_node' || edit.id !== nodeId));
   }
-
-  for (const id of mentioned) {
-    const src = nodeById(sessionId, id);
-    if (src) await connectMention(sessionId, nodeId, src, { preserveSelection: true });
-  }
+  const params = { ...target.params, [key]: prompt, refNodeIds: [...mentioned] };
+  if (JSON.stringify(params) !== JSON.stringify(target.params)) edits.push({ kind: 'update_node', id: nodeId, patch: { params } });
+  const deleted = new Set<string>();
+  await editCommands.commit(sessionId, edits.filter((edit) => {
+    if (edit.kind !== 'delete_node' && edit.kind !== 'delete_edge') return true;
+    const id = `${edit.kind}:${edit.id}`; if (deleted.has(id)) return false; deleted.add(id); return true;
+  }));
 }
+
 
 /**
  * Record one agent canvas write in the activity trail (deduped by tool-call id,
@@ -850,6 +781,9 @@ export function pushTrail(sessionId: string, entry: AgentTrailEntry): void {
 
 // --- internal mutations (no history) ---
 
+const createRequests = new WeakMap<object, { canvasId: string; nodeId: string; pending?: { id: string; input: Parameters<typeof api.addCanvasNode>[1] } }>();
+const deleteRequests = new Map<string, string>();
+
 async function _addNode(
   sessionId: string,
   spec: {
@@ -865,21 +799,37 @@ async function _addNode(
   const id = canvasId(sessionId);
   if (!id) return null;
   const fence = captureProjectionFence(sessionId, id);
-  const node = await api.addCanvasNode(id, spec);
+  let request = createRequests.get(spec);
+  if (!request || request.canvasId !== id) { request = { canvasId: id, nodeId: nanoid() }; createRequests.set(spec, request); }
+  request.pending ??= { id: nanoid(), input: structuredClone({ ...spec, id: request.nodeId }) };
+  let node: CanvasNode;
+  try { node = await api.addCanvasNode(id, request.pending.input, request.pending.id); }
+  catch (error) {
+    const status = (error as { status?: number })?.status;
+    if (status >= 400 && status < 500) request.pending = undefined;
+    throw error;
+  }
+  request.pending = undefined;
   await applyResponseEvent(sessionId, { type: 'node_added', node }, fence);
+  if (canvasId(sessionId) !== id) throw new Error('画布身份已经变化');
   return node.id;
 }
 
 async function _deleteNode(sessionId: string, nodeId: string): Promise<void> {
-  localEditsBySession.get(sessionId)?.remove(nodeId);
-  const nodes = state.nodesBySession[sessionId] ?? [];
-  setNodes(sessionId, nodes.filter((n) => n.id !== nodeId));
-  setEdges(
-    sessionId,
-    (state.edgesBySession[sessionId] ?? []).filter((e) => e.sourceId !== nodeId && e.targetId !== nodeId),
-  );
   const id = canvasId(sessionId);
-  if (id) await api.deleteCanvasNode(id, nodeId).catch((): void => undefined);
+  if (!id) throw new Error('画布尚未加载');
+  const fence = captureProjectionFence(sessionId, id);
+  const key = JSON.stringify([sessionId, id, nodeId]);
+  const operationId = deleteRequests.get(key) ?? nanoid(); deleteRequests.set(key, operationId);
+  try { await api.deleteCanvasNode(id, nodeId, operationId); }
+  catch (error) {
+    const status = (error as { status?: number })?.status;
+    if (status >= 400 && status < 500) deleteRequests.delete(key);
+    throw error;
+  }
+  deleteRequests.delete(key);
+  localEditsBySession.get(sessionId)?.remove(nodeId);
+  await applyResponseEvent(sessionId, { type: 'node_deleted', id: nodeId }, fence);
 }
 
 async function _setPosition(sessionId: string, nodeId: string, x: number, y: number): Promise<void> {
@@ -929,9 +879,11 @@ async function _addEdge(
 }
 
 async function _deleteEdge(sessionId: string, edgeId: string): Promise<void> {
-  setEdges(sessionId, (state.edgesBySession[sessionId] ?? []).filter((e) => e.id !== edgeId));
   const id = canvasId(sessionId);
-  if (id) await api.deleteCanvasEdge(id, edgeId).catch((): void => undefined);
+  if (!id) throw new Error('画布尚未加载');
+  const fence = captureProjectionFence(sessionId, id);
+  await api.deleteCanvasEdge(id, edgeId);
+  await applyResponseEvent(sessionId, { type: 'edge_deleted', id: edgeId }, fence);
 }
 
 // --- public mutations (with history) ---
@@ -975,37 +927,7 @@ export async function duplicateNode(sessionId: string, nodeId: string): Promise<
 }
 
 export async function forkNode(sessionId: string, nodeId: string): Promise<string | null> {
-  const source = nodeById(sessionId, nodeId);
-  if (!source) return null;
-  const spec = {
-    type: source.type,
-    x: source.x + source.w + 32,
-    y: source.y,
-    title: source.title ? `${source.title} (变体)` : `${source.type === 'image' ? '图片' : 'Agent'} (变体)`,
-    params: { ...(source.params as Record<string, unknown>) },
-  };
-  const newId = await _addNode(sessionId, spec);
-  if (!newId) return null;
-
-  const edges = state.edgesBySession[sessionId] ?? [];
-  const incoming = edges.filter((e) => e.targetId === nodeId);
-  for (const edge of incoming) {
-    await _addEdge(sessionId, edge.sourceId, newId, edge.sourceHandle, edge.targetHandle);
-  }
-
-  record(sessionId, {
-    undo: () => (newId ? _deleteNode(sessionId, newId) : Promise.resolve()),
-    redo: async () => {
-      const recreated = await _addNode(sessionId, spec);
-      if (recreated) {
-        for (const edge of incoming) {
-          await _addEdge(sessionId, edge.sourceId, recreated, edge.sourceHandle, edge.targetHandle);
-        }
-      }
-    },
-  });
-
-  return newId;
+  return (await forkSelected(sessionId, [nodeId]))[0] ?? null;
 }
 
 /** Human label a fork/variant title is built from. */
@@ -1049,29 +971,12 @@ export async function forkVariations(
     params: { ...(source.params as Record<string, unknown>) },
   }));
 
-  const create = async (): Promise<string[]> => {
-    const made: string[] = [];
-    for (const spec of specs) {
-      const id = await _addNode(sessionId, spec);
-      if (!id) continue;
-      made.push(id);
-      for (const edge of incoming) {
-        await _addEdge(sessionId, edge.sourceId, id, edge.sourceHandle, edge.targetHandle);
-      }
-    }
-    return made;
-  };
-
-  let ids = await create();
-  if (ids.length === 0) return [];
-  record(sessionId, {
-    undo: async () => {
-      for (const id of ids) await _deleteNode(sessionId, id);
-    },
-    redo: async () => {
-      ids = await create();
-    },
-  });
+  const ids = specs.map(() => nanoid());
+  const edits: CanvasEdit[] = specs.flatMap((spec, i) => [
+    { kind: 'add_node' as const, id: ids[i], node: spec },
+    ...incoming.map((edge) => edgeEdit(edge.sourceId, ids[i], edge.sourceHandle, edge.targetHandle)),
+  ]);
+  await editCommands.commit(sessionId, edits);
   return ids;
 }
 
@@ -1101,29 +1006,11 @@ export async function forkSelected(sessionId: string, nodeIds: string[]): Promis
     .filter((p): p is NonNullable<typeof p> => p !== null);
   if (plans.length === 0) return [];
 
-  const create = async (): Promise<string[]> => {
-    const made: string[] = [];
-    for (const plan of plans) {
-      const id = await _addNode(sessionId, plan.spec);
-      if (!id) continue;
-      made.push(id);
-      for (const edge of plan.incoming) {
-        await _addEdge(sessionId, edge.sourceId, id, edge.sourceHandle, edge.targetHandle);
-      }
-    }
-    return made;
-  };
-
-  let ids = await create();
-  if (ids.length === 0) return [];
-  record(sessionId, {
-    undo: async () => {
-      for (const id of ids) await _deleteNode(sessionId, id);
-    },
-    redo: async () => {
-      ids = await create();
-    },
-  });
+  const ids = plans.map(() => nanoid());
+  await editCommands.commit(sessionId, plans.flatMap((plan, i) => [
+    { kind: 'add_node' as const, id: ids[i], node: plan.spec },
+    ...plan.incoming.map((edge) => edgeEdit(edge.sourceId, ids[i], edge.sourceHandle, edge.targetHandle)),
+  ]));
   return ids;
 }
 
@@ -1155,85 +1042,21 @@ export function recordAgentBatch(sessionId: string, entry: AgentTrailEntry, agen
     agentBatchRecorded.add(entry.id);
 
     const idSet = new Set(present);
-    const nodeSpecs = present
-      .map((id) => nodeById(sessionId, id))
-      .filter((n): n is CanvasNode => Boolean(n))
-      .map((n) => ({
-        type: n.type,
-        x: n.x,
-        y: n.y,
-        w: n.w,
-        h: n.h,
-        title: n.title,
-        params: n.params as CanvasNodeParams,
-      }));
-    // Any edge that touches the batch — inner edges and edges to outside nodes.
-    const edgeSpecs = (state.edgesBySession[sessionId] ?? [])
-      .filter((e) => idSet.has(e.sourceId) || idSet.has(e.targetId))
-      .map((e) => ({
-        sourceId: e.sourceId,
-        targetId: e.targetId,
-        sourceHandle: e.sourceHandle,
-        targetHandle: e.targetHandle,
-      }));
-
-    let liveIds = [...present];
-
-    record(sessionId, {
-      agentTurn,
-      undo: async () => {
-        for (const id of liveIds) await _deleteNode(sessionId, id);
-      },
-      redo: async () => {
-        const oldToNew = new Map<string, string>();
-        const remade: string[] = [];
-        for (let i = 0; i < nodeSpecs.length; i += 1) {
-          const newId = await _addNode(sessionId, nodeSpecs[i]);
-          if (!newId) continue;
-          oldToNew.set(present[i], newId);
-          remade.push(newId);
-        }
-        for (const e of edgeSpecs) {
-          const s = oldToNew.get(e.sourceId) ?? e.sourceId;
-          const t = oldToNew.get(e.targetId) ?? e.targetId;
-          if (nodeById(sessionId, s) && nodeById(sessionId, t)) {
-            await _addEdge(sessionId, s, t, e.sourceHandle, e.targetHandle).catch((): null => null);
-          }
-        }
-        liveIds = remade;
-      },
-    });
+    const nodes = present.map((id) => nodeById(sessionId, id)).filter((node): node is CanvasNode => Boolean(node));
+    const edges = edgesForSession(sessionId).filter((edge) => idSet.has(edge.sourceId) || idSet.has(edge.targetId));
+    editCommands.recordExisting(sessionId, present.map((id) => ({ kind: 'delete_node', id })),
+      [...nodes.map(restoreNodeEdit), ...edges.map((edge): CanvasEdit => ({ kind: 'add_edge', edge }))], agentTurn);
   };
 
   attempt(1);
 }
 
-export async function addDownstreamAgent(
-  sessionId: string,
-  sourceId: string,
-  instruction = '请评估该图片，从画面构图、细节与质感给出点评，并提供优化后的 Prompt 建议。',
-): Promise<string | null> {
+export async function addDownstreamAgent(sessionId: string, sourceId: string,
+  instruction = '请评估该图片，从画面构图、细节与质感给出点评，并提供优化后的 Prompt 建议。'): Promise<string | null> {
   const source = nodeById(sessionId, sourceId);
   if (!source) return null;
-  const spec = {
-    type: 'agent' as const,
-    x: source.x + source.w + 40,
-    y: source.y,
-    title: '画面质检',
-    params: { instruction },
-  };
-  const agentId = await _addNode(sessionId, spec);
-  if (!agentId) return null;
-  await _addEdge(sessionId, sourceId, agentId);
-
-  record(sessionId, {
-    undo: () => (agentId ? _deleteNode(sessionId, agentId) : Promise.resolve()),
-    redo: async () => {
-      const id = await _addNode(sessionId, spec);
-      if (id) await _addEdge(sessionId, sourceId, id);
-    },
-  });
-  return agentId;
+  return addNodeAndConnect(sessionId, { type: 'agent', x: source.x + source.w + 40, y: source.y,
+    title: '画面质检', params: { instruction } }, sourceId);
 }
 
 /**
@@ -1259,30 +1082,58 @@ export async function animateFromImage(sessionId: string, imageNodeId: string): 
   );
 }
 
-export async function removeNode(sessionId: string, nodeId: string): Promise<void> {
-  const node = nodeById(sessionId, nodeId);
-  if (!node) return;
-  const touching = (state.edgesBySession[sessionId] ?? []).filter(
-    (e) => e.sourceId === nodeId || e.targetId === nodeId,
-  );
-  const spec = { type: node.type, x: node.x, y: node.y, title: node.title, params: node.params };
-  let recreatedId = nodeId;
-  await _deleteNode(sessionId, nodeId);
-  record(sessionId, {
-    undo: async () => {
-      const newId = await _addNode(sessionId, spec);
-      if (!newId) return;
-      recreatedId = newId;
-      for (const e of touching) {
-        const src = e.sourceId === nodeId ? newId : e.sourceId;
-        const tgt = e.targetId === nodeId ? newId : e.targetId;
-        if (nodeById(sessionId, src) && nodeById(sessionId, tgt)) {
-          await _addEdge(sessionId, src, tgt).catch((): null => null);
+const preparedNodeRemovals = new Map<string, () => Promise<void>>();
+
+/** Delete a selection and clean surviving references with one command and one undo. */
+export async function removeNodes(sessionId: string, nodeIds: string[]): Promise<void> {
+  const ids = [...new Set(nodeIds)].sort();
+  if (!ids.length) return;
+  const key = JSON.stringify([sessionId, canvasId(sessionId), ids]);
+  let apply = preparedNodeRemovals.get(key);
+  if (!apply) {
+    const nodes = state.nodesBySession[sessionId] ?? EMPTY_NODES;
+    const present = new Set(nodes.map((node) => node.id));
+    const removed = new Set(ids.filter((id) => present.has(id)));
+    if (!removed.size) return;
+    const edits: CanvasEdit[] = [];
+    for (const node of nodes) {
+      if (removed.has(node.id)) continue;
+      const params = { ...node.params } as Record<string, unknown>;
+      let changed = false;
+      const refs = composerRefIds(node);
+      const remaining = refs.filter((id) => !removed.has(id));
+      if (remaining.length !== refs.length) { params.refNodeIds = remaining; changed = true; }
+      const promptKey = mentionPromptKey(node.type);
+      const text = promptKey && typeof params[promptKey] === 'string' ? params[promptKey] as string : null;
+      if (text !== null && promptKey) {
+        let next = text;
+        for (const token of parseMentionTokens(text)) {
+          if (token.type === 'mention' && removed.has(token.id)) next = stripMentionToken(next, token.id);
         }
+        if (next !== text) { params[promptKey] = next; changed = true; }
       }
-    },
-    redo: () => _deleteNode(sessionId, recreatedId),
-  });
+      if (changed) edits.push({ kind: 'update_node', id: node.id, patch: { params } });
+    }
+    // Node deletion already cascades incident edges. Explicit edge deletes here
+    // would duplicate shared removals when both endpoints are in the selection.
+    edits.push(...[...removed].map((id): CanvasEdit => ({ kind: 'delete_node', id })));
+    apply = editCommands.prepare(sessionId, edits);
+    preparedNodeRemovals.set(key, apply);
+  }
+  try { await apply(); }
+  catch (error) {
+    const status = (error as { status?: number })?.status;
+    // A definite rejection permits replanning against the latest projection;
+    // only an unknown transport outcome retains the frozen plan for replay.
+    if (status >= 400 && status < 500) preparedNodeRemovals.delete(key);
+    throw error;
+  }
+  preparedNodeRemovals.delete(key);
+  setSelection(sessionId, (state.selectedNodeIdsBySession[sessionId] ?? []).filter((id) => !ids.includes(id)));
+}
+
+export async function removeNode(sessionId: string, nodeId: string): Promise<void> {
+  await removeNodes(sessionId, [nodeId]);
 }
 
 /** Records one history entry for a whole drag gesture. */
@@ -1291,11 +1142,9 @@ export function commitMove(sessionId: string, nodeId: string, from: { x: number;
     discardNodeLiveGeometry(sessionId, nodeId, ['x', 'y']);
     return;
   }
-  void _setPosition(sessionId, nodeId, to.x, to.y);
-  record(sessionId, {
-    undo: () => _setPosition(sessionId, nodeId, from.x, from.y),
-    redo: () => _setPosition(sessionId, nodeId, to.x, to.y),
-  });
+  void _setPosition(sessionId, nodeId, to.x, to.y).then(() => record(sessionId, {
+    undo: () => _setPosition(sessionId, nodeId, from.x, from.y), redo: () => _setPosition(sessionId, nodeId, to.x, to.y),
+  })).catch((error) => toast.error('移动失败', String(error)));
 }
 
 /** Live position during a drag — no API call, no history (commitMove does both). */
@@ -1344,11 +1193,34 @@ export function commitMoveBatch(
     commitMove(sessionId, real[0].id, real[0].from, real[0].to);
     return;
   }
-  const apply = (pick: 'from' | 'to') => async () => {
-    await writeNodePatches(sessionId, real.map((move) => ({ nodeId: move.id, patch: { x: Math.round(move[pick].x), y: Math.round(move[pick].y) } })));
-  };
-  void apply('to')();
-  record(sessionId, { undo: apply('from'), redo: apply('to') });
+  const plan = (pick: 'from' | 'to'): CanvasEdit[] => real.map((move) => ({ kind: 'update_node', id: move.id,
+    patch: { x: Math.round(move[pick].x), y: Math.round(move[pick].y) } }));
+  const forward = plan('to');
+  const inverse = plan('from');
+  const mutationId = nanoid();
+  const edits = localEdits(sessionId);
+  const id = canvasId(sessionId);
+  const nodes = state.nodesBySession[sessionId] ?? EMPTY_NODES;
+  for (const move of real) {
+    const node = nodes.find((node) => node.id === move.id);
+    if (node) edits.stage(node, { x: Math.round(move.to.x), y: Math.round(move.to.y) }, mutationId);
+  }
+  setNodes(sessionId, edits.project(nodes));
+  void api.editCanvas(id, forward, mutationId).then((snapshot) => {
+    if (canvasId(sessionId) !== id) return;
+    for (const move of real) {
+      const node = snapshot.nodes.find((node) => node.id === move.id);
+      if (node) edits.acknowledge(move.id, id, mutationId, node, false);
+    }
+    ingestSnapshot(sessionId, snapshot, syncCursorBySession.get(sessionId)?.epoch ?? null);
+    editCommands.recordExisting(sessionId, inverse, forward);
+  }).catch((error) => {
+    for (const move of real) {
+      const restored = edits.fail(move.id, id, mutationId);
+      if (restored && canvasId(sessionId) === id) setNodes(sessionId, (state.nodesBySession[sessionId] ?? []).map((node) => node.id === restored.id ? restored : node));
+    }
+    toast.error('批量移动失败', String(error));
+  });
 }
 
 /** The group node whose `memberIds` contain `nodeId`, if any. */
@@ -1424,11 +1296,9 @@ export function commitResize(
     discardNodeLiveGeometry(sessionId, nodeId, ['x', 'y', 'w', 'h']);
     return;
   }
-  void _setBox(sessionId, nodeId, to);
-  record(sessionId, {
-    undo: () => _setBox(sessionId, nodeId, from),
-    redo: () => _setBox(sessionId, nodeId, to),
-  });
+  void _setBox(sessionId, nodeId, to).then(() => record(sessionId, {
+    undo: () => _setBox(sessionId, nodeId, from), redo: () => _setBox(sessionId, nodeId, to),
+  })).catch((error) => toast.error('调整尺寸失败', String(error)));
 }
 
 export async function updateNodeParams(
@@ -1488,295 +1358,139 @@ export async function removeNodeAsset(
   await _setNode(sessionId, nodeId, { output: nextOutput });
 }
 
-export async function batchUpdateNodeParams(
-  sessionId: string,
-  nodeIds: string[],
-  patch: Record<string, unknown>,
-): Promise<void> {
-  const befores = new Map<string, CanvasNodeParams | undefined>();
-  for (const id of nodeIds) {
-    befores.set(id, nodeById(sessionId, id)?.params);
-    const curr = (nodeById(sessionId, id)?.params ?? {}) as Record<string, unknown>;
-    await _setNode(sessionId, id, { params: { ...curr, ...patch } });
-  }
-  record(sessionId, {
-    undo: async () => {
-      for (const id of nodeIds) {
-        const before = befores.get(id);
-        if (before !== undefined) await _setNode(sessionId, id, { params: before });
-      }
-    },
-    redo: async () => {
-      for (const id of nodeIds) {
-        const curr = (nodeById(sessionId, id)?.params ?? {}) as Record<string, unknown>;
-        await _setNode(sessionId, id, { params: { ...curr, ...patch } });
-      }
-    },
+export async function batchUpdateNodeParams(sessionId: string, nodeIds: string[], patch: Record<string, unknown>): Promise<void> {
+  const edits = nodeIds.flatMap((id): CanvasEdit[] => {
+    const node = nodeById(sessionId, id);
+    return node ? [{ kind: 'update_node', id, patch: { params: { ...node.params, ...patch } } }] : [];
   });
+  await editCommands.commit(sessionId, edits);
+}
+
+export function prepareStarterFlow(sessionId: string, at: { x: number; y: number } = { x: 60, y: 60 }): () => Promise<void> {
+  const [section, image, video, extractor] = Array.from({ length: 4 }, () => nanoid());
+  return editCommands.prepare(sessionId, [
+    { kind: 'add_node', id: section, node: { type: 'section', x: at.x, y: at.y, w: 1100, h: 520, title: '场景一：雨夜霓虹街头',
+      params: { color: 'blue', memberIds: [image, video, extractor], description: '电影质感：雨夜街道，霓虹倒影，电影镜头跟踪漫步' } } },
+    { kind: 'add_node', id: image, node: { type: 'image', x: at.x + 40, y: at.y + 70, w: 320, h: 380, title: '雨夜概念图 (首帧)',
+      params: { prompt: 'Cinematic film still, cyberpunk wet street at night, neon reflections in rain puddles, 35mm photograph, moody lighting, 8k', size: '1536x1024' } } },
+    { kind: 'add_node', id: video, node: { type: 'video', x: at.x + 420, y: at.y + 70, w: 340, h: 420, title: '漫步运镜视频',
+      params: { prompt: 'Slow forward camera tracking shot following character walking in rainy night street, cinematic motion', duration: '5s', ratio: '16:9', cameraMotion: 'zoom_in' } } },
+    { kind: 'add_node', id: extractor, node: { type: 'frameExtractor', x: at.x + 820, y: at.y + 160, w: 200, h: 160, title: '提取首尾帧', params: { mode: 'end' } } },
+    edgeEdit(image, video, null, 'start_frame'), edgeEdit(video, extractor, null, 'video_in'),
+  ]);
 }
 
 export async function loadStarterFlow(sessionId: string): Promise<void> {
-  const sectionId = await _addNode(sessionId, {
-    type: 'section',
-    x: 60,
-    y: 60,
-    w: 1100,
-    h: 520,
-    title: '场景一：雨夜霓虹街头',
-    params: {
-      color: 'blue',
-      description: '电影质感：雨夜街道，霓虹倒影，电影镜头跟踪漫步',
-    },
-  });
-
-  const imageId = await _addNode(sessionId, {
-    type: 'image',
-    x: 100,
-    y: 130,
-    w: 320,
-    h: 380,
-    title: '雨夜概念图 (首帧)',
-    params: {
-      prompt: 'Cinematic film still, cyberpunk wet street at night, neon reflections in rain puddles, 35mm photograph, moody lighting, 8k',
-      size: '1536x1024',
-    },
-  });
-
-  const videoId = await _addNode(sessionId, {
-    type: 'video',
-    x: 480,
-    y: 130,
-    w: 340,
-    h: 420,
-    title: '漫步运镜视频',
-    params: {
-      prompt: 'Slow forward camera tracking shot following character walking in rainy night street, cinematic motion',
-      duration: '5s',
-      ratio: '16:9',
-      cameraMotion: 'zoom_in',
-    },
-  });
-
-  const frameExtractorId = await _addNode(sessionId, {
-    type: 'frameExtractor',
-    x: 880,
-    y: 220,
-    w: 200,
-    h: 160,
-    title: '提取首尾帧',
-    params: { mode: 'end' },
-  });
-
-  if (imageId && videoId) {
-    await _addEdge(sessionId, imageId, videoId, null, 'start_frame');
-  }
-  if (videoId && frameExtractorId) {
-    await _addEdge(sessionId, videoId, frameExtractorId, null, 'video_in');
-  }
-  if (sectionId && imageId && videoId && frameExtractorId) {
-    await _setNode(sessionId, sectionId, {
-      params: {
-        color: 'blue',
-        description: '电影质感：雨夜街道，霓虹倒影，电影镜头跟踪漫步',
-        memberIds: [imageId, videoId, frameExtractorId],
-      },
-    });
-  }
+  await prepareStarterFlow(sessionId)();
 }
 
 /** Throws with a readable message when the server rejects the connection. */
-export async function connectNodes(
-  sessionId: string,
-  sourceId: string,
-  targetId: string,
-  sourceHandle?: string | null,
-  targetHandle?: string | null,
-): Promise<void> {
-  if (sourceId === targetId) return;
-
-  const sourceNode = nodeById(sessionId, sourceId);
-  const targetNode = nodeById(sessionId, targetId);
-
-  // Self-healing: if connecting a video node output to an image frame slot (start_frame / end_frame)
-  // or connecting video -> video without handles:
-  const isVideoToFrameSlot =
-    sourceNode?.type === 'video' &&
-    (targetHandle === 'start_frame' ||
-      targetHandle === 'end_frame' ||
-      targetHandle === 'reference' ||
-      (targetNode?.type === 'video' && !targetHandle));
-
-  if (isVideoToFrameSlot && targetNode) {
-    const preferredMode = targetHandle === 'end_frame' ? 'start' : 'end';
-    const midX = Math.round((sourceNode.x + sourceNode.w + targetNode.x) / 2 - 100);
-    const midY = Math.round((sourceNode.y + targetNode.y) / 2);
-    const actualTargetHandle = targetHandle || 'start_frame';
-
-    const extractorId = await _addNode(sessionId, {
-      type: 'frameExtractor',
-      x: midX,
-      y: midY,
-      title: preferredMode === 'end' ? '抽尾帧' : '抽首帧',
-      params: { mode: preferredMode },
-    });
-
-    if (extractorId) {
-      let currentExtractorId = extractorId;
-      let currentEdge1Id = await _addEdge(sessionId, sourceId, extractorId, sourceHandle, 'video_in');
-      let currentEdge2Id = await _addEdge(sessionId, extractorId, targetId, 'frame_out', actualTargetHandle);
-
-      record(sessionId, {
-        undo: async () => {
-          if (currentEdge2Id) await _deleteEdge(sessionId, currentEdge2Id);
-          if (currentEdge1Id) await _deleteEdge(sessionId, currentEdge1Id);
-          await _deleteNode(sessionId, currentExtractorId);
-        },
-        redo: async () => {
-          const recreated = await _addNode(sessionId, {
-            type: 'frameExtractor',
-            x: midX,
-            y: midY,
-            title: preferredMode === 'end' ? '抽尾帧' : '抽首帧',
-            params: { mode: preferredMode },
-          });
-          if (recreated) {
-            currentExtractorId = recreated;
-            currentEdge1Id =
-              (await _addEdge(sessionId, sourceId, recreated, sourceHandle, 'video_in').catch((): null => null)) ??
-              undefined;
-            currentEdge2Id =
-              (await _addEdge(sessionId, recreated, targetId, 'frame_out', actualTargetHandle).catch(
-                (): null => null,
-              )) ?? undefined;
-          }
-        },
-      });
-
-      // If upstream video already has asset, trigger extraction automatically!
-      if (sourceNode.output?.assets?.[0]) {
-        void extractFrameForNode(sessionId, extractorId).catch((): void => undefined);
-      }
-      return;
-    }
-  }
-
-  const edgeId = await _addEdge(sessionId, sourceId, targetId, sourceHandle, targetHandle);
-  if (!edgeId) return;
-
-  // Mention sync: reference-class edges get a prompt chip. First/last frame do not.
-  if (
-    targetNode &&
-    sourceNode &&
-    shouldSyncMentionOnEdge(targetHandle, sourceNode.type)
-  ) {
-    const key = mentionPromptKey(targetNode.type);
-    if (key) {
-      const p = (targetNode.params as Record<string, unknown>) ?? {};
-      const currPrompt = typeof p[key] === 'string' ? (p[key] as string) : '';
-      if (!currPrompt.includes(sourceNode.id)) {
-        const mentionToken = serializeMention(sourceNode.title || '节点', sourceNode.id);
-        const nextPrompt = currPrompt.trim() ? `${currPrompt} ${mentionToken}` : mentionToken;
-        void updateNodeParams(sessionId, targetId, { ...p, [key]: nextPrompt });
-      }
-    }
-  }
-
-  record(sessionId, {
-    undo: () => _deleteEdge(sessionId, edgeId),
-    redo: async () => {
-      await _addEdge(sessionId, sourceId, targetId, sourceHandle, targetHandle).catch((): null => null);
-    },
-  });
+function connectionMentionParams(source: Pick<CanvasNode, 'id' | 'title' | 'type'>, target: Pick<CanvasNode, 'type' | 'params'>,
+  targetHandle?: string | null): Record<string, unknown> | undefined {
+  if (!shouldSyncMentionOnEdge(targetHandle, source.type)) return;
+  const key = mentionPromptKey(target.type);
+  if (!key) return;
+  const params = target.params as Record<string, unknown>;
+  const prompt = typeof params[key] === 'string' ? params[key] as string : '';
+  const mentions = parseMentionTokens(prompt).flatMap((token) => token.type === 'mention' ? [token.id] : []);
+  const token = serializeMention(source.title || '节点', source.id);
+  return { ...params, [key]: mentions.includes(source.id) ? prompt : prompt.trim() ? `${prompt} ${token}` : token,
+    refNodeIds: [...new Set([...mentions, source.id])] };
 }
 
-export async function addNodeAndConnect(
-  sessionId: string,
-  spec: { type: CanvasNodeType; x: number; y: number; title?: string; params?: CanvasNodeParams },
-  sourceId: string,
-  sourceHandle?: string | null,
-  targetHandle?: string | null,
-): Promise<string | null> {
-  const newNodeId = await _addNode(sessionId, spec);
-  if (!newNodeId) return null;
-  const edgeId = await _addEdge(sessionId, sourceId, newNodeId, sourceHandle, targetHandle);
-  record(sessionId, {
-    undo: async () => {
-      if (edgeId) await _deleteEdge(sessionId, edgeId);
-      await _deleteNode(sessionId, newNodeId);
-    },
-    redo: async () => {
-      const recreated = await _addNode(sessionId, spec);
-      if (recreated) {
-        await _addEdge(sessionId, sourceId, recreated, sourceHandle, targetHandle).catch((): null => null);
-      }
-    },
-  });
-  return newNodeId;
+function planConnection(sessionId: string, source: CanvasNode, target: CanvasNode, sourceHandle?: string | null,
+  targetHandle?: string | null): { edits: CanvasEdit[]; extractorId?: string } {
+  const edges = edgesForSession(sessionId);
+  if (source.id === target.id || edges.some((edge) => edge.sourceId === source.id && edge.targetId === target.id)) return { edits: [] };
+  if (source.type === 'video' && (['start_frame', 'end_frame', 'reference'].includes(targetHandle) || target.type === 'video' && !targetHandle)) {
+    if (edges.some((edge) => edge.sourceId === source.id && nodeById(sessionId, edge.targetId)?.type === 'frameExtractor' && edges.some((out) => out.sourceId === edge.targetId && out.targetId === target.id))) return { edits: [] };
+    const id = nanoid(); const mode = targetHandle === 'end_frame' ? 'start' : 'end';
+    return { extractorId: id, edits: [
+      { kind: 'add_node', id, node: { type: 'frameExtractor', x: Math.round((source.x + source.w + target.x) / 2 - 100), y: Math.round((source.y + target.y) / 2),
+        title: mode === 'end' ? '抽尾帧' : '抽首帧', params: { mode } } },
+      edgeEdit(source.id, id, sourceHandle, 'video_in'), edgeEdit(id, target.id, 'frame_out', targetHandle || 'start_frame'),
+    ] };
+  }
+  const edits = [edgeEdit(source.id, target.id, sourceHandle, targetHandle)];
+  const params = connectionMentionParams(source, target, targetHandle);
+  if (params && JSON.stringify(params) !== JSON.stringify(target.params))
+    edits.push({ kind: 'update_node', id: target.id, patch: { params } });
+  return { edits };
+}
+
+export async function connectNodes(sessionId: string, sourceId: string, targetId: string, sourceHandle?: string | null, targetHandle?: string | null): Promise<void> {
+  const source = nodeById(sessionId, sourceId); const target = nodeById(sessionId, targetId); if (!source || !target) return;
+  const plan = planConnection(sessionId, source, target, sourceHandle, targetHandle);
+  await editCommands.commit(sessionId, plan.edits);
+  if (plan.extractorId && source.output?.assets?.length) void extractFrameForNode(sessionId, plan.extractorId).catch((error) => toast.error('抽帧失败', String(error)));
+}
+
+/** One creation intent keeps its IDs and receipt until success, including a UI retry. */
+export function prepareNodeCreation(sessionId: string, spec: CanvasNodeSpec, link?: {
+  sourceId?: string; targetId?: string; sourceHandle?: string | null; targetHandle?: string | null;
+}): () => Promise<string> {
+  const id = nanoid();
+  const created = { ...spec, params: spec.params ?? {} };
+  const edits: CanvasEdit[] = [{ kind: 'add_node', id, node: created }];
+  if (link?.sourceId) {
+    const source = nodeById(sessionId, link.sourceId);
+    if (!source) throw new Error('原节点已不存在');
+    const params = connectionMentionParams(source, { type: spec.type, params: created.params as CanvasNodeParams }, link.targetHandle);
+    if (params) created.params = params;
+    edits.push(edgeEdit(link.sourceId, id, link.sourceHandle, link.targetHandle));
+  } else if (link?.targetId) {
+    const target = nodeById(sessionId, link.targetId);
+    if (!target) throw new Error('原节点已不存在');
+    const params = connectionMentionParams({ id, type: spec.type, title: spec.title }, target, link.targetHandle);
+    edits.push(edgeEdit(id, link.targetId, link.sourceHandle, link.targetHandle));
+    if (params) edits.push({ kind: 'update_node', id: target.id, patch: { params } });
+  }
+  const apply = editCommands.prepare(sessionId, edits);
+  return async () => { await apply(); return id; };
+}
+
+/** A starter pair is one user intent: both nodes and their wire share a receipt and undo. */
+export function prepareStarterPair(sessionId: string, source: CanvasNodeSpec, target: CanvasNodeSpec, link?: {
+  sourceHandle?: string | null; targetHandle?: string | null;
+}): () => Promise<[string, string]> {
+  const sourceId = nanoid();
+  const targetId = nanoid();
+  const apply = editCommands.prepare(sessionId, [
+    { kind: 'add_node', id: sourceId, node: source },
+    { kind: 'add_node', id: targetId, node: target },
+    edgeEdit(sourceId, targetId, link?.sourceHandle, link?.targetHandle),
+  ]);
+  return async () => { await apply(); return [sourceId, targetId]; };
+}
+
+export async function addNodeAndConnect(sessionId: string, spec: CanvasNodeSpec, sourceId: string,
+  sourceHandle?: string | null, targetHandle?: string | null): Promise<string | null> {
+  return prepareNodeCreation(sessionId, spec, { sourceId, sourceHandle, targetHandle })();
 }
 
 /**
  * Creates a new upstream node and connects it TO an existing target node.
  * Used when dragging backwards from an input handle.
  */
-export async function addNodeAndConnectToTarget(
-  sessionId: string,
-  spec: { type: CanvasNodeType; x: number; y: number; title?: string; params?: CanvasNodeParams },
-  targetId: string,
-  targetHandle?: string | null,
-  sourceHandle?: string | null,
-): Promise<string | null> {
-  const newNodeId = await _addNode(sessionId, spec);
-  if (!newNodeId) return null;
-  const edgeId = await _addEdge(sessionId, newNodeId, targetId, sourceHandle, targetHandle);
-  record(sessionId, {
-    undo: async () => {
-      if (edgeId) await _deleteEdge(sessionId, edgeId);
-      await _deleteNode(sessionId, newNodeId);
-    },
-    redo: async () => {
-      const recreated = await _addNode(sessionId, spec);
-      if (recreated) {
-        await _addEdge(sessionId, recreated, targetId, sourceHandle, targetHandle).catch((): null => null);
-      }
-    },
-  });
-  return newNodeId;
+export async function addNodeAndConnectToTarget(sessionId: string, spec: CanvasNodeSpec, targetId: string,
+  targetHandle?: string | null, sourceHandle?: string | null): Promise<string | null> {
+  return prepareNodeCreation(sessionId, spec, { targetId, targetHandle, sourceHandle })();
 }
 
 export async function removeEdge(sessionId: string, edgeId: string): Promise<void> {
-  const edge = (state.edgesBySession[sessionId] ?? []).find((e) => e.id === edgeId);
+  const edge = edgesForSession(sessionId).find((e) => e.id === edgeId);
   if (!edge) return;
   const target = nodeById(sessionId, edge.targetId);
   const source = nodeById(sessionId, edge.sourceId);
   const key = target ? mentionPromptKey(target.type) : null;
-  const shouldStrip = Boolean(target && source && key && shouldSyncMentionOnEdge(edge.targetHandle, source.type));
-  const prevParams = target?.params;
-  const prevText = key && prevParams && typeof (prevParams as Record<string, unknown>)[key] === 'string'
-    ? ((prevParams as Record<string, unknown>)[key] as string)
-    : '';
-  const nextText = shouldStrip && prevText ? stripMentionToken(prevText, edge.sourceId) : prevText;
-
-  await _deleteEdge(sessionId, edgeId);
-  if (shouldStrip && target && key && nextText !== prevText) {
-    await _setNode(sessionId, target.id, { params: { ...(prevParams as object), [key]: nextText } });
+  const edits: CanvasEdit[] = [{ kind: 'delete_edge', id: edgeId }];
+  if (target && source && key && shouldSyncMentionOnEdge(edge.targetHandle, source.type)) {
+    const params = target.params as Record<string, unknown>;
+    const text = typeof params[key] === 'string' ? params[key] as string : '';
+    const next = stripMentionToken(text, source.id);
+    if (next !== text) edits.push({ kind: 'update_node', id: target.id, patch: { params: { ...params, [key]: next } } });
   }
-
-  record(sessionId, {
-    undo: async () => {
-      await _addEdge(sessionId, edge.sourceId, edge.targetId, edge.sourceHandle, edge.targetHandle).catch((): null => null);
-      if (shouldStrip && target && prevParams) await _setNode(sessionId, target.id, { params: prevParams });
-    },
-    redo: async () => {
-      const again = (state.edgesBySession[sessionId] ?? []).find(
-        (e) => e.sourceId === edge.sourceId && e.targetId === edge.targetId,
-      );
-      if (again) await _deleteEdge(sessionId, again.id);
-      if (shouldStrip && target && key && nextText !== prevText) {
-        const curr = nodeById(sessionId, target.id)?.params;
-        if (curr) await _setNode(sessionId, target.id, { params: { ...curr, [key]: nextText } });
-      }
-    },
-  });
+  await editCommands.commit(sessionId, edits);
 }
 
 /**
@@ -1784,60 +1498,16 @@ export async function removeEdge(sessionId: string, edgeId: string): Promise<voi
  * The original edge (A -> B) is replaced with (A -> Reroute) and (Reroute -> B).
  * Supported with full undo/redo.
  */
-export async function insertRerouteNode(
-  sessionId: string,
-  edgeId: string,
-  at: { x: number; y: number },
-): Promise<string | null> {
-  const edge = (state.edgesBySession[sessionId] ?? []).find((e) => e.id === edgeId);
+export async function insertRerouteNode(sessionId: string, edgeId: string, at: { x: number; y: number }): Promise<string | null> {
+  const edge = edgesForSession(sessionId).find((e) => e.id === edgeId);
   if (!edge) return null;
-
-  const originalSourceId = edge.sourceId;
-  const originalTargetId = edge.targetId;
-  const originalSourceHandle = edge.sourceHandle;
-  const originalTargetHandle = edge.targetHandle;
-
-  let rerouteId = await _addNode(sessionId, {
-    type: 'reroute',
-    x: Math.round(at.x - 10),
-    y: Math.round(at.y - 10),
-    w: 20,
-    h: 20,
-    title: '',
-  });
-  if (!rerouteId) return null;
-
-  await _deleteEdge(sessionId, edgeId);
-  let edge1Id = await _addEdge(sessionId, originalSourceId, rerouteId, originalSourceHandle, null);
-  let edge2Id = await _addEdge(sessionId, rerouteId, originalTargetId, null, originalTargetHandle);
-
-  record(sessionId, {
-    undo: async () => {
-      if (edge1Id) await _deleteEdge(sessionId, edge1Id).catch((): void => undefined);
-      if (edge2Id) await _deleteEdge(sessionId, edge2Id).catch((): void => undefined);
-      if (rerouteId) await _deleteNode(sessionId, rerouteId).catch((): void => undefined);
-      await _addEdge(sessionId, originalSourceId, originalTargetId, originalSourceHandle, originalTargetHandle).catch((): null => null);
-    },
-    redo: async () => {
-      rerouteId = await _addNode(sessionId, {
-        type: 'reroute',
-        x: Math.round(at.x - 10),
-        y: Math.round(at.y - 10),
-        w: 20,
-        h: 20,
-        title: '',
-      });
-      if (!rerouteId) return;
-      const oldEdge = (state.edgesBySession[sessionId] ?? []).find(
-        (e) => e.sourceId === originalSourceId && e.targetId === originalTargetId,
-      );
-      if (oldEdge) await _deleteEdge(sessionId, oldEdge.id).catch((): void => undefined);
-      edge1Id = await _addEdge(sessionId, originalSourceId, rerouteId, originalSourceHandle, null);
-      edge2Id = await _addEdge(sessionId, rerouteId, originalTargetId, null, originalTargetHandle);
-    },
-  });
-
-  return rerouteId;
+  const id = nanoid();
+  await editCommands.commit(sessionId, [
+    { kind: 'delete_edge', id: edgeId },
+    { kind: 'add_node', id, node: { type: 'reroute', x: Math.round(at.x - 10), y: Math.round(at.y - 10), w: 20, h: 20, title: '' } },
+    edgeEdit(edge.sourceId, id, edge.sourceHandle, null), edgeEdit(id, edge.targetId, null, edge.targetHandle),
+  ]);
+  return id;
 }
 
 export function isMoodboard(sessionId: string): boolean {
@@ -1865,17 +1535,10 @@ export function setMoodboard(sessionId: string, active: boolean): void {
 
 /** Batch reposition (auto-layout) — one history entry for the lot. */
 export function applyLayout(sessionId: string, positions: Record<string, { x: number; y: number }>): void {
-  const before: Record<string, { x: number; y: number }> = {};
-  for (const [id, pos] of Object.entries(positions)) {
-    const n = nodeById(sessionId, id);
-    if (!n) continue;
-    before[id] = { x: n.x, y: n.y };
-    void _setPosition(sessionId, id, pos.x, pos.y);
-  }
-  const apply = (map: Record<string, { x: number; y: number }>) => async () => {
-    for (const [id, pos] of Object.entries(map)) await _setPosition(sessionId, id, pos.x, pos.y);
-  };
-  record(sessionId, { undo: apply(before), redo: apply(positions) });
+  const edits = Object.entries(positions).filter(([id]) => nodeById(sessionId, id)).map(([id, position]): CanvasEdit => ({
+    kind: 'update_node', id, patch: { x: Math.round(position.x), y: Math.round(position.y) },
+  }));
+  void editCommands.commit(sessionId, edits).catch((error) => toast.error('排列失败', String(error)));
 }
 
 /** Container box that wraps `members` with comfortable padding on all sides. */
@@ -2022,249 +1685,65 @@ export async function runSection(sessionId: string, sectionId: string): Promise<
   }
 }
 
-export async function collapseToSubgraph(
-  sessionId: string,
-  memberIds: string[],
-  title?: string,
-): Promise<string | null> {
-  const allNodes = state.nodesBySession[sessionId] ?? [];
-  const allEdges = state.edgesBySession[sessionId] ?? [];
-
-  const targetNodes = allNodes.filter((n) => memberIds.includes(n.id) && n.type !== 'subgraph');
-  if (targetNodes.length < 2) return null;
-
-  const targetIdSet = new Set(targetNodes.map((n) => n.id));
-  const innerEdges = allEdges.filter(
-    (e) => targetIdSet.has(e.sourceId) && targetIdSet.has(e.targetId),
-  );
-  const inboundEdges = allEdges.filter(
-    (e) => !targetIdSet.has(e.sourceId) && targetIdSet.has(e.targetId),
-  );
-  const outboundEdges = allEdges.filter(
-    (e) => targetIdSet.has(e.sourceId) && !targetIdSet.has(e.targetId),
-  );
-
-  const avgX = Math.round(targetNodes.reduce((sum, n) => sum + n.x, 0) / targetNodes.length);
-  const avgY = Math.round(targetNodes.reduce((sum, n) => sum + n.y, 0) / targetNodes.length);
-
-  const innerSnapshot = {
-    nodes: targetNodes,
-    edges: innerEdges,
-  };
-
-  const subgraphCount = allNodes.filter((n) => n.type === 'subgraph').length + 1;
-  const subgraphSpec = {
-    type: 'subgraph' as const,
-    x: avgX,
-    y: avgY,
-    w: 280,
-    h: 190,
-    title: title || `复合子图 ${subgraphCount}`,
-    params: {
-      collapsed: true,
-      innerNodeIds: targetNodes.map((n) => n.id),
-      innerSnapshot,
-      description: `包含 ${targetNodes.length} 个节点的模块`,
-    },
-  };
-
-  let currentSubgraphId = await _addNode(sessionId, subgraphSpec);
-  if (!currentSubgraphId) return null;
-
-  for (const inEdge of inboundEdges) {
-    await _addEdge(sessionId, inEdge.sourceId, currentSubgraphId, inEdge.sourceHandle, 'input');
+export async function collapseToSubgraph(sessionId: string, memberIds: string[], title?: string): Promise<string | null> {
+  const nodes = (state.nodesBySession[sessionId] ?? []).filter((node) => memberIds.includes(node.id) && node.type !== 'subgraph');
+  if (nodes.length < 2) return null;
+  const ids = new Set(nodes.map((node) => node.id));
+  const edges = edgesForSession(sessionId);
+  const inner = edges.filter((edge) => ids.has(edge.sourceId) && ids.has(edge.targetId));
+  const inbound = edges.filter((edge) => !ids.has(edge.sourceId) && ids.has(edge.targetId));
+  const outbound = edges.filter((edge) => ids.has(edge.sourceId) && !ids.has(edge.targetId));
+  const id = nanoid();
+  const edits: CanvasEdit[] = [
+    ...nodes.map((node): CanvasEdit => ({ kind: 'delete_node', id: node.id })),
+    { kind: 'add_node', id, node: { type: 'subgraph', x: Math.round(nodes.reduce((sum, n) => sum + n.x, 0) / nodes.length),
+      y: Math.round(nodes.reduce((sum, n) => sum + n.y, 0) / nodes.length), w: 280, h: 190,
+      title: title || `复合子图 ${(state.nodesBySession[sessionId] ?? []).filter((n) => n.type === 'subgraph').length + 1}`,
+      params: { collapsed: true, innerNodeIds: nodes.map((n) => n.id), innerSnapshot: { nodes, edges: inner },
+        boundaryEdges: [...inbound, ...outbound], description: `包含 ${nodes.length} 个节点的模块` } } },
+  ];
+  // Several inner ports may share one external node; one visible edge represents that boundary.
+  for (const sourceId of new Set(inbound.map((edge) => edge.sourceId))) {
+    const edge = inbound.find((edge) => edge.sourceId === sourceId);
+    edits.push(edgeEdit(sourceId, id, edge.sourceHandle, 'input'));
   }
-  for (const outEdge of outboundEdges) {
-    await _addEdge(sessionId, currentSubgraphId, outEdge.targetId, 'output', outEdge.targetHandle);
+  for (const targetId of new Set(outbound.map((edge) => edge.targetId))) {
+    const edge = outbound.find((edge) => edge.targetId === targetId);
+    edits.push(edgeEdit(id, targetId, 'output', edge.targetHandle));
   }
-
-  for (const n of targetNodes) {
-    await _deleteNode(sessionId, n.id);
-  }
-
-  let currentInnerNodeIds: string[] = [];
-
-  record(sessionId, {
-    undo: async () => {
-      if (currentSubgraphId) await _deleteNode(sessionId, currentSubgraphId);
-      const idMap = new Map<string, string>();
-      currentInnerNodeIds = [];
-      for (const n of innerSnapshot.nodes) {
-        const newId = await _addNode(sessionId, {
-          type: n.type,
-          x: n.x,
-          y: n.y,
-          w: n.w,
-          h: n.h,
-          title: n.title,
-          params: n.params,
-        });
-        if (newId) {
-          idMap.set(n.id, newId);
-          currentInnerNodeIds.push(newId);
-        }
-      }
-      for (const e of innerSnapshot.edges) {
-        const src = idMap.get(e.sourceId) || e.sourceId;
-        const tgt = idMap.get(e.targetId) || e.targetId;
-        await _addEdge(sessionId, src, tgt, e.sourceHandle, e.targetHandle);
-      }
-      for (const inEdge of inboundEdges) {
-        const tgt = idMap.get(inEdge.targetId) || inEdge.targetId;
-        await _addEdge(sessionId, inEdge.sourceId, tgt, inEdge.sourceHandle, inEdge.targetHandle);
-      }
-      for (const outEdge of outboundEdges) {
-        const src = idMap.get(outEdge.sourceId) || outEdge.sourceId;
-        await _addEdge(sessionId, src, outEdge.targetId, outEdge.sourceHandle, outEdge.targetHandle);
-      }
-    },
-    redo: async () => {
-      for (const id of currentInnerNodeIds) {
-        await _deleteNode(sessionId, id);
-      }
-      const newSubgraphId = await _addNode(sessionId, subgraphSpec);
-      if (newSubgraphId) {
-        currentSubgraphId = newSubgraphId;
-        for (const inEdge of inboundEdges) {
-          await _addEdge(sessionId, inEdge.sourceId, newSubgraphId, inEdge.sourceHandle, 'input');
-        }
-        for (const outEdge of outboundEdges) {
-          await _addEdge(sessionId, newSubgraphId, outEdge.targetId, 'output', outEdge.targetHandle);
-        }
-      }
-    },
-  });
-
-  return currentSubgraphId;
+  await editCommands.commit(sessionId, edits);
+  return id;
 }
 
 export async function unpackSubgraph(sessionId: string, subgraphId: string): Promise<string[]> {
   const subgraph = nodeById(sessionId, subgraphId);
   if (!subgraph || subgraph.type !== 'subgraph') return [];
   const params = subgraph.params as CanvasSubgraphParams;
-  const snapshot = params?.innerSnapshot;
-  if (!snapshot || !snapshot.nodes || snapshot.nodes.length === 0) {
-    await _deleteNode(sessionId, subgraphId);
-    return [];
-  }
-
-  const allEdges = state.edgesBySession[sessionId] ?? [];
-  const inboundToSubgraph = allEdges.filter((e) => e.targetId === subgraphId);
-  const outboundFromSubgraph = allEdges.filter((e) => e.sourceId === subgraphId);
-
-  const subgraphSpec = {
-    type: subgraph.type,
-    x: subgraph.x,
-    y: subgraph.y,
-    w: subgraph.w,
-    h: subgraph.h,
-    title: subgraph.title,
-    params: subgraph.params,
-  };
-
-  await _deleteNode(sessionId, subgraphId);
-
-  const idMap = new Map<string, string>();
-  let unpackedNodeIds: string[] = [];
-
-  for (const n of snapshot.nodes) {
-    const newId = await _addNode(sessionId, {
-      type: n.type,
-      x: n.x,
-      y: n.y,
-      w: n.w,
-      h: n.h,
-      title: n.title,
-      params: n.params,
-    });
-    if (newId) {
-      idMap.set(n.id, newId);
-      unpackedNodeIds.push(newId);
+  const snapshot = params.innerSnapshot;
+  if (!snapshot?.nodes?.length) { await removeNode(sessionId, subgraphId); return []; }
+  const mapping = new Map(snapshot.nodes.map((node) => [node.id, nodeById(sessionId, node.id) ? nanoid() : node.id]));
+  const edits: CanvasEdit[] = [{ kind: 'delete_node', id: subgraphId }, ...snapshot.nodes.map((node): CanvasEdit => {
+    const restored = restoreNodeEdit({ ...node, id: mapping.get(node.id), params: remapParams(node.params, mapping) });
+    return restored;
+  })];
+  for (const edge of snapshot.edges) edits.push(edgeEdit(mapping.get(edge.sourceId), mapping.get(edge.targetId), edge.sourceHandle, edge.targetHandle));
+  const visible = edgesForSession(sessionId);
+  if (params.boundaryEdges) {
+    for (const edge of params.boundaryEdges) {
+      const sourceId = mapping.get(edge.sourceId) ?? edge.sourceId;
+      const targetId = mapping.get(edge.targetId) ?? edge.targetId;
+      const outer = mapping.has(edge.sourceId) ? edge.targetId : edge.sourceId;
+      if (visible.some((e) => e.sourceId === outer && e.targetId === subgraphId || e.sourceId === subgraphId && e.targetId === outer))
+        edits.push(edgeEdit(sourceId, targetId, edge.sourceHandle, edge.targetHandle));
+    }
+  } else {
+    for (const edge of visible) {
+      if (edge.targetId === subgraphId) edits.push(edgeEdit(edge.sourceId, mapping.get(snapshot.nodes[0].id), edge.sourceHandle, 'input'));
+      if (edge.sourceId === subgraphId) edits.push(edgeEdit(mapping.get(snapshot.nodes.at(-1).id), edge.targetId, 'output', edge.targetHandle));
     }
   }
-
-  for (const e of snapshot.edges) {
-    const src = idMap.get(e.sourceId) || e.sourceId;
-    const tgt = idMap.get(e.targetId) || e.targetId;
-    await _addEdge(sessionId, src, tgt, e.sourceHandle, e.targetHandle);
-  }
-
-  const firstTarget = idMap.get(snapshot.nodes[0]?.id) || snapshot.nodes[0]?.id;
-  if (firstTarget) {
-    for (const inEdge of inboundToSubgraph) {
-      await _addEdge(sessionId, inEdge.sourceId, firstTarget, inEdge.sourceHandle, 'input');
-    }
-  }
-  const lastSource =
-    idMap.get(snapshot.nodes[snapshot.nodes.length - 1]?.id) ||
-    snapshot.nodes[snapshot.nodes.length - 1]?.id;
-  if (lastSource) {
-    for (const outEdge of outboundFromSubgraph) {
-      await _addEdge(sessionId, lastSource, outEdge.targetId, 'output', outEdge.targetHandle);
-    }
-  }
-
-  let currentSubgraphId: string | null = null;
-
-  record(sessionId, {
-    undo: async () => {
-      for (const id of unpackedNodeIds) {
-        await _deleteNode(sessionId, id);
-      }
-      currentSubgraphId = await _addNode(sessionId, subgraphSpec);
-      if (currentSubgraphId) {
-        for (const inEdge of inboundToSubgraph) {
-          await _addEdge(sessionId, inEdge.sourceId, currentSubgraphId, inEdge.sourceHandle, inEdge.targetHandle);
-        }
-        for (const outEdge of outboundFromSubgraph) {
-          await _addEdge(sessionId, currentSubgraphId, outEdge.targetId, outEdge.sourceHandle, outEdge.targetHandle);
-        }
-      }
-    },
-    redo: async () => {
-      if (currentSubgraphId) {
-        await _deleteNode(sessionId, currentSubgraphId);
-      }
-      const redoIdMap = new Map<string, string>();
-      unpackedNodeIds = [];
-      for (const n of snapshot.nodes) {
-        const newId = await _addNode(sessionId, {
-          type: n.type,
-          x: n.x,
-          y: n.y,
-          w: n.w,
-          h: n.h,
-          title: n.title,
-          params: n.params,
-        });
-        if (newId) {
-          redoIdMap.set(n.id, newId);
-          unpackedNodeIds.push(newId);
-        }
-      }
-      for (const e of snapshot.edges) {
-        const src = redoIdMap.get(e.sourceId) || e.sourceId;
-        const tgt = redoIdMap.get(e.targetId) || e.targetId;
-        await _addEdge(sessionId, src, tgt, e.sourceHandle, e.targetHandle);
-      }
-      const redoFirstTarget = redoIdMap.get(snapshot.nodes[0]?.id) || snapshot.nodes[0]?.id;
-      if (redoFirstTarget) {
-        for (const inEdge of inboundToSubgraph) {
-          await _addEdge(sessionId, inEdge.sourceId, redoFirstTarget, inEdge.sourceHandle, 'input');
-        }
-      }
-      const redoLastSource =
-        redoIdMap.get(snapshot.nodes[snapshot.nodes.length - 1]?.id) ||
-        snapshot.nodes[snapshot.nodes.length - 1]?.id;
-      if (redoLastSource) {
-        for (const outEdge of outboundFromSubgraph) {
-          await _addEdge(sessionId, redoLastSource, outEdge.targetId, 'output', outEdge.targetHandle);
-        }
-      }
-    },
-  });
-
-  return unpackedNodeIds;
+  await editCommands.commit(sessionId, edits);
+  return [...mapping.values()];
 }
 
 export async function runSubgraph(sessionId: string, subgraphId: string): Promise<void> {
@@ -2293,36 +1772,20 @@ export async function runSubgraph(sessionId: string, subgraphId: string): Promis
  */
 export async function arrangeSelectedNodes(sessionId: string, nodeIds: string[]): Promise<void> {
   const all = state.nodesBySession[sessionId] ?? [];
-  const picked = all.filter((n) => nodeIds.includes(n.id));
-  const groups = picked.filter((n) => n.type === 'group');
-
-  // Selecting a single group means "tidy up inside this group".
-  if (groups.length === 1 && picked.length === 1) {
-    const group = groups[0];
-    const members = groupMemberIds(sessionId, group.id)
-      .map((id) => nodeById(sessionId, id))
-      .filter((n): n is CanvasNode => Boolean(n));
-    if (members.length < 2) return;
-    applyLayout(
-      sessionId,
-      gridArrange(members, {
-        center: { x: group.x + group.w / 2, y: group.y + group.h / 2 },
-      }),
-    );
-    void refitGroup(sessionId, group.id);
-    return;
-  }
-
-  const targets = picked.filter((n) => n.type !== 'group');
+  const selected = all.filter((node) => nodeIds.includes(node.id));
+  const singleGroup = selected.length === 1 && selected[0].type === 'group' ? selected[0] : undefined;
+  const targets = singleGroup ? all.filter((node) => groupMemberIds(sessionId, singleGroup.id).includes(node.id)) : selected.filter((node) => node.type !== 'group');
   if (targets.length < 2) return;
-  applyLayout(sessionId, gridArrange(targets));
-  // Any group that owns one of the moved nodes needs to grow/shrink to match.
-  const touched = new Set<string>();
-  for (const t of targets) {
-    const g = groupOf(sessionId, t.id);
-    if (g) touched.add(g.id);
+  const positions = gridArrange(targets, singleGroup ? { center: { x: singleGroup.x + singleGroup.w / 2, y: singleGroup.y + singleGroup.h / 2 } } : undefined);
+  const projected = all.map((node) => positions[node.id] ? { ...node, ...positions[node.id] } : node);
+  const edits: CanvasEdit[] = Object.entries(positions).map(([id, position]) => ({ kind: 'update_node', id, patch: position }));
+  const groups = all.filter((node) => node.type === 'group' && ((node.params as CanvasGroupParams).memberIds ?? []).some((id) => positions[id]));
+  for (const group of groups) {
+    const ids = groupMemberIds(sessionId, group.id);
+    const members = projected.filter((node) => ids.includes(node.id));
+    if (members.length) edits.push({ kind: 'update_node', id: group.id, patch: groupBox(members) });
   }
-  for (const gid of touched) void refitGroup(sessionId, gid);
+  await editCommands.commit(sessionId, edits);
 }
 
 /** Grow / shrink a group container so it wraps its current members. */
@@ -2338,57 +1801,28 @@ export async function refitGroup(sessionId: string, groupId: string): Promise<vo
 }
 
 export async function duplicateSelectedNodes(sessionId: string, nodeIds: string[]): Promise<string[]> {
-  const nodes = (state.nodesBySession[sessionId] ?? []).filter((n) => nodeIds.includes(n.id));
-  if (nodes.length === 0) return [];
-
-  const oldToNew = new Map<string, string>();
-  const createdIds: string[] = [];
-  const createdEdgeIds: string[] = [];
-
-  for (const n of nodes) {
-    const spec = {
-      type: n.type,
-      x: n.x + 36,
-      y: n.y + 36,
-      w: n.w,
-      h: n.h,
-      title: n.title ? `${n.title} (副本)` : undefined,
-      params: n.params,
-    };
-    const newId = await _addNode(sessionId, spec);
-    if (newId) {
-      oldToNew.set(n.id, newId);
-      createdIds.push(newId);
-    }
+  const nodes = (state.nodesBySession[sessionId] ?? []).filter((node) => nodeIds.includes(node.id));
+  const mapping = new Map(nodes.map((node) => [node.id, nanoid()]));
+  const edits: CanvasEdit[] = nodes.map((node) => ({ kind: 'add_node', id: mapping.get(node.id),
+    node: { type: node.type, x: node.x + 36, y: node.y + 36, w: node.w, h: node.h,
+      title: node.title ? `${node.title} (副本)` : '', params: remapParams(node.params, mapping) } }));
+  for (const edge of edgesForSession(sessionId)) {
+    if (mapping.has(edge.sourceId) && mapping.has(edge.targetId))
+      edits.push(edgeEdit(mapping.get(edge.sourceId), mapping.get(edge.targetId), edge.sourceHandle, edge.targetHandle));
   }
+  await editCommands.commit(sessionId, edits);
+  return [...mapping.values()];
+}
 
-  // Clone internal edges between selected nodes
-  const edges = state.edgesBySession[sessionId] ?? [];
-  const internalEdges = edges.filter((e) => oldToNew.has(e.sourceId) && oldToNew.has(e.targetId));
-  for (const edge of internalEdges) {
-    const newSource = oldToNew.get(edge.sourceId)!;
-    const newTarget = oldToNew.get(edge.targetId)!;
-    const newEdgeId = await _addEdge(
-      sessionId,
-      newSource,
-      newTarget,
-      edge.sourceHandle ?? undefined,
-      edge.targetHandle ?? undefined,
-    );
-    if (newEdgeId) createdEdgeIds.push(newEdgeId);
+function remapParams(params: CanvasNodeParams, ids: Map<string, string>): CanvasNodeParams {
+  const result = { ...params } as Record<string, unknown>;
+  for (const key of ['prompt', 'content', 'instruction']) {
+    if (typeof result[key] === 'string') result[key] = (result[key] as string).replace(/\(canvas:([A-Za-z0-9_-]+)\)/g,
+      (token, id) => ids.has(id) ? `(canvas:${ids.get(id)})` : token);
   }
-
-  record(sessionId, {
-    undo: async () => {
-      for (const eId of createdEdgeIds) await _deleteEdge(sessionId, eId);
-      for (const nId of createdIds) await _deleteNode(sessionId, nId);
-    },
-    redo: async () => {
-      await duplicateSelectedNodes(sessionId, nodeIds);
-    },
-  });
-
-  return createdIds;
+  for (const key of ['memberIds', 'refNodeIds', 'innerNodeIds']) if (Array.isArray(result[key]))
+    result[key] = (result[key] as string[]).map((id) => ids.get(id) ?? id);
+  return result;
 }
 
 // --- runs (not undoable) ---
@@ -2439,10 +1873,7 @@ export async function importImage(sessionId: string, file: File, at: { x: number
     y: at.y,
   });
   await applyResponseEvent(sessionId, { type: 'node_added', node }, fence);
-  record(sessionId, {
-    undo: () => _deleteNode(sessionId, node.id),
-    redo: () => Promise.resolve(), // imported bytes are gone from the drop event
-  });
+  recordCreated(sessionId, [node]);
   return node;
 }
 
@@ -2489,10 +1920,7 @@ export async function addAnchorFromFile(
     params: { role: 'character', strength: 'mid' },
   });
   await applyResponseEvent(sessionId, { type: 'node_added', node }, fence);
-  record(sessionId, {
-    undo: () => _deleteNode(sessionId, node.id),
-    redo: () => Promise.resolve(),
-  });
+  recordCreated(sessionId, [node]);
   return node.id;
 }
 
@@ -2500,48 +1928,18 @@ export async function addAnchorFromFile(
  * Wire a reference anchor into every image/video node in `targetIds` (skipping
  * ones already connected), as one history entry. Returns how many edges landed.
  */
-export async function attachAnchor(
-  sessionId: string,
-  anchorId: string,
-  targetIds: string[],
-): Promise<number> {
-  const nodes = state.nodesBySession[sessionId] ?? [];
-  const byId = new Map(nodes.map((n) => [n.id, n]));
-  const edges = state.edgesBySession[sessionId] ?? [];
-  const REF_SLOT_MAX = 3;
-  const refSlotCount = (tid: string): number =>
-    (state.edgesBySession[sessionId] ?? []).filter(
-      (e) => e.targetId === tid && (e.targetHandle ?? '').startsWith('ref_'),
-    ).length;
-  const targets = targetIds.filter((tid) => {
-    const t = byId.get(tid);
-    if (!t || (t.type !== 'image' && t.type !== 'video')) return false;
-    if (edges.some((e) => e.sourceId === anchorId && e.targetId === tid)) return false;
-    return refSlotCount(tid) < REF_SLOT_MAX;
-  });
-  if (targets.length === 0) return 0;
-
-  const connect = async (): Promise<string[]> => {
-    const made: string[] = [];
-    for (const tid of targets) {
-      const slot = Math.min(REF_SLOT_MAX, refSlotCount(tid) + 1);
-      const eid = await _addEdge(sessionId, anchorId, tid, null, `ref_${slot}`);
-      if (eid) made.push(eid);
-    }
-    return made;
-  };
-
-  let edgeIds = await connect();
-  if (edgeIds.length === 0) return 0;
-  record(sessionId, {
-    undo: async () => {
-      for (const eid of edgeIds) await _deleteEdge(sessionId, eid);
-    },
-    redo: async () => {
-      edgeIds = await connect();
-    },
-  });
-  return edgeIds.length;
+export async function attachAnchor(sessionId: string, anchorId: string, targetIds: string[]): Promise<number> {
+  const edges = edgesForSession(sessionId);
+  const edits: CanvasEdit[] = [];
+  for (const targetId of new Set(targetIds)) {
+    const target = nodeById(sessionId, targetId);
+    if (!target || !['image', 'video'].includes(target.type) || edges.some((e) => e.sourceId === anchorId && e.targetId === targetId)) continue;
+    const occupied = new Set(edges.filter((edge) => edge.targetId === targetId).map((edge) => edge.targetHandle));
+    const slot = [1, 2, 3].find((slot) => !occupied.has(`ref_${slot}`));
+    if (slot) edits.push(edgeEdit(anchorId, targetId, null, `ref_${slot}`));
+  }
+  await editCommands.commit(sessionId, edits);
+  return edits.length;
 }
 
 /**
@@ -2553,51 +1951,16 @@ export async function attachAnchor(
  * `pick`: 'start' | 'end' grab the first / last frame; 'current' grabs the
  * frame at `currentTime` (seconds) of the player the user is scrubbing.
  */
-export async function extractVideoFrame(
-  sessionId: string,
-  videoNodeId: string,
-  pick: FramePick,
-  currentTime = 0,
-  assetIndex = 0,
-): Promise<string | null> {
-  const id = canvasId(sessionId);
-  if (!id) return null;
-  const source = nodeById(sessionId, videoNodeId);
-  if (!source || source.type !== 'video') return null;
+export async function extractVideoFrame(sessionId: string, videoNodeId: string, pick: FramePick, currentTime = 0, assetIndex = 0): Promise<string | null> {
+  const source = nodeById(sessionId, videoNodeId); if (!source || source.type !== 'video') return null;
   const assets = source.output?.assets ?? [];
-  const rel = assets[Math.min(assetIndex, assets.length - 1)] ?? assets[0];
-  if (!rel) return null;
-
-  const httpUrl = await api.canvasAssetUrl(rel);
-  const blob = await grabVideoFrameBlob(httpUrl, pick, currentTime);
-  const buffer = await blob.arrayBuffer();
-  let binary = '';
-  const bytes = new Uint8Array(buffer);
-  for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
-
-  const label = pick === 'start' ? '镜头首帧' : pick === 'end' ? '镜头尾帧' : '镜头选帧';
-  const yOffset = pick === 'start' ? 0 : pick === 'end' ? 80 : 160;
-
-  const fence = captureProjectionFence(sessionId, id);
-  const node = await api.importCanvasImage(id, {
-    name: label,
-    dataBase64: btoa(binary),
-    x: Math.round(source.x + source.w + 56),
-    y: Math.round(source.y + yOffset),
-  });
-  await applyResponseEvent(sessionId, { type: 'node_added', node }, fence);
-
-  const edgeId = await _addEdge(sessionId, videoNodeId, node.id).catch((): null => null);
-
-  record(sessionId, {
-    undo: async () => {
-      if (edgeId) await _deleteEdge(sessionId, edgeId);
-      await _deleteNode(sessionId, node.id);
-    },
-    redo: () => Promise.resolve(), // the decoded frame bytes are not retained
-  });
-
-  return node.id;
+  const path = assets[Math.min(assetIndex, assets.length - 1)]; if (!path) return null;
+  const blob = await grabVideoFrameBlob(await api.canvasAssetUrl(path), pick, currentTime);
+  const id = nanoid(); const label = pick === 'start' ? '镜头首帧' : pick === 'end' ? '镜头尾帧' : '镜头选帧';
+  await commitUploads(sessionId, [{ kind: 'add_node', id, node: { type: 'image', x: source.x + source.w + 56, y: source.y + (pick === 'start' ? 0 : pick === 'end' ? 80 : 160),
+    title: label, params: { prompt: '', extractedFrom: { nodeId: videoNodeId, asset: path, pick, currentTime } } } }, edgeEdit(videoNodeId, id)],
+    [{ nodeId: id, name: `${label}.png`, mimeType: 'image/png', dataBase64: await blobToBase64(blob) }]);
+  return id;
 }
 
 export async function extractFrameForNode(sessionId: string, frameExtractorNodeId: string): Promise<void> {
@@ -2614,7 +1977,7 @@ export async function extractFrameForNode(sessionId: string, frameExtractorNodeI
   if (!sourceNode || sourceNode.type !== 'video') throw new Error('上游节点不是视频节点');
 
   const assets = sourceNode.output?.assets ?? [];
-  const rel = assets[0];
+  const rel = assets[sourceNode.output?.activeAssetIndex ?? 0];
   if (!rel) throw new Error('上游视频尚未生成产物');
 
   const params = (targetNode.params as CanvasFrameExtractorParams) || { mode: 'end' };
@@ -2653,70 +2016,38 @@ export async function uploadAssetToNode(sessionId: string, nodeId: string, file:
   await applyResponseEvent(sessionId, { type: 'node_updated', node: updatedNode }, fence);
 }
 
+async function commitUploads(sessionId: string, edits: CanvasEdit[], uploads: CanvasEditUpload[]): Promise<CanvasSnapshot> {
+  const id = canvasId(sessionId);
+  if (!id) throw new Error('画布尚未加载');
+  return editCommands.commitWithResult(sessionId, edits, () => api.editCanvasWithUploads(id, edits, uploads, nanoid()), uploads);
+}
+
+function recordCreated(sessionId: string, nodes: CanvasNode[], edges: CanvasEdge[] = []): void {
+  editCommands.recordExisting(sessionId, nodes.map((node) => ({ kind: 'delete_node', id: node.id })),
+    [...nodes.map(restoreNodeEdit), ...edges.map((edge): CanvasEdit => ({ kind: 'add_edge', edge }))]);
+}
+
 const EDIT_NODE_GAP = 80;
 
 /**
  * 从源图节点派生一次编辑：建新 image 节点 + edge(image_out → edit_src)。
  * 本地类在客户端算像素并上传；模型类上传蒙版（若有）后 runNode。
  */
-export async function deriveImageEdit(
-  sessionId: string,
-  sourceNodeId: string,
-  spec: Omit<ImageEditSpec, 'sourceNodeId'>,
-  opts?: { localResultBlob?: Blob; maskBlob?: Blob },
-): Promise<string | null> {
-  const src = nodeById(sessionId, sourceNodeId);
-  if (!src) return null;
-  const at = { x: src.x + src.w + EDIT_NODE_GAP, y: src.y };
-  const fullSpec: ImageEditSpec = { ...spec, sourceNodeId };
-  const srcParams = (src.params as CanvasImageParams) ?? { prompt: '', size: '1024x1024' };
-
-  const newId = await addNodeAndConnect(
-    sessionId,
-    {
-      type: 'image',
-      x: at.x,
-      y: at.y,
-      title: editNodeTitle(spec.kind),
-      params: {
-        prompt: '',
-        size: srcParams.size ?? '1024x1024',
-        model: srcParams.model,
-        edit: fullSpec,
-      },
-    },
-    sourceNodeId,
-    'image_out',
-    'edit_src',
-  );
-  if (!newId) return null;
-
-  if (isLocalEdit(spec.kind) || opts?.localResultBlob) {
-    if (opts?.localResultBlob) {
-      await uploadAssetToNode(
-        sessionId,
-        newId,
-        new File([opts.localResultBlob], `${spec.kind}.png`, { type: 'image/png' }),
-      );
-    }
-    return newId;
-  }
-
-  if (EDIT_META[spec.kind].needsMask && opts?.maskBlob) {
-    const cid = canvasId(sessionId);
-    if (cid) {
-      const b64 = await blobToBase64(opts.maskBlob);
-      const { maskAsset } = await api.uploadCanvasNodeMask(cid, newId, b64);
-      const current = nodeById(sessionId, newId);
-      const currentParams = (current?.params as CanvasImageParams) ?? srcParams;
-      await updateNodeParams(sessionId, newId, {
-        ...currentParams,
-        edit: { ...fullSpec, maskAsset },
-      });
-    }
-  }
-  await runNode(sessionId, newId);
-  return newId;
+export async function deriveImageEdit(sessionId: string, sourceNodeId: string, spec: Omit<ImageEditSpec, 'sourceNodeId'>,
+  opts?: { localResultBlob?: Blob; maskBlob?: Blob }): Promise<string | null> {
+  const source = nodeById(sessionId, sourceNodeId);
+  if (!source) return null;
+  const params = source.params as CanvasImageParams;
+  const id = nanoid();
+  const edits: CanvasEdit[] = [{ kind: 'add_node', id, node: { type: 'image', x: source.x + source.w + EDIT_NODE_GAP, y: source.y,
+    title: editNodeTitle(spec.kind), params: { prompt: '', size: params.size ?? '1024x1024', model: params.model, edit: { ...spec, sourceNodeId } } } },
+    edgeEdit(sourceNodeId, id, 'image_out', 'edit_src')];
+  const uploads: CanvasEditUpload[] = [];
+  if (opts?.localResultBlob) uploads.push({ nodeId: id, name: `${spec.kind}.png`, mimeType: 'image/png', dataBase64: await blobToBase64(opts.localResultBlob) });
+  if (EDIT_META[spec.kind].needsMask && opts?.maskBlob) uploads.push({ nodeId: id, name: 'mask.png', mimeType: 'image/png', role: 'mask', dataBase64: await blobToBase64(opts.maskBlob) });
+  if (uploads.length) await commitUploads(sessionId, edits, uploads); else await editCommands.commit(sessionId, edits);
+  if (!isLocalEdit(spec.kind) && !opts?.localResultBlob) await runNode(sessionId, id);
+  return id;
 }
 
 /**
@@ -2733,78 +2064,35 @@ export async function reviseImageEdit(
   if (!node) return;
   const params = (node.params as CanvasImageParams) ?? { prompt: '', size: '1024x1024' };
   if (!params.edit) return;
-  let nextEdit: ImageEditSpec = { ...params.edit, ...patch };
-  if (opts?.maskBlob) {
-    const cid = canvasId(sessionId);
-    if (cid) {
-      const b64 = await blobToBase64(opts.maskBlob);
-      const { maskAsset } = await api.uploadCanvasNodeMask(cid, nodeId, b64);
-      nextEdit = { ...nextEdit, maskAsset };
-    }
-  }
-  await updateNodeParams(sessionId, nodeId, { ...params, edit: nextEdit });
-  if (isLocalEdit(nextEdit.kind)) {
-    if (opts?.localResultBlob) {
-      await uploadAssetToNode(
-        sessionId,
-        nodeId,
-        new File([opts.localResultBlob], `${nextEdit.kind}.png`, { type: 'image/png' }),
-      );
-    }
-    return;
-  }
+  const nextEdit: ImageEditSpec = { ...params.edit, ...patch };
+  const edits: CanvasEdit[] = [{ kind: 'update_node', id: nodeId, patch: { params: { ...params, edit: nextEdit } } }];
+  const uploads: CanvasEditUpload[] = [];
+  if (opts?.maskBlob) uploads.push({ nodeId, name: 'mask.png', mimeType: 'image/png', role: 'mask', dataBase64: await blobToBase64(opts.maskBlob) });
+  if (isLocalEdit(nextEdit.kind) && opts?.localResultBlob) uploads.push({ nodeId, name: `${nextEdit.kind}.png`, mimeType: 'image/png', dataBase64: await blobToBase64(opts.localResultBlob) });
+  if (uploads.length) await commitUploads(sessionId, edits, uploads); else await editCommands.commit(sessionId, edits);
+  if (isLocalEdit(nextEdit.kind)) return;
   if (opts?.rerun === false) return;
   await runNode(sessionId, nodeId);
 }
 
 /** 快速切分：源图切成 N 块，每块建一个 image 节点。一条 undo 记录包住全部。 */
-export async function deriveImageSplit(
-  sessionId: string,
-  sourceNodeId: string,
-  grid: '2x2' | '3x3' | '4x4',
-  tiles: Blob[],
-): Promise<string[]> {
-  const src = nodeById(sessionId, sourceNodeId);
-  if (!src || tiles.length === 0) return [];
+export async function deriveImageSplit(sessionId: string, sourceNodeId: string, grid: '2x2' | '3x3' | '4x4', tiles: Blob[]): Promise<string[]> {
+  const source = nodeById(sessionId, sourceNodeId);
+  if (!source || !tiles.length) return [];
   const cols = grid === '2x2' ? 2 : grid === '3x3' ? 3 : 4;
   const box = defaultNodeBox('image');
-  const srcParams = (src.params as CanvasImageParams) ?? { prompt: '', size: '1024x1024' };
-  const createdIds: string[] = [];
-  const createdEdgeIds: string[] = [];
-
-  for (let i = 0; i < tiles.length; i += 1) {
-    const col = i % cols;
-    const row = Math.floor(i / cols);
-    const spec = {
-      type: 'image' as const,
-      x: src.x + src.w + EDIT_NODE_GAP + col * (box.w + EDIT_NODE_GAP),
-      y: src.y + row * (box.h + EDIT_NODE_GAP),
-      title: `切分 ${i + 1}`,
-      params: {
-        prompt: '',
-        size: srcParams.size ?? '1024x1024',
-        edit: { kind: 'split' as const, sourceNodeId, params: { grid } },
-      },
-    };
-    const newId = await _addNode(sessionId, spec);
-    if (!newId) continue;
-    createdIds.push(newId);
-    const edgeId = await _addEdge(sessionId, sourceNodeId, newId, 'image_out', 'edit_src');
-    if (edgeId) createdEdgeIds.push(edgeId);
-    await uploadAssetToNode(sessionId, newId, new File([tiles[i]], `split-${i + 1}.png`, { type: 'image/png' }));
-  }
-
-  if (createdIds.length === 0) return [];
-  record(sessionId, {
-    undo: async () => {
-      for (const eId of createdEdgeIds) await _deleteEdge(sessionId, eId);
-      for (const nId of createdIds) await _deleteNode(sessionId, nId);
-    },
-    redo: async () => {
-      await deriveImageSplit(sessionId, sourceNodeId, grid, tiles);
-    },
-  });
-  return createdIds;
+  const ids = tiles.map(() => nanoid());
+  const params = source.params as CanvasImageParams;
+  const edits: CanvasEdit[] = ids.flatMap((id, i) => [
+    { kind: 'add_node' as const, id, node: { type: 'image' as const, x: source.x + source.w + EDIT_NODE_GAP + (i % cols) * (box.w + EDIT_NODE_GAP),
+      y: source.y + Math.floor(i / cols) * (box.h + EDIT_NODE_GAP), title: `切分 ${i + 1}`,
+      params: { prompt: '', size: params.size ?? '1024x1024', edit: { kind: 'split', sourceNodeId, params: { grid } } } } },
+    edgeEdit(sourceNodeId, id, 'image_out', 'edit_src'),
+  ]);
+  const uploads = await Promise.all(tiles.map(async (tile, i): Promise<CanvasEditUpload> => ({ nodeId: ids[i], name: `split-${i + 1}.png`,
+    mimeType: 'image/png', dataBase64: await blobToBase64(tile) })));
+  await commitUploads(sessionId, edits, uploads);
+  return ids;
 }
 
 /** Download the current canvas as a portable `.reizo.zip`. */
@@ -2843,12 +2131,10 @@ export async function importWorkflow(
   const res = await api.importCanvasWorkflow(id, btoa(binary));
   const createdIds = res.nodeIds ?? [];
   if (createdIds.length > 0) {
-    record(sessionId, {
-      undo: async () => {
-        for (const nid of createdIds) await _deleteNode(sessionId, nid);
-      },
-      redo: () => Promise.resolve(), // decoded zip bytes are not retained
-    });
+    const { snap, acknowledgedVersion } = await readCanvasSnapshot(sessionId);
+    ingestSnapshot(sessionId, snap, syncCursorBySession.get(sessionId)?.epoch ?? null, false, acknowledgedVersion);
+    const ids = new Set(createdIds);
+    recordCreated(sessionId, snap.nodes.filter((node) => ids.has(node.id)), snap.edges.filter((edge) => ids.has(edge.sourceId) || ids.has(edge.targetId)));
   }
   return { warnings: res.warnings ?? [], count: createdIds.length };
 }
@@ -2955,61 +2241,11 @@ export async function acceptProposals(sessionId: string): Promise<void> {
 }
 
 export async function rejectProposals(sessionId: string): Promise<void> {
-  const currentProposals = state.proposalsBySession[sessionId] ?? [];
-  if (currentProposals.length === 0) return;
-
-  const allNodes = state.nodesBySession[sessionId] ?? [];
-  const allEdges = state.edgesBySession[sessionId] ?? [];
-
-  const nodesToDelete = allNodes.filter((n) => currentProposals.includes(n.id));
-  const edgesToDelete = allEdges.filter(
-    (e) => currentProposals.includes(e.sourceId) || currentProposals.includes(e.targetId),
-  );
-
+  const proposals = state.proposalsBySession[sessionId] ?? [];
+  const edits = proposals.filter((id) => nodeById(sessionId, id)).map((id): CanvasEdit => ({ kind: 'delete_node', id }));
+  await editCommands.commit(sessionId, edits);
   setProposals(sessionId, []);
 
-  for (const e of edgesToDelete) {
-    await _deleteEdge(sessionId, e.id);
-  }
-  for (const n of nodesToDelete) {
-    await _deleteNode(sessionId, n.id);
-  }
 
-  let liveDeletedIds = currentProposals;
-
-  record(sessionId, {
-    undo: async () => {
-      const idMap = new Map<string, string>();
-      const restoredIds: string[] = [];
-      for (const n of nodesToDelete) {
-        const newId = await _addNode(sessionId, {
-          type: n.type,
-          x: n.x,
-          y: n.y,
-          w: n.w,
-          h: n.h,
-          title: n.title,
-          params: n.params,
-        });
-        if (newId) {
-          idMap.set(n.id, newId);
-          restoredIds.push(newId);
-        }
-      }
-      for (const e of edgesToDelete) {
-        const src = idMap.get(e.sourceId) || e.sourceId;
-        const tgt = idMap.get(e.targetId) || e.targetId;
-        await _addEdge(sessionId, src, tgt, e.sourceHandle, e.targetHandle);
-      }
-      liveDeletedIds = restoredIds;
-      setProposals(sessionId, restoredIds);
-    },
-    redo: async () => {
-      setProposals(sessionId, []);
-      for (const id of liveDeletedIds) {
-        await _deleteNode(sessionId, id);
-      }
-    },
-  });
 }
 

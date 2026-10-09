@@ -1,5 +1,6 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
+import { skillContractSchema, type SkillContract } from '../shared/skillContract';
 
 export interface Skill {
   id: string;
@@ -15,6 +16,8 @@ export interface Skill {
   source: 'bundled' | 'user';
   /** Directory the skill file lives in — used to serve `skill-asset:` URLs. */
   dir: string;
+  contract?: SkillContract;
+  contractError?: string;
 }
 
 function parseFrontmatter(raw: string): { name?: string; description?: string; prompt?: string; cover?: string; category?: string; body: string } {
@@ -40,6 +43,10 @@ async function loadSkillFile(file: string, source: Skill['source']): Promise<Ski
       path.basename(file).toLowerCase() === 'skill.md'
         ? path.basename(path.dirname(file))
         : path.basename(file).replace(/\.md$/i, '');
+    let contract: SkillContract | undefined;
+    let contractError: string | undefined;
+    try { contract = skillContractSchema.parse(JSON.parse(await readFile(path.join(path.dirname(file), 'contract.json'), 'utf8'))); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') contractError = `技能交付约定无效: ${error instanceof Error ? error.message : String(error)}`; }
     return {
       id,
       name: parsed.name || id,
@@ -50,6 +57,7 @@ async function loadSkillFile(file: string, source: Skill['source']): Promise<Ski
       body: parsed.body,
       source,
       dir: path.dirname(file),
+      contract, contractError,
     };
   } catch {
     return null;

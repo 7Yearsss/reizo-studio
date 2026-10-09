@@ -11,7 +11,9 @@ export type ArtifactKind =
   | 'video'
   | 'audio'
   | 'sketch'
-  | 'sheet';
+  | 'sheet'
+  | 'doc'
+  | 'presentation';
 
 /** Which preview component renders this artifact. */
 export type ArtifactRenderer =
@@ -25,6 +27,8 @@ export type ArtifactRenderer =
   | 'diagram'
   | 'sketch'
   | 'sheet'
+  | 'doc'
+  | 'presentation'
   | 'raw';
 
 export type ArtifactStatus = 'streaming' | 'complete' | 'error';
@@ -109,6 +113,8 @@ const TEXT_KINDS: ReadonlySet<ArtifactKind> = new Set([
   'diagram',
   'sketch',
   'sheet',
+  'doc',
+  'presentation',
   'code',
 ]);
 
@@ -118,6 +124,8 @@ export function isBlobKind(kind: ArtifactKind): boolean {
 }
 
 export function inferArtifactKind(name: string, mimeType?: string): ArtifactKind {
+  if (mimeType === 'application/vnd.reizo.document+json') return 'doc';
+  if (mimeType === 'application/vnd.reizo.presentation+json') return 'presentation';
   const lower = name.toLowerCase();
   if ((mimeType && mimeType.startsWith('image/')) || /\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(lower)) {
     return 'image';
@@ -142,6 +150,8 @@ export function inferArtifactKind(name: string, mimeType?: string): ArtifactKind
 
 export function inferRenderer(kind: ArtifactKind): ArtifactRenderer {
   switch (kind) {
+    case 'doc': return 'doc';
+    case 'presentation': return 'presentation';
     case 'markdown':
       return 'markdown';
     case 'html':
@@ -172,6 +182,8 @@ export function inferRenderer(kind: ArtifactKind): ArtifactRenderer {
 
 export function mimeForKind(kind: ArtifactKind): string {
   switch (kind) {
+    case 'doc': return 'application/vnd.reizo.document+json';
+    case 'presentation': return 'application/vnd.reizo.presentation+json';
     case 'markdown':
       return 'text/markdown';
     case 'html':

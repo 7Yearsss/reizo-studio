@@ -14,6 +14,7 @@ export interface AudioJobResult {
   audioBuffer: Buffer;
   format: 'mp3' | 'wav';
   durationSec?: number;
+  usage?: unknown;
 }
 
 export interface AudioDriverCredentials {

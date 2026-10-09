@@ -62,6 +62,7 @@ describe('shouldSyncMentionOnEdge', () => {
     expect(shouldSyncMentionOnEdge('prompt', 'note')).toBe(true);
     expect(shouldSyncMentionOnEdge('prompt', 'agent')).toBe(true);
     expect(shouldSyncMentionOnEdge('prompt', 'image')).toBe(true);
+    expect(shouldSyncMentionOnEdge('text_in', 'image')).toBe(true);
   });
 
   it('does not treat a bare handle as a mention twin (video fallback is start frame)', () => {

@@ -1,0 +1,54 @@
+// Runs inside Electron so existing credentials are decrypted through safeStorage.
+// All documents, sessions and outputs belong to an isolated temporary workspace.
+const { app } = require('electron');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'reizo-office-live-'));
+const sourceProfile = path.join(process.env.APPDATA, 'Reizo Studio');
+const localState = path.join(sourceProfile, 'Local State');
+if (fs.existsSync(localState)) fs.copyFileSync(localState, path.join(dataRoot, 'Local State'));
+app.setPath('userData', dataRoot);
+require('tsx/cjs');
+
+app.whenReady().then(async () => {
+  const { openDb } = require('../src/main/server/db/client.ts');
+  const { createApp } = require('../src/main/server/app.ts');
+  const { createSettingsStore } = require('../src/main/server/storage/settingsStore.ts');
+  const { createSqliteSessionStore } = require('../src/main/server/storage/sqliteSessionStore.ts');
+  const { createArtifactStore } = require('../src/main/server/storage/artifactStore.ts');
+  const { workbookFromCreateSheets, serializeSheetContent, parseSheetContent } = require('../src/shared/sheetContent.ts');
+  const { serializeSheetReference } = require('../src/shared/sheetReferences.ts');
+  const source = createSettingsStore(path.join(process.env.APPDATA, 'Reizo Studio', 'data'));
+  const original = await source.get();
+  const providerId = original.activeProviderId;
+  if (!original.providers[providerId]?.apiKey) throw new Error('Configured provider has no readable credential');
+  const model = 'grok-4.6';
+  const settingsStore = { ...source, get: async () => ({ ...original, workspacePath: null, computerUse: false, directorSessions: {}, providers: { ...original.providers, [providerId]: { ...original.providers[providerId], model } } }) };
+  const db = openDb(path.join(dataRoot, 'test.db'));
+  const sessions = createSqliteSessionStore(db);
+  const session = await sessions.create('Grok Excel smoke test');
+  const artifacts = createArtifactStore(db, dataRoot);
+  const result = workbookFromCreateSheets([{ name: '预算', values: [['项目', '金额'], ['设计', 120], ['研发', 360]], formulas: [{ cell: 'B4', formula: '=SUM(B2:B3)' }] }, { name: '备注', values: [['请保留此工作表']] }]);
+  if ('error' in result) throw new Error(result.error);
+  const before = await artifacts.create({ sessionId: session.id, name: 'grok-budget.xlsx', kind: 'sheet', content: serializeSheetContent(result.content), source: 'manual' });
+  const server = createApp({ dataRoot, db, settingsStore, sessionStore: sessions, port: 47179, skillsDirs: [] });
+  const abort = new AbortController();
+  const timeout = setTimeout(() => abort.abort(), 120000);
+  console.log(JSON.stringify({ phase: 'starting', model, providerId }));
+  const response = await server.request('http://127.0.0.1:47179/api/sessions/' + session.id + '/messages', { method: 'POST', headers: { host: '127.0.0.1:47179', 'content-type': 'application/json' }, body: JSON.stringify({ text: '请读取当前选中的预算表，只把选中单元格 B2 的金额从 120 改为 888。保持 B3 的 360、B4 的求和公式以及备注工作表不变。直接在已有工作簿局部修改，不要新建工作簿。', providerId, model, mentions: [serializeSheetReference({ artifactId: before.id, sheetId: 'sheet-1', sheetName: '预算', range: 'B2' })] }), signal: abort.signal });
+  const stream = await response.text();
+  clearTimeout(timeout);
+  const final = await artifacts.get(before.id);
+  const content = parseSheetContent(final.content);
+  const rows = content.sheets[0].cells;
+  const output = { model, httpStatus: response.status, version: final.version, B2: rows['1']['1'].v, B3: rows['2']['1'].v, formula: rows['3']['1'].f, note: content.sheets[1].cells['0']['0'].v, workbooks: (await artifacts.listBySession(session.id)).length, tools: [...new Set([...stream.matchAll(/"name":"(read_sheet|generate_sheet)"/g)].map((match) => match[1]))] };
+  output.passed = response.ok && output.B2 === 888 && output.B3 === 360 && output.formula === '=SUM(B2:B3)' && output.note === '请保留此工作表' && output.workbooks === 1;
+  const evidence = path.resolve('artifacts/office-qa');
+  fs.mkdirSync(evidence, { recursive: true });
+  fs.writeFileSync(path.join(evidence, 'excel-grok-result.json'), JSON.stringify(output, null, 2));
+  console.log(JSON.stringify(output));
+  server.stopCanvasJobs();
+  db.close();
+  app.exit(output.passed ? 0 : 1);
+}).catch((error) => { console.error('Office live smoke failed:', error.message); app.exit(1); });

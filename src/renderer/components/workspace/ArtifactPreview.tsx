@@ -1,3 +1,4 @@
+import { createDeferredView } from '../DeferredView';
 import { useEffect, useState } from 'react';
 import { Code2, Copy, Download, Eye, FileDown, History, X } from 'lucide-react';
 import type { Artifact } from '../../../shared/artifact';
@@ -9,9 +10,22 @@ import { pickRenderer } from './renderers';
 import ArtifactVersionRail from './ArtifactVersionRail';
 import HandoffMenu from './HandoffMenu';
 import { parseSheetContent } from '../../../shared/sheetContent';
-import { downloadSheetAsXlsx } from '../../../shared/sheetXlsx';
+import SheetDocument from './SheetDocument';
 
-export default function ArtifactPreview({
+const DocumentEditor = createDeferredView<{ artifact: Artifact }>(() => import('./DocumentEditor'), { label: 'Doc', minHeight: 420 });
+
+const HtmlEditor = createDeferredView<{ artifact: Artifact }>(() => import('./HtmlEditor'), { label: 'HTML', minHeight: 420 });
+
+const PresentationEditor = createDeferredView<{ artifact: Artifact }>(() => import('./PresentationEditor'), { label: 'PPT', minHeight: 420 });
+
+export default function ArtifactPreview(props: { artifact: Artifact; onClose: () => void }) {
+  if (props.artifact.kind === 'presentation') return <PresentationEditor key={props.artifact.id} artifact={props.artifact} />;
+  if (props.artifact.kind === 'html') return <HtmlEditor key={props.artifact.id} artifact={props.artifact} />;
+  if (props.artifact.kind === 'doc') return <DocumentEditor key={props.artifact.id} artifact={props.artifact} />;
+  return props.artifact.kind === 'sheet' ? <SheetDocument key={props.artifact.id} {...props} /> : <GeneralArtifactPreview {...props} />;
+}
+
+function GeneralArtifactPreview({
   artifact,
   onClose,
 }: {
@@ -62,7 +76,8 @@ export default function ArtifactPreview({
     if (artifact.kind === 'sheet') {
       const parsed = parseSheetContent(text);
       if (parsed) {
-        void downloadSheetAsXlsx(parsed, artifact.name);
+        const { downloadSheetAsXlsx } = await import('../../../shared/sheetXlsx');
+        await downloadSheetAsXlsx(parsed, artifact.name);
         return;
       }
     }

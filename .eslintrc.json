@@ -14,7 +14,7 @@
   ],
   "parser": "@typescript-eslint/parser",
   "plugins": ["react-hooks"],
-  "ignorePatterns": ["dist/", "out/", ".vite/"],
+  "ignorePatterns": ["dist/", "out/", ".vite/", "artifacts/", "src/renderer/vendor/presenton/"],
   "settings": {
     "import/resolver": {
       "typescript": { "project": "./tsconfig.json" }

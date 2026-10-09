@@ -48,6 +48,16 @@ export function toolLabel(name: string): string {
     case 'computer': return '操作电脑';
     case 'generate_diagram': return '生成流程图';
     case 'generate_sheet': return '生成表格';
+    case 'read_sheet': return '读取表格';
+    case 'read_document': return '读取文档';
+    case 'generate_document': return '创建文档';
+    case 'propose_document_edits': return '提出文档修改建议';
+    case 'read_presentation': return '读取演示稿';
+    case 'generate_presentation': return '创建演示稿';
+    case 'propose_presentation_edits': return '提出 PPT 修改建议';
+    case 'read_html': return '读取 HTML 页面';
+    case 'generate_html': return '创建 HTML 页面';
+    case 'propose_html_edits': return '提出 HTML 修改建议';
     default: return name.replace(/[_-]+/g, ' ');
   }
 }
@@ -56,6 +66,7 @@ export function toolAction(name: string): 'read' | 'edit' | 'write' | 'run' | 's
   if (name === 'run_command') return 'run';
   if (name === 'edit_file') return 'edit';
   if (name === 'write_file') return 'write';
+  if (name === 'generate_sheet') return 'edit';
   if (name === 'grep' || name === 'find_files') return 'search';
   return 'read';
 }
@@ -84,6 +95,25 @@ export function toolTarget(part: ToolCallPart): string {
 }
 
 export function toolDetail(part: ToolCallPart): string {
+  if (['read_document', 'generate_document', 'propose_document_edits', 'read_html', 'generate_html', 'propose_html_edits', 'read_presentation', 'generate_presentation', 'propose_presentation_edits'].includes(part.name) && part.result) {
+    try {
+      const result = JSON.parse(part.result);
+      if (result.error) return String(result.error);
+      if (result.summary) return String(result.summary);
+      if (result.name) return `${part.name.startsWith('read_') ? '已读取' : '已创建'}「${result.name}」${result.version ? ` · v${result.version}` : ''}`;
+      if (Array.isArray(result.presentations)) return result.presentations.map((deck: { name: string }) => deck.name).join('\n') || '当前会话没有演示稿';
+      if (Array.isArray(result.pages)) return result.pages.map((page: { name: string }) => page.name).join('\n') || '当前会话没有 HTML 页面';
+      if (Array.isArray(result.documents)) return result.documents.map((doc: { name: string }) => doc.name).join('\n') || '当前会话没有文档';
+    } catch { /* Partial tool output. */ }
+  }
+  if ((part.name === 'read_sheet' || part.name === 'generate_sheet') && part.result) {
+    try {
+      const result = JSON.parse(part.result);
+      if (result.error) return String(result.error);
+      if (result.name) return `${part.name === 'read_sheet' ? '已读取' : '已更新'}「${result.name}」${result.version ? ` · v${result.version}` : ''}`;
+      if (Array.isArray(result.workbooks)) return result.workbooks.map((book: { name: string }) => book.name).join('\n') || '当前会话没有表格';
+    } catch { /* streamed output is not complete yet */ }
+  }
   let diff = '';
   if (part.result) {
     try {

@@ -1,0 +1,30 @@
+{
+  "fields": {
+    "objective": {
+      "type": "text"
+    },
+    "audience": {
+      "type": "text"
+    },
+    "pages": {
+      "type": "integer",
+      "min": 1,
+      "max": 40
+    },
+    "style": {
+      "type": "text"
+    }
+  },
+  "outputs": {
+    "kinds": [
+      "image"
+    ],
+    "requiredRoles": [
+      "slide"
+    ],
+    "countFrom": "pages",
+    "requireFinal": true
+  },
+  "version": 1,
+  "requiredExports": [{ "format": "pptx", "count": 1 }]
+}

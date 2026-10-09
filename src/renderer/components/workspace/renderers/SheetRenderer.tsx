@@ -1,263 +1,202 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Download, FileSpreadsheet, LoaderCircle } from 'lucide-react';
-import { UniverSheetsCorePreset } from '@univerjs/preset-sheets-core';
+import { Download, LoaderCircle } from 'lucide-react';
+import { CalculationMode, UniverSheetsCorePreset } from '@univerjs/preset-sheets-core';
 // eslint-disable-next-line import/no-unresolved
 import sheetsZhCN from '@univerjs/preset-sheets-core/locales/zh-CN';
 import { CommandType, createUniver, defaultTheme, LocaleType } from '@univerjs/presets';
 import type { ArtifactRenderProps } from './types';
-import {
-  compactToUniverSnapshot,
-  parseSheetContent,
-  replaceUniverSnapshot,
-  serializeSheetContent,
-  type SheetArtifactContent,
-} from '../../../../shared/sheetContent';
-import { downloadSheetAsXlsx } from '../../../../shared/sheetXlsx';
-
+import { compactToUniverSnapshot, parseSheetContent, replaceUniverSnapshot, serializeSheetContent } from '../../../../shared/sheetContent';
+import { clearActiveSheet, publishSheetSelection, registerSheetFlusher } from '../../../state/sheetWorkspace';
+import { useChatStore } from '../../../state/useChatStore';
+import { Button } from '../../ui/button';
+import { Alert, AlertDescription } from '../../ui/alert';
+import { toast } from '../../../lib/toast';
 import '@univerjs/preset-sheets-core/lib/index.css';
 import '@univerjs/presets/lib/styles/preset-sheets-core.css';
 
+type Workbook = { save(): unknown; setEditable(value: boolean): Workbook; isCellEditing(): boolean; endEditingAsync(save?: boolean): Promise<boolean> };
+type SelectionEvent = { type?: number; worksheet?: { getSheetId(): string; getSheetName(): string; getRange(range: unknown): { getA1Notation(): string } }; selections?: unknown[] };
 type UniverAPI = {
+  getFormula(): { onCalculationResultApplied(timeout?: number): Promise<void> };
+  toggleDarkMode(isDarkMode: boolean): void;
   Event: { CommandExecuted: string; SelectionChanged: string; SelectionMoving: string };
-  addEvent: (
-    event: string,
-    callback: (payload: { type?: number }) => void,
-  ) => { dispose: () => void };
-  createWorkbook: (data: Record<string, unknown>) => { save: () => unknown };
+  addEvent(event: string, listener: (payload: SelectionEvent) => void): { dispose(): void };
+  createWorkbook(data: Record<string, unknown>): Workbook;
 };
+export interface SheetRendererProps extends ArtifactRenderProps { initialDirty?: boolean; initialError?: string }
 
-function disposeUniverLater(
-  univer: { dispose: () => void } | null,
-  host: HTMLElement | null,
-): void {
-  const instance = univer;
-  window.setTimeout(() => {
-    try {
-      instance?.dispose();
-    } catch {
-      // ignore
-    }
-    if (!host?.isConnected) return;
-    while (host.firstChild) {
-      try {
-        host.removeChild(host.firstChild);
-      } catch {
-        break;
-      }
-    }
-  }, 0);
-}
-
-export default function SheetRenderer({
-  artifact,
-  text,
-  onCommitDraft,
-}: ArtifactRenderProps) {
+export default function SheetRenderer({ artifact, text, onCommitDraft, initialDirty = false, initialError }: SheetRendererProps) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const parsedRef = useRef<SheetArtifactContent | null>(parseSheetContent(text));
-  const workbookRef = useRef<{ save: () => unknown } | null>(null);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const onCommitRef = useRef(onCommitDraft);
-  const hydratingRef = useRef(true);
-  const dirtyRef = useRef(false);
-
+  const workbookRef = useRef<Workbook | null>(null);
+  const formulaRef = useRef<ReturnType<UniverAPI['getFormula']> | null>(null);
+  const parsedRef = useRef(parseSheetContent(text));
+  const saveCallback = useRef(onCommitDraft);
+  saveCallback.current = onCommitDraft;
+  const dirty = useRef(initialDirty);
+  const discarded = useRef(false);
+  const editSequence = useRef(0);
+  const pendingSave = useRef<Promise<void> | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hydrating = useRef(true);
   const [ready, setReady] = useState(false);
+  const [error, setError] = useState<string | null>(initialError ?? null);
+  const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-  const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
+  const busy = useChatStore((s) => s.sendingBySession[artifact.sessionId]) ?? false;
+  const blocked = busy || !onCommitDraft || !ready;
+  useEffect(() => { workbookRef.current?.setEditable(!blocked); }, [blocked]);
 
-  useEffect(() => {
-    onCommitRef.current = onCommitDraft;
-  }, [onCommitDraft]);
-
-  const captureContent = useCallback((): string | null => {
-    const current = parsedRef.current;
-    const workbook = workbookRef.current;
-    if (!current || !workbook) return null;
-    try {
-      const snapshot = workbook.save();
-      const next = replaceUniverSnapshot(current, snapshot);
-      parsedRef.current = next;
-      return serializeSheetContent(next);
-    } catch {
-      return null;
-    }
+  const capture = useCallback(() => {
+    if (!parsedRef.current || !workbookRef.current) throw new Error('表格尚未就绪');
+    const content = replaceUniverSnapshot(parsedRef.current, workbookRef.current.save());
+    parsedRef.current = content;
+    return serializeSheetContent(content);
   }, []);
 
-  const handleExport = useCallback(() => {
-    const current = parsedRef.current;
-    if (!current) return;
-    void downloadSheetAsXlsx(current, artifact.name);
-  }, [artifact.name]);
+  const flushRef = useRef<() => Promise<void>>(async () => undefined);
+  const flush = useCallback(async () => {
+    if (!saveCallback.current || discarded.current) return;
+    if (pendingSave.current) { await pendingSave.current; return flushRef.current(); }
+    // Own the entire flush before the first await, including cell-editor and formula commits.
+    const pending = Promise.resolve().then(async () => {
+      if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+      const workbook = workbookRef.current;
+      if (workbook?.isCellEditing()) {
+        if (!await workbook.endEditingAsync(true)) throw new Error('请先完成当前单元格输入');
+        dirty.current = true;
+        editSequence.current++;
+      }
+      if (!dirty.current || discarded.current) return;
+      if (hydrating.current) throw new Error('表格正在加载，请稍后再发送');
+      await formulaRef.current?.onCalculationResultApplied(5000);
+      if (discarded.current) return;
+      const sequence = editSequence.current;
+      const content = capture();
+      setSaving(true);
+      await saveCallback.current?.(content);
+      dirty.current = editSequence.current !== sequence;
+      setError(null);
+    }).catch((cause: unknown) => {
+      setError(cause instanceof Error ? cause.message : '表格保存失败');
+      throw cause;
+    }).finally(() => { pendingSave.current = null; setSaving(false); });
+    pendingSave.current = pending;
+    await pending;
+    if (dirty.current) await flushRef.current();
+  }, [capture]);
+  flushRef.current = flush;
+
+  useEffect(() => onCommitDraft ? registerSheetFlusher(artifact.sessionId, artifact.id, () => flushRef.current(), async () => {
+    discarded.current = true;
+    dirty.current = false;
+    await pendingSave.current?.catch((): void => undefined);
+  }) : undefined, [artifact.id, artifact.sessionId, Boolean(onCommitDraft)]);
 
   useEffect(() => {
     const host = hostRef.current;
     const parsed = parseSheetContent(text);
-    if (!host || !parsed) {
-      setInitError('表格数据无法解析');
-      return;
-    }
-
+    if (!host || !parsed) { setInitError('表格数据无法解析'); return; }
     parsedRef.current = parsed;
-    hydratingRef.current = true;
-    dirtyRef.current = false;
-    setReady(false);
-    setInitError(null);
-
+    const engineHost = document.createElement('div');
+    engineHost.style.cssText = 'height:100%;width:100%;min-height:420px';
+    host.appendChild(engineHost);
     let disposed = false;
-    let univer: { dispose: () => void } | null = null;
-    let commandSub: { dispose: () => void } | null = null;
-    let hydrateTimer: ReturnType<typeof setTimeout> | null = null;
     let started = false;
-
-    const start = () => {
-      if (disposed) return;
-      if (started) {
+    let univer: { dispose(): void } | undefined;
+    let api: UniverAPI | undefined;
+    const subscriptions: { dispose(): void }[] = [];
+    let hydrationTimer: ReturnType<typeof setTimeout> | undefined;
+    let hydrationDeadline = 0;
+    const finishHydration = () => {
+      if (!hydrationDeadline) hydrationDeadline = Date.now() + 1200;
+      clearTimeout(hydrationTimer);
+      hydrationTimer = setTimeout(() => {
+        hydrating.current = false;
+        if (!disposed) setReady(true);
         window.dispatchEvent(new Event('resize'));
-        return;
-      }
-      if (host.clientWidth < 80 || host.clientHeight < 240) return;
-      started = true;
-
-      try {
-        const created = createUniver({
-          locale: LocaleType.ZH_CN,
-          locales: {
-            [LocaleType.ZH_CN]: sheetsZhCN,
-          },
-          theme: defaultTheme,
-          presets: [
-            UniverSheetsCorePreset({
-              container: host,
-              header: true,
-              toolbar: true,
-              formulaBar: true,
-              footer: { sheetBar: true, statisticBar: true, menus: true, zoomSlider: true },
-            }),
-          ],
-        });
-        univer = created.univer;
-        const univerAPI = created.univerAPI as unknown as UniverAPI;
-        const snapshot = (
-          parsed.univerSnapshot && typeof parsed.univerSnapshot === 'object'
-            ? parsed.univerSnapshot
-            : compactToUniverSnapshot(parsed, artifact.name)
-        ) as Record<string, unknown>;
-
-        workbookRef.current = univerAPI.createWorkbook(snapshot);
-        window.dispatchEvent(new Event('resize'));
-
-        let hydrateDeadline: number | null = null;
-        const scheduleHydrationComplete = () => {
-          if (hydrateTimer) clearTimeout(hydrateTimer);
-          if (hydrateDeadline == null) hydrateDeadline = Date.now() + 1200;
-          const delay = Math.max(0, Math.min(150, hydrateDeadline - Date.now()));
-          hydrateTimer = setTimeout(() => {
-            hydratingRef.current = false;
-            window.dispatchEvent(new Event('resize'));
-            if (!disposed) setReady(true);
-          }, delay);
-        };
-
-        commandSub = univerAPI.addEvent(univerAPI.Event.CommandExecuted, (event) => {
-          if (disposed) return;
-          if (event.type !== CommandType.MUTATION) return;
-          if (hydratingRef.current) {
-            scheduleHydrationComplete();
-            return;
-          }
-          dirtyRef.current = true;
-          if (saveTimer.current) clearTimeout(saveTimer.current);
-          saveTimer.current = setTimeout(() => {
-            if (!onCommitRef.current) return;
-            const serialized = captureContent();
-            if (!serialized) return;
-
-            setSaveStatus('saving');
-            void onCommitRef.current(serialized)
-              .then(() => {
-                setSaveStatus('saved');
-                setTimeout(() => setSaveStatus('idle'), 2000);
-              })
-              .catch((err: unknown) => {
-                setSaveStatus('error');
-                setSaveErrorMessage(err instanceof Error ? err.message : '保存失败');
-              });
-          }, 600);
-        });
-
-        scheduleHydrationComplete();
-      } catch (err) {
-        setInitError(err instanceof Error ? err.message : '表格编辑器初始化失败');
-      }
+      }, Math.max(0, Math.min(150, hydrationDeadline - Date.now())));
     };
-
-    const startTimer = window.setTimeout(() => {
-      const ro = new ResizeObserver(() => start());
-      ro.observe(host);
-      start();
-      resizeObserver = ro;
-    }, 0);
-
-    let resizeObserver: ResizeObserver | null = null;
-
+    const start = () => {
+      if (disposed || host.clientWidth < 80 || host.clientHeight < 240) return;
+      if (started) { window.dispatchEvent(new Event('resize')); return; }
+      started = true;
+      try {
+        const created = createUniver({ locale: LocaleType.ZH_CN, locales: { [LocaleType.ZH_CN]: sheetsZhCN }, theme: defaultTheme, darkMode: document.documentElement.classList.contains('dark'),
+          presets: [UniverSheetsCorePreset({ container: engineHost, header: true, toolbar: true, formulaBar: true, formula: { initialFormulaComputing: CalculationMode.FORCED }, footer: { sheetBar: true, statisticBar: true, menus: true, zoomSlider: true } })] });
+        univer = created.univer;
+        api = created.univerAPI as unknown as UniverAPI;
+        formulaRef.current = api.getFormula();
+        workbookRef.current = api.createWorkbook((parsed.univerSnapshot ?? compactToUniverSnapshot(parsed, artifact.name)) as Record<string, unknown>);
+        workbookRef.current.setEditable(Boolean(saveCallback.current) && !busy);
+        subscriptions.push(api.addEvent(api.Event.CommandExecuted, (event) => {
+          if (disposed || event.type !== CommandType.MUTATION || !saveCallback.current) return;
+          if (hydrating.current) { finishHydration(); return; }
+          dirty.current = true;
+          editSequence.current++;
+          if (timer.current) clearTimeout(timer.current);
+          timer.current = setTimeout(() => { void flushRef.current().catch((): void => undefined); }, 600);
+        }));
+        const select = (event: SelectionEvent) => {
+          if (disposed || hydrating.current || !saveCallback.current) return;
+          const worksheet = event.worksheet;
+          const range = event.selections?.[0];
+          if (!worksheet || !range) return;
+          publishSheetSelection(artifact.sessionId, { artifactId: artifact.id, name: artifact.name, sheetId: worksheet.getSheetId(), sheetName: worksheet.getSheetName(), range: worksheet.getRange(range).getA1Notation() });
+        };
+        subscriptions.push(api.addEvent(api.Event.SelectionChanged, select), api.addEvent(api.Event.SelectionMoving, select));
+        if (saveCallback.current) publishSheetSelection(artifact.sessionId, { artifactId: artifact.id, name: artifact.name });
+        finishHydration();
+      } catch (cause) { setInitError(cause instanceof Error ? cause.message : '表格初始化失败'); }
+    };
+    const observer = new ResizeObserver(start);
+    let lastDarkMode = document.documentElement.classList.contains('dark');
+    const themeObserver = new MutationObserver(() => {
+      const nextDarkMode = document.documentElement.classList.contains('dark');
+      if (nextDarkMode === lastDarkMode) return;
+      lastDarkMode = nextDarkMode;
+      api?.toggleDarkMode(nextDarkMode);
+    });
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    observer.observe(host);
+    const startTimer = setTimeout(start, 0);
     return () => {
       disposed = true;
-      workbookRef.current = null;
-      window.clearTimeout(startTimer);
-      if (hydrateTimer) clearTimeout(hydrateTimer);
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      resizeObserver?.disconnect();
-      commandSub?.dispose();
-      disposeUniverLater(univer, host);
+      clearTimeout(startTimer);
+      clearTimeout(hydrationTimer);
+      if (timer.current) clearTimeout(timer.current);
+      observer.disconnect();
+      themeObserver.disconnect();
+      clearActiveSheet(artifact.sessionId, artifact.id);
+      // Finish the edit before disposing the editor's independent React root.
+      void flushRef.current().catch((cause: unknown) => toast.error(cause instanceof Error ? cause.message : '表格未保存')).finally(() => {
+        subscriptions.forEach((s) => s.dispose());
+        workbookRef.current = null;
+        formulaRef.current = null;
+        setTimeout(() => { univer?.dispose(); engineHost.remove(); }, 0);
+      });
     };
   }, [artifact.id]);
 
-  if (initError) {
-    return (
-      <div className="flex min-h-[300px] flex-col items-center justify-center p-6 text-center text-xs text-rose-500">
-        <FileSpreadsheet className="mb-2 size-8 text-rose-400" />
-        <p>{initError}</p>
-      </div>
-    );
+  async function download() {
+    setExporting(true);
+    try {
+      await flushRef.current();
+      await formulaRef.current?.onCalculationResultApplied(5000);
+      const current = parseSheetContent(capture());
+      if (current) await (await import('../../../../shared/sheetXlsx')).downloadSheetAsXlsx(current, artifact.name);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '导出失败'); }
+    finally { setExporting(false); }
   }
 
-  return (
-    <div className="relative flex min-h-[420px] min-w-0 flex-1 flex-col overflow-hidden bg-paper-raised">
-      {!ready && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center gap-2 bg-paper/80 text-xs text-ink-muted backdrop-blur-sm">
-          <LoaderCircle className="size-4 animate-spin text-accent" />
-          <span>正在打开表格…</span>
-        </div>
-      )}
-
-      {/* Top right floating toolbar */}
-      <div className="absolute right-3 top-2 z-20 flex items-center gap-2">
-        {saveStatus === 'saving' && (
-          <span className="text-[10px] text-ink-muted">保存中…</span>
-        )}
-        {saveStatus === 'saved' && (
-          <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-600 dark:text-emerald-400">
-            已保存
-          </span>
-        )}
-        {saveStatus === 'error' && (
-          <span className="rounded bg-rose-500/10 px-1.5 py-0.5 text-[10px] text-rose-600 dark:text-rose-400">
-            {saveErrorMessage || '保存失败'}
-          </span>
-        )}
-        <button
-          type="button"
-          onClick={handleExport}
-          className="inline-flex items-center gap-1 rounded-md border border-line bg-paper/90 px-2 py-1 text-[11px] font-medium text-ink shadow-sm backdrop-blur hover:bg-paper"
-          title="导出为原生 Excel (.xlsx) 文件"
-        >
-          <Download className="size-3" />
-          <span>导出 Excel</span>
-        </button>
-      </div>
-
-      <div ref={hostRef} className="h-full min-h-[420px] w-full flex-1" />
+  if (initError) return <Alert variant="destructive"><AlertDescription>{initError}</AlertDescription></Alert>;
+  return <div className="relative flex min-h-[420px] min-w-0 flex-1 flex-col overflow-hidden bg-paper-raised">
+    <div className="flex shrink-0 items-center justify-end gap-2 px-3 py-1">
+      <span role="status" className="text-xs text-ink-muted">{saving ? '正在保存…' : busy ? 'Agent 正在处理，暂时只读' : onCommitDraft ? '自动保存 · 选中单元格可在对话中引用' : '历史版本 · 只读'}</span>
+      <Button variant="ghost" size="sm" onClick={() => void download()} disabled={!ready || saving || exporting}><Download data-icon="inline-start" />{exporting ? '正在导出…' : '导出 Excel'}</Button>
     </div>
-  );
+    {error && <Alert variant="destructive"><AlertDescription>{error}<Button variant="outline" size="sm" onClick={() => void flushRef.current().catch((): void => undefined)}>重试保存</Button></AlertDescription></Alert>}
+    {!ready && <div role="status" className="absolute inset-0 flex items-center justify-center gap-2 bg-paper/90"><LoaderCircle className="size-4 animate-spin" />正在打开表格…</div>}
+    <div ref={hostRef} inert={blocked} aria-readonly={blocked} className="min-h-[420px] w-full flex-1" />
+  </div>;
 }

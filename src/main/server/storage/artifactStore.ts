@@ -1,4 +1,7 @@
+import { validateHtmlContent } from '../../../shared/htmlContent';
+import { normalizePresentation } from '../../../shared/presentationContent';
 import { createHash } from 'node:crypto';
+import { normalizeDocumentContent } from '../../../shared/documentContent';
 import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { mkdir, rm, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -20,6 +23,8 @@ import {
   type ArtifactWithContent,
 } from '../../../shared/artifact';
 import type { DbHandle } from '../db/client';
+import { stageArtifactBlob, readArtifactBlob } from './artifactBlobLease';
+import { serializeFileMutation } from './atomicFile';
 
 /** Inline text content over this many bytes is refused — use a blob kind. */
 const MAX_INLINE_BYTES = 4_000_000;
@@ -96,6 +101,9 @@ export interface CreateArtifactInput {
 }
 
 export interface AddVersionInput {
+  /** Internal SQLite-only callback, executed atomically with publishing the version. */
+  onCommit?: (version: number) => void;
+  expectedVersion?: number;
   content?: string;
   bytes?: Buffer;
   label?: string;
@@ -104,9 +112,25 @@ export interface AddVersionInput {
   mimeType?: string;
 }
 
+export class ArtifactVersionConflictError extends Error {
+  constructor() { super('内容已被更新，请重新读取后再保存；本次修改未覆盖现有内容'); }
+}
+
 export function createArtifactStore(handle: DbHandle, dataRoot: string) {
   const raw: DatabaseSync = handle.raw;
   const blobRoot = path.join(dataRoot, 'artifacts', 'blobs');
+
+  // Native publication holds this ownership until its database transaction commits or is discarded.
+  // Deleting an old version's directory cannot race a new publication using the same artifact id.
+  const mutationPath = (id: string) => {
+    if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error('Invalid artifact identity');
+    return path.join(blobRoot, id);
+  };
+  function acquirePublication(id: string): Promise<() => void> {
+    return new Promise((resolve, reject) => {
+      void serializeFileMutation(mutationPath(id), () => new Promise<void>((release) => resolve(release))).catch(reject);
+    });
+  }
 
   const selById = raw.prepare('SELECT * FROM artifacts WHERE id = ?');
   const selBySession = raw.prepare(
@@ -178,6 +202,15 @@ export function createArtifactStore(handle: DbHandle, dataRoot: string) {
     input: { content?: string; bytes?: Buffer; mimeType?: string },
     kind: ArtifactKind,
   ): { blob: boolean; bytes?: Buffer; text?: string; mime?: string } {
+    if (kind === 'presentation') {
+      if (input.bytes) throw new Error('可编辑 PPT 需要结构化页面内容');
+      return { blob: false, text: JSON.stringify(normalizePresentation(JSON.parse(input.content ?? ''))) };
+    }
+    if (kind === 'doc') {
+      if (input.bytes) throw new Error('可编辑文档必须使用结构化内容；DOCX 原文件请作为附件导入');
+      return { blob: false, text: JSON.stringify(normalizeDocumentContent(JSON.parse(input.content ?? ''))) };
+    }
+    if (kind === 'html') { if (input.bytes) throw new Error('HTML requires text content'); return { blob: false, text: validateHtmlContent(input.content ?? '') }; }
     if (input.bytes) return { blob: true, bytes: input.bytes, mime: input.mimeType };
     const value = input.content ?? '';
     const decoded = value.startsWith('data:') ? decodeDataUrl(value) : null;
@@ -268,6 +301,40 @@ export function createArtifactStore(handle: DbHandle, dataRoot: string) {
   }
 
   const store = {
+    async preparePublish(input: CreateArtifactInput & { artifactId: string }, signal?: AbortSignal) {
+      signal?.throwIfAborted();
+      const release = await acquirePublication(input.artifactId);
+      let released = false;
+      const releaseOnce = () => { if (!released) { released = true; release(); } };
+      try {
+        signal?.throwIfAborted();
+        const previous = selById.get(input.artifactId) as unknown as ArtifactRowRaw | undefined;
+        if (previous && previous.session_id !== input.sessionId) throw new Error('Artifact belongs to another session');
+        if (previous && (previous.kind !== 'binary' || previous.mime_type !== input.mimeType || parseJson<ArtifactOrigin>(previous.origin_json, { surface: 'canvas' }).canvasNodeId !== input.origin?.canvasNodeId))
+          throw new Error('Artifact belongs to another native output');
+        if (!input.bytes || input.kind !== 'binary') throw new Error('Prepared publication requires a native binary artifact');
+        const n = (previous?.current_version ?? 0) + 1;
+        const staged = await stageArtifactBlob(dataRoot, input.artifactId, n, input.bytes, signal);
+        const origin = input.origin ?? { surface: 'canvas' as const };
+        return { ...staged, keep() { staged.keep(); releaseOnce(); }, async discard() { try { await staged.discard(); } finally { releaseOnce(); } }, commit(): ArtifactWithContent {
+          const current = selById.get(input.artifactId) as unknown as ArtifactRowRaw | undefined;
+          if ((current?.current_version ?? 0) !== n - 1 || current && current.session_id !== input.sessionId) throw new Error('Artifact version changed during export');
+          const now = Date.now();
+          if (!current) raw.prepare(`INSERT INTO artifacts (id, session_id, project_id, name, kind, renderer, status, mime_type, source, current_version, byte_size, origin_json, metadata_json, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'binary', 'raw', 'complete', ?, ?, ?, ?, ?, ?, ?, ?)`).run(input.artifactId, input.sessionId, input.projectId ?? null, input.name, input.mimeType,
+            input.source, n, staged.byteSize, JSON.stringify(origin), JSON.stringify(input.metadata ?? {}), now, now);
+          else raw.prepare(`UPDATE artifacts SET name = ?, current_version = ?, byte_size = ?, status = 'complete', mime_type = ?, origin_json = ?, metadata_json = ?, updated_at = ? WHERE id = ?`)
+            .run(input.name, n, staged.byteSize, input.mimeType, JSON.stringify(origin), JSON.stringify(input.metadata ?? {}), now, input.artifactId);
+          insertVersionRow(input.artifactId, n, 'Local export', origin, { storage: 'blob', content: null, blobPath: staged.blobPath, byteSize: staged.byteSize, digest: staged.digest });
+          return { ...toMeta(selById.get(input.artifactId) as unknown as ArtifactRowRaw), content: '', rawUrl: `/api/artifacts/${input.artifactId}/raw?v=${n}` };
+        } };
+      } catch (error) { releaseOnce(); throw error; }
+    },
+    async readBlob(id: string, version: number): Promise<Buffer> {
+      const row = selVersion.get(id, version) as unknown as VersionRowRaw | undefined;
+      if (!row || row.storage !== 'blob' || !row.blob_path) throw new Error('Artifact blob version not found');
+      return readArtifactBlob(dataRoot, row.blob_path);
+    },
     async listAll(): Promise<Artifact[]> {
       return (selAll.all() as unknown as ArtifactRowRaw[]).map(toMeta);
     },
@@ -354,9 +421,12 @@ export function createArtifactStore(handle: DbHandle, dataRoot: string) {
     },
 
     async addVersion(id: string, input: AddVersionInput): Promise<ArtifactWithContent | null> {
+      return serializeFileMutation(mutationPath(id), async () => {
       const row = selById.get(id) as unknown as ArtifactRowRaw | undefined;
       if (!row) return null;
+      if (input.expectedVersion !== undefined && row.current_version !== input.expectedVersion) throw new ArtifactVersionConflictError();
       const kind = row.kind as ArtifactKind;
+      if ((kind === 'doc' || kind === 'html' || kind === 'presentation') && input.origin.surface !== 'manual_edit') throw new Error('文档的 AI 修改必须先保存为待审核草稿');
       const n = row.current_version + 1;
       const label =
         input.label ??
@@ -367,6 +437,8 @@ export function createArtifactStore(handle: DbHandle, dataRoot: string) {
       );
       const prepared = await prepareVersion(id, n, row.name, kind, m);
       tx(() => {
+        const latest = selById.get(id) as unknown as ArtifactRowRaw | undefined;
+        if (!latest || latest.current_version !== row.current_version) throw new ArtifactVersionConflictError();
         insertVersionRow(id, n, label, input.origin, prepared);
         raw
           .prepare(
@@ -374,22 +446,26 @@ export function createArtifactStore(handle: DbHandle, dataRoot: string) {
              WHERE id = ?`,
           )
           .run(n, prepared.byteSize, input.status ?? 'complete', JSON.stringify(input.origin), Date.now(), id);
+        input.onCommit?.(n);
       });
       return store.get(id);
+      });
     },
 
-    async restoreVersion(id: string, n: number): Promise<ArtifactWithContent | null> {
+    async restoreVersion(id: string, n: number, expectedVersion?: number): Promise<ArtifactWithContent | null> {
       const row = selById.get(id) as unknown as ArtifactRowRaw | undefined;
       if (!row) return null;
       const src = selVersion.get(id, n) as unknown as VersionRowRaw | undefined;
       if (!src) return null;
       const origin: ArtifactOrigin = { ...parseJson<ArtifactOrigin>(src.origin_json, { surface: 'chat' }) };
+      if (row.kind === 'doc' || row.kind === 'html' || row.kind === 'presentation') origin.surface = 'manual_edit';
       if (src.storage === 'blob' && src.blob_path) {
         const bytes = await readFile(path.join(blobRoot, src.blob_path));
-        return store.addVersion(id, { bytes, origin, label: `Restored from v${n}` });
+        return store.addVersion(id, { bytes, origin, expectedVersion: expectedVersion ?? row.current_version, label: `Restored from v${n}` });
       }
       return store.addVersion(id, {
         content: src.content ?? '',
+        expectedVersion: expectedVersion ?? row.current_version,
         origin,
         label: `Restored from v${n}`,
       });
@@ -407,6 +483,8 @@ export function createArtifactStore(handle: DbHandle, dataRoot: string) {
         | ArtifactRowRaw
         | undefined;
       if (existing) {
+        // A workspace file rewrite cannot publish over a managed, review-protected document.
+        if ((existing.kind === 'doc' || existing.kind === 'html' || existing.kind === 'presentation' || existing.kind === 'sheet') && input.origin.surface !== 'manual_edit') return store.create(input);
         const updated = await store.addVersion(existing.id, {
           content: input.content,
           bytes: input.bytes,
@@ -426,8 +504,10 @@ export function createArtifactStore(handle: DbHandle, dataRoot: string) {
     },
 
     async remove(id: string): Promise<void> {
-      raw.prepare('DELETE FROM artifacts WHERE id = ?').run(id);
-      await rm(path.join(blobRoot, id), { recursive: true, force: true });
+      await serializeFileMutation(mutationPath(id), async () => {
+        raw.prepare('DELETE FROM artifacts WHERE id = ?').run(id);
+        await rm(mutationPath(id), { recursive: true, force: true });
+      });
     },
 
     async removeBySession(sessionId: string): Promise<void> {
@@ -436,10 +516,7 @@ export function createArtifactStore(handle: DbHandle, dataRoot: string) {
           id: string;
         }[]
       ).map((r) => r.id);
-      raw.prepare('DELETE FROM artifacts WHERE session_id = ?').run(sessionId);
-      await Promise.all(
-        ids.map((id) => rm(path.join(blobRoot, id), { recursive: true, force: true })),
-      );
+      await Promise.all(ids.map((id) => store.remove(id)));
     },
   };
 

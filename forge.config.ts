@@ -11,11 +11,15 @@ const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
     icon: 'resources/icon',
+    // Only runtime build output belongs in app.asar; keep private QA fixtures out.
+    ignore: (file) => Boolean(file) && file !== '/.vite' && !/^\/\.vite\/(build|renderer)(?:\/|$)/.test(file),
     // WASM binaries for the local matting feature (onnxruntime-web): copied
     // flat into resources/ so /api/matting/ort/* can serve them in packaged
     // builds. The asyncify variants are intentionally left out (~25MB) — the
     // u2netp graph doesn't need them.
-    extraResource: [
+      extraResource: [
+        './skills',
+        './third_party',
       './node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm',
       './node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.mjs',
       './node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.wasm',
