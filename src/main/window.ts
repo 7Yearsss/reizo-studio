@@ -48,7 +48,7 @@ export function createMainWindow(): BrowserWindow {
     frame: isMac,
     icon: iconPath,
     titleBarStyle: isMac ? 'hiddenInset' : undefined,
-    trafficLightPosition: isMac ? { x: 16, y: 12 } : undefined,
+    trafficLightPosition: isMac ? { x: 16, y: 13 } : undefined,
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#0d0d0d' : '#faf6ee',
     autoHideMenuBar: true,
     webPreferences: {

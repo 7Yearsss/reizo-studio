@@ -31,6 +31,10 @@ function isMacPlatform(): boolean {
   return /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent);
 }
 
+const isMac = typeof window !== 'undefined' && window.reizo?.platform === 'darwin';
+// trafficLightPosition.x (16) + three 12px buttons with 8px gaps ≈ 68, plus breathing room.
+const MAC_TRAFFIC_LIGHT_INSET = 78;
+
 export default function CustomTitleBar() {
   const [maximized, setMaximized] = useState(false);
   const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
@@ -94,19 +98,27 @@ export default function CustomTitleBar() {
         )}
         // Width rides the `--sidebar-width` var so it tracks the sidebar's
         // direct-DOM drag updates live, not just the store commit on release.
-        style={sidebarCollapsed ? undefined : { width: 'var(--sidebar-width, 248px)' }}
+        style={{
+          ...(sidebarCollapsed ? null : { width: 'var(--sidebar-width, 248px)' }),
+          // macOS: native traffic lights (hiddenInset) float over the top-left;
+          // reserve their ~70px so the toolbar starts to their right.
+          ...(isMac ? { paddingLeft: MAC_TRAFFIC_LIGHT_INSET } : null),
+        }}
       >
         <div className="titlebar-no-drag flex items-center gap-1">
-          <Tooltip content="Reizo Studio" side="bottom">
-            <div className="flex h-7 w-7 items-center justify-center">
-              <img
-                src={logoUrl}
-                alt="Reizo"
-                className="h-5 w-5 object-contain select-none"
-                draggable={false}
-              />
-            </div>
-          </Tooltip>
+          {/* On macOS the traffic lights take the logo's place. */}
+          {!isMac && (
+            <Tooltip content="Reizo Studio" side="bottom">
+              <div className="flex h-7 w-7 items-center justify-center">
+                <img
+                  src={logoUrl}
+                  alt="Reizo"
+                  className="h-5 w-5 object-contain select-none"
+                  draggable={false}
+                />
+              </div>
+            </Tooltip>
+          )}
 
           <Tooltip content={sidebarCollapsed ? `展开侧栏 (${sidebarModHint})` : `收起侧栏 (${sidebarModHint})`} side="bottom">
             <button
