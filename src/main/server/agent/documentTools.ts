@@ -1,6 +1,6 @@
 import { tool } from 'ai';
 import { z } from 'zod';
-import { applyDocumentEdit, DOCUMENT_MIME, documentBlocks, parseDocumentContent, type DocumentEdit } from '../../../shared/documentContent';
+import { applyDocumentEdit, DOCUMENT_MIME, documentBlocks, documentEditWithinSelection, parseDocumentContent, type DocumentEdit } from '../../../shared/documentContent';
 import type { DocumentReference } from '../../../shared/documentReferences';
 import type { ArtifactStore } from '../storage/artifactStore';
 import type { ArtifactReviewStore } from '../storage/artifactReviewStore';
@@ -29,7 +29,7 @@ export function createDocumentTools(options: { sessionId: string; projectId?: st
           .map((b) => ({ ...b, text: b.text.slice(0, MAX_BLOCK_TEXT), truncated: b.text.length > MAX_BLOCK_TEXT }));
         const shown = takeWithinBudget(page);
         // Small metadata first, bulky blocks last: a clip can then never drop the version/pending info.
-        return { ok: true, artifactId, name: artifact.name, version: artifact.version, selection: references().find((r) => r.artifactId === artifactId)?.selection,
+        return { ok: true, artifactId, name: artifact.name, version: artifact.version, selections: references().filter((r) => r.artifactId === artifactId && r.selection).map((r) => ({ ...r.selection, label: r.label })),
           pendingReviews: reviews.list(artifactId).filter((r) => r.changes.some((c) => c.status === 'pending')).map((r) => ({ id: r.id, stale: r.stale, changes: r.changes.length })),
           totalBlocks: blocks.length, returned: shown.length, nextOffset: !blockId && offset + shown.length < blocks.length ? offset + shown.length : null, blocks: shown };
       },
@@ -54,10 +54,9 @@ export function createDocumentTools(options: { sessionId: string; projectId?: st
           const selectedRefs = references().filter((r) => r.artifactId === artifactId && r.selection);
           const content = parseDocumentContent(artifact.content);
           if (!content) throw new Error('文档格式无效');
-          for (const ref of selectedRefs) {
-            if (ref.version !== undefined && ref.version !== artifact.version) throw new Error('选区对应的文档版本已变化，请用户重新选择');
-            for (const operation of operations) applyDocumentEdit(content, operation as DocumentEdit, ref.selection);
-          }
+          if (selectedRefs.some((ref) => ref.version !== undefined && ref.version !== artifact.version)) throw new Error('选区对应的文档版本已变化，请用户重新选择');
+          // Several picked ranges: each operation must land inside one of them.
+          if (selectedRefs.length) for (const operation of operations as DocumentEdit[]) applyDocumentEdit(content, operation, (selectedRefs.find((ref) => documentEditWithinSelection(operation, ref.selection!)) ?? selectedRefs[0]).selection);
           const review = await reviews.create({ artifactId, sessionId, expectedVersion, operations, origin: { surface: 'chat' } });
           return { ok: true, artifactId, reviewId: review.id, pending: review.changes.length, summary: '修改建议已显示在 Doc 面板，原文保持不变，等待用户审核。' };
         } catch (error) { return { ok: false, error: error instanceof Error ? error.message : '创建建议失败' }; }

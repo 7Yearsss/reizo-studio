@@ -1,8 +1,8 @@
 import { selectPresentation, refreshPresentationReviews, referencePresentation } from './presentationWorkspace';
 import { splitPresentationContext } from '../../shared/presentationReferences';
-import { selectHtml, refreshHtmlReviews, referenceHtml } from './htmlWorkspace';
+import { selectHtml, refreshHtmlReviews, restoreHtmlReferences } from './htmlWorkspace';
 import { splitHtmlContext } from '../../shared/htmlReferences';
-import { selectDocument, refreshDocumentReviews, referenceDocument } from './documentWorkspace';
+import { selectDocument, refreshDocumentReviews, restoreDocumentReferences } from './documentWorkspace';
 import { splitDocumentContext } from '../../shared/documentReferences';
 import * as api from '../api';
 import type { ChatMessage, ReplyActivity, SessionSummary, ToolCallPart } from '../../shared/chat';
@@ -775,9 +775,9 @@ export function editLastUserMessage(sessionId: string): void {
   const presentation = splitPresentationContext(lastUser.content);
   referencePresentation(sessionId, presentation.refs[0]);
   const html = splitHtmlContext(presentation.text);
-  referenceHtml(sessionId, html.refs[0]);
+  restoreHtmlReferences(sessionId, html.refs);
   const document = splitDocumentContext(html.text);
-  referenceDocument(sessionId, document.refs[0]);
+  restoreDocumentReferences(sessionId, document.refs);
   const sheet = splitSheetContext(document.text);
   restoreSheetReferences(sessionId, sheet.refs);
   seedComposer(sessionId, sheet.text, { replaceFromId: lastUser.id });

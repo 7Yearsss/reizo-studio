@@ -57,6 +57,19 @@ describe('document workspace boundary', () => {
     expect(updated.content).toContain('新的段落'); expect(updated.content).toContain('保持不变');
     expect(JSON.stringify(parseDocumentContent(updated.content)?.doc)).toContain('"bold"');
   });
+  it('accepts edits inside any of several picked ranges and rejects edits outside all of them', async () => {
+    const f = await setup();
+    const [first, second] = ['原始段落', '保持不变'].map((text) => documentBlocks(f.content).find((b) => b.text === text)!);
+    const tools = createDocumentTools({ sessionId: f.session.id, artifacts: f.artifacts, reviews: f.reviews, references: [
+      { artifactId: f.artifact.id, name: '方案', version: 1, label: 1, selection: { blockId: first.id, start: 0, end: 2, text: '原始' } },
+      { artifactId: f.artifact.id, name: '方案', version: 1, label: 2, selection: { blockId: second.id, start: 2, end: 4, text: '不变' } },
+    ] });
+    const call = (name: keyof typeof tools, input: unknown) => (tools[name].execute as unknown as (input: unknown, options: unknown) => Promise<Record<string, unknown>>)(input, { toolCallId: 'test', messages: [] });
+    const base = { artifactId: f.artifact.id, expectedVersion: 1 };
+    expect((await call('read_document', { artifactId: f.artifact.id })).selections).toMatchObject([{ blockId: first.id, label: 1 }, { blockId: second.id, label: 2 }]);
+    expect((await call('propose_document_edits', { ...base, operations: [{ op: 'replaceText', blockId: first.id, start: 0, end: 2, text: '新的' }, { op: 'replaceText', blockId: second.id, start: 2, end: 4, text: '更新' }] })).ok).toBe(true);
+    expect((await call('propose_document_edits', { ...base, operations: [{ op: 'replaceText', blockId: first.id, start: 0, end: 2, text: '新的' }, { op: 'replaceText', blockId: second.id, start: 0, end: 2, text: '越界' }] })).ok).toBe(false);
+  });
   it('scopes tools and review routes, rejects stale saves, and preserves imported original', async () => {
     const f = await setup();
     const toolset = createDocumentTools({ sessionId: 'other', artifacts: f.artifacts, reviews: f.reviews });

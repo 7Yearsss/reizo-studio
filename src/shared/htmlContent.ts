@@ -12,13 +12,15 @@ export function htmlEditRange(content: string, edit: HtmlEdit): { start: number;
   if (start < 0 || content.indexOf(edit.oldText, start + 1) >= 0) throw new Error('oldText 必须在当前 HTML 中精确且唯一匹配；请读取更多上下文');
   return { start, end: start + edit.oldText.length };
 }
-export function applyHtmlEdits(content: string, edits: HtmlEdit[], selection?: HtmlSelection): string {
+/** With `selections`, every edit must sit inside one of the picked ranges. */
+export function applyHtmlEdits(content: string, edits: HtmlEdit[], selections?: HtmlSelection | HtmlSelection[]): string {
+  const scopes = selections === undefined ? [] : Array.isArray(selections) ? selections : [selections];
   const ranges = edits.map((edit) => ({ ...htmlEditRange(content, edit), edit }));
   ranges.sort((a, b) => a.start - b.start);
   for (let i = 0; i < ranges.length; i++) {
     const range = ranges[i];
     if (i && ranges[i - 1].end > range.start) throw new Error('修改范围重叠，请合并为一项建议');
-    if (selection && (range.start < selection.start || range.end > selection.end)) throw new Error('修改超出引用的源码选区');
+    if (scopes.length && !scopes.some((s) => range.start >= s.start && range.end <= s.end)) throw new Error('修改超出引用的源码选区');
   }
   let next = content;
   for (const range of ranges.reverse()) next = next.slice(0, range.start) + range.edit.newText + next.slice(range.end);

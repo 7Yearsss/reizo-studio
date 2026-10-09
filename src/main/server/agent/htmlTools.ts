@@ -31,7 +31,7 @@ export function createHtmlTools(options: { sessionId: string; projectId?: string
         const first = startLine - 1; const last = Math.min(lines.length, first + limit); let end = first; let used = 0;
         while (end < last && (end === first || used + lines[end].length + 1 <= READ_PAGE_BUDGET)) { used += lines[end].length + 1; end++; }
         const joined = lines.slice(first, end).join('\n'); const lineCut = joined.length > READ_PAGE_BUDGET;
-        return { ok: true, artifactId, name: artifact.name, version: artifact.version, selection: options.getReferences?.().find((ref) => ref.artifactId === artifactId)?.selection,
+        return { ok: true, artifactId, name: artifact.name, version: artifact.version, selections: options.getReferences?.().filter((ref) => ref.artifactId === artifactId && ref.selection).map((ref) => ({ ...ref.selection, label: ref.label })) ?? [],
           startLine, endLine: end, totalLines: lines.length, truncated: lineCut || end < lines.length, nextStartLine: end < lines.length ? end + 1 : null, text: lineCut ? joined.slice(0, READ_PAGE_BUDGET) : joined };
       },
     }),
@@ -52,10 +52,9 @@ export function createHtmlTools(options: { sessionId: string; projectId?: string
         try {
           const artifact = await artifacts.get(artifactId);
           if (!artifact || artifact.sessionId !== sessionId || artifact.kind !== 'html') return { ok: false, error: '未找到本会话 HTML 页面' };
-          for (const ref of options.getReferences?.().filter((ref) => ref.artifactId === artifactId && ref.selection) ?? []) {
-            if (ref.version !== artifact.version) throw new Error('引用的源码版本已变化，请重新选择');
-            applyHtmlEdits(artifact.content, edits, ref.selection);
-          }
+          const selectedRefs = options.getReferences?.().filter((ref) => ref.artifactId === artifactId && ref.selection) ?? [];
+          if (selectedRefs.some((ref) => ref.version !== artifact.version)) throw new Error('引用的源码版本已变化，请重新选择');
+          if (selectedRefs.length) applyHtmlEdits(artifact.content, edits, selectedRefs.map((ref) => ref.selection!));
           const review = await reviews.create({ artifactId, sessionId, expectedVersion, operations: edits, origin: { surface: 'chat' } });
           return { ok: true, artifactId, reviewId: review.id, pending: review.changes.length, summary: 'HTML 修改建议已生成，请用户查看差异并接受或拒绝。' };
         } catch (error) { return { ok: false, error: error instanceof Error ? error.message : '创建建议失败' }; }

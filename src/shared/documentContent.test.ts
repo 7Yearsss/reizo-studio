@@ -2,7 +2,7 @@ import { documentReviewSchema, reviewDocumentEdit } from './documentReview';
 import { describe, expect, it } from 'vitest';
 import { applySuggestions, revertSuggestions } from '@handlewithcare/prosemirror-suggest-changes';
 import { EditorState } from '@tiptap/pm/state';
-import { applyDocumentEdit, createDocumentContent, documentBlocks, parseDocumentContent } from './documentContent';
+import { applyDocumentEdit, createDocumentContent, documentEditWithinSelection, documentBlocks, parseDocumentContent } from './documentContent';
 
 function fixture() {
   return createDocumentContent({ type: 'doc', content: [
@@ -20,6 +20,8 @@ describe('document operations and review', () => {
     expect(result.doc.content?.[1]).toEqual(base.doc.content?.[1]);
     expect(parseDocumentContent(JSON.stringify(result))).toEqual(result);
     expect(() => applyDocumentEdit(base, { op: 'deleteBlock', blockId: block.id }, { blockId: block.id, start: 4, end: 6 })).toThrow('超出所选内容');
+    expect(documentEditWithinSelection({ op: 'replaceText', blockId: block.id, start: 4, end: 5, text: 'x' }, { blockId: block.id, start: 4, end: 6 })).toBe(true);
+    expect(documentEditWithinSelection({ op: 'replaceText', blockId: 'other', start: 4, end: 5, text: 'x' }, { blockId: block.id, start: 4, end: 6 })).toBe(false);
   });
   it('reuses the suggestion engine so an inline edit can be accepted or rejected', () => {
     const base = fixture();

@@ -218,9 +218,14 @@ function inheritFormatting(base: DocumentNode, next: JSONContent): JSONContent {
   return { ...next, attrs, content: next.content.map((n) => n.type === 'text' ? { ...n, marks: [...(n.marks ?? []), { type: 'runStyle', attrs: inherited }] } : n) };
 }
 
+/** A selection reference only allows text replacements inside its own range. */
+export function documentEditWithinSelection(edit: DocumentEdit, selection: DocumentSelection): boolean {
+  return edit.op === 'replaceText' && edit.blockId === selection.blockId && edit.start >= selection.start && edit.end <= selection.end;
+}
+
 export function editTransaction(state: EditorState, edit: DocumentEdit, selection?: DocumentSelection): Transaction {
   const transaction = state.tr;
-  if (selection && (edit.op !== 'replaceText' || edit.blockId !== selection.blockId || edit.start < selection.start || edit.end > selection.end)) throw new Error('修改超出所选内容；请重新选择范围或引用整篇文档');
+  if (selection && !documentEditWithinSelection(edit, selection)) throw new Error('修改超出所选内容；请重新选择范围或引用整篇文档');
   if (edit.op === 'insertBlocks') {
     const target = edit.afterId ? locate(state.doc, edit.afterId) : null;
     if (!edit.nodes.length || edit.nodes.length > 50) throw new Error('每次插入 1 至 50 个文档块');

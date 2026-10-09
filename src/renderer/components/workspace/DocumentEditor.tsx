@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EditorContent, useEditor, useEditorState, type Editor as TiptapEditor } from '@tiptap/react';
 import { Bold, Italic, Underline, Strikethrough, List, ListOrdered, Table, Undo2, Redo2, Download, Quote, History, Sparkles, Info } from 'lucide-react';
 import type { Artifact, ArtifactWithContent } from '../../../shared/artifact';
@@ -7,7 +7,9 @@ import { documentExtensions, documentSelectionIntact, normalizeDocumentContent, 
 import * as api from '../../api';
 import * as artifacts from '../../state/artifactStore';
 import { clearEditorRecovery, getEditorRecovery, registerEditorFlusher, setEditorRecovery, trackEditorWrite } from '../../state/editorPersistence';
-import { dropDocumentSelection, reconcileDocumentSelection, referenceDocument, syncDocumentReferenceVersion, useDocumentWorkspace } from '../../state/documentWorkspace';
+import { addDocumentReference, dropDocumentSelection, reconcileDocumentSelection, syncDocumentReferenceVersion, useDocumentWorkspace } from '../../state/documentWorkspace';
+import { labelSelections } from '../../../shared/referenceLabels';
+import { referenceDecorations, referenceMarksKey, referenceMarksPlugin, type LabelledRange } from './referenceMarks';
 import { Button } from '../ui/button';
 import { Alert, AlertDescription } from '../ui/alert';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
@@ -114,8 +116,10 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
   const [bubble, setBubble] = useState<{ top: number; left: number } | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const askRef = useRef<() => void>(() => { /* Assigned on every render below. */ });
-  const reference = useDocumentWorkspace((s) => s.references[artifact.sessionId]);
-  const referenced = reference?.artifactId === artifact.id ? reference : undefined;
+  const references = useDocumentWorkspace((s) => s.references[artifact.sessionId]);
+  // Numbered like the composer chips (labels run across every referenced document).
+  const referenced = useMemo(() => labelSelections(references ?? []).filter((r) => r.artifactId === artifact.id), [references, artifact.id]);
+  const pickedRanges = useMemo(() => referenced.filter((r): r is typeof r & LabelledRange => Boolean(r.selection && r.label)), [referenced]);
   const revision = useDocumentWorkspace((s) => s.revisions[artifact.id]);
   const activeReview = reviews.find((r) => r.changes.some((c) => c.status === 'pending'));
   const pendingBatches = reviews.filter((r) => r.changes.some((c) => c.status === 'pending')).length;
@@ -178,6 +182,15 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
   }, [artifact.id, artifact.sessionId, flush]);
   useEffect(() => { void refreshReviews().catch((cause) => setError(String(cause))); }, [refreshReviews, revision, artifact.version]);
   useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    editor.registerPlugin(referenceMarksPlugin());
+    return () => { if (!editor.isDestroyed) editor.unregisterPlugin(referenceMarksKey); };
+  }, [editor]);
+  useEffect(() => {
+    if (!editor || editor.isDestroyed || !referenceMarksKey.getState(editor.state)) return;
+    editor.view.dispatch(editor.state.tr.setMeta(referenceMarksKey, referenceDecorations(editor.state.doc, pickedRanges)).setMeta('addToHistory', false));
+  }, [editor, pickedRanges]);
+  useEffect(() => {
     if (!editor || artifact.version <= version.current) return;
     if (dirty.current) { setError('原文已有新版本，当前未保存内容已保留。可下载恢复副本后重新载入。'); return; }
     const content = parseDocumentContent(artifact.content); if (!content) return;
@@ -194,7 +207,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
   function askAI(selected: DocumentSelection | undefined) {
     setBubble(null);
     void act(async () => {
-      referenceDocument(artifact.sessionId, { artifactId: artifact.id, name: artifact.name, version: version.current, ...(selected ? { selection: selected } : {}) });
+      addDocumentReference(artifact.sessionId, { artifactId: artifact.id, name: artifact.name, version: version.current, ...(selected ? { selection: selected } : {}) });
       focusComposer(artifact.sessionId);
     });
   }
@@ -230,9 +243,9 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
         <Button size="xs" variant="outline" title="导出为 Word（保留原文件样式）" disabled={busy} onClick={() => void act(async () => { download(await api.exportDocument(artifact.id), `${artifact.name.replace(/\.docx$/i, '')}.docx`); })}><Download data-icon="inline-start" />导出</Button>
       </div>
     </div>
-    {!activeReview && <ReferenceStrip attached={referenced ? (referenced.selection ? `选段「${referenced.selection.text ?? ''}」` : '全文') : undefined}
-      hint={selection ? `已选 ${selection.end - selection.start} 个字符 · Ctrl+L 交给 AI` : '选中文字交给 AI 修改，或把全文作为上下文'}>
-      <Button size="xs" variant="ghost" disabled={busy || !selection} title="引用选中的文字（Ctrl+L）" onClick={() => askAI(selection)}><Quote data-icon="inline-start" />引用选段</Button>
+    {!activeReview && <ReferenceStrip attached={referenced.length ? (pickedRanges.length ? `${pickedRanges.length} 段选区${pickedRanges.length === 1 ? `「${pickedRanges[0].selection.text ?? ''}」` : '，可在对话里用 [编号] 分别说明'}` : '全文') : undefined}
+      hint={selection ? `已选 ${selection.end - selection.start} 个字符 · Ctrl+L 加入对话，可连续添加多段` : '选中文字交给 AI 修改（可添加多段），或把全文作为上下文'}>
+      <Button size="xs" variant="ghost" disabled={busy || !selection} title="把选中的文字加入对话，可多次添加（Ctrl+L）" onClick={() => askAI(selection)}><Quote data-icon="inline-start" />{pickedRanges.length ? '再加一段' : '引用选段'}</Button>
       <Button size="xs" variant="ghost" disabled={busy} onClick={() => askAI(undefined)}>引用全文</Button>
     </ReferenceStrip>}
     {error && <Alert variant="destructive" className="rounded-none border-x-0 border-t-0"><AlertDescription>{error}<div className="mt-2 flex gap-2"><Button size="xs" variant="outline" onClick={() => void flush().catch((): void => { /* Error is shown by the save/review handler. */ })}>重试保存</Button><Button size="xs" variant="outline" onClick={() => void recover().catch((cause) => setError(String(cause)))}>下载恢复副本并重新载入</Button></div></AlertDescription></Alert>}
@@ -247,7 +260,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
         <EditorContent editor={editor} />
       </div>
       {bubble && selection && !busy && <div className="absolute z-20 flex -translate-x-1/2 items-center gap-0.5 rounded-md border border-line bg-paper p-0.5 shadow-md" style={{ top: bubble.top, left: bubble.left }} onMouseDown={(event) => event.preventDefault()}>
-        <Button size="xs" title="把选中的文字交给 AI（Ctrl+L）" onClick={() => askAI(selection)}><Sparkles data-icon="inline-start" />问 AI</Button>
+        <Button size="xs" title="把选中的文字加入对话，可多次添加（Ctrl+L）" onClick={() => askAI(selection)}><Sparkles data-icon="inline-start" />{pickedRanges.length ? '再加一段' : '问 AI'}</Button>
         <Button size="icon-xs" variant="ghost" aria-label="加粗所选" onClick={() => editor?.chain().focus().toggleBold().run()}><Bold /></Button>
         <Button size="icon-xs" variant="ghost" aria-label="斜体所选" onClick={() => editor?.chain().focus().toggleItalic().run()}><Italic /></Button>
       </div>}

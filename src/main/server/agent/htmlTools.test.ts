@@ -25,6 +25,8 @@ it('requires unique non-overlapping replacements and keeps exact untouched sourc
   expect(() => applyHtmlEdits('<p>x</p><p>x</p>', [{ oldText: 'x', newText: 'y' }])).toThrow('唯一');
   expect(() => applyHtmlEdits('abcdef', [{ oldText: 'abc', newText: '1' }, { oldText: 'bcd', newText: '2' }])).toThrow('重叠');
   expect(() => applyHtmlEdits('abcdef', [{ oldText: 'abc', newText: '1' }], { start: 1, end: 5 })).toThrow('选区');
+  expect(applyHtmlEdits('abcdef', [{ oldText: 'ab', newText: '1' }, { oldText: 'ef', newText: '2' }], [{ start: 0, end: 2 }, { start: 4, end: 6 }])).toBe('1cd2');
+  expect(() => applyHtmlEdits('abcdef', [{ oldText: 'ab', newText: '1' }, { oldText: 'cd', newText: '2' }], [{ start: 0, end: 2 }, { start: 4, end: 6 }])).toThrow('选区');
   expect(applyHtmlEdits('<style>  x\r\n</style>\n<h1>old</h1>', [{ oldText: 'old', newText: 'new' }])).toBe('<style>  x\r\n</style>\n<h1>new</h1>');
 });
 it('proposes without writing and supports partial accept plus reject across persisted versions', async () => {

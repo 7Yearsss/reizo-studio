@@ -1,6 +1,7 @@
 import { presentationMentions, usePresentationWorkspace, referencePresentation, selectPresentation, dropPresentationScope } from '../../state/presentationWorkspace';
-import { htmlMentions, useHtmlWorkspace, referenceHtml, selectHtml, dropHtmlSelection } from '../../state/htmlWorkspace';
-import { documentMentions, useDocumentWorkspace, referenceDocument, selectDocument, dropDocumentSelection } from '../../state/documentWorkspace';
+import { htmlMentions, useHtmlWorkspace, selectHtml, dropHtmlSelection, removeHtmlReference } from '../../state/htmlWorkspace';
+import { documentMentions, documentReferences, useDocumentWorkspace, addDocumentReference, selectDocument, dropDocumentSelection, removeDocumentReference } from '../../state/documentWorkspace';
+import { labelSelections } from '../../../shared/referenceLabels';
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import { AtSign, FileText, FileSpreadsheet, Presentation, Code2, Clapperboard, FolderTree, Paperclip, Image as ImageIcon, Video, Type, Volume2, Bot, Sparkles, BoxSelect, Layers, Pin, Wrench } from 'lucide-react';
 import { isImeComposingEvent } from '../../lib/ime';
@@ -88,8 +89,11 @@ export default function Composer({
 }) {
   const [draft, setDraft] = useState('');
   const presentationRef = usePresentationWorkspace((s) => sessionId ? s.references[sessionId] : undefined);
-  const htmlRef = useHtmlWorkspace((s) => sessionId ? s.references[sessionId] : undefined);
-  const documentRef = useDocumentWorkspace((s) => sessionId ? s.references[sessionId] : undefined);
+  const rawHtmlRefs = useHtmlWorkspace((s) => sessionId ? s.references[sessionId] : undefined);
+  const rawDocumentRefs = useDocumentWorkspace((s) => sessionId ? s.references[sessionId] : undefined);
+  // Picked ranges are numbered across Doc then HTML, matching the labels sent with the message.
+  const documentRefs = useMemo(() => labelSelections(rawDocumentRefs ?? []), [rawDocumentRefs]);
+  const htmlRefs = useMemo(() => labelSelections(rawHtmlRefs ?? [], 1 + documentRefs.filter((r) => r.selection).length), [rawHtmlRefs, documentRefs]);
   const activeSheet = useSheetWorkspace((s) => sessionId ? s.activeBySession[sessionId] : undefined);
   const pinnedSheets = useSheetWorkspace((s) => sessionId ? s.pinnedBySession[sessionId] : undefined);
   const [syncingSheet, setSyncingSheet] = useState(false);
@@ -147,6 +151,11 @@ export default function Composer({
     replaceFromIdRef.current = seed.replaceFromId;
   }, [seed?.nonce, seed?.text, seed?.replaceFromId]);
 
+  /** Write [n] into the draft so the instruction that follows is tied to picked range n. */
+  function citeReference(label: number) {
+    setDraft((d) => `${d}${d && !/\s$/.test(d) ? ' ' : ''}[${label}] `);
+  }
+
   function buildSubmitPayload() {
     const selectionMentions = unpinnedSelectionNodes.map((n) => `canvas:${n.id}`);
     const refMentions = nodeRefs.map((r) =>
@@ -155,7 +164,7 @@ export default function Composer({
         : `canvas:${r.id}`,
     );
     return {
-      mentions: [...mentions, ...refMentions, ...selectionMentions, ...(sessionId ? [...sheetMentions(sessionId), ...documentMentions(sessionId), ...htmlMentions(sessionId), ...presentationMentions(sessionId)] : [])],
+      mentions: [...mentions, ...refMentions, ...selectionMentions, ...(sessionId ? [...sheetMentions(sessionId), ...documentMentions(sessionId), ...htmlMentions(sessionId, 1 + documentReferences(sessionId).filter((r) => r.selection).length), ...presentationMentions(sessionId)] : [])],
       extra: { skillId, attachments, replaceFromId: replaceFromIdRef.current },
     };
   }
@@ -268,7 +277,7 @@ export default function Composer({
           await flushSheetEdits(sessionId);
           const artifact = await importDocument(sessionId, file);
           artifactStore.upsertArtifact(artifact); selectDocument(sessionId, artifact.id);
-          referenceDocument(sessionId, { artifactId: artifact.id, name: artifact.name, version: artifact.version });
+          addDocumentReference(sessionId, { artifactId: artifact.id, name: artifact.name, version: artifact.version });
           uiStore.setRightPanelTab('documents');
         } catch (error) { toast.error(error instanceof Error ? error.message : 'Doc 导入失败'); }
         continue;
@@ -461,13 +470,13 @@ export default function Composer({
           }}
         >
             {sessionId && <ComposerDock todos={todos} />}
-            {sessionId && (documentRef || htmlRef || presentationRef || activeSheet || pinnedSheets?.length) ? <div className="mb-2 flex flex-wrap items-center gap-1.5">
-              {documentRef && <WorkspaceRefChip icon={<FileText />} kind="文档" name={documentRef.name} detail={documentRef.selection ? `「${documentRef.selection.text ?? ''}」` : '全文'}
-                open={() => { selectDocument(sessionId, documentRef.artifactId); uiStore.setRightPanelTab('documents'); }} remove={() => referenceDocument(sessionId)} />}
+            {sessionId && (documentRefs.length || htmlRefs.length || presentationRef || activeSheet || pinnedSheets?.length) ? <div className="mb-2 flex flex-wrap items-center gap-1.5">
+              {documentRefs.map((ref, index) => <WorkspaceRefChip key={`doc:${index}`} icon={<FileText />} kind="文档" name={ref.name} detail={ref.selection ? `「${ref.selection.text ?? ''}」` : '全文'} label={ref.label} cite={() => citeReference(ref.label!)}
+                open={() => { selectDocument(sessionId, ref.artifactId); uiStore.setRightPanelTab('documents'); }} remove={() => removeDocumentReference(sessionId, index)} />)}
               {presentationRef && <WorkspaceRefChip icon={<Presentation />} kind=" PPT " name={presentationRef.name} detail={presentationRef.elementIds?.length ? `${presentationRef.elementIds.length} 个元素` : presentationRef.slideId ? '当前页' : '整份演示稿'}
                 open={() => { selectPresentation(sessionId, presentationRef.artifactId); uiStore.setRightPanelTab('presentations'); }} remove={() => referencePresentation(sessionId)} />}
-              {htmlRef && <WorkspaceRefChip icon={<Code2 />} kind=" HTML " name={htmlRef.name} detail={htmlRef.selection ? `「${htmlRef.selection.text ?? ''}」` : '整页'}
-                open={() => { selectHtml(sessionId, htmlRef.artifactId); uiStore.setRightPanelTab('html'); }} remove={() => referenceHtml(sessionId)} />}
+              {htmlRefs.map((ref, index) => <WorkspaceRefChip key={`html:${index}`} icon={<Code2 />} kind=" HTML " name={ref.name} detail={ref.selection ? `「${ref.selection.text ?? ''}」` : '整页'} label={ref.label} cite={() => citeReference(ref.label!)}
+                open={() => { selectHtml(sessionId, ref.artifactId); uiStore.setRightPanelTab('html'); }} remove={() => removeHtmlReference(sessionId, index)} />)}
               {pinnedSheets?.map((ref, index) => <WorkspaceRefChip key={`${ref.artifactId}:${index}`} icon={<Pin />} kind="表格" name={ref.name} detail={ref.range ? `${ref.sheetName ?? ''}!${ref.range}` : '整个工作簿'}
                 open={() => { selectWorkbook(sessionId, ref.artifactId); uiStore.setRightPanelTab('sheets'); }} remove={() => removePinnedSheet(sessionId, index)} />)}
               {activeSheet && <WorkspaceRefChip icon={<FileSpreadsheet />} kind="表格" name={activeSheet.name} detail={`${activeSheet.range ? `${activeSheet.sheetName ?? ''}!${activeSheet.range}` : '当前工作表'} · 当前选区`} pinned={false}

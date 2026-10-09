@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, History, Quote, Redo2, Undo2 } from 'lucide-react';
 import type { Artifact, ArtifactWithContent } from '../../../shared/artifact';
 import type { ArtifactReview } from '../../../shared/artifactReview';
 import * as api from '../../api';
-import { referenceHtml, useHtmlWorkspace, dropHtmlSelection } from '../../state/htmlWorkspace';
+import { addHtmlReference, useHtmlWorkspace, dropHtmlSelection } from '../../state/htmlWorkspace';
 import { Button } from '../ui/button';
 import { Alert, AlertDescription } from '../ui/alert';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../ui/tabs';
@@ -30,8 +30,9 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
   const [run, setRun] = useState(false); const [preview, setPreview] = useState(draft.text);
   const [reviews, setReviews] = useState<ArtifactReview[]>([]);
   const revision = useHtmlWorkspace((s) => s.revisions[artifact.id]);
-  const reference = useHtmlWorkspace((s) => s.references[artifact.sessionId]);
-  const referenced = reference?.artifactId === artifact.id ? reference : undefined;
+  const references = useHtmlWorkspace((s) => s.references[artifact.sessionId]);
+  const referenced = useMemo(() => (references ?? []).filter((ref) => ref.artifactId === artifact.id), [references, artifact.id]);
+  const picked = referenced.filter((ref) => ref.selection);
   const refresh = useCallback(async () => { setReviews(await api.listArtifactReviews(artifact.id)); }, [artifact.id]);
   useEffect(() => { const timer = setTimeout(() => setPreview(draft.text), 350); return () => clearTimeout(timer); }, [draft.text]);
   useEffect(() => { void refresh().catch((cause) => draft.setError(String(cause))); }, [refresh, revision, artifact.version]);
@@ -45,7 +46,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
   async function decide(review: ArtifactReview, ids: string[], decision: 'accept' | 'reject') {
     await act(async () => {
       const result = await api.decideArtifactReview(artifact.id, review.id, review.reviewVersion, ids, decision);
-      if (result.artifact.version !== draft.getVersion()) { draft.load(result.artifact); dropHtmlSelection(artifact.sessionId); setRun(false); }
+      if (result.artifact.version !== draft.getVersion()) { draft.load(result.artifact); dropHtmlSelection(artifact.sessionId, artifact.id); setRun(false); }
       await refresh();
     });
   }
@@ -59,14 +60,14 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
         <Button size="xs" variant="outline" disabled={busy} onClick={() => void act(async () => download(draft.getText(), /\.html?$/i.test(artifact.name) ? artifact.name : `${artifact.name}.html`))}><Download data-icon="inline-start" />导出</Button>
       </div>
     </div>
-    <ReferenceStrip attached={referenced ? (referenced.selection ? `选区「${referenced.selection.text}」` : '整页') : undefined} hint="在源码中选中一段交给 AI，或把整页作为上下文">
-      <Button size="xs" variant="ghost" disabled={busy} title="引用源码中选中的内容" onClick={() => { const selection = code.current?.selection(); if (!selection) { draft.setError('请先在源码中选择一段内容'); return; } void act(async () => { referenceHtml(artifact.sessionId, { artifactId: artifact.id, name: artifact.name, version: draft.getVersion(), selection }); focusComposer(artifact.sessionId); }); }}><Quote data-icon="inline-start" />引用选区</Button>
-      <Button size="xs" variant="ghost" disabled={busy} onClick={() => void act(async () => { referenceHtml(artifact.sessionId, { artifactId: artifact.id, name: artifact.name, version: draft.getVersion() }); focusComposer(artifact.sessionId); })}>引用页面</Button>
+    <ReferenceStrip attached={referenced.length ? (picked.length ? (picked.length === 1 ? `选区「${picked[0].selection!.text}」` : `${picked.length} 段选区，可在对话里用 [编号] 分别说明`) : '整页') : undefined} hint="在源码中选中一段交给 AI（可添加多段），或把整页作为上下文">
+      <Button size="xs" variant="ghost" disabled={busy} title="引用源码中选中的内容" onClick={() => { const selection = code.current?.selection(); if (!selection) { draft.setError('请先在源码中选择一段内容'); return; } void act(async () => { addHtmlReference(artifact.sessionId, { artifactId: artifact.id, name: artifact.name, version: draft.getVersion(), selection }); focusComposer(artifact.sessionId); }); }}><Quote data-icon="inline-start" />{picked.length ? '再加一段' : '引用选区'}</Button>
+      <Button size="xs" variant="ghost" disabled={busy} onClick={() => void act(async () => { addHtmlReference(artifact.sessionId, { artifactId: artifact.id, name: artifact.name, version: draft.getVersion() }); focusComposer(artifact.sessionId); })}>引用页面</Button>
     </ReferenceStrip>
-    {draft.error && <Alert variant="destructive"><AlertDescription>{draft.error}<div className="mt-2 flex gap-2"><Button size="xs" variant="outline" onClick={() => void act(async () => { /* Flush retries the retained draft. */ })}>重试保存</Button><Button size="xs" variant="outline" onClick={() => { void (async () => { await draft.waitForSave()?.catch((): void => { /* Keep recovery source. */ }); download(draft.getText(), `${artifact.name}-恢复副本.html`); const latest = await api.getArtifact(artifact.id); draft.load(latest); dropHtmlSelection(artifact.sessionId); })().catch((cause) => draft.setError(String(cause))); }}>下载恢复副本并重新载入</Button></div></AlertDescription></Alert>}
+    {draft.error && <Alert variant="destructive"><AlertDescription>{draft.error}<div className="mt-2 flex gap-2"><Button size="xs" variant="outline" onClick={() => void act(async () => { /* Flush retries the retained draft. */ })}>重试保存</Button><Button size="xs" variant="outline" onClick={() => { void (async () => { await draft.waitForSave()?.catch((): void => { /* Keep recovery source. */ }); download(draft.getText(), `${artifact.name}-恢复副本.html`); const latest = await api.getArtifact(artifact.id); draft.load(latest); dropHtmlSelection(artifact.sessionId, artifact.id); })().catch((cause) => draft.setError(String(cause))); }}>下载恢复副本并重新载入</Button></div></AlertDescription></Alert>}
     <div className="min-h-0 flex-1 overflow-auto">
       <Tabs defaultValue="code" className="gap-0"><div className="flex items-center justify-between gap-2 px-2 py-1"><TabsList><TabsTrigger value="code">源码</TabsTrigger><TabsTrigger value="preview">页面预览</TabsTrigger></TabsList><Button variant="ghost" size="xs" onClick={() => setRun((value) => !value)}>{run ? '停止脚本' : '运行页面脚本'}</Button></div>
-        <TabsContent value="code" forceMount className="h-[420px] data-[state=inactive]:hidden"><div inert={busy} className="h-full"><HtmlCodeEditor key={draft.source.generation} ref={code} name={artifact.name} text={draft.source.text} onChange={(text) => { draft.change(text); dropHtmlSelection(artifact.sessionId); }} /></div></TabsContent>
+        <TabsContent value="code" forceMount className="h-[420px] data-[state=inactive]:hidden"><div inert={busy} className="h-full"><HtmlCodeEditor key={draft.source.generation} ref={code} name={artifact.name} text={draft.source.text} onChange={(text) => { draft.change(text); dropHtmlSelection(artifact.sessionId, artifact.id); }} /></div></TabsContent>
         <TabsContent value="preview" forceMount className="h-[420px] data-[state=inactive]:hidden"><HtmlPreview html={preview} run={run} /></TabsContent>
       </Tabs>
       {run && <p className="px-3 py-1 text-xs text-ink-muted">已运行页面内脚本；外部脚本和网络请求未启用。</p>}
@@ -81,6 +82,6 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
         <ReviewLog reviews={reviews} />
       </section>
     </div>
-    {history && <ArtifactHistoryDialog artifact={{ ...artifact, version: draft.getVersion() }} close={() => setHistory(false)} flush={draft.flush} getVersion={draft.getVersion} render={(content) => <HtmlPreview html={content} title="HTML 历史版本预览" />} restored={async () => { draft.load(await api.getArtifact(artifact.id)); dropHtmlSelection(artifact.sessionId); setRun(false); await refresh(); }} />}
+    {history && <ArtifactHistoryDialog artifact={{ ...artifact, version: draft.getVersion() }} close={() => setHistory(false)} flush={draft.flush} getVersion={draft.getVersion} render={(content) => <HtmlPreview html={content} title="HTML 历史版本预览" />} restored={async () => { draft.load(await api.getArtifact(artifact.id)); dropHtmlSelection(artifact.sessionId, artifact.id); setRun(false); await refresh(); }} />}
   </div>;
 }

@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ArtifactWithContent } from '../../../shared/artifact';
 import { createDocumentContent } from '../../../shared/documentContent';
-import { documentMentions, referenceDocument } from '../../state/documentWorkspace';
+import { addDocumentReference, documentMentions, referenceDocument } from '../../state/documentWorkspace';
 import { clearEditorRecovery } from '../../state/editorPersistence';
 import DocumentEditor from './DocumentEditor';
 
@@ -37,4 +37,17 @@ it('hands focus to the composer when the document is referenced', async () => {
   expect((focus.mock.calls[0][0] as CustomEvent).detail).toEqual({ sessionId: initial.sessionId });
   expect(host.textContent).toContain('已引用到对话：全文');
   window.removeEventListener('reizo:focus-composer', focus);
+});
+
+it('numbers every picked range in the page, matching the chips', async () => {
+  await act(async () => { root.render(<DocumentEditor artifact={initial} />); });
+  const blockId = host.querySelector('[aria-label="文档正文"] p')?.getAttribute('data-id');
+  expect(blockId).toBeTruthy();
+  const pick = (start: number, end: number, text: string) => addDocumentReference(initial.sessionId, { artifactId: initial.id, name: initial.name, version: 1, selection: { blockId: blockId!, start, end, text } });
+  await act(async () => { pick(0, 4, 'Keep'); pick(10, 14, 'text'); });
+  expect([...host.querySelectorAll('.doc-ref-label')].map((el) => el.textContent)).toEqual(['1', '2']);
+  expect([...host.querySelectorAll('.doc-ref-range')].map((el) => el.textContent)).toEqual(['Keep', 'text']);
+  expect(host.textContent).toContain('2 段选区');
+  await act(async () => { referenceDocument(initial.sessionId); });
+  expect(host.querySelectorAll('.doc-ref-label')).toHaveLength(0);
 });
