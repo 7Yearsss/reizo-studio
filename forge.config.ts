@@ -23,7 +23,10 @@ const config: ForgeConfig = {
       preAutoEntitlements: false,
       preEmbedProvisioningProfile: false,
       continueOnError: false,
-      optionsForFile: () => ({ timestamp: 'none' }),
+      // osx-sign defaults to hardened runtime, whose library validation rejects
+      // the ad-hoc Electron Framework at launch ("different Team IDs"). Without
+      // a Developer ID there is no shared Team ID, so leave it off.
+      optionsForFile: () => ({ timestamp: 'none', hardenedRuntime: false }),
     },
     // WASM binaries for the local matting feature (onnxruntime-web): copied
     // flat into resources/ so /api/matting/ort/* can serve them in packaged

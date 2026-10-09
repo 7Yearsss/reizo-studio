@@ -12,6 +12,12 @@ while IFS= read -r -d '' archive; do
   while IFS= read -r -d '' app; do
     codesign --verify --deep --strict --verbose=2 "$app"
     codesign --display --verbose=2 "$app"
+    # Hardened runtime (flags=...runtime) enables library validation and makes
+    # dyld reject the ad-hoc Electron Framework at launch.
+    if codesign --display --verbose=2 "$app" 2>&1 | grep -q 'flags=.*runtime'; then
+      echo "Hardened runtime must be off for ad-hoc signed app: $app" >&2
+      exit 1
+    fi
     app_count=$((app_count + 1))
   done < <(find "$extract_dir" -maxdepth 1 -name '*.app' -type d -print0)
   if [[ "$app_count" -ne 1 ]]; then
