@@ -470,19 +470,6 @@ export default function Composer({
           }}
         >
             {sessionId && <ComposerDock todos={todos} />}
-            {sessionId && (documentRefs.length || htmlRefs.length || presentationRef || activeSheet || pinnedSheets?.length) ? <div className="mb-2 flex flex-wrap items-center gap-1.5">
-              {documentRefs.map((ref, index) => <WorkspaceRefChip key={`doc:${index}`} icon={<FileText />} kind="文档" name={ref.name} detail={ref.selection ? `「${ref.selection.text ?? ''}」` : '全文'} label={ref.label} cite={() => citeReference(ref.label!)}
-                open={() => { selectDocument(sessionId, ref.artifactId); uiStore.setRightPanelTab('documents'); }} remove={() => removeDocumentReference(sessionId, index)} />)}
-              {presentationRef && <WorkspaceRefChip icon={<Presentation />} kind=" PPT " name={presentationRef.name} detail={presentationRef.elementIds?.length ? `${presentationRef.elementIds.length} 个元素` : presentationRef.slideId ? '当前页' : '整份演示稿'}
-                open={() => { selectPresentation(sessionId, presentationRef.artifactId); uiStore.setRightPanelTab('presentations'); }} remove={() => referencePresentation(sessionId)} />}
-              {htmlRefs.map((ref, index) => <WorkspaceRefChip key={`html:${index}`} icon={<Code2 />} kind=" HTML " name={ref.name} detail={ref.selection ? `「${ref.selection.text ?? ''}」` : '整页'} label={ref.label} cite={() => citeReference(ref.label!)}
-                open={() => { selectHtml(sessionId, ref.artifactId); uiStore.setRightPanelTab('html'); }} remove={() => removeHtmlReference(sessionId, index)} />)}
-              {pinnedSheets?.map((ref, index) => <WorkspaceRefChip key={`${ref.artifactId}:${index}`} icon={<Pin />} kind="表格" name={ref.name} detail={ref.range ? `${ref.sheetName ?? ''}!${ref.range}` : '整个工作簿'}
-                open={() => { selectWorkbook(sessionId, ref.artifactId); uiStore.setRightPanelTab('sheets'); }} remove={() => removePinnedSheet(sessionId, index)} />)}
-              {activeSheet && <WorkspaceRefChip icon={<FileSpreadsheet />} kind="表格" name={activeSheet.name} detail={`${activeSheet.range ? `${activeSheet.sheetName ?? ''}!${activeSheet.range}` : '当前工作表'} · 当前选区`} pinned={false}
-                open={() => { selectWorkbook(sessionId, activeSheet.artifactId); uiStore.setRightPanelTab('sheets'); }} />}
-              {activeSheet && <Button type="button" variant="ghost" size="xs" title="固定此选区，换选别的单元格后仍会引用" onClick={() => pinSheetSelection(sessionId)}><Pin data-icon="inline-start" />固定</Button>}
-            </div> : null}
             {syncingSheet && <p role="status" className="mb-2 text-xs text-ink-muted">正在保存工作区内容…</p>}
             {(attachments.length > 0 || nodeRefs.length > 0 || mentions.length > 0 || unpinnedSelectionNodes.length > 0) && (
               <div className={cn("mb-2 flex flex-wrap gap-1.5", compact && "max-h-24 overflow-y-auto pr-0.5")}>
@@ -661,6 +648,19 @@ export default function Composer({
                   </span>
                 </div>
               )}
+              {sessionId && (documentRefs.length || htmlRefs.length || presentationRef || activeSheet || pinnedSheets?.length) ? <div className="mb-1.5 flex flex-wrap items-center gap-1 px-1">
+                {documentRefs.map((ref, index) => <WorkspaceRefChip key={`doc:${index}`} icon={<FileText />} kind="文档" name={ref.name} detail={ref.selection ? `「${ref.selection.text ?? ''}」` : '全文'} label={ref.label} cite={() => citeReference(ref.label!)}
+                  open={() => { selectDocument(sessionId, ref.artifactId); uiStore.setRightPanelTab('documents'); }} remove={() => removeDocumentReference(sessionId, index)} />)}
+                {presentationRef && <WorkspaceRefChip icon={<Presentation />} kind=" PPT " name={presentationRef.name} detail={presentationRef.elementIds?.length ? `${presentationRef.elementIds.length} 个元素` : presentationRef.slideId ? '当前页' : '整份演示稿'}
+                  open={() => { selectPresentation(sessionId, presentationRef.artifactId); uiStore.setRightPanelTab('presentations'); }} remove={() => referencePresentation(sessionId)} />}
+                {htmlRefs.map((ref, index) => <WorkspaceRefChip key={`html:${index}`} icon={<Code2 />} kind=" HTML " name={ref.name} detail={ref.selection ? `「${ref.selection.text ?? ''}」` : '整页'} label={ref.label} cite={() => citeReference(ref.label!)}
+                  open={() => { selectHtml(sessionId, ref.artifactId); uiStore.setRightPanelTab('html'); }} remove={() => removeHtmlReference(sessionId, index)} />)}
+                {pinnedSheets?.map((ref, index) => <WorkspaceRefChip key={`${ref.artifactId}:${index}`} icon={<Pin />} kind="表格" name={ref.name} detail={ref.range ? `${ref.sheetName ?? ''}!${ref.range}` : '整个工作簿'}
+                  open={() => { selectWorkbook(sessionId, ref.artifactId); uiStore.setRightPanelTab('sheets'); }} remove={() => removePinnedSheet(sessionId, index)} />)}
+                {activeSheet && <WorkspaceRefChip icon={<FileSpreadsheet />} kind="表格" name={activeSheet.name} detail={`${activeSheet.range ? `${activeSheet.sheetName ?? ''}!${activeSheet.range}` : '当前工作表'} · 当前选区`} pinned={false}
+                  open={() => { selectWorkbook(sessionId, activeSheet.artifactId); uiStore.setRightPanelTab('sheets'); }} />}
+                {activeSheet && <Button type="button" variant="ghost" size="xs" title="固定此选区，换选别的单元格后仍会引用" onClick={() => pinSheetSelection(sessionId)}><Pin data-icon="inline-start" />固定</Button>}
+              </div> : null}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -703,10 +703,14 @@ export default function Composer({
                     return;
                   }
                   // Atomic chip delete: Backspace on an empty draft unpins the
-                  // skill, mirroring how Cursor/Linear remove context chips.
+                  // skill, then the last Doc/HTML chip, mirroring how Cursor/Linear remove context chips.
                   if (e.key === 'Backspace' && draft === '' && skillId) {
                     e.preventDefault();
                     setSkillId(undefined);
+                  } else if (e.key === 'Backspace' && draft === '' && sessionId && (htmlRefs.length || documentRefs.length)) {
+                    e.preventDefault();
+                    if (htmlRefs.length) removeHtmlReference(sessionId, htmlRefs.length - 1);
+                    else removeDocumentReference(sessionId, documentRefs.length - 1);
                   }
                   // ↑ at the start of the box pulls queued messages back in for editing.
                   if (e.key === 'ArrowUp' && recallQueuedMessages(e)) {
