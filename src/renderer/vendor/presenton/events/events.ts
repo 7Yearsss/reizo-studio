@@ -57,3 +57,6 @@ export type TemplateV2ActivateSurfaceDetail = {
   slideId?: string | number | null;
   slideIndex?: number | null;
 };
+
+/** Reizo: the floating "问 AI" pill on a selection asks the host to hand it to the chat. */
+export const TEMPLATE_V2_ASK_AI_EVENT = "presenton:template-v2-ask-ai";

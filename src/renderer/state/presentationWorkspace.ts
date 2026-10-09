@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import type { PresentationReference } from '../../shared/presentationContent';
+import { presentationElements, type PresentationContent, type PresentationReference } from '../../shared/presentationContent';
 import { serializePresentationReference } from '../../shared/presentationReferences';
 interface State { selected: Record<string, string | undefined>; references: Record<string, PresentationReference | undefined>; revisions: Record<string, number> }
 let state: State = { selected: {}, references: {}, revisions: {} };
@@ -14,4 +14,14 @@ export function presentationMentions(sessionId: string): string[] { const ref = 
 export function dropPresentationScope(sessionId: string) {
   const ref = state.references[sessionId];
   if (ref && (ref.slideId || ref.elementIds?.length)) referencePresentation(sessionId, { artifactId: ref.artifactId, name: ref.name, version: ref.version });
+}
+/** The user's own edits keep a picked slide/element scope; only drop it once its targets are gone. */
+export function prunePresentationScope(sessionId: string, content: PresentationContent) {
+  const ref = state.references[sessionId];
+  if (!ref?.slideId) return;
+  const slide = content.slides.find((s) => s.id === ref.slideId);
+  const ids = slide ? new Set(presentationElements(slide).map((e) => e.element.id)) : undefined;
+  const elementIds = ref.elementIds?.filter((id) => ids?.has(id));
+  if (!slide || (ref.elementIds?.length && !elementIds?.length)) dropPresentationScope(sessionId);
+  else if (elementIds && elementIds.length !== ref.elementIds?.length) referencePresentation(sessionId, { ...ref, elementIds });
 }

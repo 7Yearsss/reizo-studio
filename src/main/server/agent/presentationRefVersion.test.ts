@@ -26,8 +26,12 @@ it('a whole-deck reference is not rejected just because the deck was autosaved s
   expect((await propose((ids) => ({ artifactId: ids.artifactId, name: 'Deck', version: 99 }))).ok).toBe(true);
 });
 
-it('a slide-scoped reference is still bound to the version it was picked on', async () => {
-  const out = await propose((ids) => ({ artifactId: ids.artifactId, name: 'Deck', version: 99, slideId: ids.slideId }));
+it('a slide/element scope survives autosaves while its targets still exist', async () => {
+  expect((await propose((ids) => ({ artifactId: ids.artifactId, name: 'Deck', version: 99, slideId: ids.slideId, elementIds: [ids.elementId] }))).ok).toBe(true);
+});
+
+it('a scope whose slide was deleted asks the user to pick again', async () => {
+  const out = await propose((ids) => ({ artifactId: ids.artifactId, name: 'Deck', version: 1, slideId: 'gone-slide' }));
   expect(out.ok).toBe(false);
-  expect(String(out.error)).toContain('版本已变化');
+  expect(String(out.error)).toContain('重新选择');
 });

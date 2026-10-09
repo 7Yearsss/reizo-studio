@@ -10,11 +10,11 @@ import { Alert, AlertDescription } from '../ui/alert';
 import { useTextArtifact } from './useTextArtifact';
 import PresentationSurface, { type PresentationEditingApi } from './PresentationSurface';
 import ArtifactHistoryDialog from './ArtifactHistoryDialog';
-import { referencePresentation, usePresentationWorkspace, dropPresentationScope } from '../../state/presentationWorkspace';
+import { referencePresentation, usePresentationWorkspace, dropPresentationScope, prunePresentationScope } from '../../state/presentationWorkspace';
 import PresentationReview from './PresentationReview';
 import { focusComposer, ReferenceStrip, SaveStatus } from './workspaceChrome';
 import { createChartInsertElements, createElementInsertElements, createTableInsertElements, createTextInsertElements } from '../../vendor/presenton/insert/insert-elements';
-import { TEMPLATE_V2_INSERT_ELEMENTS_EVENT, TEMPLATE_V2_SURFACE_SELECTED_EVENT, type TemplateV2SurfaceSelectedDetail } from '../../vendor/presenton/events/events';
+import { TEMPLATE_V2_ASK_AI_EVENT, TEMPLATE_V2_INSERT_ELEMENTS_EVENT, TEMPLATE_V2_SURFACE_SELECTED_EVENT, type TemplateV2SurfaceSelectedDetail } from '../../vendor/presenton/events/events';
 import type { SlideElement } from '../../vendor/presenton/types';
 import { readPresentationImage } from '../../vendor/presenton/host';
 import { exportPresentationPptx } from '../../lib/presentationPptx';
@@ -47,8 +47,23 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
     const listener = (event: Event) => { const detail = (event as CustomEvent<TemplateV2SurfaceSelectedDetail>).detail; if (detail.slideId === selected?.id) setSelection(detail.selection); };
     window.addEventListener(TEMPLATE_V2_SURFACE_SELECTED_EVENT, listener); return () => window.removeEventListener(TEMPLATE_V2_SURFACE_SELECTED_EVENT, listener);
   }, [selected?.id]);
+  const root = useRef<HTMLDivElement>(null);
+  const askRef = useRef<() => void>(() => { /* Assigned on every render below. */ });
+  useEffect(() => {
+    const ask = () => { if (root.current?.checkVisibility()) askRef.current(); };
+    // Ctrl/Cmd+L hands the selection (or, with nothing selected, the current page) to the chat — same as Doc.
+    // Tabs stay mounted while hidden, so only the visible editor answers, and never while typing elsewhere (e.g. the composer).
+    const key = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== 'l') return;
+      const host = root.current; const target = event.target as Node | null;
+      if (!host?.checkVisibility() || (target !== document.body && !host.contains(target))) return;
+      event.preventDefault(); askRef.current();
+    };
+    window.addEventListener(TEMPLATE_V2_ASK_AI_EVENT, ask); window.addEventListener('keydown', key);
+    return () => { window.removeEventListener(TEMPLATE_V2_ASK_AI_EVENT, ask); window.removeEventListener('keydown', key); };
+  }, []);
   function read(): PresentationContent { const value = parsePresentation(draft.getText()); if (!value) throw new Error('演示稿格式无效'); return value; }
-  function change(next: PresentationContent) { draft.change(JSON.stringify(normalizePresentation(next))); dropPresentationScope(artifact.sessionId); }
+  function change(next: PresentationContent) { const normalized = normalizePresentation(next); draft.change(JSON.stringify(normalized)); prunePresentationScope(artifact.sessionId, normalized); }
   async function act(action: () => Promise<void> | void) {
     if (busy) return; setBusy(true); draft.setError('');
     try { await draft.flush(); await action(); } catch (cause) { draft.setError(cause instanceof Error ? cause.message : '操作失败'); } finally { setBusy(false); }
@@ -83,8 +98,9 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
     if (elements && !ids?.length) { draft.setError('请先选择文字、图片、形状或组件'); return; }
     void act(() => { referencePresentation(artifact.sessionId, { artifactId: artifact.id, name: artifact.name, version: draft.getVersion(), slideId: wholeDeck ? undefined : selected?.id, elementIds: ids }); focusComposer(artifact.sessionId); });
   }
+  askRef.current = () => { if (!busy) cite(Boolean(selection)); };
   if (!content || !selected || !initialSlide) return <Alert variant="destructive"><AlertDescription>演示稿格式无效</AlertDescription></Alert>;
-  return <div className="flex min-h-0 flex-1 flex-col">
+  return <div ref={root} className="flex min-h-0 flex-1 flex-col">
     {content.importWarnings?.length ? <details className="border-b border-line px-3 py-2 text-xs text-ink-muted"><summary className="cursor-pointer">导入说明 · {content.importWarnings.length} 项{content.importWarnings.length > 1 ? '（包含格式转换提示）' : ''}</summary>{content.importWarnings.map((warning, index) => <p className="mt-1" key={index}>{warning}</p>)}{content.originalArtifactId && <Button size="xs" variant="link" onClick={() => { const id = content.originalArtifactId; if (id) void api.artifactRawUrl(id).then((url) => { const anchor = document.createElement('a'); anchor.href = url; anchor.download = `${artifact.name}-原始.pptx`; document.body.append(anchor); anchor.click(); anchor.remove(); }); }}>下载原始 PPTX</Button>}</details> : null}
     <input hidden ref={imageInput} type="file" accept="image/*" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; void act(() => image(file)); }} />
     <div className="flex flex-wrap items-center gap-0.5 border-b border-line px-2 py-1" data-inline-edit-ignore="true">
@@ -104,8 +120,8 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
       </div>
     </div>
     <ReferenceStrip attached={referenced ? (referenced.elementIds?.length ? `${referenced.elementIds.length} 个元素` : referenced.slideId ? `第 ${content.slides.findIndex((slide) => slide.id === referenced.slideId) + 1} 页` : '整份演示稿') : undefined}
-      hint={selection?.targetLabel ? `已选：${selection.targetLabel}` : '双击文字编辑，拖动元素调整位置；选中元素后可交给 AI'}>
-      <Button size="xs" variant="ghost" disabled={busy || !selection} title="把选中的元素交给 AI" onClick={() => cite(true)}><MousePointerClick data-icon="inline-start" />引用选中元素</Button>
+      hint={selection?.targetLabel ? `已选：${selection.targetLabel} · Ctrl+L 交给 AI` : '双击文字编辑，拖动元素调整位置；选中元素后点「问 AI」或按 Ctrl+L'}>
+      <Button size="xs" variant="ghost" disabled={busy || !selection} title="把选中的元素交给 AI（Ctrl+L）" onClick={() => cite(true)}><MousePointerClick data-icon="inline-start" />引用选中元素</Button>
       <Button size="xs" variant="ghost" disabled={busy} onClick={() => cite(false)}>引用当前页</Button>
       <Button size="xs" variant="ghost" disabled={busy} onClick={() => cite(false, true)}>引用整稿</Button>
     </ReferenceStrip>

@@ -6,7 +6,7 @@ import { openDb } from '../db/client';
 import { createArtifactStore } from '../storage/artifactStore';
 import { createArtifactReviewStore } from '../storage/artifactReviewStore';
 import { createPresentationTools, presentationReviewAdapter } from './presentationTools';
-import { applyPresentationEdit, createPresentation, normalizePresentation, parsePresentation, presentationElements } from '../../../shared/presentationContent';
+import { applyPresentationEdit, createPresentation, normalizePresentation, parsePresentation, presentationElementBox, presentationElements } from '../../../shared/presentationContent';
 const handles: ReturnType<typeof openDb>[] = [];
 afterEach(() => handles.splice(0).forEach((db) => db.close()));
 async function fixture() {
@@ -25,6 +25,17 @@ it('preserves element identities and rejects changes outside a selected page or 
   const next = applyPresentationEdit(content, { op: 'updateElement', slideId: slide.id, elementId: title.element.id!, patch: { runs: [{ text: 'Updated' }] } }, scope);
   expect(presentationElements(next.slides[0])[1].element).toEqual(body.element);
   expect(() => applyPresentationEdit(content, { op: 'deleteSlide', slideId: slide.id })).toThrow('1 至');
+});
+it('lets an element scope insert beside the selection on the same slide only', () => {
+  const content = createPresentation(); content.slides.push({ ...createPresentation().slides[0] }); const deck = normalizePresentation(content);
+  const [slide, other] = deck.slides; const [title] = presentationElements(slide);
+  const scope = { artifactId: 'test', name: 'test', version: 1, slideId: slide.id, elementIds: [title.element.id!] };
+  const element = { type: 'text', position: { x: 0, y: 0 }, size: { width: 100, height: 40 }, runs: [{ text: 'New' }] };
+  expect(presentationElements(applyPresentationEdit(deck, { op: 'insertElement', slideId: slide.id, element }, scope).slides[0])).toHaveLength(3);
+  expect(() => applyPresentationEdit(deck, { op: 'insertElement', slideId: other.id, element }, scope)).toThrow('引用的页面');
+  expect(() => applyPresentationEdit(deck, { op: 'updateSlide', slideId: slide.id, title: 'x' }, scope)).toThrow('选中');
+  const without = applyPresentationEdit(deck, { op: 'deleteElement', slideId: slide.id, elementId: title.element.id! });
+  expect(() => applyPresentationEdit(without, { op: 'insertElement', slideId: slide.id, element }, scope)).toThrow('引用的元素已被删除');
 });
 it('tracks single container children and supports scoped descendant updates', () => {
   const content = normalizePresentation({ schemaVersion: 1, slides: [{ title: 'Container', layout: { elements: [{ type: 'container', child: { type: 'text', runs: [{ text: 'child' }] } }] } }] });
@@ -64,4 +75,27 @@ it('rejects stale versions, foreign decks, and overlapping edits', async () => {
   expect((await f.call('read_presentation', { artifactId: foreign.id })).ok).toBe(false);
   await f.artifacts.addVersion(f.artifact.id, { expectedVersion: 1, origin: { surface: 'manual_edit' }, content: f.artifact.content });
   expect((await f.call('propose_presentation_edits', { artifactId: f.artifact.id, expectedVersion: 1, operations: [{ op: 'updateElement', slideId: slide.id, elementId: element.id, patch: { name: 'stale' } }] })).ok).toBe(false);
+});
+it('merges nested style patches instead of replacing them', () => {
+  const content = createPresentation('Old'); const slide = content.slides[0]; const id = slide.layout.elements![0].id!;
+  const red = applyPresentationEdit(content, { op: 'updateElement', slideId: slide.id, elementId: id, patch: { font: { color: 'FF0000' }, position: { y: 50 } } });
+  const element = red.slides[0].layout.elements![0];
+  expect(element.font).toEqual({ family: 'Arial', size: 56, bold: true, color: 'FF0000' });
+  expect(element.position).toEqual({ x: 100, y: 50 });
+  const plain = applyPresentationEdit(red, { op: 'updateElement', slideId: slide.id, elementId: id, patch: { font: { bold: null } } });
+  expect(plain.slides[0].layout.elements![0].font).toEqual({ family: 'Arial', size: 56, color: 'FF0000' });
+});
+it('moves, resizes, aligns and distributes elements including vectors', () => {
+  const box = (x: number, w: number) => ({ type: 'text', runs: [{ text: 't' }], position: { x, y: 100 }, size: { width: w, height: 50 } });
+  const deck = normalizePresentation({ schemaVersion: 1, slides: [{ title: 'S', layout: { elements: [box(10, 100), box(300, 200), box(900, 100), { type: 'rectangle', position: { x: 0, y: 0 }, size: { width: 100, height: 100 } }] } }] });
+  const slide = deck.slides[0]; const [a, b, c, shape] = presentationElements(slide).map((e) => e.element.id!);
+  const frames = (next: typeof deck) => presentationElements(next.slides[0]).map((e) => presentationElementBox(e.element));
+  const moved = applyPresentationEdit(deck, { op: 'transformElement', slideId: slide.id, elementId: shape, x: 50, width: 200 });
+  expect(frames(moved)[3]).toEqual({ x: 50, y: 0, width: 200, height: 100 });
+  expect(frames(applyPresentationEdit(deck, { op: 'arrangeElements', slideId: slide.id, elementIds: [a, b, c], align: 'right' })).slice(0, 3).map((f) => f!.x)).toEqual([900, 800, 900]);
+  expect(frames(applyPresentationEdit(deck, { op: 'arrangeElements', slideId: slide.id, elementIds: [b], align: 'center' }))[1]!.x).toBe(540);
+  expect(frames(applyPresentationEdit(deck, { op: 'arrangeElements', slideId: slide.id, elementIds: [c, a, b], align: 'distribute-horizontal' })).slice(0, 3).map((f) => f!.x)).toEqual([10, 405, 900]);
+  const scope = { artifactId: 'test', name: 'test', version: 1, slideId: slide.id, elementIds: [a, b] };
+  expect(() => applyPresentationEdit(deck, { op: 'arrangeElements', slideId: slide.id, elementIds: [a, c], align: 'left' }, scope)).toThrow('选中');
+  expect(() => presentationReviewAdapter.validateBatch?.(JSON.stringify(deck), [{ op: 'arrangeElements', slideId: slide.id, elementIds: [a, b], align: 'top' }, { op: 'transformElement', slideId: slide.id, elementId: b, x: 0 }])).toThrow('合并');
 });
