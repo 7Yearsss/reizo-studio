@@ -11,6 +11,8 @@ export interface ArtifactReviewAdapter {
   apply(content: string, operations: unknown[]): string;
   describe(content: string, operation: unknown): { label: string; before: string; after: string };
   validateBatch?(content: string, operations: unknown[]): void;
+  /** Re-anchor a pending operation after `accepted` operations were committed to the base. */
+  rebase?(accepted: unknown[], operation: unknown): unknown;
 }
 export class ArtifactReviewError extends Error {
   constructor(message: string, public readonly status: 400 | 404 | 409 = 400) { super(message); }
@@ -104,10 +106,15 @@ export function createArtifactReviewStore(db: DbHandle, artifacts: ArtifactStore
           return get(review.id) as ArtifactReview;
         }
         if (review.stale) throw new ArtifactReviewError('原文已更新，请基于最新内容重新生成建议', 409);
-        const content = pending.length === 0 ? review.candidateContent : adapter.apply(review.baseContent, selected.map((c) => c.operation));
+        const acceptedOps = selected.map((c) => c.operation);
+        const content = pending.length === 0 ? review.candidateContent : adapter.apply(review.baseContent, acceptedOps);
         next.baseContent = content;
-        next.candidateContent = adapter.apply(content, pending);
-        next.changes = next.changes.map((change) => change.status === 'pending' ? { ...change, ...adapter.describe(content, change.operation) } : change);
+        next.changes = next.changes.map((change) => {
+          if (change.status !== 'pending') return change;
+          const operation = adapter.rebase?.(acceptedOps, change.operation) ?? change.operation;
+          return { ...change, operation, ...adapter.describe(content, operation) };
+        });
+        next.candidateContent = adapter.apply(content, next.changes.filter((c) => c.status === 'pending').map((c) => c.operation));
         const updated = await artifacts.addVersion(review.artifactId, {
           expectedVersion: review.baseVersion, content, origin: { ...review.origin, surface: 'manual_edit' }, label: 'Accepted AI edits',
           onCommit(version) {

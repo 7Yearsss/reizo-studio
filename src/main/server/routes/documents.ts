@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { SessionStore } from '../../../shared/chat';
@@ -51,7 +52,11 @@ export function createDocumentsRouter(artifacts: ArtifactStore, sessions: Sessio
     const content = parseDocumentContent(artifact.content);
     if (!content) return c.json({ error: '文档格式无效' }, 400);
     const filename = `${artifact.name.replace(/\.docx$/i, '').replace(/[\r\n/\\]/g, '_')}.docx`;
-    return new Response(new Uint8Array(await exportDocx(content)), { headers: { 'content-type': DOCX_MIME, 'content-disposition': `attachment; filename="document.docx"; filename*=UTF-8''${encodeURIComponent(filename).replace(/['()*]/g, (char) => `%${char.charCodeAt(0).toString(16)}`)}` } });
+    let original: Buffer | undefined;
+    const originalMeta = content.originalArtifactId ? artifacts.getMeta(content.originalArtifactId) : null;
+    const originalPath = originalMeta ? artifacts.blobFilePath(originalMeta.id, originalMeta.version) : null;
+    if (originalPath) original = await readFile(originalPath).catch((): undefined => undefined);
+    return new Response(new Uint8Array(await exportDocx(content, original)), { headers: { 'content-type': DOCX_MIME, 'content-disposition': `attachment; filename="document.docx"; filename*=UTF-8''${encodeURIComponent(filename).replace(/['()*]/g, (char) => `%${char.charCodeAt(0).toString(16)}`)}` } });
   });
   router.get('/artifacts/:id/reviews', (c) => {
     if (!artifacts.getMeta(c.req.param('id'))) return c.json({ error: '文档不存在' }, 404);

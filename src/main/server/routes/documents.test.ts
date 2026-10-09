@@ -88,3 +88,23 @@ describe('document workspace boundary', () => {
     expect(ids).toContain(original.attrs!.id);
   });
 });
+
+describe('word-level review', () => {
+  it('splits a rewrite into exact hunks, accepts them independently and keeps later offsets valid', async () => {
+    const f = await setup();
+    const content = documentFromHtml('<p>甲方应在三十日内付款，乙方应在十日内交付。</p>');
+    const artifact = await f.artifacts.create({ sessionId: f.session.id, name: '合同', kind: 'doc', source: 'manual', content: JSON.stringify(content) });
+    const block = documentBlocks(content)[0];
+    const review = await f.reviews.create({ artifactId: artifact.id, sessionId: f.session.id, expectedVersion: 1, origin: { surface: 'chat' },
+      operations: [{ op: 'replaceText', blockId: block.id, start: 0, end: block.text.length, text: '甲方应在十五日内付款，乙方应在七日内交付。' }] });
+    expect(review.changes.length).toBe(2);
+    expect(review.changes[0].label).toContain('→');
+    // Accept the later hunk first, then the earlier one: offsets shift between the two decisions.
+    const second = await f.reviews.decide({ id: review.id, sessionId: f.session.id, expectedReviewVersion: 1, changeIds: [review.changes[1].id], decision: 'accept' });
+    const rebased = second.changes[0].operation as { start: number };
+    expect(rebased.start).toBe((review.changes[0].operation as { start: number }).start);
+    const done = await f.reviews.decide({ id: review.id, sessionId: f.session.id, expectedReviewVersion: second.reviewVersion, changeIds: [review.changes[0].id], decision: 'accept' });
+    expect(done.status).toBe('accepted');
+    expect(documentBlocks(parseDocumentContent((await f.artifacts.get(artifact.id))!.content)!)[0].text).toBe('甲方应在十五日内付款，乙方应在七日内交付。');
+  });
+});

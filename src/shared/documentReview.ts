@@ -2,7 +2,7 @@ import type { JSONContent } from '@tiptap/core';
 import { Schema, type MarkSpec, type NodeSpec } from '@tiptap/pm/model';
 import { EditorState } from '@tiptap/pm/state';
 import { addSuggestionMarks, transformToSuggestionTransaction } from '@handlewithcare/prosemirror-suggest-changes';
-import { documentSchema, editTransaction, type DocumentContent, type DocumentEdit } from './documentContent';
+import { documentSchema, editTransaction, orderDocumentEdits, type DocumentContent, type DocumentEdit } from './documentContent';
 
 const reviewNodes: Record<string, NodeSpec> = {};
 const reviewMarks: Record<string, MarkSpec> = {};
@@ -17,3 +17,14 @@ export function reviewDocumentEdit(content: DocumentContent, edit: DocumentEdit,
   return transformToSuggestionTransaction(transaction, state, () => changeId).doc.toJSON();
 }
 
+
+/** Projection of several pending edits at once, each tagged with its change id so the UI can address it. */
+export function reviewDocumentEdits(content: DocumentContent, items: { edit: DocumentEdit; changeId: string }[]): JSONContent {
+  let state = EditorState.create({ schema: documentReviewSchema, doc: documentReviewSchema.nodeFromJSON(content.doc) });
+  const ordered = orderDocumentEdits(items.map((item) => item.edit));
+  for (const edit of ordered) {
+    const changeId = items.find((item) => item.edit === edit)!.changeId;
+    state = state.apply(transformToSuggestionTransaction(editTransaction(state, edit), state, () => changeId));
+  }
+  return state.doc.toJSON();
+}

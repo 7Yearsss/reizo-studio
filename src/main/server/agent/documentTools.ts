@@ -37,7 +37,7 @@ export function createDocumentTools(options: { sessionId: string; projectId?: st
       },
     }),
     propose_document_edits: tool({
-      description: '为已有文档创建待审核修改，绝不直接改原文。先 read_document，使用其 version 和 blockId。每块合并为一项修改，选段引用只允许范围内 replaceText。用户在 Doc 面板接受或拒绝，工具不能代替用户接受。',
+      description: '为已有文档创建待审核修改，绝不直接改原文。先 read_document，使用其 version 和 blockId。优先用 replaceText 做最小范围的文字修改（会保留字体、颜色、对齐等原有格式，系统会自动按词拆成多处便于逐项审核）；replaceBlock 会重写整块，仅在必须改结构时使用。选段引用只允许范围内 replaceText。用户在 Doc 面板接受或拒绝，工具不能代替用户接受。',
       inputSchema: z.object({ artifactId: z.string(), expectedVersion: z.number().int().positive(), operations: z.array(documentEditSchema).min(1).max(40) }),
       execute: async ({ artifactId, expectedVersion, operations }) => {
         try {
