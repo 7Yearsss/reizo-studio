@@ -22,11 +22,12 @@ export interface DocumentContent {
 }
 
 export interface DocumentSelection { blockId: string; start: number; end: number; text?: string }
-export type DocumentEdit =
+export type DocumentEdit = (
   | { op: 'replaceText'; blockId: string; start: number; end: number; text: string }
   | { op: 'replaceBlock'; blockId: string; node: JSONContent }
   | { op: 'insertBlocks'; afterId: string | null; nodes: JSONContent[] }
-  | { op: 'deleteBlock'; blockId: string };
+  | { op: 'deleteBlock'; blockId: string }
+) & { reason?: string };
 
 const TOP_LEVEL_TYPES = ['paragraph', 'heading', 'bulletList', 'orderedList', 'blockquote', 'codeBlock', 'horizontalRule', 'table', 'image'];
 /** Attributes that carry source formatting; carried over when AI replaces a block. */

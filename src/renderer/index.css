@@ -23,6 +23,7 @@
 .document-review del { background: color-mix(in srgb, var(--destructive) 14%, transparent); text-decoration: line-through; text-decoration-color: var(--destructive); cursor: pointer; }
 .document-review [data-type="modification"] { outline: 1px dashed var(--accent); outline-offset: 1px; cursor: pointer; }
 .document-review .rv-active { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 2px; }
+.document-review .rv-hover:not(.rv-active) { outline: 1px solid var(--accent); outline-offset: 1px; border-radius: 2px; }
 .document-review ins.rv-active { background: color-mix(in srgb, #16a34a 34%, transparent); }
 .document-review del.rv-active { background: color-mix(in srgb, var(--destructive) 28%, transparent); }
 .rv-before ins { display: none !important; }

@@ -9,11 +9,14 @@ function freshIds(node: JSONContent): JSONContent {
   return { ...node, attrs, ...(node.content ? { content: node.content.map(freshIds) } : {}) };
 }
 
+/** Why the AI proposes this edit; shown next to the change during review. */
+const reason = z.string().max(300).optional();
+
 export const documentEditSchema = z.discriminatedUnion('op', [
-  z.object({ op: z.literal('replaceText'), blockId: z.string().min(1), start: z.number().int().nonnegative(), end: z.number().int().nonnegative(), text: z.string().max(100000) }),
-  z.object({ op: z.literal('replaceBlock'), blockId: z.string().min(1), node: z.record(z.string(), z.unknown()) }),
-  z.object({ op: z.literal('insertBlocks'), afterId: z.string().nullable(), nodes: z.array(z.record(z.string(), z.unknown())).min(1).max(50) }),
-  z.object({ op: z.literal('deleteBlock'), blockId: z.string().min(1) }),
+  z.object({ op: z.literal('replaceText'), blockId: z.string().min(1), start: z.number().int().nonnegative(), end: z.number().int().nonnegative(), text: z.string().max(100000), reason: reason }),
+  z.object({ op: z.literal('replaceBlock'), blockId: z.string().min(1), node: z.record(z.string(), z.unknown()), reason: reason }),
+  z.object({ op: z.literal('insertBlocks'), afterId: z.string().nullable(), nodes: z.array(z.record(z.string(), z.unknown())).min(1).max(50), reason: reason }),
+  z.object({ op: z.literal('deleteBlock'), blockId: z.string().min(1), reason: reason }),
 ]);
 
 function read(content: string): DocumentContent {

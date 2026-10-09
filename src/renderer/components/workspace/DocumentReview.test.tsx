@@ -43,7 +43,7 @@ it('shows changes inside the formatted paragraph, navigates between them and dec
   expect(host.querySelector('[role="status"]')!.textContent).toBe('第 2 / 2 处');
   expect(surface.querySelector('.rv-active')!.textContent).toBe('甲');
 
-  const accept = [...host.querySelectorAll('button')].find((b) => b.textContent === '接受')!;
+  const accept = host.querySelector<HTMLButtonElement>('[aria-label="接受此处"]')!;
   await act(async () => { accept.click(); });
   expect(decide).toHaveBeenCalledWith(expect.objectContaining({ id: 'r1' }), ['c2'], 'accept');
 });
@@ -59,4 +59,45 @@ it('offers a side-by-side view where each side hides the other side’s marks', 
 it('does not invent spacing for paragraphs that carry no spacing attributes', async () => {
   await act(async () => { root.render(<DocumentReview review={fixture()} otherBatches={0} busy={false} decide={vi.fn()} revise={async () => true} />); });
   expect(host.querySelector('p')!.getAttribute('style')).not.toMatch(/margin|text-indent/);
+});
+
+it('opens on the first change, explains it, and can be driven from the keyboard', async () => {
+  const scroll = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+  const review = fixture();
+  (review.changes[0].operation as Record<string, unknown>).reason = '统一为十一月';
+  const decide = vi.fn();
+  await act(async () => { root.render(<DocumentReview review={review} otherBatches={0} busy={false} decide={decide} revise={async () => true} />); });
+  expect(scroll).toHaveBeenCalled();
+  expect(host.textContent).toContain('AI：统一为十一月');
+  expect(host.textContent).toMatch(/改写 1.*新增 1|新增 1.*改写 1/);
+  const section = host.querySelector('section')!;
+  const press = async (key: string) => { await act(async () => { section.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })); }); };
+  await press('j');
+  expect(host.querySelector('[role="status"]')!.textContent).toBe('第 2 / 2 处');
+  await press('Enter');
+  expect(decide).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'r1' }), ['c2'], 'accept');
+  await press('Backspace');
+  expect(decide).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'r1' }), ['c1'], 'reject');
+  scroll.mockRestore();
+});
+
+it('draws one overview tick per change that jumps to it', async () => {
+  const height = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(1000);
+  await act(async () => { root.render(<DocumentReview review={fixture()} otherBatches={0} busy={false} decide={vi.fn()} revise={async () => true} />); });
+  const ticks = host.querySelectorAll('[aria-label="修改位置"] button');
+  expect(ticks.length).toBe(2);
+  await act(async () => { (ticks[1] as HTMLButtonElement).click(); });
+  expect(host.querySelector('[role="status"]')!.textContent).toBe('第 2 / 2 处');
+  height.mockRestore();
+});
+
+it('shows the accept/reject buttons for whichever change the pointer is over', async () => {
+  const decide = vi.fn();
+  await act(async () => { root.render(<DocumentReview review={fixture()} otherBatches={0} busy={false} decide={decide} revise={async () => true} />); });
+  // Current change is the first; hovering the second one moves the buttons to it without selecting it.
+  await act(async () => { host.querySelector('del')!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); });
+  expect(host.querySelector('.rv-hover')!.textContent).toBe('甲');
+  expect(host.querySelector('[role="status"]')!.textContent).toBe('第 1 / 2 处');
+  await act(async () => { host.querySelector<HTMLButtonElement>('[aria-label="接受此处"]')!.click(); });
+  expect(decide).toHaveBeenCalledWith(expect.objectContaining({ id: 'r1' }), ['c2'], 'accept');
 });
