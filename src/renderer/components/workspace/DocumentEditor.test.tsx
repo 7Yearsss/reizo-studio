@@ -28,3 +28,13 @@ it('retains a document reference without saving merely because editable mode tog
   expect(harness.save).not.toHaveBeenCalled();
   expect(host.querySelector('[aria-label="文档正文"]')?.textContent).toBe('Keep this text.');
 });
+
+it('hands focus to the composer when the document is referenced', async () => {
+  const focus = vi.fn();
+  window.addEventListener('reizo:focus-composer', focus);
+  await act(async () => { root.render(<DocumentEditor artifact={initial} />); });
+  await act(async () => { [...host.querySelectorAll('button')].find((button) => button.textContent === '引用全文')!.click(); });
+  expect((focus.mock.calls[0][0] as CustomEvent).detail).toEqual({ sessionId: initial.sessionId });
+  expect(host.textContent).toContain('已引用到对话：全文');
+  window.removeEventListener('reizo:focus-composer', focus);
+});

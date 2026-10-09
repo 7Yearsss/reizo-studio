@@ -249,10 +249,4 @@ export default function DocumentReview({ review, otherBatches, busy, decide, rev
   </section>;
 }
 
-export function ReviewLog({ reviews }: { reviews: ArtifactReview[] }) {
-  const done = reviews.flatMap((r) => r.changes.filter((c) => c.status !== 'pending'));
-  if (!done.length) return null;
-  return <details className="border-t border-line px-3 py-2"><summary className="cursor-pointer text-xs text-ink-muted">审核记录（{done.length}）</summary>
-    {done.map((c) => <p className="mt-1 text-xs" key={c.id}>{c.label} · {c.status === 'accepted' ? `已接受 · 版本 ${c.acceptedVersion}` : '已拒绝'}</p>)}
-  </details>;
-}
+export { ReviewLog } from './workspaceChrome';

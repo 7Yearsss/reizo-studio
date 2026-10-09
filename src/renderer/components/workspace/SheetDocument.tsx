@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { History, X } from 'lucide-react';
+import { History, Pin, Sparkles, X } from 'lucide-react';
 import type { Artifact, ArtifactWithContent } from '../../../shared/artifact';
 import { parseSheetContent } from '../../../shared/sheetContent';
 import * as api from '../../api';
 import * as artifactStore from '../../state/artifactStore';
-import { clearSheetRecovery, discardWorkbookEdits, flushWorkbookEdits, getSheetRecovery, setSheetRecovery, trackSheetWrite } from '../../state/sheetWorkspace';
+import { clearSheetRecovery, discardWorkbookEdits, flushWorkbookEdits, getSheetRecovery, setSheetRecovery, trackSheetWrite, useSheetWorkspace, pinSheetSelection } from '../../state/sheetWorkspace';
 import { createDeferredView } from '../DeferredView';
 import type { SheetRendererProps } from './renderers/SheetRenderer';
 import { Button } from '../ui/button';
 import { Alert, AlertDescription } from '../ui/alert';
 import ArtifactVersionRail from './ArtifactVersionRail';
+import { focusComposer, ReferenceStrip } from './workspaceChrome';
 
 const Editor = createDeferredView<SheetRendererProps>(() => import('./renderers/SheetRenderer'), { label: 'Excel 编辑器', minHeight: 420 });
 interface Frame { doc: ArtifactWithContent; generation: number; recovered: boolean; error?: string }
@@ -22,6 +23,9 @@ export default function SheetDocument({ artifact, onClose }: { artifact: Artifac
   const [showHistory, setShowHistory] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
+  const activeSelection = useSheetWorkspace((s) => s.activeBySession[artifact.sessionId]);
+  const ownSelection = activeSelection?.artifactId === artifact.id ? activeSelection : undefined;
+  const pinnedCount = useSheetWorkspace((s) => (s.pinnedBySession[artifact.sessionId] ?? []).filter((ref) => ref.artifactId === artifact.id).length);
 
   useEffect(() => {
     if (!viewVersion && current.current?.id === artifact.id && current.current.version >= artifact.version && frame) return;
@@ -77,6 +81,11 @@ export default function SheetDocument({ artifact, onClose }: { artifact: Artifac
       <Button variant="ghost" size="icon-sm" aria-label="表格版本历史" onClick={() => setShowHistory((v) => !v)}><History /></Button>
       <Button variant="ghost" size="icon-sm" aria-label="关闭表格" onClick={onClose}><X /></Button>
     </div>
+    {!viewVersion && <ReferenceStrip attached={ownSelection?.range ? `${ownSelection.sheetName ?? ''}!${ownSelection.range}${pinnedCount ? ` · 另有 ${pinnedCount} 个固定选区` : ''}` : pinnedCount ? `${pinnedCount} 个固定选区` : undefined}
+      hint="选中单元格后，发送消息时会自动带上选区">
+      <Button size="xs" variant="ghost" disabled={!ownSelection?.range} title="固定这个选区，切换选择后仍会引用" onClick={() => pinSheetSelection(artifact.sessionId)}><Pin data-icon="inline-start" />固定选区</Button>
+      <Button size="xs" variant="ghost" title="跳到对话输入框" onClick={() => focusComposer(artifact.sessionId)}><Sparkles data-icon="inline-start" />问 AI</Button>
+    </ReferenceStrip>}
     {error && <Alert variant="destructive"><AlertDescription>{error}<Button variant="outline" size="sm" onClick={() => void discardAndReload()}>丢弃未保存编辑并重新加载</Button></AlertDescription></Alert>}
     {truncated && <Alert><AlertDescription>文件超过当前表格容量，已导入部分内容；原文件未被修改。最多 8 张工作表、2000 行、50 列和 40000 个单元格。</AlertDescription></Alert>}
     <div className="flex min-h-0 flex-1">

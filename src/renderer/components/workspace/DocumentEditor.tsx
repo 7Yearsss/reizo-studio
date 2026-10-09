@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { EditorContent, useEditor } from '@tiptap/react';
-import { Bold, Italic, List, ListOrdered, Table, Undo2, Redo2, Download, Quote, History } from 'lucide-react';
+import { EditorContent, useEditor, useEditorState, type Editor as TiptapEditor } from '@tiptap/react';
+import { Bold, Italic, Underline, Strikethrough, List, ListOrdered, Table, Undo2, Redo2, Download, Quote, History, Sparkles, Info } from 'lucide-react';
 import type { Artifact, ArtifactWithContent } from '../../../shared/artifact';
 import type { ArtifactReview } from '../../../shared/artifactReview';
 import { documentExtensions, documentSelectionIntact, normalizeDocumentContent, parseDocumentContent, typographyCss, type DocumentContent, type DocumentSelection } from '../../../shared/documentContent';
@@ -10,7 +10,10 @@ import { clearEditorRecovery, getEditorRecovery, registerEditorFlusher, setEdito
 import { dropDocumentSelection, reconcileDocumentSelection, referenceDocument, syncDocumentReferenceVersion, useDocumentWorkspace } from '../../state/documentWorkspace';
 import { Button } from '../ui/button';
 import { Alert, AlertDescription } from '../ui/alert';
-import DocumentReview, { ReviewLog } from './DocumentReview';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { cn } from '../../lib/cn';
+import DocumentReview from './DocumentReview';
+import { focusComposer, ReferenceStrip, ReviewLog, SaveStatus } from './workspaceChrome';
 import ArtifactHistoryDialog from './ArtifactHistoryDialog';
 import DocumentReadOnly from './DocumentReadOnly';
 
@@ -18,6 +21,64 @@ function download(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob); const anchor = document.createElement('a');
   anchor.href = url; anchor.download = filename; document.body.append(anchor); anchor.click(); anchor.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+type BlockStyle = 'paragraph' | 'h1' | 'h2' | 'h3';
+const BLOCK_LABEL: Record<BlockStyle, string> = { paragraph: '正文', h1: '标题 1', h2: '标题 2', h3: '标题 3' };
+
+function ToolButton({ label, shortcut, active, disabled, onClick, children }: { label: string; shortcut?: string; active?: boolean; disabled: boolean; onClick: () => void; children: React.ReactNode }) {
+  return <Button size="icon-sm" variant="ghost" aria-label={label} title={shortcut ? `${label}（${shortcut}）` : label} aria-pressed={active} disabled={disabled}
+    className={cn('size-7', active && 'bg-paper-inset text-accent')} onMouseDown={(event) => event.preventDefault()} onClick={onClick}>{children}</Button>;
+}
+
+type Chain = ReturnType<TiptapEditor['chain']>;
+
+function FormatTools({ editor, disabled }: { editor: TiptapEditor | null; disabled: boolean }) {
+  const state = useEditorState({
+    editor,
+    selector: ({ editor: e }) => e ? {
+      block: (e.isActive('heading', { level: 1 }) ? 'h1' : e.isActive('heading', { level: 2 }) ? 'h2' : e.isActive('heading', { level: 3 }) ? 'h3' : 'paragraph') as BlockStyle,
+      bold: e.isActive('bold'), italic: e.isActive('italic'), underline: e.isActive('underline'), strike: e.isActive('strike'),
+      bullet: e.isActive('bulletList'), ordered: e.isActive('orderedList'), quote: e.isActive('blockquote'),
+      undo: e.can().undo(), redo: e.can().redo(),
+    } : null,
+  });
+  const off = !editor || disabled;
+  const run = (fn: (chain: Chain) => Chain) => { if (editor) fn(editor.chain().focus()).run(); };
+  const sep = <span aria-hidden className="mx-0.5 h-4 w-px shrink-0 bg-line" />;
+  return <>
+    <Select value={state?.block ?? 'paragraph'} disabled={off} onValueChange={(value) => run((c) => value === 'paragraph' ? c.setParagraph() : c.setHeading({ level: Number(value.slice(1)) as 1 | 2 | 3 }))}>
+      <SelectTrigger size="sm" aria-label="段落样式" className="h-7 w-[5.5rem] border-transparent px-2 text-xs hover:bg-paper-inset"><SelectValue /></SelectTrigger>
+      <SelectContent><SelectGroup>{(Object.keys(BLOCK_LABEL) as BlockStyle[]).map((key) => <SelectItem key={key} value={key}>{BLOCK_LABEL[key]}</SelectItem>)}</SelectGroup></SelectContent>
+    </Select>
+    {sep}
+    <ToolButton label="加粗" shortcut="Ctrl+B" active={state?.bold} disabled={off} onClick={() => run((c) => c.toggleBold())}><Bold /></ToolButton>
+    <ToolButton label="斜体" shortcut="Ctrl+I" active={state?.italic} disabled={off} onClick={() => run((c) => c.toggleItalic())}><Italic /></ToolButton>
+    <ToolButton label="下划线" shortcut="Ctrl+U" active={state?.underline} disabled={off} onClick={() => run((c) => c.toggleUnderline())}><Underline /></ToolButton>
+    <ToolButton label="删除线" active={state?.strike} disabled={off} onClick={() => run((c) => c.toggleStrike())}><Strikethrough /></ToolButton>
+    {sep}
+    <ToolButton label="项目列表" active={state?.bullet} disabled={off} onClick={() => run((c) => c.toggleBulletList())}><List /></ToolButton>
+    <ToolButton label="编号列表" active={state?.ordered} disabled={off} onClick={() => run((c) => c.toggleOrderedList())}><ListOrdered /></ToolButton>
+    <ToolButton label="引用块" active={state?.quote} disabled={off} onClick={() => run((c) => c.toggleBlockquote())}><Quote /></ToolButton>
+    <ToolButton label="插入表格" disabled={off} onClick={() => run((c) => c.insertTable({ rows: 3, cols: 3, withHeaderRow: true }))}><Table /></ToolButton>
+    {sep}
+    <ToolButton label="撤销" shortcut="Ctrl+Z" disabled={off || !state?.undo} onClick={() => run((c) => c.undo())}><Undo2 /></ToolButton>
+    <ToolButton label="重做" shortcut="Ctrl+Shift+Z" disabled={off || !state?.redo} onClick={() => run((c) => c.redo())}><Redo2 /></ToolButton>
+  </>;
+}
+
+/** Where to float the selection toolbar, in the scroller's content coordinates; null when it cannot be measured. */
+function bubbleAt(editor: TiptapEditor, box: HTMLElement | null): { top: number; left: number } | null {
+  if (!box) return null;
+  try {
+    const { from, to } = editor.state.selection;
+    const start = editor.view.coordsAtPos(from); const end = editor.view.coordsAtPos(to);
+    const rect = box.getBoundingClientRect();
+    const above = Math.min(start.top, end.top) - rect.top + box.scrollTop - 38;
+    const top = above < box.scrollTop + 4 ? Math.max(start.bottom, end.bottom) - rect.top + box.scrollTop + 6 : above;
+    const mid = (start.top === end.top ? (start.left + end.left) / 2 : start.left) - rect.left + box.scrollLeft;
+    return { top, left: Math.min(Math.max(mid, 90), box.clientWidth - 90) };
+  } catch { return null; }
 }
 
 export default function DocumentEditor({ artifact }: { artifact: Artifact }) {
@@ -50,6 +111,11 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
   const [history, setHistory] = useState(false);
   const [selection, setSelection] = useState<DocumentSelection | undefined>();
   const [reviews, setReviews] = useState<ArtifactReview[]>([]);
+  const [bubble, setBubble] = useState<{ top: number; left: number } | null>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  const askRef = useRef<() => void>(() => { /* Assigned on every render below. */ });
+  const reference = useDocumentWorkspace((s) => s.references[artifact.sessionId]);
+  const referenced = reference?.artifactId === artifact.id ? reference : undefined;
   const revision = useDocumentWorkspace((s) => s.revisions[artifact.id]);
   const activeReview = reviews.find((r) => r.changes.some((c) => c.status === 'pending'));
   const pendingBatches = reviews.filter((r) => r.changes.some((c) => c.status === 'pending')).length;
@@ -84,7 +150,12 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
   }, [artifact.id, artifact.sessionId]);
   const editor = useEditor({
     extensions: documentExtensions(), content: initial.content.doc,
-    editorProps: { attributes: { class: 'document-prose min-h-80 px-6 py-5 outline-none', style: typographyCss(initial.content), 'aria-label': '文档正文', role: 'textbox', 'aria-multiline': 'true' } },
+    editorProps: { attributes: { class: 'document-prose min-h-[60vh] px-8 py-7 outline-none', style: typographyCss(initial.content), 'aria-label': '文档正文', role: 'textbox', 'aria-multiline': 'true' },
+      handleKeyDown: (_view, event) => {
+        if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'l') { event.preventDefault(); askRef.current(); return true; }
+        return false;
+      } },
+    onBlur: () => setBubble(null),
     onUpdate: ({ editor: current }) => {
       if (JSON.stringify(value.current.doc) === JSON.stringify(current.getJSON())) return;
       value.current = { ...value.current, doc: current.getJSON() }; dirty.current = true; setStatus('尚未保存');
@@ -97,6 +168,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
       const { $from, $to, empty } = current.state.selection;
       setSelection(!empty && $from.sameParent($to) && $from.parent.isTextblock && typeof $from.parent.attrs.id === 'string'
         ? { blockId: $from.parent.attrs.id, start: $from.parentOffset, end: $to.parentOffset, text: current.state.doc.textBetween($from.pos, $to.pos).slice(0, 2000) } : undefined);
+      setBubble(empty ? null : bubbleAt(current, scroller.current));
     },
   });
   useEffect(() => {
@@ -119,6 +191,14 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
     catch (cause) { setError(cause instanceof Error ? cause.message : '操作失败'); await refreshReviews().catch((): void => { /* Error is shown by the save/review handler. */ }); return false; }
     finally { setBusy(false); editor?.setEditable(true, false); }
   }
+  function askAI(selected: DocumentSelection | undefined) {
+    setBubble(null);
+    void act(async () => {
+      referenceDocument(artifact.sessionId, { artifactId: artifact.id, name: artifact.name, version: version.current, ...(selected ? { selection: selected } : {}) });
+      focusComposer(artifact.sessionId);
+    });
+  }
+  askRef.current = () => { if (!busy && !activeReview) askAI(selection); };
   async function decide(review: ArtifactReview, ids: string[], decision: 'accept' | 'reject') {
     await act(async () => {
       const result = await api.decideArtifactReview(artifact.id, review.id, review.reviewVersion, ids, decision);
@@ -138,34 +218,44 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
     clearTimeout(timer.current); dirty.current = false; clearEditorRecovery(artifact.id);
     value.current = content; version.current = latest.version; editor?.commands.setContent(content.doc, { emitUpdate: false }); artifacts.upsertArtifact(latest); setError(''); setStatus('已保存');
   }
+  const warnings = value.current.importWarnings ?? [];
   return <div className="flex min-h-0 flex-1 flex-col">
-    <div className="flex flex-wrap items-center gap-1 border-b border-line p-2" aria-label="文档格式">
-      <Button size="icon-sm" variant="ghost" title="加粗" aria-label="加粗" disabled={!editor || busy || Boolean(activeReview)} onClick={() => editor?.chain().focus().toggleBold().run()}><Bold /></Button>
-      <Button size="icon-sm" variant="ghost" title="斜体" aria-label="斜体" disabled={!editor || busy || Boolean(activeReview)} onClick={() => editor?.chain().focus().toggleItalic().run()}><Italic /></Button>
-      <Button size="sm" variant="ghost" disabled={!editor || busy || Boolean(activeReview)} onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}>标题</Button>
-      <Button size="icon-sm" variant="ghost" aria-label="项目列表" disabled={!editor || busy || Boolean(activeReview)} onClick={() => editor?.chain().focus().toggleBulletList().run()}><List /></Button>
-      <Button size="icon-sm" variant="ghost" aria-label="编号列表" disabled={!editor || busy || Boolean(activeReview)} onClick={() => editor?.chain().focus().toggleOrderedList().run()}><ListOrdered /></Button>
-      <Button size="icon-sm" variant="ghost" aria-label="插入表格" disabled={!editor || busy || Boolean(activeReview)} onClick={() => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}><Table /></Button>
-      <Button size="icon-sm" variant="ghost" aria-label="撤销" disabled={!editor || busy || Boolean(activeReview)} onClick={() => editor?.chain().focus().undo().run()}><Undo2 /></Button>
-      <Button size="icon-sm" variant="ghost" aria-label="重做" disabled={!editor || busy || Boolean(activeReview)} onClick={() => editor?.chain().focus().redo().run()}><Redo2 /></Button>
-      <span role="status" className="ml-auto text-xs text-ink-muted">{status} · v{version.current}</span>
-      <Button size="icon-sm" variant="ghost" aria-label="文档版本历史" disabled={busy} onClick={() => void act(async () => { setHistory(true); })}><History /></Button>
-      <Button size="sm" variant="outline" disabled={busy} onClick={() => void act(async () => { download(await api.exportDocument(artifact.id), `${artifact.name.replace(/\.docx$/i, '')}.docx`); })}><Download data-icon="inline-start" />导出</Button>
+    <div className="flex flex-wrap items-center gap-0.5 border-b border-line px-2 py-1" aria-label="文档格式">
+      {activeReview
+        ? <span className="flex items-center gap-1.5 px-1 text-xs text-ink-muted"><Sparkles className="size-3.5 text-accent" />正在审核 AI 修改，处理完后可继续编辑</span>
+        : <FormatTools editor={editor} disabled={busy} />}
+      <div className="ml-auto flex items-center gap-1 pl-2">
+        <SaveStatus status={status} version={version.current} failed={Boolean(error)} />
+        <Button size="icon-sm" variant="ghost" className="size-7" aria-label="文档版本历史" title="版本历史" disabled={busy} onClick={() => void act(async () => { setHistory(true); })}><History /></Button>
+        <Button size="xs" variant="outline" title="导出为 Word（保留原文件样式）" disabled={busy} onClick={() => void act(async () => { download(await api.exportDocument(artifact.id), `${artifact.name.replace(/\.docx$/i, '')}.docx`); })}><Download data-icon="inline-start" />导出</Button>
+      </div>
     </div>
-    <div className="flex items-center gap-2 border-b border-line p-2">
-      <Button size="xs" variant="outline" disabled={busy || !selection || Boolean(activeReview)} onClick={() => { const selected = selection; void act(async () => { referenceDocument(artifact.sessionId, { artifactId: artifact.id, name: artifact.name, version: version.current, selection: selected }); }); }}><Quote data-icon="inline-start" />引用选段</Button>
-      <Button size="xs" variant="ghost" disabled={busy} onClick={() => void act(async () => { referenceDocument(artifact.sessionId, { artifactId: artifact.id, name: artifact.name, version: version.current }); })}>引用全文</Button>
-      <span className="text-xs text-ink-muted">{selection ? `已选 ${selection.end - selection.start} 个字符` : '选中一段文字，交给 AI 修改'}</span>
+    {!activeReview && <ReferenceStrip attached={referenced ? (referenced.selection ? `选段「${referenced.selection.text ?? ''}」` : '全文') : undefined}
+      hint={selection ? `已选 ${selection.end - selection.start} 个字符 · Ctrl+L 交给 AI` : '选中文字交给 AI 修改，或把全文作为上下文'}>
+      <Button size="xs" variant="ghost" disabled={busy || !selection} title="引用选中的文字（Ctrl+L）" onClick={() => askAI(selection)}><Quote data-icon="inline-start" />引用选段</Button>
+      <Button size="xs" variant="ghost" disabled={busy} onClick={() => askAI(undefined)}>引用全文</Button>
+    </ReferenceStrip>}
+    {error && <Alert variant="destructive" className="rounded-none border-x-0 border-t-0"><AlertDescription>{error}<div className="mt-2 flex gap-2"><Button size="xs" variant="outline" onClick={() => void flush().catch((): void => { /* Error is shown by the save/review handler. */ })}>重试保存</Button><Button size="xs" variant="outline" onClick={() => void recover().catch((cause) => setError(String(cause)))}>下载恢复副本并重新载入</Button></div></AlertDescription></Alert>}
+    <div ref={scroller} onScroll={() => setBubble(null)} className={cn('relative min-h-0 flex-1 overflow-auto bg-paper-inset', activeReview && 'hidden')}>
+      {warnings.length ? <details className="mx-auto mt-3 w-[calc(100%-1.5rem)] max-w-[816px] rounded-md border border-line bg-paper px-3 py-2 text-xs text-ink-muted">
+        <summary className="cursor-pointer"><Info className="mr-1.5 inline size-3.5 align-[-2px]" />导入说明：{warnings.length} 处内容未完整保留</summary>
+        {warnings.map((warning, i) => <p key={i} className="mt-1">{warning}</p>)}
+        {value.current.originalArtifactId && <Button size="xs" variant="link" className="px-0" onClick={() => { void api.artifactRawUrl(value.current.originalArtifactId!).then((url) => { const anchor = document.createElement('a'); anchor.href = url; anchor.download = `${artifact.name}-原始.docx`; anchor.click(); }); }}>下载原始文件</Button>}
+      </details> : null}
+      {/* Page: clicking the margin below the text puts the caret at the end, like a word processor. */}
+      <div className="mx-auto my-3 w-[calc(100%-1.5rem)] max-w-[816px] rounded-sm border border-line bg-paper shadow-sm" onClick={(event) => { if (event.target === event.currentTarget) editor?.commands.focus('end'); }}>
+        <EditorContent editor={editor} />
+      </div>
+      {bubble && selection && !busy && <div className="absolute z-20 flex -translate-x-1/2 items-center gap-0.5 rounded-md border border-line bg-paper p-0.5 shadow-md" style={{ top: bubble.top, left: bubble.left }} onMouseDown={(event) => event.preventDefault()}>
+        <Button size="xs" title="把选中的文字交给 AI（Ctrl+L）" onClick={() => askAI(selection)}><Sparkles data-icon="inline-start" />问 AI</Button>
+        <Button size="icon-xs" variant="ghost" aria-label="加粗所选" onClick={() => editor?.chain().focus().toggleBold().run()}><Bold /></Button>
+        <Button size="icon-xs" variant="ghost" aria-label="斜体所选" onClick={() => editor?.chain().focus().toggleItalic().run()}><Italic /></Button>
+      </div>}
+      <ReviewLog reviews={reviews} className="mx-auto mb-4 w-[calc(100%-1.5rem)] max-w-[816px]" />
     </div>
-    {error && <Alert variant="destructive"><AlertDescription>{error}<div className="mt-2 flex gap-2"><Button size="xs" variant="outline" onClick={() => void flush().catch((): void => { /* Error is shown by the save/review handler. */ })}>重试保存</Button><Button size="xs" variant="outline" onClick={() => void recover().catch((cause) => setError(String(cause)))}>下载恢复副本并重新载入</Button></div></AlertDescription></Alert>}
-    <div className="min-h-0 flex-1 overflow-auto">
-      {value.current.importWarnings?.length ? <details className="px-4 pt-3 text-xs text-ink-muted"><summary>导入说明</summary>{value.current.importWarnings.map((warning, i) => <p key={i} className="mt-1">{warning}</p>)}{value.current.originalArtifactId && <Button size="xs" variant="link" onClick={() => { void api.artifactRawUrl(value.current.originalArtifactId!).then((url) => { const anchor = document.createElement('a'); anchor.href = url; anchor.download = `${artifact.name}-原始.docx`; anchor.click(); }); }}>下载原始文件</Button>}</details> : null}
-      <div className={activeReview ? 'hidden' : undefined}><EditorContent editor={editor} /></div>
-      {activeReview && <DocumentReview key={activeReview.id} review={activeReview} otherBatches={pendingBatches - 1} busy={busy} decide={(review, ids, decision) => void decide(review, ids, decision)} revise={(review, change, text) => act(async () => {
-        await api.reviseArtifactReview(artifact.id, review.id, change.id, review.reviewVersion, { ...(change.operation as object), text }); await refreshReviews();
-      })} />}
-      <ReviewLog reviews={reviews} />
-    </div>
+    {activeReview && <DocumentReview key={activeReview.id} review={activeReview} otherBatches={pendingBatches - 1} busy={busy} decide={(review, ids, decision) => void decide(review, ids, decision)} revise={(review, change, text) => act(async () => {
+      await api.reviseArtifactReview(artifact.id, review.id, change.id, review.reviewVersion, { ...(change.operation as object), text }); await refreshReviews();
+    })} />}
     {history && <ArtifactHistoryDialog artifact={{ ...artifact, version: version.current }} close={() => setHistory(false)} flush={flush} getVersion={() => version.current} render={(content) => <DocumentReadOnly content={content} />} restored={async () => {
       const latest = await api.getArtifact(artifact.id); const content = parseDocumentContent(latest.content);
       if (!content) throw new Error('文档格式无效');

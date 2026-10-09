@@ -5,6 +5,7 @@ import { Button } from '../ui/button';
 import { Alert, AlertDescription } from '../ui/alert';
 import LazyDiffView from '../chat/LazyDiffView';
 import PresentationSurface from './PresentationSurface';
+import { ReviewLog } from './workspaceChrome';
 
 function VisualReview({ review }: { review: ArtifactReview }) {
   const [open, setOpen] = useState(false);
@@ -15,7 +16,7 @@ function VisualReview({ review }: { review: ArtifactReview }) {
 }
 export default function PresentationReview({ reviews, busy, decide }: { reviews: ArtifactReview[]; busy: boolean; decide(review: ArtifactReview, ids: string[], decision: 'accept' | 'reject'): void }) {
   const pending = reviews.filter((r) => r.changes.some((c) => c.status === 'pending'));
-  return <section aria-label="PPT 修改建议" className="flex flex-col gap-3 border-t border-line p-3"><div className="flex items-center justify-between"><h3 className="text-sm font-medium">AI 修改建议</h3><span className="text-xs text-ink-muted">接受后才会更新演示稿</span></div>
+  return <section aria-label="PPT 修改建议" className="flex flex-col gap-3 border-t border-line p-3"><div className="flex items-center justify-between"><h3 className="flex items-center gap-1.5 text-sm font-medium">AI 修改建议{pending.length ? <span className="rounded-full bg-accent px-1.5 text-[10px] leading-4 text-paper tabular-nums">{pending.reduce((n, r) => n + r.changes.filter((c) => c.status === 'pending').length, 0)}</span> : null}</h3><span className="text-xs text-ink-muted">接受后才会更新演示稿</span></div>
     {!pending.length && <p className="text-xs text-ink-muted">暂无待审核修改。引用当前页或选中元素，在对话中提出修改要求。</p>}
     {pending.map((review) => <div key={review.id} className="flex flex-col gap-2 rounded border border-line p-3">
       {review.stale && <Alert><AlertDescription>演示稿已有新版本，请重新生成这批建议。</AlertDescription></Alert>}
@@ -23,6 +24,6 @@ export default function PresentationReview({ reviews, busy, decide }: { reviews:
       <VisualReview review={review} />
       {review.changes.filter((c) => c.status === 'pending').map((change) => <div key={change.id} className="flex flex-col gap-2 border-t border-line pt-2"><p className="text-sm">{change.label}</p><details><summary className="cursor-pointer text-xs text-ink-muted">查看元素属性变化</summary><LazyDiffView preview={{ path: 'element.json', before: change.before ? JSON.stringify(JSON.parse(change.before), null, 2) : '', after: change.after ? JSON.stringify(JSON.parse(change.after), null, 2) : '' }} /></details><div className="flex justify-end gap-2"><Button size="xs" variant="outline" disabled={busy} onClick={() => decide(review, [change.id], 'reject')}>拒绝</Button><Button size="xs" disabled={busy || review.stale} onClick={() => decide(review, [change.id], 'accept')}>接受</Button></div></div>)}
     </div>)}
-    {reviews.some((r) => r.changes.some((c) => c.status !== 'pending')) && <details><summary className="cursor-pointer text-xs text-ink-muted">审核记录</summary>{reviews.flatMap((r) => r.changes.filter((c) => c.status !== 'pending').map((c) => <p key={c.id} className="mt-2 text-xs">{c.label} · {c.status === 'accepted' ? `已接受 · 版本 ${c.acceptedVersion}` : '已拒绝'}</p>))}</details>}
+    <ReviewLog reviews={reviews} />
   </section>;
 }

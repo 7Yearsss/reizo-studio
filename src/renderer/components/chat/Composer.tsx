@@ -1,8 +1,8 @@
 import { presentationMentions, usePresentationWorkspace, referencePresentation, selectPresentation, dropPresentationScope } from '../../state/presentationWorkspace';
-import { htmlMentions, useHtmlWorkspace, referenceHtml, dropHtmlSelection } from '../../state/htmlWorkspace';
+import { htmlMentions, useHtmlWorkspace, referenceHtml, selectHtml, dropHtmlSelection } from '../../state/htmlWorkspace';
 import { documentMentions, useDocumentWorkspace, referenceDocument, selectDocument, dropDocumentSelection } from '../../state/documentWorkspace';
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
-import { AtSign, Clapperboard, FolderTree, Paperclip, Image as ImageIcon, Video, Type, Volume2, Bot, Sparkles, BoxSelect, Layers, Pin, Wrench } from 'lucide-react';
+import { AtSign, FileText, FileSpreadsheet, Presentation, Code2, Clapperboard, FolderTree, Paperclip, Image as ImageIcon, Video, Type, Volume2, Bot, Sparkles, BoxSelect, Layers, Pin, Wrench } from 'lucide-react';
 import { isImeComposingEvent } from '../../lib/ime';
 import { cn } from '../../lib/cn';
 import { PromptInput } from '../agents/prompt-input';
@@ -12,6 +12,7 @@ import SlashPalette, { applySlashArgs, buildSlashCommands, extractSlashQuery, ty
 import PendingInteraction from './PendingInteraction';
 import QueuePanel from './QueuePanel';
 import ComposerDock from './ComposerDock';
+import WorkspaceRefChip from './WorkspaceRefChip';
 import ReplyStatusBar from './ReplyStatusBar';
 import InterruptedTurnBanner from './InterruptedTurnBanner';
 import SelectField from '../ui/SelectField';
@@ -334,6 +335,12 @@ export default function Composer({
   const focusComposer = useCallback(() => {
     composerBodyRef.current?.querySelector('textarea')?.focus();
   }, []);
+  // Workspace editors ask for focus right after attaching a reference ("问 AI" / Ctrl+L).
+  useEffect(() => {
+    const onFocus = (event: Event) => { if ((event as CustomEvent<{ sessionId?: string }>).detail?.sessionId === sessionId) window.setTimeout(focusComposer, 0); };
+    window.addEventListener('reizo:focus-composer', onFocus);
+    return () => window.removeEventListener('reizo:focus-composer', onFocus);
+  }, [sessionId, focusComposer]);
 
   function pickSlash(command: SlashCommand, args: string) {
     setSkillId(command.id);
@@ -454,13 +461,19 @@ export default function Composer({
           }}
         >
             {sessionId && <ComposerDock todos={todos} />}
-            {sessionId && documentRef && <div className="mb-2"><Button type="button" variant="outline" size="xs" className="max-w-full" title="移除文档引用" onClick={() => referenceDocument(sessionId)}><span className="truncate">{documentRef.name} · {documentRef.selection ? documentRef.selection.text : '全文'}</span> ×</Button></div>}
-            {sessionId && htmlRef && <div className="mb-2"><Button type="button" variant="outline" size="xs" className="max-w-full" title="移除 HTML 引用" onClick={() => referenceHtml(sessionId)}><span className="truncate">{htmlRef.name} · {htmlRef.selection ? htmlRef.selection.text : '整页'}</span> ×</Button></div>}
-            {sessionId && presentationRef && <div className="mb-2"><Button type="button" variant="outline" size="xs" className="max-w-full" title="移除 PPT 引用" onClick={() => referencePresentation(sessionId)}><span className="truncate">{presentationRef.name} · {presentationRef.elementIds?.length ? `${presentationRef.elementIds.length} 个元素` : presentationRef.slideId ? '当前页' : '整份演示稿'}</span> ×</Button></div>}
-            {sessionId && Boolean(activeSheet || pinnedSheets?.length) && <div className="mb-2 flex flex-wrap items-center gap-1.5">
-              {activeSheet && <Button type="button" variant="outline" size="xs" title="发送时自动引用；点击固定此选区" onClick={() => pinSheetSelection(sessionId)}><Pin data-icon="inline-start" />{activeSheet.name}{activeSheet.range ? ` · ${activeSheet.sheetName}!${activeSheet.range}` : ''}</Button>}
-              {pinnedSheets?.map((ref, index) => <Button key={`${ref.artifactId}:${index}`} type="button" variant="secondary" size="xs" title="移除固定引用" onClick={() => removePinnedSheet(sessionId, index)}>{ref.name}{ref.range ? ` · ${ref.sheetName}!${ref.range}` : ''} ×</Button>)}
-            </div>}
+            {sessionId && (documentRef || htmlRef || presentationRef || activeSheet || pinnedSheets?.length) ? <div className="mb-2 flex flex-wrap items-center gap-1.5">
+              {documentRef && <WorkspaceRefChip icon={<FileText />} kind="文档" name={documentRef.name} detail={documentRef.selection ? `「${documentRef.selection.text ?? ''}」` : '全文'}
+                open={() => { selectDocument(sessionId, documentRef.artifactId); uiStore.setRightPanelTab('documents'); }} remove={() => referenceDocument(sessionId)} />}
+              {presentationRef && <WorkspaceRefChip icon={<Presentation />} kind=" PPT " name={presentationRef.name} detail={presentationRef.elementIds?.length ? `${presentationRef.elementIds.length} 个元素` : presentationRef.slideId ? '当前页' : '整份演示稿'}
+                open={() => { selectPresentation(sessionId, presentationRef.artifactId); uiStore.setRightPanelTab('presentations'); }} remove={() => referencePresentation(sessionId)} />}
+              {htmlRef && <WorkspaceRefChip icon={<Code2 />} kind=" HTML " name={htmlRef.name} detail={htmlRef.selection ? `「${htmlRef.selection.text ?? ''}」` : '整页'}
+                open={() => { selectHtml(sessionId, htmlRef.artifactId); uiStore.setRightPanelTab('html'); }} remove={() => referenceHtml(sessionId)} />}
+              {pinnedSheets?.map((ref, index) => <WorkspaceRefChip key={`${ref.artifactId}:${index}`} icon={<Pin />} kind="表格" name={ref.name} detail={ref.range ? `${ref.sheetName ?? ''}!${ref.range}` : '整个工作簿'}
+                open={() => { selectWorkbook(sessionId, ref.artifactId); uiStore.setRightPanelTab('sheets'); }} remove={() => removePinnedSheet(sessionId, index)} />)}
+              {activeSheet && <WorkspaceRefChip icon={<FileSpreadsheet />} kind="表格" name={activeSheet.name} detail={`${activeSheet.range ? `${activeSheet.sheetName ?? ''}!${activeSheet.range}` : '当前工作表'} · 当前选区`} pinned={false}
+                open={() => { selectWorkbook(sessionId, activeSheet.artifactId); uiStore.setRightPanelTab('sheets'); }} />}
+              {activeSheet && <Button type="button" variant="ghost" size="xs" title="固定此选区，换选别的单元格后仍会引用" onClick={() => pinSheetSelection(sessionId)}><Pin data-icon="inline-start" />固定</Button>}
+            </div> : null}
             {syncingSheet && <p role="status" className="mb-2 text-xs text-ink-muted">正在保存工作区内容…</p>}
             {(attachments.length > 0 || nodeRefs.length > 0 || mentions.length > 0 || unpinnedSelectionNodes.length > 0) && (
               <div className={cn("mb-2 flex flex-wrap gap-1.5", compact && "max-h-24 overflow-y-auto pr-0.5")}>
