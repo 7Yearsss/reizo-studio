@@ -167,6 +167,22 @@ export default function HomePage({ active = true }: { active?: boolean }) {
     if (path) await settingsStore.patchSettings({ workspacePath: path });
   }
 
+  async function handleOpenPanel(tab: uiStore.RightPanelTab) {
+    if (creating) return;
+    setCreating(true);
+    uiStore.setMode('chat');
+    uiStore.setRightPanelTab(tab);
+    try {
+      const session = await chatStore.createSession('新对话');
+      tabStore.openChatTab(session.id, session.title, true);
+    } catch (err) {
+      uiStore.closeRightPanel();
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCreating(false);
+    }
+  }
+
   async function handleOpenCanvas() {
     if (creating) return;
     setCreating(true);
@@ -191,7 +207,10 @@ export default function HomePage({ active = true }: { active?: boolean }) {
         titleBarSlot &&
         createPortal(
           <div className="ml-auto shrink-0">
-            <TopRightToolbar onOpenCanvas={() => void handleOpenCanvas()} />
+            <TopRightToolbar
+              onOpenCanvas={() => void handleOpenCanvas()}
+              onOpenPanel={(tab) => void handleOpenPanel(tab)}
+            />
           </div>,
           titleBarSlot,
         )}
