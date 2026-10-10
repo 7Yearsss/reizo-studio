@@ -1,5 +1,6 @@
 import { BrowserWindow, dialog, ipcMain, shell } from 'electron';
-import { readFile } from 'node:fs/promises';
+import { open, stat } from 'node:fs/promises';
+import path from 'node:path';
 import { DROPPED_FILE_MAX_BYTES, IPC } from '../shared/constants';
 import type { SettingsStore } from './server/storage/settingsStore';
 import { flattenWorkspace, listWorkspaceDir, readWorkspaceText } from './workspaceFs';
@@ -74,15 +75,37 @@ export function registerWorkspaceIpc(settingsStore: SettingsStore): void {
     return readGitStatus(root);
   });
 
-  ipcMain.handle(IPC.FILE_READ_ABSOLUTE, async (_event, filePath: string) => {
-    if (typeof filePath !== 'string' || !filePath) throw new Error('path is required');
-    const buf = await readFile(filePath);
+  // Reads a file the user dropped/picked. The preload derives `filePath` from a
+  // real File object, so the renderer cannot name arbitrary paths; the sender
+  // check below also rejects calls from any frame that is not the app's own page.
+  ipcMain.handle(IPC.FILE_READ_ABSOLUTE, async (event, filePath: string) => {
+    if (!isTrustedSender(event.senderFrame?.url)) throw new Error('Untrusted sender');
+    if (typeof filePath !== 'string' || !path.isAbsolute(filePath)) throw new Error('absolute path is required');
+    if (!(await stat(filePath)).isFile()) throw new Error('Not a regular file');
+    const handle = await open(filePath, 'r');
+    let buf: Buffer;
+    let truncated: boolean;
+    try {
+      const probe = Buffer.alloc(DROPPED_FILE_MAX_BYTES + 1);
+      const { bytesRead } = await handle.read(probe, 0, probe.length, 0);
+      truncated = bytesRead > DROPPED_FILE_MAX_BYTES;
+      buf = probe.subarray(0, Math.min(bytesRead, DROPPED_FILE_MAX_BYTES));
+    } finally {
+      await handle.close();
+    }
     if (buf.includes(0)) throw new Error('Binary file');
-    const truncated = buf.byteLength > DROPPED_FILE_MAX_BYTES;
     return {
-      name: filePath.split(/[/\\]/).pop() ?? 'file',
-      content: (truncated ? buf.subarray(0, DROPPED_FILE_MAX_BYTES) : buf).toString('utf8'),
+      name: path.basename(filePath),
+      content: buf.toString('utf8'),
       truncated,
     };
   });
+}
+
+function isTrustedSender(url: string | undefined): boolean {
+  if (!url) return false;
+  if (typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== 'undefined' && MAIN_WINDOW_VITE_DEV_SERVER_URL) {
+    return new URL(url).origin === new URL(MAIN_WINDOW_VITE_DEV_SERVER_URL).origin;
+  }
+  return url.startsWith('file://');
 }

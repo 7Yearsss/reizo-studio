@@ -274,7 +274,7 @@ export function installShowcaseTransport() {
   const bridge = { getApiOrigin: async () => origin, platform: 'web', listWorkspace: async (): Promise<DirEntry[]> => [], flattenWorkspace: async (): Promise<DirEntry[]> => [],
     readWorkspaceFile: unsupported, pickFolder: async () => null, windowIsMaximized: async () => false,
     windowMinimize: async (): Promise<void> => {}, windowClose: async (): Promise<void> => {}, windowToggleMaximize: async () => false,
-    runCommand: unsupported, readDroppedFile: unsupported, getPathForFile: () => '', revealInFolder: unsupported,
+    runCommand: unsupported, readDroppedFile: unsupported, revealInFolder: unsupported,
     deleteWorkspacePath: unsupported, createWorkspaceEntry: unsupported, gitStatus: async () => ({ available: false, branch: null, dirty: false, porcelain: '', recent: '' }),
     installSkill: unsupported, uninstallSkill: unsupported, searchSkillHub: async () => ({ items: [], total: 0 }),
     installSkillHubSkill: unsupported, previewSkillHubSkill: unsupported, exportPdf: unsupported,

@@ -317,8 +317,7 @@ export default function Composer({
         continue;
       }
       try {
-        const filePath = window.reizo.getPathForFile(file);
-        const read = await window.reizo.readDroppedFile(filePath);
+        const read = await window.reizo.readDroppedFile(file);
         next.push({ name: read.name, content: read.content });
       } catch {
         if (file.type.startsWith('text') || file.name.endsWith('.md') || file.name.endsWith('.json')) {

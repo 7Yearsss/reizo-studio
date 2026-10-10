@@ -16,8 +16,13 @@ contextBridge.exposeInMainWorld('reizo', {
   readWorkspaceFile: (relativePath: string) => ipcRenderer.invoke(IPC.WORKSPACE_READ, relativePath),
   flattenWorkspace: (): Promise<DirEntry[]> => ipcRenderer.invoke(IPC.WORKSPACE_FLATTEN),
   runCommand: (command: string) => ipcRenderer.invoke(IPC.WORKSPACE_RUN, command),
-  readDroppedFile: (filePath: string) => ipcRenderer.invoke(IPC.FILE_READ_ABSOLUTE, filePath),
-  getPathForFile: (file: File): string => webUtils.getPathForFile(file),
+  // The path is derived here from a real user-supplied File (drag/drop or file
+  // picker); the renderer can never pass an arbitrary path string.
+  readDroppedFile: (file: File) => {
+    const filePath = webUtils.getPathForFile(file);
+    if (!filePath) return Promise.reject(new Error('Not a file on disk'));
+    return ipcRenderer.invoke(IPC.FILE_READ_ABSOLUTE, filePath);
+  },
   revealInFolder: (relativePath?: string) => ipcRenderer.invoke(IPC.WORKSPACE_REVEAL, relativePath),
   deleteWorkspacePath: (relativePath: string) => ipcRenderer.invoke(IPC.WORKSPACE_DELETE, relativePath),
   createWorkspaceEntry: (relativePath: string, kind: 'file' | 'dir') =>

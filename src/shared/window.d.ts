@@ -18,8 +18,7 @@ export interface ReizoBridge {
   readWorkspaceFile(relativePath: string): Promise<{ relativePath: string; content: string; truncated: boolean }>;
   flattenWorkspace(): Promise<DirEntry[]>;
   runCommand(command: string): Promise<{ command: string; cwd: string; stdout: string; stderr: string; exitCode: number }>;
-  readDroppedFile(filePath: string): Promise<{ name: string; content: string; truncated: boolean }>;
-  getPathForFile(file: File): string;
+  readDroppedFile(file: File): Promise<{ name: string; content: string; truncated: boolean }>;
   revealInFolder(relativePath?: string): Promise<void>;
   deleteWorkspacePath(relativePath: string): Promise<{ path: string }>;
   createWorkspaceEntry(relativePath: string, kind: 'file' | 'dir'): Promise<{ path: string; kind: 'file' | 'dir' }>;
