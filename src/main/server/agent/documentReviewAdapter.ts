@@ -80,6 +80,19 @@ export const documentReviewAdapter: ArtifactReviewAdapter = {
       ranges.push({ from, to });
     }
   },
+  canRebase(baseContent, headContent, operations) {
+    const base = new Map(documentBlocks(read(baseContent)).map((b) => [b.id, b]));
+    const head = new Map(documentBlocks(read(headContent)).map((b) => [b.id, b]));
+    for (const operation of operations) {
+      const edit = documentEditSchema.parse(operation) as DocumentEdit;
+      const target = documentEditTarget(edit);
+      if (target === null) continue; // inserting at the very start
+      const was = base.get(target); const now = head.get(target);
+      if (!was || !now) return false;
+      if (edit.op !== 'insertBlocks' && (was.text !== now.text || was.type !== now.type)) return false;
+    }
+    return true;
+  },
   /** After some changes are accepted, text offsets of later changes in the same block move with them. */
   rebase(accepted, operation) {
     const edit = documentEditSchema.parse(operation) as DocumentEdit;

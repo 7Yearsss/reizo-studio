@@ -58,13 +58,15 @@ const reasonOf = (change: ArtifactReviewChange | undefined): string | undefined 
 interface Props {
   review: ArtifactReview;
   otherBatches: number;
+  /** Accept every pending suggestion of every batch, oldest first (a long task arrives in several). */
+  acceptEverything?: () => void;
   busy: boolean;
   decide(review: ArtifactReview, ids: string[], decision: 'accept' | 'reject'): void;
   revise(review: ArtifactReview, change: ArtifactReviewChange, text: string): Promise<boolean>;
 }
 
 /** Reviews AI edits in place: the document keeps its own layout, changed words are marked where they occur. */
-export default function DocumentReview({ review, otherBatches, busy, decide, revise }: Props) {
+export default function DocumentReview({ review, otherBatches, acceptEverything, busy, decide, revise }: Props) {
   const [mode, setMode] = useState<Mode>('inline');
   const [activeId, setActiveId] = useState<string | undefined>();
   const [hoverId, setHoverId] = useState<string | undefined>();
@@ -198,7 +200,8 @@ export default function DocumentReview({ review, otherBatches, busy, decide, rev
           {(['inline', 'split'] as const).map((value) => <button key={value} type="button" aria-pressed={mode === value} onClick={() => setMode(value)} className={`px-2 py-0.5 ${mode === value ? 'bg-paper-inset font-medium' : 'text-ink-muted'}`}>{value === 'inline' ? '内联' : '对照'}</button>)}
         </div>
         <Button size="xs" variant="outline" disabled={busy} onClick={() => decide(review, allIds, 'reject')}>全部拒绝</Button>
-        <Button size="xs" disabled={busy || review.stale} onClick={() => decide(review, allIds, 'accept')}>全部接受</Button>
+        <Button size="xs" variant={otherBatches > 0 ? 'outline' : 'default'} disabled={busy || review.stale} onClick={() => decide(review, allIds, 'accept')}>{otherBatches > 0 ? '接受这一批' : '全部接受'}</Button>
+        {otherBatches > 0 && acceptEverything && <Button size="xs" disabled={busy || review.stale} onClick={acceptEverything}>接受全部 {otherBatches + 1} 批</Button>}
       </div>
     </div>
     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 border-b border-line px-3 py-1.5 text-xs text-ink-muted">

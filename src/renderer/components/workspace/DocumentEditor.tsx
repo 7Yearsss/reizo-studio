@@ -383,6 +383,24 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
       artifacts.upsertArtifact(result.artifact); await refreshReviews();
     });
   }
+  /** A long task is proposed in batches; accept them all in order (each follows the document as the one before lands). */
+  async function acceptEverything() {
+    await act(async () => {
+      const pending = [...reviews].reverse().filter((review) => review.changes.some((change) => change.status === 'pending'));
+      for (const review of pending) {
+        const ids = review.changes.filter((change) => change.status === 'pending').map((change) => change.id);
+        const result = await api.decideArtifactReview(artifact.id, review.id, review.reviewVersion, ids, 'accept');
+        const next = parseDocumentContent(result.artifact.content);
+        if (next && result.artifact.version > version.current) {
+          value.current = next; version.current = result.artifact.version;
+          editor?.commands.setContent(next.doc, { emitUpdate: false });
+          dropDocumentSelection(artifact.sessionId); setSelection(undefined);
+        }
+        artifacts.upsertArtifact(result.artifact);
+      }
+      await refreshReviews();
+    });
+  }
   async function recover() {
     if (writing.current) await writing.current.catch((): void => { /* Error is shown by the save/review handler. */ });
     download(new Blob([JSON.stringify(value.current, null, 2)], { type: 'application/json' }), `${artifact.name}-恢复副本.json`);
@@ -460,7 +478,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
       )}
       <ReviewLog reviews={reviews} className="mx-auto mb-4 w-[calc(100%-1.5rem)] max-w-[816px]" />
     </div>
-    {activeReview && <DocumentReview key={activeReview.id} review={activeReview} otherBatches={pendingBatches - 1} busy={busy} decide={(review, ids, decision) => void decide(review, ids, decision)} revise={(review, change, text) => act(async () => {
+    {activeReview && <DocumentReview key={activeReview.id} review={activeReview} otherBatches={pendingBatches - 1} acceptEverything={() => void acceptEverything()} busy={busy} decide={(review, ids, decision) => void decide(review, ids, decision)} revise={(review, change, text) => act(async () => {
       await api.reviseArtifactReview(artifact.id, review.id, change.id, review.reviewVersion, { ...(change.operation as object), text }); await refreshReviews();
     })} />}
     {history && <ArtifactHistoryDialog artifact={{ ...artifact, version: version.current }} close={() => setHistory(false)} flush={flush} getVersion={() => version.current} render={(content) => <DocumentReadOnly content={content} />} restored={async () => {

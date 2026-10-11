@@ -77,8 +77,10 @@ export function createDocumentsRouter(artifacts: ArtifactStore, sessions: Sessio
     const revisions = c.req.query('revisions') === '1' && original && content.docx ? { author: 'Reizo' } : undefined;
     return new Response(new Uint8Array(await exportDocx(content, original, revisions ? { revisions } : {})), { headers: { 'content-type': DOCX_MIME, 'content-disposition': `attachment; filename="document.docx"; filename*=UTF-8''${encodeURIComponent(filename).replace(/['()*]/g, (char) => `%${char.charCodeAt(0).toString(16)}`)}` } });
   });
-  router.get('/artifacts/:id/reviews', (c) => {
+  router.get('/artifacts/:id/reviews', async (c) => {
     if (!artifacts.getMeta(c.req.param('id'))) return c.json({ error: '文档不存在' }, 404);
+    // Reviews proposed in batches follow the document as earlier batches are accepted.
+    await reviews.rebaseStale(c.req.param('id'));
     return c.json({ reviews: reviews.list(c.req.param('id')) });
   });
   router.post('/artifacts/:id/reviews/:reviewId/decide', async (c) => {

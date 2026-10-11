@@ -13,6 +13,8 @@ export interface ArtifactReviewAdapter {
   validateBatch?(content: string, operations: unknown[]): void;
   /** Re-anchor a pending operation after `accepted` operations were committed to the base. */
   rebase?(accepted: unknown[], operation: unknown): unknown;
+  /** True when `operations` proposed against `baseContent` still mean the same thing on the newer `headContent` (nothing they target changed). */
+  canRebase?(baseContent: string, headContent: string, operations: unknown[]): boolean;
 }
 export class ArtifactReviewError extends Error {
   constructor(message: string, public readonly status: 400 | 404 | 409 = 400) { super(message); }
@@ -37,8 +39,35 @@ export function createArtifactReviewStore(db: DbHandle, artifacts: ArtifactStore
     if (changes.every((c) => c.status === 'rejected')) return 'rejected';
     return changes.some((c) => c.status !== 'pending') ? 'partial' : 'pending';
   }
+  /**
+   * A review proposed against an older version stays usable when what happened since touched none of the
+   * blocks it targets: a long task proposed in batches must not go stale because batch 1 was accepted first.
+   * Caller holds the review's lock. Returns the rebased review, or null when it cannot be rebased.
+   */
+  async function tryRebase(review: ArtifactReview): Promise<ArtifactReview | null> {
+    if (!review.stale) return null;
+    const adapter = adapters[review.kind];
+    if (!adapter?.canRebase) return null;
+    const head = await artifacts.get(review.artifactId);
+    if (!head) return null;
+    const pending = review.changes.filter((c) => c.status === 'pending');
+    const operations = pending.map((c) => c.operation);
+    try {
+      if (!adapter.canRebase(review.baseContent, head.content, operations)) return null;
+      adapter.validateBatch?.(head.content, operations);
+      const candidateContent = adapter.apply(head.content, operations);
+      const changes = review.changes.map((c) => c.status === 'pending' ? { ...c, ...adapter.describe(head.content, c.operation) } : c);
+      persist({ ...review, baseContent: head.content, baseVersion: head.version, candidateContent, changes, reviewVersion: review.reviewVersion + 1, updatedAt: new Date().toISOString() }, review.reviewVersion);
+      return get(review.id);
+    } catch { return null; }
+  }
   return {
     get,
+    /** Move every stale review of this artifact that can safely follow it onto its latest version. */
+    async rebaseStale(artifactId: string): Promise<void> {
+      const stale = (raw.prepare('SELECT id FROM artifact_reviews WHERE artifact_id = ?').all(artifactId) as { id: string }[]).map((row) => get(row.id)).filter((r): r is ArtifactReview => Boolean(r?.stale));
+      for (const review of stale) await serializeFileMutation(path.join(dataRoot, 'review-locks', review.id), async () => { const fresh = get(review.id); if (fresh?.stale) await tryRebase(fresh); });
+    },
     list(artifactId: string): ArtifactReview[] {
       const rows = raw.prepare('SELECT id FROM artifact_reviews WHERE artifact_id = ? ORDER BY created_at DESC').all(artifactId) as { id: string }[];
       return rows.map((row) => get(row.id)).filter((item): item is ArtifactReview => item !== null);
@@ -87,14 +116,21 @@ export function createArtifactReviewStore(db: DbHandle, artifacts: ArtifactStore
       if (input.decision !== 'accept' && input.decision !== 'reject') throw new ArtifactReviewError('无效的审核动作');
       if (!/^[\w-]{1,128}$/.test(input.id)) throw new ArtifactReviewError('无效的建议 ID');
       return serializeFileMutation(path.join(dataRoot, 'review-locks', input.id), async () => {
-        const review = get(input.id);
+        let review = get(input.id);
         if (!review || review.sessionId !== input.sessionId) throw new ArtifactReviewError('未找到修改建议', 404);
+        let expectedReviewVersion = input.expectedReviewVersion;
+        // The page may still show this review as it was before it followed the document to its newer version.
+        if (input.decision === 'accept' && review.stale) {
+          const before = review.reviewVersion;
+          const rebased = await tryRebase(review);
+          if (rebased) { review = rebased; if (expectedReviewVersion === before) expectedReviewVersion = rebased.reviewVersion; }
+        }
         const ids = new Set(input.changeIds);
         const selected = review.changes.filter((c) => ids.has(c.id));
         if (!ids.size || selected.length !== ids.size) throw new ArtifactReviewError('请选择有效的修改项');
         const nextStatus = input.decision === 'accept' ? 'accepted' : 'rejected';
         if (selected.every((c) => c.status === nextStatus)) return review;
-        if (review.reviewVersion !== input.expectedReviewVersion || selected.some((c) => c.status !== 'pending')) throw new ArtifactReviewError('审核状态已变化，请刷新后重试', 409);
+        if (review.reviewVersion !== expectedReviewVersion || selected.some((c) => c.status !== 'pending')) throw new ArtifactReviewError('审核状态已变化，请刷新后重试', 409);
         const adapter = adapters[review.kind];
         if (!adapter) throw new ArtifactReviewError('该产物暂不支持审核');
         const changes: ArtifactReviewChange[] = review.changes.map((c) => ids.has(c.id) ? { ...c, status: nextStatus, decidedAt: new Date().toISOString() } : c);
