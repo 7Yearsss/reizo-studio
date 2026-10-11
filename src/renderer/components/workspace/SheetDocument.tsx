@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { History, Quote, Sparkles, Table2, X } from 'lucide-react';
+import { History, Table2, X } from 'lucide-react';
 import type { Artifact, ArtifactWithContent } from '../../../shared/artifact';
 import type { ArtifactReview } from '../../../shared/artifactReview';
 import { parseSheetContent, serializeSheetContent, type SheetArtifactContent } from '../../../shared/sheetContent';
@@ -12,7 +12,7 @@ import type { SheetCellFocus, SheetRendererProps } from './renderers/SheetRender
 import { Button } from '../ui/button';
 import { Alert, AlertDescription } from '../ui/alert';
 import ArtifactVersionRail from './ArtifactVersionRail';
-import { focusComposer, ReferenceStrip } from './workspaceChrome';
+import { focusComposer } from './workspaceChrome';
 import SheetReview, { type SheetSelectedCell } from './SheetReview';
 import SheetPivotPanel from './SheetPivotPanel';
 import SheetChartDock from './SheetChartView';
@@ -33,7 +33,6 @@ export default function SheetDocument({ artifact, onClose }: { artifact: Artifac
   const [reload, setReload] = useState(0);
   const activeSelection = useSheetWorkspace((s) => s.activeBySession[artifact.sessionId]);
   const ownSelection = activeSelection?.artifactId === artifact.id ? activeSelection : undefined;
-  const pinnedCount = useSheetWorkspace((s) => (s.pinnedBySession[artifact.sessionId] ?? []).filter((ref) => ref.artifactId === artifact.id).length);
   const [reviews, setReviews] = useState<ArtifactReview[]>([]);
   const [reviewBusy, setReviewBusy] = useState(false);
   const [showOriginal, setShowOriginal] = useState(false);
@@ -152,10 +151,6 @@ export default function SheetDocument({ artifact, onClose }: { artifact: Artifac
       <Button variant="ghost" size="icon-sm" aria-label="表格版本历史" onClick={() => setShowHistory((v) => !v)}><History /></Button>
       <Button variant="ghost" size="icon-sm" aria-label="关闭表格" onClick={onClose}><X /></Button>
     </div>
-    {!viewVersion && <ReferenceStrip attached={ownSelection?.range ? `${ownSelection.sheetName ?? ''}!${ownSelection.range}${pinnedCount ? ` · 另有 ${pinnedCount} 段已编号` : ''}` : pinnedCount ? `${pinnedCount} 段已编号选区` : undefined}>
-      <Button size="xs" variant="ghost" disabled={!ownSelection?.range} title="把选中的单元格范围编号后加入对话，可多次添加，分别用 [1] [2] 指代（Ctrl+L）" onClick={quoteSelection}><Quote data-icon="inline-start" />{pinnedCount ? '再引用一段' : '引用选区'}</Button>
-      <Button size="xs" variant="ghost" title="跳到对话输入框" onClick={() => focusComposer(artifact.sessionId)}><Sparkles data-icon="inline-start" />问 AI</Button>
-    </ReferenceStrip>}
     {error && <Alert variant="destructive"><AlertDescription>{error}<Button variant="outline" size="sm" onClick={() => void discardAndReload()}>丢弃未保存编辑并重新加载</Button></AlertDescription></Alert>}
     {truncated && <Alert><AlertDescription>文件超过当前表格容量，已导入部分内容；原文件未被修改。最多 8 张工作表、2000 行、50 列和 40000 个单元格。</AlertDescription></Alert>}
     <div className="flex min-h-0 flex-1">

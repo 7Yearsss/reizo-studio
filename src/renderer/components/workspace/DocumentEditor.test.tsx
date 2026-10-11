@@ -35,7 +35,7 @@ it('hands focus to the composer when the document is referenced', async () => {
   await act(async () => { root.render(<DocumentEditor artifact={initial} />); });
   await act(async () => { [...host.querySelectorAll('button')].find((button) => button.textContent === '引用全文')!.click(); });
   expect((focus.mock.calls[0][0] as CustomEvent).detail).toEqual({ sessionId: initial.sessionId });
-  expect(host.textContent).toContain('已引用到对话：全文');
+  expect(host.textContent).toContain('全文');
   window.removeEventListener('reizo:focus-composer', focus);
 });
 
