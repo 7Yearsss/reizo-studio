@@ -69,19 +69,20 @@ function FormatTools({ editor, disabled }: { editor: TiptapEditor | null; disabl
   </>;
 }
 
-/** Where to float the selection toolbar, in the scroller's content coordinates; null when it cannot be measured. */
+/** Where to float the ask-AI pill, in the scroller's content coordinates: above the end the selection was dragged to. */
 function bubbleAt(editor: TiptapEditor, box: HTMLElement | null): { top: number; left: number } | null {
   if (!box) return null;
   try {
-    const { from, to } = editor.state.selection;
-    const start = editor.view.coordsAtPos(from); const end = editor.view.coordsAtPos(to);
+    const { head } = editor.state.selection;
+    const at = editor.view.coordsAtPos(head);
     const rect = box.getBoundingClientRect();
-    const above = Math.min(start.top, end.top) - rect.top + box.scrollTop - 38;
-    const top = above < box.scrollTop + 4 ? Math.max(start.bottom, end.bottom) - rect.top + box.scrollTop + 6 : above;
-    const mid = (start.top === end.top ? (start.left + end.left) / 2 : start.left) - rect.left + box.scrollLeft;
-    return { top, left: Math.min(Math.max(mid, 90), box.clientWidth - 90) };
+    const above = at.top - rect.top + box.scrollTop - 40;
+    const top = above < box.scrollTop + 4 ? at.bottom - rect.top + box.scrollTop + 8 : above;
+    return { top, left: Math.min(Math.max(at.left - rect.left + box.scrollLeft, 70), box.clientWidth - 70) };
   } catch { return null; }
 }
+
+const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || navigator.userAgent);
 
 export default function DocumentEditor({ artifact }: { artifact: Artifact }) {
   const [full, setFull] = useState<ArtifactWithContent | null>(null);
@@ -114,6 +115,8 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
   const [selection, setSelection] = useState<DocumentSelection | undefined>();
   const [reviews, setReviews] = useState<ArtifactReview[]>([]);
   const [bubble, setBubble] = useState<{ top: number; left: number } | null>(null);
+  const pointerDown = useRef(false);
+  const settleTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const scroller = useRef<HTMLDivElement>(null);
   const askRef = useRef<() => void>(() => { /* Assigned on every render below. */ });
   const references = useDocumentWorkspace((s) => s.references[artifact.sessionId]);
@@ -171,9 +174,24 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
     onSelectionUpdate: ({ editor: current }) => {
       const { $from, $to, empty } = current.state.selection;
       setSelection(empty ? undefined : documentSelectionBetween(current.state.doc, $from.pos, $to.pos));
-      setBubble(empty ? null : bubbleAt(current, scroller.current));
+      // The pill only appears once the selection has settled: after the mouse is released, or a
+      // short pause for keyboard selection. While dragging it would sit in the way.
+      setBubble(null);
+      clearTimeout(settleTimer.current);
+      if (empty || pointerDown.current) return;
+      settleTimer.current = setTimeout(() => { if (!current.isDestroyed && !current.state.selection.empty) setBubble(bubbleAt(current, scroller.current)); }, 260);
     },
   });
+  useEffect(() => {
+    const release = () => {
+      if (!pointerDown.current) return;
+      pointerDown.current = false;
+      clearTimeout(settleTimer.current);
+      settleTimer.current = setTimeout(() => { if (editor && !editor.isDestroyed && !editor.state.selection.empty) setBubble(bubbleAt(editor, scroller.current)); }, 0);
+    };
+    window.addEventListener('pointerup', release);
+    return () => { window.removeEventListener('pointerup', release); clearTimeout(settleTimer.current); };
+  }, [editor]);
   useEffect(() => {
     mounted.current = true;
     const unregister = registerEditorFlusher(artifact.sessionId, artifact.id, flush);
@@ -248,7 +266,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
       <Button size="xs" variant="ghost" disabled={busy} onClick={() => askAI(undefined)}>引用全文</Button>
     </ReferenceStrip>}
     {error && <Alert variant="destructive" className="rounded-none border-x-0 border-t-0"><AlertDescription>{error}<div className="mt-2 flex gap-2"><Button size="xs" variant="outline" onClick={() => void flush().catch((): void => { /* Error is shown by the save/review handler. */ })}>重试保存</Button><Button size="xs" variant="outline" onClick={() => void recover().catch((cause) => setError(String(cause)))}>下载恢复副本并重新载入</Button></div></AlertDescription></Alert>}
-    <div ref={scroller} onScroll={() => setBubble(null)} className={cn('relative min-h-0 flex-1 overflow-auto bg-paper-inset', activeReview && 'hidden')}>
+    <div ref={scroller} onPointerDown={() => { pointerDown.current = true; }} onScroll={() => setBubble(null)} className={cn('relative min-h-0 flex-1 overflow-auto bg-paper-inset', activeReview && 'hidden')}>
       {warnings.length ? <details className="mx-auto mt-3 w-[calc(100%-1.5rem)] max-w-[816px] rounded-md border border-line bg-paper px-3 py-2 text-xs text-ink-muted">
         <summary className="cursor-pointer"><Info className="mr-1.5 inline size-3.5 align-[-2px]" />导入说明：{warnings.length} 处内容未完整保留</summary>
         {warnings.map((warning, i) => <p key={i} className="mt-1">{warning}</p>)}
@@ -258,11 +276,20 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
       <div className="mx-auto my-3 w-[calc(100%-1.5rem)] max-w-[816px] rounded-sm border border-line bg-paper shadow-sm" onClick={(event) => { if (event.target === event.currentTarget) editor?.commands.focus('end'); }}>
         <EditorContent editor={editor} />
       </div>
-      {bubble && selection && !busy && <div className="absolute z-20 flex -translate-x-1/2 items-center gap-0.5 rounded-md border border-line bg-paper p-0.5 shadow-md" style={{ top: bubble.top, left: bubble.left }} onMouseDown={(event) => event.preventDefault()}>
-        <Button size="xs" title="把选中的文字加入对话，可多次添加（Ctrl+L）" onClick={() => askAI(selection)}><Sparkles data-icon="inline-start" />{pickedRanges.length ? '再加一段' : '问 AI'}</Button>
-        <Button size="icon-xs" variant="ghost" aria-label="加粗所选" onClick={() => editor?.chain().focus().toggleBold().run()}><Bold /></Button>
-        <Button size="icon-xs" variant="ghost" aria-label="斜体所选" onClick={() => editor?.chain().focus().toggleItalic().run()}><Italic /></Button>
-      </div>}
+      {bubble && selection && !busy && (
+        <div className="absolute z-20 -translate-x-1/2" style={{ top: bubble.top, left: bubble.left }} onMouseDown={(event) => event.preventDefault()}>
+          <button
+            type="button"
+            title="把选中的内容加入对话，可多次添加"
+            onClick={() => askAI(selection)}
+            className="pop-in flex h-8 items-center gap-1.5 whitespace-nowrap rounded-[10px] bg-ink pl-2.5 pr-2 text-[12px] font-medium text-paper-raised shadow-[0_6px_20px_rgba(25,47,80,0.22)] transition-transform active:scale-[0.97]"
+          >
+            <Sparkles className="size-3.5" />
+            问 AI
+            <kbd className="ml-0.5 rounded-md bg-paper-raised/15 px-1.5 py-0.5 font-sans text-[11px] leading-none">{isMac ? '⌘L' : 'Ctrl L'}</kbd>
+          </button>
+        </div>
+      )}
       <ReviewLog reviews={reviews} className="mx-auto mb-4 w-[calc(100%-1.5rem)] max-w-[816px]" />
     </div>
     {activeReview && <DocumentReview key={activeReview.id} review={activeReview} otherBatches={pendingBatches - 1} busy={busy} decide={(review, ids, decision) => void decide(review, ids, decision)} revise={(review, change, text) => act(async () => {
