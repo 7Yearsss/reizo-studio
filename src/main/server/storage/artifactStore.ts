@@ -83,6 +83,11 @@ function decodeDataUrl(value: string): { bytes: Buffer; mime: string } | null {
   return { bytes, mime };
 }
 
+/** Manual saves closer together than this fold into one history entry. */
+const MANUAL_EDIT_FOLD_MS = 5 * 60 * 1000;
+/** Older plain manual saves beyond this many latest versions are dropped; labelled versions are kept. */
+const MAX_RECENT_VERSIONS = 100;
+
 export interface CreateArtifactInput {
   sessionId: string;
   projectId?: string | null;
@@ -436,10 +441,35 @@ export function createArtifactStore(handle: DbHandle, dataRoot: string) {
         kind,
       );
       const prepared = await prepareVersion(id, n, row.name, kind, m);
+      // Autosave appends a full-content row every few seconds of typing. Plain manual saves are
+      // therefore (1) skipped when nothing changed and (2) folded into the previous manual save
+      // when it is recent, so history keeps meaningful steps instead of every pause.
+      const plainManual = input.origin.surface === 'manual_edit' && input.label === undefined && prepared.storage === 'inline';
+      let foldPrevious = false;
+      if (plainManual) {
+        const head = selVersion.get(id, row.current_version) as unknown as VersionRowRaw | undefined;
+        if (head?.storage === 'inline' && head.content_digest === prepared.digest) return store.get(id);
+        foldPrevious =
+          head?.storage === 'inline' &&
+          head.label === 'Manual edit' &&
+          parseJson<ArtifactOrigin>(head.origin_json, { surface: 'chat' }).surface === 'manual_edit' &&
+          Date.now() - head.created_at < MANUAL_EDIT_FOLD_MS;
+      }
       tx(() => {
         const latest = selById.get(id) as unknown as ArtifactRowRaw | undefined;
         if (!latest || latest.current_version !== row.current_version) throw new ArtifactVersionConflictError();
+        // The folded row's number is retired, not reused: a review based on it must read as stale.
+        if (foldPrevious) raw.prepare('DELETE FROM artifact_versions WHERE artifact_id = ? AND n = ?').run(id, row.current_version);
         insertVersionRow(id, n, label, input.origin, prepared);
+        if (plainManual) {
+          raw
+            .prepare(
+              `DELETE FROM artifact_versions
+               WHERE artifact_id = ? AND storage = 'inline' AND label = 'Manual edit' AND n > 1
+                 AND n NOT IN (SELECT n FROM artifact_versions WHERE artifact_id = ? ORDER BY n DESC LIMIT ?)`,
+            )
+            .run(id, id, MAX_RECENT_VERSIONS);
+        }
         raw
           .prepare(
             `UPDATE artifacts SET current_version = ?, byte_size = ?, status = ?, origin_json = ?, updated_at = ?

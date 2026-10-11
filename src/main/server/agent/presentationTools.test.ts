@@ -73,7 +73,7 @@ it('rejects stale versions, foreign decks, and overlapping edits', async () => {
   await expect(f.reviews.create({ artifactId: f.artifact.id, sessionId: f.artifact.sessionId, expectedVersion: 1, origin: { surface: 'chat' }, operations: [{ op: 'updateElement', slideId: slide.id, elementId: element.id, patch: { name: 'change' } }, { op: 'deleteSlide', slideId: slide.id }] })).rejects.toThrow('重叠');
   const foreign = await f.artifacts.create({ sessionId: 'other', name: 'private', kind: 'presentation', source: 'manual', content: f.artifact.content });
   expect((await f.call('read_presentation', { artifactId: foreign.id })).ok).toBe(false);
-  await f.artifacts.addVersion(f.artifact.id, { expectedVersion: 1, origin: { surface: 'manual_edit' }, content: f.artifact.content });
+  await f.artifacts.addVersion(f.artifact.id, { expectedVersion: 1, origin: { surface: 'manual_edit' }, content: JSON.stringify((() => { const edited = JSON.parse(f.artifact.content); edited.slides[0].name = 'edited'; return edited; })()) });
   expect((await f.call('propose_presentation_edits', { artifactId: f.artifact.id, expectedVersion: 1, operations: [{ op: 'updateElement', slideId: slide.id, elementId: element.id, patch: { name: 'stale' } }] })).ok).toBe(false);
 });
 it('merges nested style patches instead of replacing them', () => {

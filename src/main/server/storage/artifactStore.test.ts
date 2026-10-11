@@ -142,3 +142,28 @@ describe('artifactStore', () => {
     expect(await store2.listBySession('legacy-sess')).toHaveLength(0);
   });
 });
+
+describe('manual edit history', () => {
+  async function setup() {
+    const { store } = freshStore();
+    const artifact = await store.create({ sessionId: 's', name: 'n.md', content: 'v1', source: 'manual' });
+    return { store, artifact };
+  }
+  it('skips a save that changes nothing', async () => {
+    const { store, artifact } = await setup();
+    const saved = await store.addVersion(artifact.id, { expectedVersion: 1, content: 'v1', origin: { surface: 'manual_edit' } });
+    expect(saved?.version).toBe(1);
+  });
+  it('folds recent manual saves into one history entry and keeps labelled versions', async () => {
+    const { store, artifact } = await setup();
+    await store.addVersion(artifact.id, { expectedVersion: 1, content: 'a', origin: { surface: 'manual_edit' } });
+    const folded = await store.addVersion(artifact.id, { expectedVersion: 2, content: 'ab', origin: { surface: 'manual_edit' } });
+    expect(folded?.version).toBe(3);
+    expect((await store.get(artifact.id, 3))?.content).toBe('ab');
+    expect((await store.get(artifact.id, 2))?.content ?? null).not.toBe('a');
+    const labelled = await store.addVersion(artifact.id, { expectedVersion: 3, content: 'abc', origin: { surface: 'manual_edit' }, label: 'Accepted AI edits' });
+    const after = await store.addVersion(artifact.id, { expectedVersion: labelled!.version, content: 'abcd', origin: { surface: 'manual_edit' } });
+    expect(await store.get(artifact.id, labelled!.version)).not.toBeNull();
+    expect(after?.version).toBe(labelled!.version + 1);
+  });
+});

@@ -59,12 +59,14 @@ describe('artifact review publication', () => {
   });
   it('rejects stale accepts and allows rejecting the stale suggestions', async () => {
     const { artifacts, artifact, reviews, proposal } = await fixture();
-    await artifacts.addVersion(artifact.id, { expectedVersion: 1, content: artifact.content, origin: { surface: 'manual_edit' } });
+    const edited = JSON.parse(artifact.content); edited.doc.content[0].content[0].text = '用户手动修改';
+    const manual = JSON.stringify(edited);
+    await artifacts.addVersion(artifact.id, { expectedVersion: 1, content: manual, origin: { surface: 'manual_edit' } });
     expect(reviews.get(proposal.id)?.stale).toBe(true);
     await expect(reviews.decide({ id: proposal.id, sessionId: 'session', expectedReviewVersion: 1, changeIds: proposal.changes.map((c) => c.id), decision: 'accept' })).rejects.toThrow('原文已更新');
     const result = await reviews.decide({ id: proposal.id, sessionId: 'session', expectedReviewVersion: 1, changeIds: proposal.changes.map((c) => c.id), decision: 'reject' });
     expect(result.status).toBe('rejected');
-    expect((await artifacts.get(artifact.id))?.content).toBe(artifact.content);
+    expect((await artifacts.get(artifact.id))?.content).toBe(JSON.stringify(JSON.parse(manual)));
   });
   it('rolls back both the content and review decision if publication fails', async () => {
     const { db, artifacts, dataRoot, artifact, proposal } = await fixture();
