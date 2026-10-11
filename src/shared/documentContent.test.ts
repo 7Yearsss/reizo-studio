@@ -2,7 +2,7 @@ import { documentReviewSchema, reviewDocumentEdit } from './documentReview';
 import { describe, expect, it } from 'vitest';
 import { applySuggestions, revertSuggestions } from '@handlewithcare/prosemirror-suggest-changes';
 import { EditorState } from '@tiptap/pm/state';
-import { applyDocumentEdit, createDocumentContent, documentEditWithinSelection, documentBlocks, parseDocumentContent } from './documentContent';
+import { applyDocumentEdit, createDocumentContent, documentSchema, documentSelectionsBetween, documentEditWithinSelection, documentBlocks, parseDocumentContent } from './documentContent';
 
 function fixture() {
   return createDocumentContent({ type: 'doc', content: [
@@ -39,5 +39,24 @@ describe('document operations and review', () => {
     expect(() => applyDocumentEdit(fixture(), { op: 'deleteBlock', blockId: 'missing' })).toThrow('已变化');
     expect(() => createDocumentContent({ type: 'doc', content: [{ type: 'image', attrs: { src: 'file:///private.txt' } }] })).toThrow('图片');
     expect(() => createDocumentContent({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'bad', marks: [{ type: 'link', attrs: { href: 'javascript:alert(1)' } }] }] }] })).toThrow('链接');
+  });
+});
+
+describe('documentSelectionsBetween', () => {
+  it('splits a range across paragraphs into one selection per block', () => {
+    const content = fixture();
+    const doc = documentSchema.nodeFromJSON(content.doc);
+    const [first, second] = documentBlocks(content);
+    // paragraph 1 spans 0..11 (9 chars + borders); drag from char 4 of block 1 into char 3 of block 2.
+    const from = 1 + 4;
+    const secondStart = doc.child(0).nodeSize;
+    const to = secondStart + 1 + 3;
+    const picked = documentSelectionsBetween(doc, from, to);
+    expect(picked).toEqual([
+      { blockId: first.id, start: 4, end: 9, text: '十月上线。' },
+      { blockId: second.id, start: 0, end: 3, text: '这段必' },
+    ]);
+    expect(documentSelectionsBetween(doc, from, from)).toEqual([]);
+    expect(documentSelectionsBetween(doc, 0, doc.content.size, 1)).toHaveLength(1);
   });
 });

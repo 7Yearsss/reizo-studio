@@ -181,6 +181,24 @@ export function documentBlocks(content: DocumentContent): DocumentBlock[] {
 }
 
 /**
+ * One selection per text block touched by the range [from, to], so a drag across several
+ * paragraphs becomes several references instead of none. Blocks without an id are skipped.
+ */
+export function documentSelectionsBetween(doc: DocumentNode, from: number, to: number, limit = 8): DocumentSelection[] {
+  const out: DocumentSelection[] = [];
+  doc.nodesBetween(from, to, (node, pos) => {
+    if (out.length >= limit) return false;
+    if (!node.isTextblock) return true;
+    if (typeof node.attrs.id !== 'string') return false;
+    const a = Math.max(from, pos + 1);
+    const b = Math.min(to, pos + 1 + node.content.size);
+    if (b > a) out.push({ blockId: node.attrs.id, start: a - pos - 1, end: b - pos - 1, text: doc.textBetween(a, b).slice(0, 2000) });
+    return false;
+  });
+  return out;
+}
+
+/**
  * True while the referenced range still sits where it was picked: same block, same
  * offsets, same text. The editor uses this after each edit to keep a selection
  * reference alive across unrelated typing and drop it only once it truly moved.
