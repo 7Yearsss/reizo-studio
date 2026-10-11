@@ -20,7 +20,7 @@ export function createHtmlTools(options: { sessionId: string; projectId?: string
   const { sessionId, artifacts, reviews } = options;
   return {
     read_html: tool({
-      description: '列出或读取本会话 HTML 页面最新源码。startLine 从 1 开始，按大小分页（约 6000 字符），truncated 时用 nextStartLine 继续读取；返回 version 供修改校验。先读取再提出建议。',
+      description: '列出或读取本会话 HTML 页面最新源码。startLine 从 1 开始，按大小分页（约 6000 字符），truncated 时用 nextStartLine 继续读取；返回 version 供修改校验。消息里已带当前源码时可直接提；否则先读取再提出建议。',
       inputSchema: z.object({ artifactId: z.string().optional(), startLine: z.number().int().positive().optional(), limit: z.number().int().min(1).max(200).optional() }),
       execute: async ({ artifactId, startLine = 1, limit = 120 }) => {
         if (!artifactId) return { ok: true, pages: (await artifacts.listBySession(sessionId)).filter((a) => a.kind === 'html').map((a) => ({ artifactId: a.id, name: a.name, version: a.version })) };
