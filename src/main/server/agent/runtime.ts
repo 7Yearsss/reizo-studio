@@ -23,6 +23,7 @@ import { createScheduleTools } from './scheduleTools';
 import { createCanvasTools } from './canvasTools';
 import { createArtifactTools } from './artifactTools';
 import { buildSheetContext } from './sheetContext';
+import { buildDocumentContext } from './documentContext';
 import { parseSheetReferences, wrapSheetContext } from '../../../shared/sheetReferences';
 import { createImageTools } from './imageTools';
 import { createComputerTools, isComputerUseSupported } from './computerTools';
@@ -241,12 +242,13 @@ export async function runChatTurn(options: {
   const { refs: canvasRefs, paths: pathMentions } = parseCanvasRefs(sheetRefs.rest);
   const canvasRefBlock = buildCanvasRefBlock(canvasStore, sessionId, canvasRefs);
   const sheetRefBlock = await buildSheetContext(artifactStore, sessionId, sheetRefs.refs);
+  const documentContext = await buildDocumentContext(artifactStore, sessionId, documentRefs.refs);
 
   const extraBlocks = [
     pathMentions.length > 0 ? `Referenced workspace paths:\n${pathMentions.map((m) => `- ${m}`).join('\n')}` : '',
     canvasRefBlock,
     sheetRefBlock,
-    documentRefs.refs.length ? wrapDocumentContext(documentRefs.refs) : '',
+    documentRefs.refs.length ? wrapDocumentContext(documentRefs.refs, documentContext) : '',
     htmlRefs.refs.length ? wrapHtmlContext(htmlRefs.refs) : '',
     presentationRefs.refs.length ? wrapPresentationContext(presentationRefs.refs) : '',
     attachments.length > 0
@@ -355,7 +357,7 @@ export async function runChatTurn(options: {
     options.artifactReviews ? 'For editable PPT decks use generate_presentation. Read existing slide and element IDs with read_presentation, then propose_presentation_edits. Keep edits within referenced pages/elements and wait for user review. Never bypass review through shell, files, or HTTP.' : '',
     options.artifactReviews ? 'For Excel workbooks use generate_sheet only to create new ones. To change an existing workbook call read_sheet, then propose_sheet_edits with the current version; the original stays unchanged until the user accepts in the Excel panel. Keep each operation to its own non-overlapping range. For pivot tables, group-by summaries, or cross-tabs use an upsertPivot operation (live formulas, refreshable) instead of computing totals yourself. For charts use upsertChart, preferably bound to a pivot via pivotId (propose the chart after the pivot is accepted). Never bypass review through shell, files, or HTTP.' : '',
     options.artifactReviews ? 'Use generate_html for new editable HTML pages. For changes read_html then propose_html_edits. Do not bypass review with file writes, shell commands, or HTTP requests.' : '',
-    options.artifactReviews ? 'For editable documents use generate_document. Before modifying an existing Doc call read_document, then propose_document_edits with the current version and stable block IDs. Proposals do not change the original. Only the user may accept or reject in the Doc panel. Never use file writes, shell commands, or HTTP calls to bypass document review. Respect referenced selected ranges.' : '',
+    options.artifactReviews ? 'For editable documents use generate_document. When the message carries <document-context> with `current` content, edit straight from it: call propose_document_edits with that version and those block IDs, without read_document first. Otherwise call read_document before modifying an existing Doc, then propose_document_edits with the current version and stable block IDs. Proposals do not change the original. Only the user may accept or reject in the Doc panel. Never use file writes, shell commands, or HTTP calls to bypass document review. Respect referenced selected ranges.' : '',
     artifactStore
       ? 'When the user asks for a flowchart, sequence diagram, system architecture diagram, or mind map, call generate_diagram with Mermaid syntax to produce an interactive Excalidraw canvas artifact in the right panel. When the user asks for a spreadsheet, budget, financial report, or table calculation, call generate_sheet with rows, columns, and formulas to render a full-featured Excel sheet artifact in the right panel.'
       : '',
