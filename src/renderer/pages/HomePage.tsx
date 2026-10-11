@@ -229,7 +229,7 @@ export default function HomePage({ active = true }: { active?: boolean }) {
             />
           )}
           <div
-            className={draggingFiles ? 'rounded-[28px] ring-2 ring-accent/60' : undefined}
+            className={draggingFiles ? 'rounded-3xl ring-2 ring-accent/60' : undefined}
             onDragOver={(e) => {
               if (e.dataTransfer.types.includes('Files')) e.preventDefault();
             }}

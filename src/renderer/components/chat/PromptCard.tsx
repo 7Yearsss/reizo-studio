@@ -63,7 +63,7 @@ export default function PromptCard({
   return (
     <div
       className={cn(
-        'group rounded-[28px] border border-line bg-paper-raised px-5 py-4 shadow-[0_8px_30px_rgba(28,22,18,0.06)] transition-colors duration-[140ms] focus-within:border-ink/15',
+        'group rounded-3xl border border-line bg-paper-raised px-5 py-4 shadow-[0_8px_30px_rgba(28,22,18,0.06)] transition-colors duration-[140ms] focus-within:border-ink/15',
         className,
       )}
     >
