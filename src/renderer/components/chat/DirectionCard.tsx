@@ -65,9 +65,9 @@ export default function DirectionCardChoice({
       <div className="flex items-center justify-between">
         <span className="text-xs font-semibold">{direction.title}</span>
         {selected ? (
-          <span className="text-[10px] text-accent">已选</span>
+          <span className="text-[11px] text-accent">已选</span>
         ) : recommended ? (
-          <span className="text-[10px] text-success">推荐</span>
+          <span className="text-[11px] text-success">推荐</span>
         ) : null}
       </div>
       {zoom ? (

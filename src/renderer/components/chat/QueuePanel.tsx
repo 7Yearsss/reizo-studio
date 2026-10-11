@@ -60,7 +60,7 @@ export default function QueuePanel({
                 插话中
               </span>
               <span className="min-w-0 flex-1 truncate">{steer.text}</span>
-              <span className="shrink-0 animate-pulse text-[10px] text-ink-muted">下一步注入</span>
+              <span className="shrink-0 animate-pulse text-[11px] text-ink-muted">下一步注入</span>
             </div>
           ))}
           {items.map((item, index) => (

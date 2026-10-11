@@ -45,7 +45,7 @@ export default function HandoffMenu({ artifact, getContent }: { artifact: Artifa
       </Tooltip>
       {open && (
         <div className="absolute right-0 top-7 z-20 w-40 rounded-xl border border-line bg-paper-raised py-1.5 shadow-lg backdrop-blur-md">
-          <div className="px-3 py-1 text-[10px] text-ink-muted">复制给 CLI / 对话</div>
+          <div className="px-3 py-1 text-[11px] text-ink-muted">复制给 CLI / 对话</div>
           {FRAMEWORK_PROMPTS.map((f) => (
             <button
               key={f.id}

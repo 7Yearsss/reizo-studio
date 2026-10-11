@@ -31,7 +31,7 @@ export default function NextStepStrip({
 
   return (
     <div className="mb-2 flex flex-wrap items-center gap-1.5">
-      <span className="inline-flex items-center gap-1 text-[10px] text-ink-muted">
+      <span className="inline-flex items-center gap-1 text-[11px] text-ink-muted">
         <Sparkles size={11} /> 下一步
       </span>
       {actions.map((a) => (

@@ -203,7 +203,7 @@ export default function DocumentReview({ review, otherBatches, busy, decide, rev
     </div>
     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 border-b border-line px-3 py-1.5 text-xs text-ink-muted">
       {active ? <span className="min-w-0 max-w-full truncate text-ink" title={active.label}>
-        <span className="mr-1.5 inline-block rounded px-1 text-[10px] text-paper" style={{ background: KIND_COLOR[kinds[active.id] ?? 'replace'] }}>{KIND_LABEL[kinds[active.id] ?? 'replace']}</span>{active.label}{active.editedByUserAt ? ' · 已由你编辑' : ''}
+        <span className="mr-1.5 inline-block rounded px-1 text-[11px] text-paper" style={{ background: KIND_COLOR[kinds[active.id] ?? 'replace'] }}>{KIND_LABEL[kinds[active.id] ?? 'replace']}</span>{active.label}{active.editedByUserAt ? ' · 已由你编辑' : ''}
       </span> : null}
       {reason && <span className="min-w-0 max-w-full truncate" title={reason}>AI：{reason}</span>}
       <span className="ml-auto hidden shrink-0 sm:inline" title="在文档区域点击后可用">{counts.map(([kind, n]) => `${KIND_LABEL[kind]} ${n}`).join(' · ')}{counts.length ? ' · ' : ''}J/K 切换 · Enter 接受 · ⌫ 拒绝</span>

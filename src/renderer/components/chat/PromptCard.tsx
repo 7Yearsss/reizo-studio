@@ -162,7 +162,7 @@ export default function PromptCard({
         )}
       </div>
       {hint && (
-        <p className="mt-2 px-0.5 text-[10px] leading-none text-ink-muted opacity-0 transition-opacity duration-150 group-focus-within:opacity-100">
+        <p className="mt-2 px-0.5 text-[11px] leading-none text-ink-muted opacity-0 transition-opacity duration-150 group-focus-within:opacity-100">
           {hint}
         </p>
       )}

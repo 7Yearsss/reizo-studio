@@ -238,7 +238,7 @@ export default function ArtifactPanel({ sessionId }: { sessionId: string }) {
           <FolderKanban className="h-3.5 w-3.5 shrink-0 text-accent" />
           <span className="truncate">本会话作品</span>
           {artifacts.length > 0 && (
-            <span className="rounded-full bg-paper-inset px-1.5 text-[10px] font-medium tabular-nums">
+            <span className="rounded-full bg-paper-inset px-1.5 text-[11px] font-medium tabular-nums">
               {artifacts.length}
             </span>
           )}
@@ -370,7 +370,7 @@ export default function ArtifactPanel({ sessionId }: { sessionId: string }) {
                         </span>
                       )}
                     </span>
-                    <span className="mt-0.5 block truncate font-mono text-[10px] text-ink-muted">
+                    <span className="mt-0.5 block truncate font-mono text-[11px] text-ink-muted">
                       {KIND_LABELS[a.kind]} · {SOURCE_LABELS[a.source] ?? a.source} · {formatTime(a.createdAt)}
                     </span>
                   </span>

@@ -203,7 +203,7 @@ export default function SheetPivotPanel({ content, selection, busy, commit, onCl
           {fields.map((field) => <li key={field.name} draggable onDragStart={(event) => event.dataTransfer.setData('text/plain', JSON.stringify({ field: field.name }))} className="flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-paper-raised">
             <Checkbox checked={used(draft, field.name)} onCheckedChange={(checked) => toggleField(field, checked === true)} aria-label={field.name} />
             <span className="min-w-0 flex-1 truncate">{field.name}</span>
-            <span className="text-[10px] text-ink-muted">{isNumeric(field) ? '数值' : '文本'}</span>
+            <span className="text-[11px] text-ink-muted">{isNumeric(field) ? '数值' : '文本'}</span>
             <GripVertical className="size-3 cursor-grab text-ink-muted" />
           </li>)}
         </ul>

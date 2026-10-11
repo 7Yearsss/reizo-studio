@@ -152,7 +152,7 @@ export default function SlashPalette({
               </span>
               <span className="relative z-10 font-mono text-sm font-medium text-ink">/{cmd.name}</span>
               <span className="relative z-10 flex-1 truncate text-xs text-ink-muted">{cmd.description}</span>
-              <span className="relative z-10 rounded-md bg-paper-inset/80 px-1.5 py-0.5 text-[10px] font-medium text-ink-muted">
+              <span className="relative z-10 rounded-md bg-paper-inset/80 px-1.5 py-0.5 text-[11px] font-medium text-ink-muted">
                 {cmd.kind === 'skill' ? '技能' : '内置'}
               </span>
             </button>

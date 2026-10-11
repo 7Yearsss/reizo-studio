@@ -79,7 +79,7 @@ function Row({
         <span className="flex items-center gap-1.5 text-[13px] text-ink">
           <span className="truncate">{name}</span>
           {badge ? (
-            <span className="shrink-0 rounded-md bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">
+            <span className="shrink-0 rounded-md bg-accent/10 px-1.5 py-0.5 text-[11px] font-medium text-accent">
               {badge}
             </span>
           ) : null}
