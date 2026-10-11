@@ -128,3 +128,30 @@ describe('tracked-changes export', () => {
     expect(xml).toContain('<w:tbl>');
   });
 });
+
+describe('typeset export', () => {
+  it('writes the official layout into the DOCX: fonts, sizes, fixed line height, indent and alignment', async () => {
+    const { applyFormat, OFFICIAL_SPEC } = await import('../../../../shared/documentFormat');
+    const original = await fixture();
+    const content = parseDocumentContent(JSON.stringify(await importDocx(original)))!;
+    const { content: formatted, changed } = applyFormat(content, OFFICIAL_SPEC);
+    expect(changed).toBeGreaterThan(0);
+    const xml = await documentXml(await exportDocx(formatted, original));
+    // Body paragraph "项目预计十月上线。": 仿宋 三号 (16pt = sz 32), exact 28pt lines, two-character first-line indent, justified.
+    const body = xml.slice(xml.indexOf('<w:p>', xml.indexOf('Styled sample') + 1));
+    const paragraph = body.slice(0, body.indexOf('</w:p>'));
+    expect(paragraph).toContain('w:eastAsia="仿宋_GB2312"');
+    expect(paragraph).toContain('<w:sz w:val="32"/>');
+    expect(paragraph).toContain('<w:color w:val="000000"/>');
+    expect(paragraph).toContain('w:line="560" w:lineRule="exact"');
+    expect(paragraph).toContain('w:firstLine="640"');
+    expect(paragraph).toContain('<w:jc w:val="both"/>');
+    // The title is centred in 方正小标宋简体 二号 (22pt = sz 44) and the original file's header/styles are untouched.
+    expect(xml).toContain('w:eastAsia="方正小标宋简体"');
+    expect(xml).toContain('<w:sz w:val="44"/>');
+    expect(await (await JSZip.loadAsync(await exportDocx(formatted, original))).file('word/header1.xml')!.async('string')).toBe(HEADER_XML);
+    // The fixed line height survives a round trip.
+    const again = await importDocx(Buffer.from(await exportDocx(formatted, original)));
+    expect(JSON.stringify(again.doc)).toContain('"lineExact":28');
+  });
+});

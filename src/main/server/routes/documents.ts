@@ -3,9 +3,24 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { SessionStore } from '../../../shared/chat';
 import { createDocumentContent, DOCUMENT_MIME, parseDocumentContent } from '../../../shared/documentContent';
+import { specFromContent } from '../../../shared/documentFormat';
 import { ArtifactReviewError, type ArtifactReviewStore } from '../storage/artifactReviewStore';
 import { ArtifactVersionConflictError, type ArtifactStore } from '../storage/artifactStore';
 import { DOCX_MIME, exportDocx, importDocx, MAX_DOCX_UPLOAD_BYTES } from '../agent/documentIO';
+
+/** The request body as a Buffer, or the error response when it is empty or over the upload limit. */
+async function readUpload(request: Request): Promise<Buffer | Response> {
+  const reader = request.body?.getReader();
+  if (!reader) return Response.json({ error: '文件为空' }, { status: 400 });
+  const chunks: Uint8Array[] = []; let length = 0;
+  for (;;) {
+    const { done, value } = await reader.read(); if (done) break;
+    length += value.byteLength;
+    if (length > MAX_DOCX_UPLOAD_BYTES) { await reader.cancel(); return Response.json({ error: '文档超过 8 MB 上限' }, { status: 413 }); }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks);
+}
 
 export function createDocumentsRouter(artifacts: ArtifactStore, sessions: SessionStore, reviews: ArtifactReviewStore) {
   const router = new Hono();
@@ -23,22 +38,24 @@ export function createDocumentsRouter(artifacts: ArtifactStore, sessions: Sessio
     const artifact = await artifacts.create({ sessionId: session.id, projectId: session.projectId, name: body.name, kind: 'doc', mimeType: DOCUMENT_MIME, source: 'manual', content: JSON.stringify(createDocumentContent()), origin: { surface: 'manual_edit' } });
     return c.json({ artifact }, 201);
   });
+  // Learn the layout of a reference document (范文) without adding it to the session.
+  router.post('/documents/reference-format', async (c) => {
+    const name = c.req.query('name')?.trim() ?? '';
+    if (!/\.docx$/i.test(name)) return c.json({ error: '请选择 .docx 文档' }, 400);
+    if (Number(c.req.header('content-length')) > MAX_DOCX_UPLOAD_BYTES) return c.json({ error: '文档超过 8 MB 上限' }, 413);
+    const bytes = await readUpload(c.req.raw);
+    if (bytes instanceof Response) return bytes;
+    const content = await importDocx(bytes);
+    return c.json({ spec: specFromContent(content, `范文：${name.replace(/\.docx$/i, '')}`) });
+  });
   router.post('/sessions/:sessionId/documents/import', async (c) => {
     const session = await sessions.get(c.req.param('sessionId'));
     if (!session) return c.json({ error: '会话不存在' }, 404);
     const name = c.req.query('name')?.trim() ?? '';
     if (!/\.docx$/i.test(name)) return c.json({ error: '请选择 .docx 文档' }, 400);
     if (Number(c.req.header('content-length')) > MAX_DOCX_UPLOAD_BYTES) return c.json({ error: '文档超过 8 MB 上限' }, 413);
-    const reader = c.req.raw.body?.getReader();
-    if (!reader) return c.json({ error: '文件为空' }, 400);
-    const chunks: Uint8Array[] = []; let length = 0;
-    for (;;) {
-      const { done, value } = await reader.read(); if (done) break;
-      length += value.byteLength;
-      if (length > MAX_DOCX_UPLOAD_BYTES) { await reader.cancel(); return c.json({ error: '文档超过 8 MB 上限' }, 413); }
-      chunks.push(value);
-    }
-    const bytes = Buffer.concat(chunks);
+    const bytes = await readUpload(c.req.raw);
+    if (bytes instanceof Response) return bytes;
     const content = await importDocx(bytes);
     const original = await artifacts.create({ sessionId: session.id, projectId: session.projectId, name, bytes, kind: 'binary', mimeType: DOCX_MIME, source: 'attachment' });
     try {

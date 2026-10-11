@@ -36,7 +36,7 @@ export type DocumentEdit = (
 
 const TOP_LEVEL_TYPES = ['paragraph', 'heading', 'bulletList', 'orderedList', 'blockquote', 'codeBlock', 'horizontalRule', 'table', 'image'];
 /** Attributes that carry source formatting; carried over when AI replaces a block. */
-export const FIDELITY_BLOCK_ATTRS = ['textAlign', 'indentLeft', 'indentFirst', 'spaceBefore', 'spaceAfter', 'lineSpacing', 'pStyle', 'pPrExtra', 'srcKey', 'srcHash', 'numId', 'tblPr'] as const;
+export const FIDELITY_BLOCK_ATTRS = ['textAlign', 'indentLeft', 'indentFirst', 'spaceBefore', 'spaceAfter', 'lineSpacing', 'lineExact', 'pStyle', 'pPrExtra', 'srcKey', 'srcHash', 'numId', 'tblPr'] as const;
 
 export function safeHex(value: unknown): string | null { const v = String(value ?? '').replace(/^#/, ''); return /^[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : null; }
 export function safeFont(value: unknown): string | null {
@@ -66,6 +66,8 @@ const DocxFidelity = Extension.create({
         spaceBefore: { default: null, renderHTML: (a: Attrs) => { const pt = twipsToPt(a.spaceBefore, 0); return pt === null ? {} : { style: `margin-top:${pt}pt` }; } },
         spaceAfter: { default: null, renderHTML: (a: Attrs) => { const pt = twipsToPt(a.spaceAfter, 0); return pt === null ? {} : { style: `margin-bottom:${pt}pt` }; } },
         lineSpacing: { default: null, renderHTML: (a: Attrs) => { const n = safeNumber(a.lineSpacing, 0.5, 5); return n === null ? {} : { style: `line-height:${n}` }; } },
+        /** Fixed line height in points (Word's "exactly"), as official documents use. */
+        lineExact: { default: null, renderHTML: (a: Attrs) => { const n = safeNumber(a.lineExact, 6, 200); return n === null ? {} : { style: `line-height:${n}pt` }; } },
         ...blockAttr('pStyle'), ...blockAttr('pPrExtra'),
       } },
       { types: TOP_LEVEL_TYPES, attributes: { ...blockAttr('srcKey', { keepOnSplit: false }), ...blockAttr('srcHash', { keepOnSplit: false }) } },

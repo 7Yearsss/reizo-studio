@@ -22,6 +22,9 @@ import { focusComposer, ReferenceStrip, ReviewLog, SaveStatus } from './workspac
 import ArtifactHistoryDialog from './ArtifactHistoryDialog';
 import DocumentReadOnly from './DocumentReadOnly';
 import ExportMenu from './ExportMenu';
+import FormatMenu, { FormatPreviewBar } from './FormatMenu';
+import { applyFormat, type FormatResult, type FormatSpec } from '../../../shared/documentFormat';
+import { toast } from '../../lib/toast';
 import InlineEditCard, { type InlineEditPhase } from './InlineEditCard';
 import { inlineEditDecorations, inlineEditMarksKey, inlineEditMarksPlugin } from './inlineEditMarks';
 
@@ -133,6 +136,8 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
   const [bubble, setBubble] = useState<{ top: number; left: number } | null>(null);
   const [edit, setEdit] = useState<{ selection: DocumentSelection; from: number; to: number; at: { top: number; left: number }; phase: InlineEditPhase; notice?: string } | null>(null);
   const stopped = useRef(false);
+  const saveLabel = useRef<'排版' | undefined>(undefined);
+  const [formatPreview, setFormatPreview] = useState<{ name: string; original: DocumentContent; result: FormatResult; view: 'after' | 'before' } | null>(null);
   const openEditRef = useRef<() => void>(() => { /* Assigned on every render below. */ });
   const aiBusy = useChatStore((state) => Boolean(state.sendingBySession[artifact.sessionId]));
   const aiWaiting = useChatStore((state) => Boolean(state.interactionBySession[artifact.sessionId]));
@@ -157,7 +162,8 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
         const normalized = normalizeDocumentContent(value.current);
         const raw = JSON.stringify(normalized);
         if (mounted.current) setStatus('正在保存…');
-        const saved = await api.addArtifactVersion(artifact.id, raw, version.current);
+        const label = saveLabel.current; saveLabel.current = undefined;
+        const saved = await api.addArtifactVersion(artifact.id, raw, version.current, label);
         version.current = saved.version;
         syncDocumentReferenceVersion(artifact.sessionId, artifact.id, saved.version);
         dirty.current = JSON.stringify(value.current) !== snapshot;
@@ -298,6 +304,44 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
       focusComposer(artifact.sessionId);
     });
   }
+  /** Typeset by a spec: shown on the page as a preview first; saved only when applied, as its own history entry. */
+  async function previewFormat(spec: FormatSpec) {
+    if (!editor || editor.isDestroyed || formatPreview) return;
+    let original: DocumentContent | undefined;
+    // `act` re-enables editing when it finishes, so the preview is set up after it.
+    await act(async () => { await flush(); original = value.current; });
+    if (!original || editor.isDestroyed) return;
+    const result = applyFormat(original, spec);
+    if (!result.changed) { toast.info('已经符合这个格式'); return; }
+    editor.setEditable(false, false);
+    editor.commands.setContent(result.content.doc, { emitUpdate: false });
+    setBubble(null); setSelection(undefined);
+    setFormatPreview({ name: spec.name, original, result, view: 'after' });
+  }
+  async function previewReferenceFormat(file: File) {
+    try { await previewFormat(await api.referenceFormat(file)); }
+    catch (cause) { toast.error(cause instanceof Error ? cause.message : '范文读取失败'); }
+  }
+  function showFormatView(view: 'after' | 'before') {
+    if (!editor || editor.isDestroyed || !formatPreview) return;
+    editor.commands.setContent((view === 'after' ? formatPreview.result.content : formatPreview.original).doc, { emitUpdate: false });
+    setFormatPreview({ ...formatPreview, view });
+  }
+  function cancelFormat() {
+    if (!editor || editor.isDestroyed || !formatPreview) return;
+    editor.commands.setContent(formatPreview.original.doc, { emitUpdate: false });
+    editor.setEditable(true, false);
+    setFormatPreview(null);
+  }
+  function applyFormatPreview() {
+    if (!editor || editor.isDestroyed || !formatPreview) return;
+    value.current = { ...formatPreview.result.content };
+    editor.commands.setContent(formatPreview.result.content.doc, { emitUpdate: false });
+    editor.setEditable(true, false);
+    dirty.current = true; saveLabel.current = '排版'; setStatus('尚未保存');
+    setFormatPreview(null);
+    void flush().then(() => toast.success('已应用格式，可在版本历史中还原'), (cause) => setError(cause instanceof Error ? cause.message : '保存失败'));
+  }
   openEditRef.current = openEdit;
   askRef.current = () => { if (!busy && !activeReview) askAI(selection); };
   async function decide(review: ArtifactReview, ids: string[], decision: 'accept' | 'reject') {
@@ -329,10 +373,12 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
         <SaveStatus status={status} version={version.current} failed={Boolean(error)} />
         <Button size="icon-sm" variant="ghost" className="size-7" aria-label="文档版本历史" title="版本历史" disabled={busy} onClick={() => void act(async () => { setHistory(true); })}><History /></Button>
         <Button size="xs" variant="ghost" title="检查全文一致性" disabled={busy || aiBusy || Boolean(activeReview)} onClick={() => void audit()}><ListChecks data-icon="inline-start" />检查</Button>
-        <ExportMenu disabled={busy} canTrackChanges={Boolean(value.current.docx?.groups?.length)} onExport={(revisions) => void act(async () => { download(await api.exportDocument(artifact.id, { revisions }), `${artifact.name.replace(/\.docx$/i, '')}${revisions ? '（修订）' : ''}.docx`); })} />
+        <FormatMenu disabled={busy || aiBusy || Boolean(activeReview) || Boolean(formatPreview)} onPick={(spec) => void previewFormat(spec)} onPickReference={(file) => void previewReferenceFormat(file)} />
+        <ExportMenu disabled={busy || Boolean(formatPreview)} canTrackChanges={Boolean(value.current.docx?.groups?.length)} onExport={(revisions) => void act(async () => { download(await api.exportDocument(artifact.id, { revisions }), `${artifact.name.replace(/\.docx$/i, '')}${revisions ? '（修订）' : ''}.docx`); })} />
       </div>
     </div>
-    {!activeReview && <ReferenceStrip attached={referenced.length ? (pickedRanges.length ? `${pickedRanges.length} 段选区${pickedRanges.length === 1 ? `「${pickedRanges[0].selection.text ?? ''}」` : '，可在对话里用 [编号] 分别说明'}` : '全文') : undefined}
+    {formatPreview && <FormatPreviewBar name={formatPreview.name} result={formatPreview.result} view={formatPreview.view} onView={showFormatView} onApply={applyFormatPreview} onCancel={cancelFormat} />}
+    {!activeReview && !formatPreview && <ReferenceStrip attached={referenced.length ? (pickedRanges.length ? `${pickedRanges.length} 段选区${pickedRanges.length === 1 ? `「${pickedRanges[0].selection.text ?? ''}」` : '，可在对话里用 [编号] 分别说明'}` : '全文') : undefined}
       hint={selection ? `已选 ${selection.text?.replace(/\n/g, '').length ?? 0} 字` : undefined}>
       <Button size="xs" variant="ghost" disabled={busy || !selection} title="把选中的文字加入对话，可多次添加（Ctrl+L）" onClick={() => askAI(selection)}><Quote data-icon="inline-start" />{pickedRanges.length ? '再加一段' : '引用选段'}</Button>
       <Button size="xs" variant="ghost" disabled={busy} onClick={() => askAI(undefined)}>引用全文</Button>
@@ -348,7 +394,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
       <div className="mx-auto my-3 w-[calc(100%-1.5rem)] max-w-[816px] rounded-sm border border-line bg-paper shadow-sm" onClick={(event) => { if (event.target === event.currentTarget) editor?.commands.focus('end'); }}>
         <EditorContent editor={editor} />
       </div>
-      {bubble && selection && !busy && !edit && (
+      {bubble && selection && !busy && !edit && !formatPreview && (
         <div className="absolute z-20 -translate-x-1/2" style={{ top: bubble.top, left: bubble.left }} onMouseDown={(event) => event.preventDefault()}>
           <div className="pop-in flex h-8 items-stretch whitespace-nowrap rounded-[10px] bg-ink text-[12px] font-medium text-paper-raised shadow-[0_6px_20px_rgba(25,47,80,0.22)]">
             <button type="button" title="让 AI 直接改写所选内容" onClick={openEdit} className="flex items-center gap-1.5 rounded-l-[10px] pl-2.5 pr-2 transition-colors hover:bg-paper-raised/10">

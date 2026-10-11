@@ -138,8 +138,8 @@ function paragraphXml(node: JSONContent, w: Writer, opts: ParaOptions = {}): str
   if (typeof a.pPrExtra === 'string' && a.pPrExtra) {
     try { const holder = parseXml(`<x>${a.pPrExtra}</x>`).children[0]; for (const el of elements(holder)) parts.push({ name: el.name, xml: a.pPrExtra.slice(el.start - 3, el.end - 3) }); } catch { /* ignore malformed extras */ }
   }
-  const before = num(a.spaceBefore); const after = num(a.spaceAfter); const line = num(a.lineSpacing);
-  if (before !== undefined || after !== undefined || line !== undefined) parts.push({ name: 'w:spacing', xml: `<w:spacing${before !== undefined ? ` w:before="${Math.round(before)}"` : ''}${after !== undefined ? ` w:after="${Math.round(after)}"` : ''}${line !== undefined ? ` w:line="${Math.round(line * 240)}" w:lineRule="auto"` : ''}/>` });
+  const before = num(a.spaceBefore); const after = num(a.spaceAfter); const exact = num(a.lineExact); const line = exact === undefined ? num(a.lineSpacing) : undefined;
+  if (before !== undefined || after !== undefined || line !== undefined || exact !== undefined) parts.push({ name: 'w:spacing', xml: `<w:spacing${before !== undefined ? ` w:before="${Math.round(before)}"` : ''}${after !== undefined ? ` w:after="${Math.round(after)}"` : ''}${exact !== undefined ? ` w:line="${Math.round(exact * 20)}" w:lineRule="exact"` : line !== undefined ? ` w:line="${Math.round(line * 240)}" w:lineRule="auto"` : ''}/>` });
   const left = (num(a.indentLeft) ?? 0) + (opts.indentExtra ?? 0); const first = num(a.indentFirst);
   if (left || first) parts.push({ name: 'w:ind', xml: `<w:ind${left ? ` w:left="${Math.round(left)}"` : ''}${first ? (first < 0 ? ` w:hanging="${Math.round(-first)}"` : ` w:firstLine="${Math.round(first)}"`) : ''}/>` });
   const jc = { left: 'left', center: 'center', right: 'right', justify: 'both' }[String(a.textAlign) as 'left'];

@@ -444,7 +444,7 @@ export function createArtifactStore(handle: DbHandle, dataRoot: string) {
       // Autosave appends a full-content row every few seconds of typing. Plain manual saves are
       // therefore (1) skipped when nothing changed and (2) folded into the previous manual save
       // when it is recent, so history keeps meaningful steps instead of every pause.
-      const plainManual = input.origin.surface === 'manual_edit' && input.label === undefined && prepared.storage === 'inline';
+      const plainManual = input.origin.surface === 'manual_edit' && (input.label === undefined || input.label === 'Manual edit') && prepared.storage === 'inline';
       let foldPrevious = false;
       if (plainManual) {
         const head = selVersion.get(id, row.current_version) as unknown as VersionRowRaw | undefined;

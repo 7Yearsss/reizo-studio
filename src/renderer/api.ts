@@ -546,11 +546,11 @@ export async function getArtifactVersions(id: string): Promise<ArtifactVersion[]
   return versions;
 }
 
-export async function addArtifactVersion(id: string, content: string, expectedVersion?: number): Promise<ArtifactWithContent> {
+export async function addArtifactVersion(id: string, content: string, expectedVersion?: number, label?: '排版'): Promise<ArtifactWithContent> {
   const res = await api(`/api/artifacts/${id}/versions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ content, expectedVersion }),
+    body: JSON.stringify({ content, expectedVersion, ...(label ? { label } : {}) }),
   });
   const { artifact } = await res.json();
   return artifact;
@@ -591,6 +591,10 @@ export async function createDocument(sessionId: string, name: string): Promise<A
 }
 export async function importDocument(sessionId: string, file: File): Promise<ArtifactWithContent> {
   return (await (await api(`/api/sessions/${sessionId}/documents/import?name=${encodeURIComponent(file.name)}`, { method: 'POST', body: file })).json()).artifact;
+}
+/** The layout a reference .docx already has, as a spec to typeset another document by. */
+export async function referenceFormat(file: File): Promise<import('../shared/documentFormat').FormatSpec> {
+  return (await (await api(`/api/documents/reference-format?name=${encodeURIComponent(file.name)}`, { method: 'POST', body: file })).json()).spec;
 }
 export async function importPresentation(sessionId: string, file: File): Promise<ArtifactWithContent> {
   return (await (await api(`/api/sessions/${sessionId}/presentations/import?name=${encodeURIComponent(file.name)}`, { method: 'POST', body: file })).json()).artifact;
