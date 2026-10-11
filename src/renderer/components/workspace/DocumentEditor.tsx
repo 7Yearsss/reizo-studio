@@ -248,7 +248,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
     {!activeReview && <ReferenceStrip attached={referenced.length ? (pickedRanges.length ? `${pickedRanges.length} 段选区${pickedRanges.length === 1 ? `「${pickedRanges[0].selection.text ?? ''}」` : '，可在对话里用 [编号] 分别说明'}` : '全文') : undefined}
       hint={selections.length ? `已选 ${selections.reduce((n, s) => n + s.end - s.start, 0)} 个字符${selections.length > 1 ? `（${selections.length} 段）` : ''} · Ctrl+L 加入对话，可连续添加多段` : '选中文字交给 AI 修改（可添加多段），或把全文作为上下文'}>
       <Button size="xs" variant="ghost" disabled={busy || !selections.length} title="把选中的文字加入对话，可多次添加（Ctrl+L）" onClick={() => askAI(selections)}><Quote data-icon="inline-start" />{pickedRanges.length ? '再加一段' : '引用选段'}</Button>
-      <Button size="xs" variant="ghost" disabled={busy} onClick={() => askAI(undefined)}>引用全文</Button>
+      <Button size="xs" variant="ghost" disabled={busy} onClick={() => askAI([])}>引用全文</Button>
     </ReferenceStrip>}
     {error && <Alert variant="destructive" className="rounded-none border-x-0 border-t-0"><AlertDescription>{error}<div className="mt-2 flex gap-2"><Button size="xs" variant="outline" onClick={() => void flush().catch((): void => { /* Error is shown by the save/review handler. */ })}>重试保存</Button><Button size="xs" variant="outline" onClick={() => void recover().catch((cause) => setError(String(cause)))}>下载恢复副本并重新载入</Button></div></AlertDescription></Alert>}
     <div ref={scroller} onScroll={() => setBubble(null)} className={cn('relative min-h-0 flex-1 overflow-auto bg-paper-inset', activeReview && 'hidden')}>

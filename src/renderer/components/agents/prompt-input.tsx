@@ -70,7 +70,27 @@ export interface PromptInputProps extends Omit<
   minRows?: number;
   maxRows?: number;
   leadingAction?: ReactNode;
+  /** Tokens in the draft (e.g. `[1]`) drawn as inline chips behind the text. Must be global; width is unchanged so the caret stays put. */
+  chipPattern?: RegExp;
   className?: string;
+}
+
+/** Splits the draft so each token gets a background that sits exactly under its own characters. */
+function renderChips(text: string, pattern: RegExp): ReactNode[] {
+  const out: ReactNode[] = [];
+  let last = 0;
+  for (const match of text.matchAll(pattern)) {
+    const at = match.index ?? 0;
+    if (at > last) out.push(text.slice(last, at));
+    out.push(
+      <mark key={at} className="rounded-[6px] bg-foreground/10 text-transparent shadow-[0_0_0_2px_color-mix(in_srgb,var(--foreground)_10%,transparent)]">
+        {match[0]}
+      </mark>,
+    );
+    last = at + match[0].length;
+  }
+  out.push(`${text.slice(last)}\u200b`);
+  return out;
 }
 
 export function PromptInput({
@@ -92,6 +112,7 @@ export function PromptInput({
   minRows = 2,
   maxRows = 8,
   leadingAction,
+  chipPattern,
   className,
   disabled,
   placeholder = "Ask the agent to do something…",
@@ -101,6 +122,7 @@ export function PromptInput({
 }: PromptInputProps) {
   const reduce = useReducedMotion() ?? false;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const chipLayerRef = useRef<HTMLDivElement>(null);
   const measurementRef = useRef<HTMLDivElement>(null);
   const [internalValue, setInternalValue] = useState(defaultValue);
   const [internalModel, setInternalModel] = useState(
@@ -206,18 +228,30 @@ export function PromptInput({
       >
         {`${currentValue}\u200b`}
       </div>
-      <textarea
-        ref={textareaRef}
-        value={currentValue}
-        disabled={disabled}
-        placeholder={placeholder}
-        aria-label={ariaLabel}
-        rows={minRows}
-        {...textareaProps}
-        onChange={(event) => setValue(event.target.value)}
-        onKeyDown={handleKeyDown}
-        className="scrollbar-hide block w-full resize-none overflow-y-auto bg-transparent px-2 pt-1.5 text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground/55"
-      />
+      <div className="relative">
+        {chipPattern && currentValue && (
+          <div
+            ref={chipLayerRef}
+            aria-hidden="true"
+            className="scrollbar-hide pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap px-2 pt-1.5 text-sm leading-6 text-transparent [overflow-wrap:break-word]"
+          >
+            {renderChips(currentValue, chipPattern)}
+          </div>
+        )}
+        <textarea
+          ref={textareaRef}
+          value={currentValue}
+          disabled={disabled}
+          placeholder={placeholder}
+          aria-label={ariaLabel}
+          rows={minRows}
+          {...textareaProps}
+          onChange={(event) => setValue(event.target.value)}
+          onKeyDown={handleKeyDown}
+          onScroll={(event) => { if (chipLayerRef.current) chipLayerRef.current.scrollTop = event.currentTarget.scrollTop; textareaProps.onScroll?.(event); }}
+          className="scrollbar-hide relative block w-full resize-none overflow-y-auto bg-transparent px-2 pt-1.5 text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground/55"
+        />
+      </div>
 
       <div className="mt-1 flex min-h-8 min-w-0 items-center gap-1">
         {actions.length ? (

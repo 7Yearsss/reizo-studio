@@ -153,7 +153,17 @@ export default function Composer({
 
   /** Write [n] into the draft so the instruction that follows is tied to picked range n. */
   function citeReference(label: number) {
-    setDraft((d) => `${d}${d && !/\s$/.test(d) ? ' ' : ''}[${label}] `);
+    const area = composerBodyRef.current?.querySelector('textarea') ?? null;
+    const at = area && document.activeElement === area ? [area.selectionStart, area.selectionEnd] : null;
+    const token = `[${label}]`;
+    setDraft((d) => {
+      // Insert at the caret when the user is typing; otherwise append, as before.
+      const [from, to] = at ?? [d.length, d.length];
+      const before = d.slice(0, from);
+      const spaced = `${before && !/\s$/.test(before) ? ' ' : ''}${token} `;
+      requestAnimationFrame(() => { const pos = before.length + spaced.length; area?.setSelectionRange(pos, pos); area?.focus(); });
+      return `${before}${spaced}${d.slice(to)}`;
+    });
   }
 
   function buildSubmitPayload() {
@@ -672,6 +682,7 @@ export default function Composer({
               />
               <PromptInput
                 value={draft}
+                chipPattern={/\[\d+\]/g}
                 onValueChange={setDraft}
                 onSubmit={() => submit()}
                 loading={Boolean(sending && !interaction)}
