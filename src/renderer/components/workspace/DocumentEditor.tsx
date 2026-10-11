@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EditorContent, useEditor, useEditorState, type Editor as TiptapEditor } from '@tiptap/react';
-import { Bold, Italic, Underline, Strikethrough, List, ListOrdered, Table, Undo2, Redo2, Quote, History, Sparkles, Info, PenLine, ListChecks, Search } from 'lucide-react';
+import { Bold, Italic, Underline, Strikethrough, List, ListOrdered, Table, Undo2, Redo2, Quote, History, Sparkles, Info, PenLine, ListChecks, Search, ListTree } from 'lucide-react';
 import type { Artifact, ArtifactWithContent } from '../../../shared/artifact';
 import type { ArtifactReview } from '../../../shared/artifactReview';
 import { documentExtensions, documentSelectionIntact, documentSelectionBetween, normalizeDocumentContent, parseDocumentContent, typographyCss, type DocumentContent, type DocumentSelection } from '../../../shared/documentContent';
@@ -25,6 +25,7 @@ import ExportMenu from './ExportMenu';
 import FormatMenu, { FormatPreviewBar } from './FormatMenu';
 import FormatControls from './FormatControls';
 import FindBar from './FindBar';
+import OutlinePanel from './OutlinePanel';
 import { docSearchKey, docSearchPlugin } from './docSearch';
 import { applyFormat, type FormatResult, type FormatSpec } from '../../../shared/documentFormat';
 import { toast } from '../../lib/toast';
@@ -140,6 +141,8 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
   const [bubble, setBubble] = useState<{ top: number; left: number } | null>(null);
   const [edit, setEdit] = useState<{ selection: DocumentSelection; from: number; to: number; at: { top: number; left: number }; phase: InlineEditPhase; notice?: string } | null>(null);
   const stopped = useRef(false);
+  const [outlineOpen, setOutlineOpen] = useState(() => { try { return localStorage.getItem('reizo:doc-outline') === '1'; } catch { return false; } });
+  const toggleOutline = () => setOutlineOpen((open) => { try { localStorage.setItem('reizo:doc-outline', open ? '0' : '1'); } catch { /* the choice just is not remembered */ } return !open; });
   const [find, setFind] = useState<{ replace: boolean; initial: string; nonce: number } | null>(null);
   const openFindRef = useRef<(replace: boolean) => void>(() => { /* Assigned on every render below. */ });
   const saveLabel = useRef<'排版' | undefined>(undefined);
@@ -417,6 +420,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
       <div className="ml-auto flex items-center gap-1 pl-2">
         <SaveStatus status={status} version={version.current} failed={Boolean(error)} />
         <Button size="icon-sm" variant="ghost" className="size-7" aria-label="文档版本历史" title="版本历史" disabled={busy} onClick={() => void act(async () => { setHistory(true); })}><History /></Button>
+        <Button size="icon-sm" variant="ghost" className={cn('size-7', outlineOpen && 'bg-paper-inset text-ink')} aria-label="大纲" aria-pressed={outlineOpen} title="大纲" onClick={toggleOutline}><ListTree /></Button>
         <Button size="icon-sm" variant="ghost" className="size-7" aria-label="查找" title="查找和替换（Ctrl+F）" onClick={() => openFind(false)}><Search /></Button>
         <Button size="xs" variant="ghost" title="改写所选内容或光标所在段落（Ctrl+J）" disabled={busy || aiBusy || Boolean(activeReview) || Boolean(formatPreview)} onClick={openEdit}><PenLine data-icon="inline-start" />改写</Button>
         <Button size="xs" variant="ghost" title="检查全文一致性" disabled={busy || aiBusy || Boolean(activeReview)} onClick={() => void audit()}><ListChecks data-icon="inline-start" />检查</Button>
@@ -431,7 +435,9 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
       <Button size="xs" variant="ghost" disabled={busy} onClick={() => askAI(undefined)}>引用全文</Button>
     </ReferenceStrip>}
     {error && <Alert variant="destructive" className="rounded-none border-x-0 border-t-0"><AlertDescription>{error}<div className="mt-2 flex gap-2"><Button size="xs" variant="outline" onClick={() => void flush().catch((): void => { /* Error is shown by the save/review handler. */ })}>重试保存</Button><Button size="xs" variant="outline" onClick={() => void recover().catch((cause) => setError(String(cause)))}>下载恢复副本并重新载入</Button></div></AlertDescription></Alert>}
-    <div ref={scroller} onPointerDown={() => { pointerDown.current = true; if (edit?.phase === 'input') closeEdit(false); }} onScroll={() => setBubble(null)} className={cn('relative min-h-0 flex-1 overflow-auto bg-paper-inset', activeReview && 'hidden')}>
+    <div className="flex min-h-0 flex-1">
+    {outlineOpen && !activeReview && editor && <OutlinePanel editor={editor} scroller={scroller.current} />}
+    <div ref={scroller} onPointerDown={() => { pointerDown.current = true; if (edit?.phase === 'input') closeEdit(false); }} onScroll={() => setBubble(null)} className={cn('relative min-h-0 min-w-0 flex-1 overflow-auto bg-paper-inset', activeReview && 'hidden')}>
       {find && editor && (
         <div className="sticky top-0 z-20 h-0">
           <FindBar key={find.nonce} editor={editor} scroller={scroller.current} replaceOpen={find.replace} initialQuery={find.initial}
@@ -477,6 +483,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
         </div>
       )}
       <ReviewLog reviews={reviews} className="mx-auto mb-4 w-[calc(100%-1.5rem)] max-w-[816px]" />
+    </div>
     </div>
     {activeReview && <DocumentReview key={activeReview.id} review={activeReview} otherBatches={pendingBatches - 1} acceptEverything={() => void acceptEverything()} busy={busy} decide={(review, ids, decision) => void decide(review, ids, decision)} revise={(review, change, text) => act(async () => {
       await api.reviseArtifactReview(artifact.id, review.id, change.id, review.reviewVersion, { ...(change.operation as object), text }); await refreshReviews();
