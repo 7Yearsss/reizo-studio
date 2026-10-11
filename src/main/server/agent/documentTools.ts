@@ -4,6 +4,7 @@ import { applyDocumentEdit, DOCUMENT_MIME, documentBlocks, documentEditWithinSel
 import type { DocumentReference } from '../../../shared/documentReferences';
 import type { ArtifactStore } from '../storage/artifactStore';
 import type { ArtifactReviewStore } from '../storage/artifactReviewStore';
+import { checkDocument } from '../../../shared/documentChecks';
 import { documentEditSchema } from './documentReviewAdapter';
 import { documentFromHtml } from './documentIO';
 import { takeWithinBudget } from './readBudget';
@@ -32,6 +33,22 @@ export function createDocumentTools(options: { sessionId: string; projectId?: st
         return { ok: true, artifactId, name: artifact.name, version: artifact.version, selections: references().filter((r) => r.artifactId === artifactId && r.selection).map((r) => ({ ...r.selection, label: r.label })),
           pendingReviews: reviews.list(artifactId).filter((r) => r.changes.some((c) => c.status === 'pending')).map((r) => ({ id: r.id, stale: r.stale, changes: r.changes.length })),
           totalBlocks: blocks.length, returned: shown.length, nextOffset: !blockId && offset + shown.length < blocks.length ? offset + shown.length : null, blocks: shown };
+      },
+    }),
+    check_document: tool({
+      description: '对 Doc 文档做确定性的全文一致性检查：序号跳号或重复、中文里的半角标点、日期和数字写法不统一、多余空格、重复用字与重复段落，以及术语统一（可传 terms）。返回带 blockId 和字符偏移的问题清单，有明确修法的附 replacement。只检查，不修改；据此调用 propose_document_edits 的 replaceText（用返回的 version）生成待审核修改，不要漏报也不要编造清单里没有的问题。',
+      inputSchema: z.object({
+        artifactId: z.string(),
+        terms: z.array(z.object({ preferred: z.string().min(1).max(60), variants: z.array(z.string().min(1).max(60)).min(1).max(10) })).max(20).optional(),
+        max: z.number().int().min(1).max(200).optional(),
+      }),
+      execute: async ({ artifactId, terms, max }) => {
+        const artifact = await artifacts.get(artifactId);
+        if (!artifact || artifact.sessionId !== sessionId || artifact.kind !== 'doc') return { ok: false, error: '未找到本会话文档' };
+        const content = parseDocumentContent(artifact.content);
+        if (!content) return { ok: false, error: '文档格式无效' };
+        const result = checkDocument(documentBlocks(content).map((b) => ({ id: b.id, type: b.type, text: b.text })), { terms, max });
+        return { ok: true, artifactId, name: artifact.name, version: artifact.version, ...result, note: result.total > result.findings.length ? `仅返回前 ${result.findings.length} 条，共 ${result.total} 条；修完后可再次检查。` : undefined };
       },
     }),
     generate_document: tool({

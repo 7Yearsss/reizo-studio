@@ -18,6 +18,7 @@ export const TOOL_OUTPUT_BUDGETS: Record<string, number> = {
   read_sheet: READ_TOOL_CLIP,
   read_presentation: READ_TOOL_CLIP,
   read_html: READ_TOOL_CLIP,
+  check_document: READ_TOOL_CLIP,
 };
 
 /**
