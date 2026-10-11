@@ -4,6 +4,11 @@ import { CalculationMode, UniverSheetsCorePreset } from '@univerjs/preset-sheets
 // eslint-disable-next-line import/no-unresolved
 import sheetsZhCN from '@univerjs/preset-sheets-core/locales/zh-CN';
 import { CommandType, createUniver, defaultTheme, LocaleType } from '@univerjs/presets';
+
+// Univer 0.25 asks for `sheets-ui.info.*` when a typed number is stored as text, but ships those strings under
+// `sheets-numfmt-ui`, so the hint over such cells showed raw keys. Mirror them where they are looked up.
+const sheetsUi = (sheetsZhCN as Record<string, { info?: Record<string, string> } | undefined>)['sheets-ui'];
+const zhCNLocale = { ...sheetsZhCN, 'sheets-ui': { ...sheetsUi, info: { ...sheetsUi?.info, error: '提示', forceStringInfo: '以文本形式存储的数字' } } };
 import type { ArtifactRenderProps } from './types';
 import { compactToUniverSnapshot, parseSheetContent, replaceUniverSnapshot, serializeSheetContent, type SheetArtifactContent } from '../../../../shared/sheetContent';
 import { clearActiveSheet, publishSheetSelection, registerSheetFlusher } from '../../../state/sheetWorkspace';
@@ -151,7 +156,7 @@ export default function SheetRenderer({ artifact, text, onCommitDraft, initialDi
       if (started) { window.dispatchEvent(new Event('resize')); return; }
       started = true;
       try {
-        const created = createUniver({ locale: LocaleType.ZH_CN, locales: { [LocaleType.ZH_CN]: sheetsZhCN }, theme: defaultTheme, darkMode: document.documentElement.classList.contains('dark'),
+        const created = createUniver({ locale: LocaleType.ZH_CN, locales: { [LocaleType.ZH_CN]: zhCNLocale }, theme: defaultTheme, darkMode: document.documentElement.classList.contains('dark'),
           presets: [UniverSheetsCorePreset({ container: engineHost, header: true, toolbar: true, formulaBar: true, formula: { initialFormulaComputing: CalculationMode.FORCED }, footer: { sheetBar: true, statisticBar: true, menus: true, zoomSlider: true } })] });
         univer = created.univer;
         api = created.univerAPI as unknown as UniverAPI;
