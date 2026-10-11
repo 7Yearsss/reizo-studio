@@ -15,6 +15,10 @@
   --accent: #1c1d1e; --accent-ink: #ffffff; --destructive: #c43128; --success: #1a7f4b;
   background: #ffffff; color: var(--ink); color-scheme: light;
   line-height: 1.8; overflow-wrap: anywhere;
+  /* Imported .docx tables carry absolute column widths (twips → px) that can exceed the
+     panel; a fixed-layout table grows to their sum, so scroll the sheet instead of
+     letting the table spill past the panel edge. */
+  max-width: 100%; overflow-x: auto;
 }
 .document-prose p { margin: .6em 0; }
 .document-prose h1 { font-size: 2em; font-weight: 700; margin: .8em 0; }
