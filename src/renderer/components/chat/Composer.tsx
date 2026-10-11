@@ -401,7 +401,7 @@ export default function Composer({
         )}
         {loopNotice && (
           <div
-            className="mb-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-ink"
+            className="mb-2 rounded-lg bg-[var(--peach)] px-3 py-2 text-[12px] text-[var(--peach-ink)]"
             role="status"
           >
             ⚠ {loopNotice}
@@ -474,10 +474,10 @@ export default function Composer({
               <div className={cn("mb-2 flex flex-wrap gap-1.5", compact && "max-h-24 overflow-y-auto pr-0.5")}>
                 {sessionId && unpinnedSelectionNodes.length > 0 && (
                   <div
-                    className="group inline-flex items-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 py-0.5 pl-1.5 pr-2 text-xs shadow-sm backdrop-blur-sm transition-all hover:border-sky-500/60 hover:bg-sky-500/15"
+                    className="group inline-flex items-center gap-1.5 rounded-lg bg-paper-inset py-0.5 pl-1.5 pr-2 text-xs text-ink transition-colors hover:bg-[var(--pss,var(--line))]"
                     title="画布当前选区 · 发送消息时自动作为上下文带入"
                   >
-                    <span className="flex h-5 w-5 items-center justify-center rounded bg-sky-500/20 text-sky-400 shrink-0" title="画布选中">
+                    <span className="flex h-5 w-5 items-center justify-center rounded bg-paper-raised text-ink-muted shrink-0" title="画布选中">
                       <BoxSelect size={12} />
                     </span>
                     <div className="flex items-center -space-x-1.5 hover:space-x-1 transition-all overflow-hidden py-0.5">
@@ -498,7 +498,7 @@ export default function Composer({
                                 className="h-5 w-5 rounded object-cover border border-white/20 shadow-xs transition-transform group-hover/thumb:scale-110"
                               />
                             ) : (
-                              <span className="flex h-5 w-5 items-center justify-center rounded border border-sky-400/30 bg-sky-950/60 text-sky-200 text-[9px] font-medium uppercase">
+                              <span className="flex h-5 w-5 items-center justify-center rounded bg-paper-raised text-ink-muted text-[11px] font-medium uppercase">
                                 {node.type.slice(0, 2)}
                               </span>
                             )}
@@ -517,12 +517,12 @@ export default function Composer({
                         );
                       })}
                     </div>
-                    <span className="text-[11px] font-medium text-sky-200">
+                    <span className="text-[11px] font-medium text-ink">
                       选区 {unpinnedSelectionNodes.length}
                     </span>
                     <button
                       type="button"
-                      className="ml-0.5 flex h-4 w-4 items-center justify-center rounded-full text-sky-300 hover:bg-sky-400/20 hover:text-white transition-colors cursor-pointer"
+                      className="ml-0.5 flex h-4 w-4 items-center justify-center rounded-full text-ink-muted hover:bg-line hover:text-ink transition-colors cursor-pointer"
                       title="固定为引用 · 之后可继续点选其他节点逐个累积"
                       onClick={() => {
                         if (!sessionId) return;
@@ -538,7 +538,7 @@ export default function Composer({
                     </button>
                     <button
                       type="button"
-                      className="ml-0.5 flex h-4 w-4 items-center justify-center rounded-full text-sky-300 hover:bg-sky-400/20 hover:text-white transition-colors cursor-pointer text-[12px] leading-none"
+                      className="ml-0.5 flex h-4 w-4 items-center justify-center rounded-full text-ink-muted hover:bg-line hover:text-ink transition-colors cursor-pointer text-[12px] leading-none"
                       onClick={() => canvasStore.clearSelection(sessionId)}
                       title="清空画布选区"
                     >
@@ -616,8 +616,8 @@ export default function Composer({
               </div>
             )}
             <div className={cn(
-              'rounded-2xl border bg-paper-raised p-2 shadow-[0_8px_30px_rgba(28,22,18,0.06)] transition-colors',
-              draggingFiles ? 'border-accent ring-2 ring-accent/40' : 'border-line',
+              'rounded-3xl border bg-paper-raised p-2 shadow-[var(--shadow-outline),0_12px_32px_rgba(30,55,85,0.05)] transition-colors',
+              draggingFiles ? 'border-accent ring-2 ring-accent/40' : 'border-transparent',
             )}>
               {liveStatus ? <div className="mb-2 px-2">{liveStatus}</div> : null}
               {activeSkill && (

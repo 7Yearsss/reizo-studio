@@ -3,6 +3,7 @@ import { ToolResult, ToolResultOutput } from '../agents/tool-result';
 import { ImageGeneration } from '../agents/image-generation';
 import { getResolvedApiOrigin } from '../../api';
 import DiffView from './LazyDiffView';
+import DeliverableCard, { deliverableOf } from './DeliverableCard';
 import { toolDetail, toolDiffPreview, toolLabel, toolTarget } from './toolDisplay';
 
 export default function ToolCard({ part, collapsed = false }: { part: ToolCallPart; collapsed?: boolean }) {
@@ -106,6 +107,9 @@ export default function ToolCard({ part, collapsed = false }: { part: ToolCallPa
       </ToolResult>
     );
   }
+
+  const deliverable = deliverableOf(part);
+  if (deliverable) return <DeliverableCard part={part} file={deliverable} />;
 
   const detail = toolDetail(part);
   const target = toolTarget(part);
