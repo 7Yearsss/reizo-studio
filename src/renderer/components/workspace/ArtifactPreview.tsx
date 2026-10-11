@@ -135,14 +135,14 @@ function GeneralArtifactPreview({
         <span className="min-w-0 flex-1 truncate text-xs font-medium">
           {artifact.name}
           {(!isLatest || hasHistory) && (
-            <span className="ml-1.5 text-[10px] text-ink-muted">v{version}</span>
+            <span className="ml-1.5 text-[11px] text-ink-muted">v{version}</span>
           )}
         </span>
         {artifact.status === 'streaming' && (
-          <span className="rounded bg-accent/10 px-1.5 text-[10px] text-accent">生成中…</span>
+          <span className="rounded bg-accent/10 px-1.5 text-[11px] text-accent">生成中…</span>
         )}
         {artifact.status === 'error' && (
-          <span className="rounded bg-red-500/10 px-1.5 text-[10px] text-red-500">中断</span>
+          <span className="rounded bg-red-500/10 px-1.5 text-[11px] text-red-500">中断</span>
         )}
         {isText && (
           <button

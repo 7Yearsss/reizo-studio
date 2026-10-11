@@ -72,7 +72,7 @@ export default function MarkdownRenderer({ text, onCommitDraft }: ArtifactRender
           <ModeButton active={mode === 'preview'} onClick={() => setMode('preview')} icon={<Eye size={12} />} label="预览" />
           <ModeButton active={mode === 'split'} onClick={() => setMode('split')} icon={<Columns2 size={12} />} label="分屏" />
           <ModeButton active={mode === 'editor'} onClick={() => setMode('editor')} icon={<Pencil size={12} />} label="编辑" />
-          <span className="ml-auto text-[10px] text-ink-muted">
+          <span className="ml-auto text-[11px] text-ink-muted">
             {saveState === 'saving' ? '保存中…' : saveState === 'saved' ? `已保存 · ${savedAtRef.current}` : ''}
           </span>
         </div>

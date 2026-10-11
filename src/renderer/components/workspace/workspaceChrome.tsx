@@ -61,8 +61,8 @@ export function WorkspaceShell({ icon, title, noun, items, selected, flush, sele
     onDragLeave={() => { dragDepth.current = Math.max(0, dragDepth.current - 1); if (!dragDepth.current) setDragging(false); }}
     onDrop={(event) => { event.preventDefault(); dragDepth.current = 0; setDragging(false); if (!busy) upload(Array.from(event.dataTransfer.files)); }}>
     <input ref={input} type="file" hidden accept={accept} multiple={multiple} onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ''; upload(files); }} />
-    <div className="flex items-center gap-2 border-b border-line p-2">
-      <span className="shrink-0 text-accent [&_svg]:size-4">{icon}</span>
+    <div className="flex h-[52px] shrink-0 items-center gap-2 border-b border-line px-3">
+      <span className="flex size-8 shrink-0 items-center justify-center rounded-[9px] bg-paper-inset text-ink [&_svg]:size-4">{icon}</span>
       <div className="min-w-0 flex-1"><Select value={selected?.id ?? ''} disabled={Boolean(busy) || !items.length} onValueChange={(id) => void action('switch', async () => { select(id); })}>
         <SelectTrigger size="sm" className="w-full" aria-label={`选择${noun}`}><SelectValue placeholder={title} /></SelectTrigger>
         <SelectContent><SelectGroup>{items.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectGroup></SelectContent>
@@ -79,7 +79,7 @@ export function WorkspaceShell({ icon, title, noun, items, selected, flush, sele
         <Button size="sm" variant="outline" disabled={Boolean(busy)} onClick={pickFile}><Upload data-icon="inline-start" />{importLabel}</Button>
       </div><p className="text-xs text-ink-muted">或把文件拖到这里（{importHint}）</p></EmptyContent>
     </Empty>}
-    {dragging && <div className="pointer-events-none absolute inset-2 z-30 flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-accent bg-paper/90 text-sm text-ink" aria-hidden>
+    {dragging && <div className="pointer-events-none absolute inset-2 z-30 flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-accent bg-paper-raised/90 text-sm text-ink" aria-hidden>
       <FileUp className="size-6 text-accent" />松开即可{importLabel}<span className="text-xs text-ink-muted">{importHint}</span>
     </div>}
   </div>;
@@ -89,15 +89,15 @@ export function WorkspaceShell({ icon, title, noun, items, selected, flush, sele
 export function SaveStatus({ status, version, failed }: { status: string; version: number; failed: boolean }) {
   const saving = status === '正在保存…'; const saved = status === '已保存';
   return <span role="status" className={cn('flex shrink-0 items-center gap-1 text-xs tabular-nums', failed ? 'text-destructive' : 'text-ink-muted')} title={`版本 v${version}`}>
-    {failed ? <CircleAlert className="size-3" /> : saving ? <Loader2 className="size-3 animate-spin" /> : saved ? <Check className="size-3" /> : <span aria-hidden className="size-1.5 rounded-full bg-amber-500" />}
+    {failed ? <CircleAlert className="size-3" /> : saving ? <Loader2 className="size-3 animate-spin" /> : saved ? <Check className="size-3" /> : <span aria-hidden className="size-1.5 rounded-full bg-[var(--peach-bar)]" />}
     {status} · v{version}
   </span>;
 }
 
 /** The strip under an editor's toolbar that hands content to the chat: what is attached, plus the reference buttons. */
 export function ReferenceStrip({ attached, hint, children }: { attached?: string; hint: string; children: ReactNode }) {
-  return <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-line bg-paper-inset/60 px-3 py-1 text-xs" data-inline-edit-ignore="true">
-    <Sparkles className="size-3.5 shrink-0 text-accent" />
+  return <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-line bg-paper-inset px-4 py-2 text-xs" data-inline-edit-ignore="true">
+    <Sparkles className="size-3.5 shrink-0 text-ink-muted" />
     <span className={cn('min-w-0 flex-1 truncate', attached ? 'text-ink' : 'text-ink-muted')} title={attached ?? hint}>{attached ? `已引用到对话：${attached}` : hint}</span>
     <div className="flex shrink-0 items-center gap-0.5">{children}</div>
   </div>;
@@ -108,9 +108,9 @@ export function ReviewLog({ reviews, className }: { reviews: ArtifactReview[]; c
   const done = reviews.flatMap((r) => r.changes.filter((c) => c.status !== 'pending'));
   if (!done.length) return null;
   const accepted = done.filter((c) => c.status === 'accepted').length;
-  return <details className={cn('rounded-md border border-line bg-paper px-3 py-2', className)}><summary className="cursor-pointer text-xs text-ink-muted">审核记录 · 接受 {accepted} · 拒绝 {done.length - accepted}</summary>
+  return <details className={cn('rounded-xl bg-paper-raised px-3 py-2 shadow-[var(--shadow-outline)]', className)}><summary className="cursor-pointer text-xs text-ink-muted">审核记录 · 接受 {accepted} · 拒绝 {done.length - accepted}</summary>
     <ul className="mt-1.5 flex flex-col gap-1">{done.map((c) => <li className="flex items-start gap-1.5 text-xs" key={c.id}>
-      {c.status === 'accepted' ? <Check className="mt-0.5 size-3 shrink-0 text-green-600" /> : <X className="mt-0.5 size-3 shrink-0 text-ink-muted" />}
+      {c.status === 'accepted' ? <Check className="mt-0.5 size-3 shrink-0 text-success" /> : <X className="mt-0.5 size-3 shrink-0 text-ink-muted" />}
       <span className={c.status === 'accepted' ? 'min-w-0 flex-1' : 'min-w-0 flex-1 text-ink-muted line-through'}>{c.label}</span>
       {c.status === 'accepted' && <span className="shrink-0 tabular-nums text-ink-muted">v{c.acceptedVersion}</span>}
     </li>)}</ul>

@@ -122,7 +122,7 @@ export default function ArtifactsPage() {
                     <span className="mt-1 block truncate text-xs text-ink-muted">
                       {KIND_LABELS[artifact.kind]} · {artifact.source === 'attachment' ? '附件' : '生成'}
                     </span>
-                    <span className="mt-1 block truncate font-mono text-[10px] text-ink-muted/80">
+                    <span className="mt-1 block truncate font-mono text-[11px] text-ink-muted/80">
                       {formatTime(artifact.createdAt)}
                     </span>
                   </span>

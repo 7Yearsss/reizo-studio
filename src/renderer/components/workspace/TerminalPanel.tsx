@@ -1,4 +1,5 @@
 import { useRef, useState, useSyncExternalStore } from 'react';
+import { Terminal } from 'lucide-react';
 import { getSnapshot, subscribe, appendTerminalLine } from '../../state/terminalStore';
 
 export default function TerminalPanel() {
@@ -30,11 +31,15 @@ export default function TerminalPanel() {
 
   return (
     <div className="flex h-full flex-col">
+      <div className="flex h-[52px] shrink-0 items-center gap-2 border-b border-line px-3">
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-[9px] bg-paper-inset text-ink"><Terminal size={16} /></span>
+        <span className="text-[13px] font-medium text-ink">终端</span>
+      </div>
       <div className="min-h-0 flex-1 overflow-auto px-3 py-2 font-mono text-[11px] leading-relaxed">
         {lines.length === 0 && <p className="text-ink-muted">在工作区里跑命令。Agent 的 run_command 也会出现在这里。</p>}
         {lines.map((line) => (
           <div key={line.id} className="mb-3">
-            <div className="text-accent">$ {line.command}</div>
+            <div className="font-medium text-ink">$ {line.command}</div>
             {line.stdout && <pre className="whitespace-pre-wrap text-ink">{line.stdout}</pre>}
             {line.stderr && <pre className="whitespace-pre-wrap text-danger">{line.stderr}</pre>}
             {line.exitCode !== 0 && <div className="text-ink-muted">exit {line.exitCode}</div>}

@@ -132,7 +132,7 @@ function InstalledSkillCard({
             onError={() => setFailed(true)}
           />
           <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/70 to-transparent" />
-          <span className="absolute left-2.5 top-2.5 rounded-md bg-black/45 px-1.5 py-0.5 text-[10px] font-medium text-white/90 backdrop-blur-sm">
+          <span className="absolute left-2.5 top-2.5 rounded-md bg-black/45 px-1.5 py-0.5 text-[11px] font-medium text-white/90 backdrop-blur-sm">
             {sourceLabel}
           </span>
           <h3 className="absolute inset-x-3 bottom-2.5 truncate text-[15px] font-semibold text-white drop-shadow">
@@ -145,7 +145,7 @@ function InstalledSkillCard({
             <Plug size={16} />
           </div>
           <h3 className="min-w-0 truncate font-semibold">{skill.name}</h3>
-          <span className="ml-auto shrink-0 rounded bg-paper-raised px-1.5 py-0.5 text-[10px] text-ink-muted">
+          <span className="ml-auto shrink-0 rounded bg-paper-raised px-1.5 py-0.5 text-[11px] text-ink-muted">
             {sourceLabel}
           </span>
         </div>
@@ -324,7 +324,7 @@ export default function PluginsPage() {
                 <div className="mb-3 flex items-center gap-2">
                   <group.icon size={15} className="text-ink-muted" />
                   <h3 className="text-sm font-semibold text-ink">{group.label}</h3>
-                  <span className="rounded-full bg-paper-inset px-1.5 py-0.5 text-[10px] text-ink-muted">
+                  <span className="rounded-full bg-paper-inset px-1.5 py-0.5 text-[11px] text-ink-muted">
                     {group.items.length}
                   </span>
                 </div>

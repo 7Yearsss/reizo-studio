@@ -188,7 +188,7 @@ export function AdminProvidersSection({ onOpenSystemProviders }: { onOpenSystemP
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-semibold tracking-tight text-ink">平台服务商与模型配置中心</h1>
-            <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+            <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
               已解锁 (管理员模式)
             </span>
           </div>
@@ -283,13 +283,13 @@ export function AdminProvidersSection({ onOpenSystemProviders }: { onOpenSystemP
                     <div className="flex items-center gap-2">
                       <h3 className="font-medium text-ink text-sm">{p.name}</h3>
                       {p.isDefault ? (
-                        <span className="inline-flex items-center gap-0.5 rounded bg-accent/15 px-1.5 py-0.2 text-[10px] font-semibold text-accent">
+                        <span className="inline-flex items-center gap-0.5 rounded bg-accent/15 px-1.5 py-0.2 text-[11px] font-semibold text-accent">
                           <Star size={9} className="fill-current" /> {runnable ? '默认' : '已存默认标记'}
                         </span>
                       ) : null}
                     </div>
 
-                    <span className="rounded bg-paper-inset px-1.5 py-0.5 text-[10px] uppercase font-mono text-ink-muted">
+                    <span className="rounded bg-paper-inset px-1.5 py-0.5 text-[11px] uppercase font-mono text-ink-muted">
                       {p.category} · {p.driverType}
                     </span>
                   </div>

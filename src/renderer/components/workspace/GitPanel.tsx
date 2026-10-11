@@ -72,30 +72,29 @@ export default function GitPanel() {
     .map(parseGitLine);
 
   return (
-    <div className="flex h-full flex-col overflow-auto px-3 py-2 text-[12px]">
-      <div className="mb-2 flex items-center justify-between border-b border-line/40 pb-2">
-        <div className="flex items-center gap-1.5 font-medium text-ink">
-          <GitBranch size={13} className="text-accent" />
-          <span>{status.branch ?? 'HEAD'}</span>
-        </div>
+    <div className="flex h-full flex-col overflow-auto text-[12px]">
+      <div className="mb-2 flex h-[52px] shrink-0 items-center gap-2 border-b border-line px-3">
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-[9px] bg-paper-inset text-ink"><GitBranch size={16} /></span>
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{status.branch ?? 'HEAD'}</span>
         <Tooltip content="刷新 Git 状态" side="left">
           <button
             type="button"
             onClick={() => void refresh(true)}
             disabled={loading}
-            className="rounded p-1 text-ink-muted hover:bg-paper-inset hover:text-ink transition-colors disabled:opacity-50"
+            className="inline-flex size-8 items-center justify-center rounded-[9px] text-ink-muted transition-colors hover:bg-paper-inset hover:text-ink disabled:opacity-50"
+            aria-label="刷新 Git 状态"
           >
-            <RotateCw size={12} className={loading ? 'animate-spin' : ''} />
+            <RotateCw size={14} className={loading ? 'animate-spin' : ''} />
           </button>
         </Tooltip>
       </div>
 
-      <p className="mb-2 text-xs text-ink-muted">
+      <p className="mx-3 mb-2 text-xs text-ink-muted">
         {status.dirty ? `${lines.length} 处未提交改动` : '工作区干净，无未提交改动'}
       </p>
 
       {lines.length > 0 && (
-        <div className="space-y-1 mb-4">
+        <div className="mx-3 mb-4 space-y-1">
           {lines.map((item) => {
             const isAdded = item.kind === 'added' || item.kind === 'untracked';
             const isDeleted = item.kind === 'deleted';
@@ -105,20 +104,20 @@ export default function GitPanel() {
                 className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-ink hover:bg-paper-inset/70 transition-colors"
               >
                 {isAdded ? (
-                  <span className="flex h-4 w-4 items-center justify-center rounded bg-emerald-500/10 text-emerald-600 text-[10px] font-bold">
+                  <span className="flex h-4 w-4 items-center justify-center rounded bg-emerald-500/10 text-emerald-600 text-[11px] font-bold">
                     +
                   </span>
                 ) : isDeleted ? (
-                  <span className="flex h-4 w-4 items-center justify-center rounded bg-rose-500/10 text-rose-600 text-[10px] font-bold">
+                  <span className="flex h-4 w-4 items-center justify-center rounded bg-rose-500/10 text-rose-600 text-[11px] font-bold">
                     −
                   </span>
                 ) : (
-                  <span className="flex h-4 w-4 items-center justify-center rounded bg-amber-500/10 text-amber-600 text-[10px] font-bold">
+                  <span className="flex h-4 w-4 items-center justify-center rounded bg-amber-500/10 text-amber-600 text-[11px] font-bold">
                     M
                   </span>
                 )}
                 <span className="truncate flex-1 font-mono text-[11px]">{item.path}</span>
-                <span className="text-[10px] text-ink-muted uppercase">{item.status}</span>
+                <span className="text-[11px] text-ink-muted uppercase">{item.status}</span>
               </div>
             );
           })}

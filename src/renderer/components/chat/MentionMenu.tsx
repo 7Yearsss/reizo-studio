@@ -72,7 +72,7 @@ export default function MentionMenu({
     <div className="pop-in absolute right-0 bottom-full left-0 mb-2 overflow-hidden rounded-2xl border border-line bg-paper-raised shadow-[0_8px_30px_rgba(28,22,18,0.08)] z-50">
       {matchedSkills.length > 0 ? (
         <div className="border-b border-line bg-paper-inset/30 py-1">
-          <div className="px-3 py-0.5 text-[10px] font-semibold text-ink-muted">技能</div>
+          <div className="px-3 py-0.5 text-[11px] font-semibold text-ink-muted">技能</div>
           {matchedSkills.map((skill) => (
             <button
               key={skill.id}
@@ -90,7 +90,7 @@ export default function MentionMenu({
 
       {matchedNodes.length > 0 ? (
         <div className="border-b border-line bg-paper-inset/30 py-1">
-          <div className="px-3 py-0.5 text-[10px] font-semibold text-ink-muted">画布节点引用</div>
+          <div className="px-3 py-0.5 text-[11px] font-semibold text-ink-muted">画布节点引用</div>
           {matchedNodes.map((node) => {
             const p = (node.params as Record<string, string>) || {};
             const desc = p.prompt || p.instruction || '';
