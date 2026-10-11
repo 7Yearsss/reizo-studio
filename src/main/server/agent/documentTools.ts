@@ -1,6 +1,6 @@
 import { tool } from 'ai';
 import { z } from 'zod';
-import { applyDocumentEdit, DOCUMENT_MIME, documentBlocks, documentEditWithinSelection, parseDocumentContent, type DocumentEdit } from '../../../shared/documentContent';
+import { applyDocumentEdit, DOCUMENT_MIME, documentBlocks, documentEditWithinSelection, documentSchema, parseDocumentContent, type DocumentEdit } from '../../../shared/documentContent';
 import type { DocumentReference } from '../../../shared/documentReferences';
 import type { ArtifactStore } from '../storage/artifactStore';
 import type { ArtifactReviewStore } from '../storage/artifactReviewStore';
@@ -45,7 +45,7 @@ export function createDocumentTools(options: { sessionId: string; projectId?: st
       },
     }),
     propose_document_edits: tool({
-      description: '为已有文档创建待审核修改，绝不直接改原文。先 read_document，使用其 version 和 blockId。优先用 replaceText 做最小范围的文字修改（会保留字体、颜色、对齐等原有格式，系统会自动按词拆成多处便于逐项审核）；replaceBlock 会重写整块，仅在必须改结构时使用。每项修改可带一句 reason（≤300 字）说明为什么这样改，审核时会显示在修改旁。选段引用只允许范围内 replaceText。用户在 Doc 面板接受或拒绝，工具不能代替用户接受。',
+      description: '为已有文档创建待审核修改，绝不直接改原文。先 read_document，使用其 version 和 blockId。优先用 replaceText 做最小范围的文字修改（会保留字体、颜色、对齐等原有格式，系统会自动按词拆成多处便于逐项审核）；replaceBlock 会重写整块，仅在必须改结构时使用。每项修改可带一句 reason（≤300 字）说明为什么这样改，审核时会显示在修改旁。选段引用只允许范围内 replaceText；跨段落的选区（带 tail）还允许改写或删除被完整覆盖的段落、在被覆盖段落之后插入。用户在 Doc 面板接受或拒绝，工具不能代替用户接受。',
       inputSchema: z.object({ artifactId: z.string(), expectedVersion: z.number().int().positive(), operations: z.array(documentEditSchema).min(1).max(40) }),
       execute: async ({ artifactId, expectedVersion, operations }) => {
         try {
@@ -54,9 +54,10 @@ export function createDocumentTools(options: { sessionId: string; projectId?: st
           const selectedRefs = references().filter((r) => r.artifactId === artifactId && r.selection);
           const content = parseDocumentContent(artifact.content);
           if (!content) throw new Error('文档格式无效');
+          const pmDoc = documentSchema.nodeFromJSON(content.doc);
           if (selectedRefs.some((ref) => ref.version !== undefined && ref.version !== artifact.version)) throw new Error('选区对应的文档版本已变化，请用户重新选择');
           // Several picked ranges: each operation must land inside one of them.
-          if (selectedRefs.length) for (const operation of operations as DocumentEdit[]) applyDocumentEdit(content, operation, (selectedRefs.find((ref) => documentEditWithinSelection(operation, ref.selection!)) ?? selectedRefs[0]).selection);
+          if (selectedRefs.length) for (const operation of operations as DocumentEdit[]) applyDocumentEdit(content, operation, (selectedRefs.find((ref) => documentEditWithinSelection(operation, ref.selection!, pmDoc)) ?? selectedRefs[0]).selection);
           const review = await reviews.create({ artifactId, sessionId, expectedVersion, operations, origin: { surface: 'chat' } });
           return { ok: true, artifactId, reviewId: review.id, pending: review.changes.length, summary: '修改建议已显示在 Doc 面板，原文保持不变，等待用户审核。' };
         } catch (error) { return { ok: false, error: error instanceof Error ? error.message : '创建建议失败' }; }

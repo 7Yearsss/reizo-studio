@@ -2,7 +2,7 @@ import { documentReviewSchema, reviewDocumentEdit } from './documentReview';
 import { describe, expect, it } from 'vitest';
 import { applySuggestions, revertSuggestions } from '@handlewithcare/prosemirror-suggest-changes';
 import { EditorState } from '@tiptap/pm/state';
-import { applyDocumentEdit, createDocumentContent, documentSchema, documentSelectionsBetween, documentEditWithinSelection, documentBlocks, parseDocumentContent } from './documentContent';
+import { applyDocumentEdit, createDocumentContent, documentSchema, documentSelectionBetween, documentSelectionIntact, documentSelectionSpans, documentEditWithinSelection, documentBlocks, parseDocumentContent } from './documentContent';
 
 function fixture() {
   return createDocumentContent({ type: 'doc', content: [
@@ -42,21 +42,35 @@ describe('document operations and review', () => {
   });
 });
 
-describe('documentSelectionsBetween', () => {
-  it('splits a range across paragraphs into one selection per block', () => {
-    const content = fixture();
-    const doc = documentSchema.nodeFromJSON(content.doc);
-    const [first, second] = documentBlocks(content);
-    // paragraph 1 spans 0..11 (9 chars + borders); drag from char 4 of block 1 into char 3 of block 2.
-    const from = 1 + 4;
-    const secondStart = doc.child(0).nodeSize;
-    const to = secondStart + 1 + 3;
-    const picked = documentSelectionsBetween(doc, from, to);
-    expect(picked).toEqual([
-      { blockId: first.id, start: 4, end: 9, text: '十月上线。' },
-      { blockId: second.id, start: 0, end: 3, text: '这段必' },
-    ]);
-    expect(documentSelectionsBetween(doc, from, from)).toEqual([]);
-    expect(documentSelectionsBetween(doc, 0, doc.content.size, 1)).toHaveLength(1);
+describe('cross-paragraph selection', () => {
+  const doc3 = () => createDocumentContent({ type: 'doc', content: ['甲乙丙丁', '戊己庚辛', '壬癸子丑'].map((text) => ({ type: 'paragraph', content: [{ type: 'text', text }] })) });
+  it('is one range with a tail, and stays intact until its text moves', () => {
+    const content = doc3();
+    const node = documentSchema.nodeFromJSON(content.doc);
+    const [a, b, c] = documentBlocks(content);
+    const third = node.child(0).nodeSize + node.child(1).nodeSize;
+    const range = documentSelectionBetween(node, 1 + 2, third + 1 + 2)!;
+    expect(range).toEqual({ blockId: a.id, start: 2, end: 4, text: '丙丁\n戊己庚辛\n壬癸', tail: { blockId: c.id, end: 2 } });
+    expect(documentSelectionBetween(node, 1 + 1, 1 + 3)).toEqual({ blockId: a.id, start: 1, end: 3, text: '乙丙' });
+    expect(documentSelectionBetween(node, 1, 1)).toBeUndefined();
+    expect(documentSelectionIntact(node, range)).toBe(true);
+    const edited = applyDocumentEdit(content, { op: 'replaceText', blockId: b.id, start: 0, end: 1, text: '乙' });
+    expect(documentSelectionIntact(documentSchema.nodeFromJSON(edited.doc), range)).toBe(false);
+    expect(documentSelectionSpans(node, range)!.map((s) => [s.start, s.end, s.whole])).toEqual([[2, 4, false], [0, 4, true], [0, 2, false]]);
+  });
+  it('permits whole-block rewrites only for blocks the range covers entirely', () => {
+    const content = doc3();
+    const node = documentSchema.nodeFromJSON(content.doc);
+    const [a, b, c] = documentBlocks(content);
+    const third = node.child(0).nodeSize + node.child(1).nodeSize;
+    const range = documentSelectionBetween(node, 1 + 2, third + 1 + 2)!;
+    expect(documentEditWithinSelection({ op: 'deleteBlock', blockId: b.id }, range, node)).toBe(true);
+    expect(documentEditWithinSelection({ op: 'deleteBlock', blockId: a.id }, range, node)).toBe(false);
+    expect(documentEditWithinSelection({ op: 'replaceText', blockId: c.id, start: 0, end: 2, text: 'x' }, range, node)).toBe(true);
+    expect(documentEditWithinSelection({ op: 'replaceText', blockId: c.id, start: 1, end: 3, text: 'x' }, range, node)).toBe(false);
+    expect(documentEditWithinSelection({ op: 'insertBlocks', afterId: b.id, nodes: [] }, range, node)).toBe(true);
+    // A single-block range still allows nothing but text inside itself.
+    const single = documentSelectionBetween(node, 2, 4)!;
+    expect(documentEditWithinSelection({ op: 'deleteBlock', blockId: a.id }, single, node)).toBe(false);
   });
 });

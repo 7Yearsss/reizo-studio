@@ -18,7 +18,14 @@ export function refreshDocumentReviews(id: string) { update({ revisions: { ...st
 export function documentReferences(sessionId: string): DocumentReference[] { return state.references[sessionId] ?? EMPTY; }
 /** Replace everything this session references with one document (or nothing). */
 export function referenceDocument(sessionId: string, ref?: DocumentReference) { setReferences(sessionId, ref ? [ref] : []); }
-const overlaps = (a: DocumentReference, b: DocumentReference) => a.selection!.blockId === b.selection!.blockId && a.selection!.start < b.selection!.end && b.selection!.start < a.selection!.end;
+const ends = (s: DocumentSelection) => [s.blockId, s.tail?.blockId ?? s.blockId];
+// Same-block ranges overlap by offsets; a range across blocks overlaps anything sharing one of its end blocks.
+const overlaps = (a: DocumentReference, b: DocumentReference) => {
+  const x = a.selection!;
+  const y = b.selection!;
+  if (!x.tail && !y.tail) return x.blockId === y.blockId && x.start < y.end && y.start < x.end;
+  return ends(x).some((id) => ends(y).includes(id));
+};
 /** Add a picked range (or the whole document) next to what is already referenced. */
 export function addDocumentReference(sessionId: string, ref: DocumentReference) { setReferences(sessionId, addReference(documentReferences(sessionId), ref, overlaps)); }
 export function removeDocumentReference(sessionId: string, index: number) { setReferences(sessionId, documentReferences(sessionId).filter((_, i) => i !== index)); }

@@ -3,7 +3,7 @@ import { EditorContent, useEditor, useEditorState, type Editor as TiptapEditor }
 import { Bold, Italic, Underline, Strikethrough, List, ListOrdered, Table, Undo2, Redo2, Download, Quote, History, Sparkles, Info } from 'lucide-react';
 import type { Artifact, ArtifactWithContent } from '../../../shared/artifact';
 import type { ArtifactReview } from '../../../shared/artifactReview';
-import { documentExtensions, documentSelectionIntact, documentSelectionsBetween, normalizeDocumentContent, parseDocumentContent, typographyCss, type DocumentContent, type DocumentSelection } from '../../../shared/documentContent';
+import { documentExtensions, documentSelectionIntact, documentSelectionBetween, normalizeDocumentContent, parseDocumentContent, typographyCss, type DocumentContent, type DocumentSelection } from '../../../shared/documentContent';
 import * as api from '../../api';
 import * as artifacts from '../../state/artifactStore';
 import { clearEditorRecovery, getEditorRecovery, registerEditorFlusher, setEditorRecovery, trackEditorWrite } from '../../state/editorPersistence';
@@ -111,7 +111,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
   const [error, setError] = useState(initial.recovered?.error ?? '');
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState(false);
-  const [selections, setSelections] = useState<DocumentSelection[]>([]);
+  const [selection, setSelection] = useState<DocumentSelection | undefined>();
   const [reviews, setReviews] = useState<ArtifactReview[]>([]);
   const [bubble, setBubble] = useState<{ top: number; left: number } | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -170,7 +170,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
     },
     onSelectionUpdate: ({ editor: current }) => {
       const { $from, $to, empty } = current.state.selection;
-      setSelections(empty ? [] : documentSelectionsBetween(current.state.doc, $from.pos, $to.pos));
+      setSelection(empty ? undefined : documentSelectionBetween(current.state.doc, $from.pos, $to.pos));
       setBubble(empty ? null : bubbleAt(current, scroller.current));
     },
   });
@@ -195,7 +195,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
     const content = parseDocumentContent(artifact.content); if (!content) return;
     value.current = content; version.current = artifact.version;
     editor.commands.setContent(content.doc, { emitUpdate: false });
-    dropDocumentSelection(artifact.sessionId); setSelections([]); setStatus('已保存');
+    dropDocumentSelection(artifact.sessionId); setSelection(undefined); setStatus('已保存');
   }, [artifact, editor]);
   async function act(run: () => Promise<void>) {
     setBusy(true); editor?.setEditable(false, false); setError('');
@@ -203,17 +203,14 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
     catch (cause) { setError(cause instanceof Error ? cause.message : '操作失败'); await refreshReviews().catch((): void => { /* Error is shown by the save/review handler. */ }); return false; }
     finally { setBusy(false); editor?.setEditable(true, false); }
   }
-  function askAI(selected: DocumentSelection[]) {
+  function askAI(selected: DocumentSelection | undefined) {
     setBubble(null);
     void act(async () => {
-      const base = { artifactId: artifact.id, name: artifact.name, version: version.current };
-      // A drag across paragraphs lands as one numbered reference per paragraph.
-      if (selected.length) selected.forEach((selection) => addDocumentReference(artifact.sessionId, { ...base, selection }));
-      else addDocumentReference(artifact.sessionId, base);
+      addDocumentReference(artifact.sessionId, { artifactId: artifact.id, name: artifact.name, version: version.current, ...(selected ? { selection: selected } : {}) });
       focusComposer(artifact.sessionId);
     });
   }
-  askRef.current = () => { if (!busy && !activeReview) askAI(selections); };
+  askRef.current = () => { if (!busy && !activeReview) askAI(selection); };
   async function decide(review: ArtifactReview, ids: string[], decision: 'accept' | 'reject') {
     await act(async () => {
       const result = await api.decideArtifactReview(artifact.id, review.id, review.reviewVersion, ids, decision);
@@ -221,7 +218,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
       if (next && result.artifact.version > version.current) {
         value.current = next; version.current = result.artifact.version;
         editor?.commands.setContent(next.doc, { emitUpdate: false });
-        dropDocumentSelection(artifact.sessionId); setSelections([]);
+        dropDocumentSelection(artifact.sessionId); setSelection(undefined);
       }
       artifacts.upsertArtifact(result.artifact); await refreshReviews();
     });
@@ -246,9 +243,9 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
       </div>
     </div>
     {!activeReview && <ReferenceStrip attached={referenced.length ? (pickedRanges.length ? `${pickedRanges.length} 段选区${pickedRanges.length === 1 ? `「${pickedRanges[0].selection.text ?? ''}」` : '，可在对话里用 [编号] 分别说明'}` : '全文') : undefined}
-      hint={selections.length ? `已选 ${selections.reduce((n, s) => n + s.end - s.start, 0)} 个字符${selections.length > 1 ? `（${selections.length} 段）` : ''} · Ctrl+L 加入对话，可连续添加多段` : '选中文字交给 AI 修改（可添加多段），或把全文作为上下文'}>
-      <Button size="xs" variant="ghost" disabled={busy || !selections.length} title="把选中的文字加入对话，可多次添加（Ctrl+L）" onClick={() => askAI(selections)}><Quote data-icon="inline-start" />{pickedRanges.length ? '再加一段' : '引用选段'}</Button>
-      <Button size="xs" variant="ghost" disabled={busy} onClick={() => askAI([])}>引用全文</Button>
+      hint={selection ? `已选 ${selection.text?.replace(/\n/g, '').length ?? 0} 个字符${selection.tail ? '（跨段落）' : ''} · Ctrl+L 加入对话，可连续添加多段` : '选中文字交给 AI 修改（可添加多段），或把全文作为上下文'}>
+      <Button size="xs" variant="ghost" disabled={busy || !selection} title="把选中的文字加入对话，可多次添加（Ctrl+L）" onClick={() => askAI(selection)}><Quote data-icon="inline-start" />{pickedRanges.length ? '再加一段' : '引用选段'}</Button>
+      <Button size="xs" variant="ghost" disabled={busy} onClick={() => askAI(undefined)}>引用全文</Button>
     </ReferenceStrip>}
     {error && <Alert variant="destructive" className="rounded-none border-x-0 border-t-0"><AlertDescription>{error}<div className="mt-2 flex gap-2"><Button size="xs" variant="outline" onClick={() => void flush().catch((): void => { /* Error is shown by the save/review handler. */ })}>重试保存</Button><Button size="xs" variant="outline" onClick={() => void recover().catch((cause) => setError(String(cause)))}>下载恢复副本并重新载入</Button></div></AlertDescription></Alert>}
     <div ref={scroller} onScroll={() => setBubble(null)} className={cn('relative min-h-0 flex-1 overflow-auto bg-paper-inset', activeReview && 'hidden')}>
@@ -261,8 +258,8 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
       <div className="mx-auto my-3 w-[calc(100%-1.5rem)] max-w-[816px] rounded-sm border border-line bg-paper shadow-sm" onClick={(event) => { if (event.target === event.currentTarget) editor?.commands.focus('end'); }}>
         <EditorContent editor={editor} />
       </div>
-      {bubble && selections.length > 0 && !busy && <div className="absolute z-20 flex -translate-x-1/2 items-center gap-0.5 rounded-md border border-line bg-paper p-0.5 shadow-md" style={{ top: bubble.top, left: bubble.left }} onMouseDown={(event) => event.preventDefault()}>
-        <Button size="xs" title="把选中的文字加入对话，可多次添加（Ctrl+L）" onClick={() => askAI(selections)}><Sparkles data-icon="inline-start" />{pickedRanges.length ? '再加一段' : '问 AI'}</Button>
+      {bubble && selection && !busy && <div className="absolute z-20 flex -translate-x-1/2 items-center gap-0.5 rounded-md border border-line bg-paper p-0.5 shadow-md" style={{ top: bubble.top, left: bubble.left }} onMouseDown={(event) => event.preventDefault()}>
+        <Button size="xs" title="把选中的文字加入对话，可多次添加（Ctrl+L）" onClick={() => askAI(selection)}><Sparkles data-icon="inline-start" />{pickedRanges.length ? '再加一段' : '问 AI'}</Button>
         <Button size="icon-xs" variant="ghost" aria-label="加粗所选" onClick={() => editor?.chain().focus().toggleBold().run()}><Bold /></Button>
         <Button size="icon-xs" variant="ghost" aria-label="斜体所选" onClick={() => editor?.chain().focus().toggleItalic().run()}><Italic /></Button>
       </div>}
@@ -275,7 +272,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
       const latest = await api.getArtifact(artifact.id); const content = parseDocumentContent(latest.content);
       if (!content) throw new Error('文档格式无效');
       value.current = content; version.current = latest.version; dirty.current = false;
-      editor?.commands.setContent(content.doc, { emitUpdate: false }); dropDocumentSelection(artifact.sessionId); setSelections([]);
+      editor?.commands.setContent(content.doc, { emitUpdate: false }); dropDocumentSelection(artifact.sessionId); setSelection(undefined);
       artifacts.upsertArtifact(latest); await refreshReviews();
     }} />}
   </div>;

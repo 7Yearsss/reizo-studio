@@ -21,7 +21,12 @@ export interface DocumentContent {
   docx?: DocxSourceInfo;
 }
 
-export interface DocumentSelection { blockId: string; start: number; end: number; text?: string }
+/**
+ * A picked range. `blockId/start/end` is the first block; when the range runs on into later
+ * blocks `tail` names the last block and where it stops (blocks in between are covered whole,
+ * and `end` is then the end of the first block). `text` joins the covered blocks with a newline.
+ */
+export interface DocumentSelection { blockId: string; start: number; end: number; text?: string; tail?: { blockId: string; end: number } }
 export type DocumentEdit = (
   | { op: 'replaceText'; blockId: string; start: number; end: number; text: string }
   | { op: 'replaceBlock'; blockId: string; node: JSONContent }
@@ -180,22 +185,53 @@ export function documentBlocks(content: DocumentContent): DocumentBlock[] {
   return blocks;
 }
 
-/**
- * One selection per text block touched by the range [from, to], so a drag across several
- * paragraphs becomes several references instead of none. Blocks without an id are skipped.
- */
-export function documentSelectionsBetween(doc: DocumentNode, from: number, to: number, limit = 8): DocumentSelection[] {
-  const out: DocumentSelection[] = [];
-  doc.nodesBetween(from, to, (node, pos) => {
-    if (out.length >= limit) return false;
+interface TextBlockInfo { id: string; pos: number; size: number }
+function textBlocks(doc: DocumentNode): TextBlockInfo[] {
+  const blocks: TextBlockInfo[] = [];
+  doc.descendants((node, pos) => {
     if (!node.isTextblock) return true;
-    if (typeof node.attrs.id !== 'string') return false;
-    const a = Math.max(from, pos + 1);
-    const b = Math.min(to, pos + 1 + node.content.size);
-    if (b > a) out.push({ blockId: node.attrs.id, start: a - pos - 1, end: b - pos - 1, text: doc.textBetween(a, b).slice(0, 2000) });
+    if (typeof node.attrs.id === 'string') blocks.push({ id: node.attrs.id, pos, size: node.content.size });
     return false;
   });
-  return out;
+  return blocks;
+}
+
+/** The covered stretch of each text block of a selection, in document order; null when its blocks are gone. */
+export function documentSelectionSpans(doc: DocumentNode, selection: DocumentSelection): { id: string; pos: number; start: number; end: number; whole: boolean }[] | null {
+  const blocks = textBlocks(doc);
+  const first = blocks.findIndex((b) => b.id === selection.blockId);
+  if (first < 0) return null;
+  if (!selection.tail) {
+    const b = blocks[first];
+    return selection.end <= b.size ? [{ id: b.id, pos: b.pos, start: selection.start, end: selection.end, whole: selection.start === 0 && selection.end === b.size }] : null;
+  }
+  const tail = selection.tail;
+  const last = blocks.findIndex((b) => b.id === tail.blockId);
+  if (last <= first || tail.end > blocks[last].size) return null;
+  return blocks.slice(first, last + 1).map((b, i, all) => {
+    const start = i === 0 ? Math.min(selection.start, b.size) : 0;
+    const end = i === all.length - 1 ? tail.end : b.size;
+    return { id: b.id, pos: b.pos, start, end, whole: start === 0 && end === b.size };
+  });
+}
+
+/** The selection covering the document range [from, to]: one range even when it crosses paragraphs. */
+export function documentSelectionBetween(doc: DocumentNode, from: number, to: number): DocumentSelection | undefined {
+  const picked: { block: TextBlockInfo; a: number; b: number }[] = [];
+  doc.nodesBetween(from, to, (node, pos) => {
+    if (!node.isTextblock) return true;
+    if (typeof node.attrs.id === 'string') picked.push({ block: { id: node.attrs.id, pos, size: node.content.size }, a: Math.max(from, pos + 1), b: Math.min(to, pos + 1 + node.content.size) });
+    return false;
+  });
+  // A block the range only touches at its edge is not part of it.
+  while (picked.length && picked[0].b <= picked[0].a) picked.shift();
+  while (picked.length && picked[picked.length - 1].b <= picked[picked.length - 1].a) picked.pop();
+  if (!picked.length) return undefined;
+  const text = picked.map((p) => doc.textBetween(p.a, p.b)).join('\n').slice(0, 2000);
+  const head = picked[0];
+  if (picked.length === 1) return { blockId: head.block.id, start: head.a - head.block.pos - 1, end: head.b - head.block.pos - 1, text };
+  const last = picked[picked.length - 1];
+  return { blockId: head.block.id, start: head.a - head.block.pos - 1, end: head.block.size, text, tail: { blockId: last.block.id, end: last.b - last.block.pos - 1 } };
 }
 
 /**
@@ -205,14 +241,10 @@ export function documentSelectionsBetween(doc: DocumentNode, from: number, to: n
  */
 export function documentSelectionIntact(doc: DocumentNode, selection: DocumentSelection): boolean {
   if (selection.text === undefined) return false;
-  let intact = false;
-  doc.descendants((node) => {
-    if (intact) return false;
-    if (node.attrs.id !== selection.blockId) return true;
-    intact = node.isTextblock && selection.end <= node.content.size && node.textBetween(selection.start, selection.end).slice(0, 2000) === selection.text;
-    return false;
-  });
-  return intact;
+  const spans = documentSelectionSpans(doc, selection);
+  if (!spans) return false;
+  const text = spans.map((span) => doc.textBetween(span.pos + 1 + span.start, span.pos + 1 + span.end)).join('\n');
+  return text.slice(0, 2000) === selection.text;
 }
 
 function locate(doc: DocumentNode, id: string): { node: DocumentNode; pos: number } {
@@ -236,14 +268,22 @@ function inheritFormatting(base: DocumentNode, next: JSONContent): JSONContent {
   return { ...next, attrs, content: next.content.map((n) => n.type === 'text' ? { ...n, marks: [...(n.marks ?? []), { type: 'runStyle', attrs: inherited }] } : n) };
 }
 
-/** A selection reference only allows text replacements inside its own range. */
-export function documentEditWithinSelection(edit: DocumentEdit, selection: DocumentSelection): boolean {
-  return edit.op === 'replaceText' && edit.blockId === selection.blockId && edit.start >= selection.start && edit.end <= selection.end;
+/**
+ * What a picked range permits. Inside one block: text replacement within the range. A range
+ * across blocks also permits rewriting or deleting the blocks it covers whole, and inserting after any covered block.
+ */
+export function documentEditWithinSelection(edit: DocumentEdit, selection: DocumentSelection, doc?: DocumentNode): boolean {
+  if (!selection.tail) return edit.op === 'replaceText' && edit.blockId === selection.blockId && edit.start >= selection.start && edit.end <= selection.end;
+  const spans = doc ? documentSelectionSpans(doc, selection) : null;
+  if (!spans) return false;
+  if (edit.op === 'replaceText') return spans.some((s) => s.id === edit.blockId && edit.start >= s.start && edit.end <= s.end);
+  if (edit.op === 'insertBlocks') return edit.afterId !== null && spans.some((s) => s.id === edit.afterId);
+  return spans.some((s) => s.id === edit.blockId && s.whole);
 }
 
 export function editTransaction(state: EditorState, edit: DocumentEdit, selection?: DocumentSelection): Transaction {
   const transaction = state.tr;
-  if (selection && !documentEditWithinSelection(edit, selection)) throw new Error('修改超出所选内容；请重新选择范围或引用整篇文档');
+  if (selection && !documentEditWithinSelection(edit, selection, state.doc)) throw new Error('修改超出所选内容；请重新选择范围或引用整篇文档');
   if (edit.op === 'insertBlocks') {
     const target = edit.afterId ? locate(state.doc, edit.afterId) : null;
     if (!edit.nodes.length || edit.nodes.length > 50) throw new Error('每次插入 1 至 50 个文档块');
