@@ -24,6 +24,12 @@ import { createProjectsRouter } from './routes/projects';
 import { createArtifactsRouter, createSessionArtifactsRouter } from './routes/artifacts';
 import { createRefsRouter } from './routes/refs';
 import { createCanvasRouter } from './routes/canvas';
+import { generateText } from 'ai';
+import { createOpenAiModel } from './agent/provider/openai';
+import { resolveSettingsModel } from './providerResolver';
+import { usageFetch } from './agent/provider/usageFetch';
+import { quotaFetch, llmSchedulerFor } from './agent/provider/quotaFetch';
+import { canvasWorkStopped } from './canvas/workLifecycle';
 import { createComputerUseRouter } from './routes/computerUse';
 import { createCanvasStore } from './storage/canvasStore';
 import { openDb, type DbHandle } from './db/client';
@@ -220,7 +226,15 @@ export function createApp(options: CreateAppOptions) {
   app.route('/api/memory', createMemoryRouter(memoryEventsStore, settingsStore));
   app.route('/api/sessions', createSessionArtifactsRouter(artifactStore, sessionStore));
   app.route('/api/artifacts', createArtifactsRouter(artifactStore));
-  app.route('/api', createDocumentsRouter(artifactStore, sessionStore, artifactReviews));
+  // One-shot rewrite for the review bar's "重写这条": a plain completion on the configured chat model, no turn or history.
+  const rewriteText = async (system: string, prompt: string, signal?: AbortSignal): Promise<string> => {
+    const { providerId, modelId, apiKey, baseUrl } = resolveSettingsModel(await settingsStore.get(), { category: 'llm' });
+    const model = createOpenAiModel({ apiKey, modelId, baseUrl, fetch: quotaFetch(llmSchedulerFor(canvasStore), providerId,
+      usageFetch(canvasStore.usage, { providerId, model: modelId, category: 'llm', accepting: () => !canvasWorkStopped(canvasStore) }), true) });
+    const { text } = await generateText({ model, system, prompt, abortSignal: signal });
+    return text;
+  };
+  app.route('/api', createDocumentsRouter(artifactStore, sessionStore, artifactReviews, rewriteText));
   app.route('/api/sessions', createPresentationsRouter(artifactStore, sessionStore));
   app.route('/api/refs', createRefsRouter(largeValueStore));
   app.route('/api/projects', createProjectsRouter(projectStore, sessionStore));

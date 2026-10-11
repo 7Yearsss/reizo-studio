@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { SessionStore } from '../../../shared/chat';
 import { createDocumentContent, DOCUMENT_MIME, parseDocumentContent } from '../../../shared/documentContent';
 import { specFromContent } from '../../../shared/documentFormat';
+import { regenerateDocumentChange, type RewriteText } from '../agent/regenerateChange';
 import { ArtifactReviewError, type ArtifactReviewStore } from '../storage/artifactReviewStore';
 import { ArtifactVersionConflictError, type ArtifactStore } from '../storage/artifactStore';
 import { DOCX_MIME, exportDocx, importDocx, MAX_DOCX_UPLOAD_BYTES } from '../agent/documentIO';
@@ -22,7 +23,7 @@ async function readUpload(request: Request): Promise<Buffer | Response> {
   return Buffer.concat(chunks);
 }
 
-export function createDocumentsRouter(artifacts: ArtifactStore, sessions: SessionStore, reviews: ArtifactReviewStore) {
+export function createDocumentsRouter(artifacts: ArtifactStore, sessions: SessionStore, reviews: ArtifactReviewStore, rewrite?: RewriteText) {
   const router = new Hono();
   router.onError((error, c) => {
     if (error instanceof ArtifactVersionConflictError) return c.json({ error: error.message }, 409);
@@ -76,6 +77,16 @@ export function createDocumentsRouter(artifacts: ArtifactStore, sessions: Sessio
     // ?revisions=1: what changed since the imported original is written as Word tracked changes.
     const revisions = c.req.query('revisions') === '1' && original && content.docx ? { author: 'Reizo' } : undefined;
     return new Response(new Uint8Array(await exportDocx(content, original, revisions ? { revisions } : {})), { headers: { 'content-type': DOCX_MIME, 'content-disposition': `attachment; filename="document.docx"; filename*=UTF-8''${encodeURIComponent(filename).replace(/['()*]/g, (char) => `%${char.charCodeAt(0).toString(16)}`)}` } });
+  });
+  // Rewrite one suggestion again from the user's feedback ("更口语一点").
+  router.post('/artifacts/:id/reviews/:reviewId/changes/:changeId/regenerate', async (c) => {
+    if (!rewrite) return c.json({ error: '当前没有可用的模型' }, 501);
+    const body = z.object({ feedback: z.string().trim().min(1).max(300), expectedReviewVersion: z.number().int().positive() }).parse(await c.req.json());
+    const review = reviews.get(c.req.param('reviewId'));
+    if (!review || review.artifactId !== c.req.param('id')) return c.json({ error: '未找到修改建议' }, 404);
+    if (review.reviewVersion !== body.expectedReviewVersion) return c.json({ error: '审核状态已变化，请刷新后重试' }, 409);
+    const next = await regenerateDocumentChange(reviews, rewrite, { review, changeId: c.req.param('changeId'), feedback: body.feedback, signal: c.req.raw.signal });
+    return c.json({ review: next });
   });
   router.get('/artifacts/:id/reviews', async (c) => {
     if (!artifacts.getMeta(c.req.param('id'))) return c.json({ error: '文档不存在' }, 404);

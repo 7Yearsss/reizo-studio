@@ -485,7 +485,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
       <ReviewLog reviews={reviews} className="mx-auto mb-4 w-[calc(100%-1.5rem)] max-w-[816px]" />
     </div>
     </div>
-    {activeReview && <DocumentReview key={activeReview.id} review={activeReview} otherBatches={pendingBatches - 1} acceptEverything={() => void acceptEverything()} busy={busy} decide={(review, ids, decision) => void decide(review, ids, decision)} revise={(review, change, text) => act(async () => {
+    {activeReview && <DocumentReview key={activeReview.id} review={activeReview} regenerate={(review, change, feedback) => act(async () => { await api.regenerateReviewChange(artifact.id, review.id, change.id, review.reviewVersion, feedback); await refreshReviews(); })} otherBatches={pendingBatches - 1} acceptEverything={() => void acceptEverything()} busy={busy} decide={(review, ids, decision) => void decide(review, ids, decision)} revise={(review, change, text) => act(async () => {
       await api.reviseArtifactReview(artifact.id, review.id, change.id, review.reviewVersion, { ...(change.operation as object), text }); await refreshReviews();
     })} />}
     {history && <ArtifactHistoryDialog artifact={{ ...artifact, version: version.current }} close={() => setHistory(false)} flush={flush} getVersion={() => version.current} render={(content) => <DocumentReadOnly content={content} />} restored={async () => {

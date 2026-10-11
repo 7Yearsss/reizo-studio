@@ -112,6 +112,28 @@ export function createArtifactReviewStore(db: DbHandle, artifacts: ArtifactStore
         persist(next, review.reviewVersion); return get(review.id) as ArtifactReview;
       });
     },
+    /** Swap some pending changes for freshly proposed ones (e.g. a paragraph rewritten again from the user's feedback). */
+    async replaceChanges(input: { id: string; sessionId: string; expectedReviewVersion: number; removeIds: string[]; operations: unknown[] }): Promise<ArtifactReview> {
+      if (!/^[\w-]{1,128}$/.test(input.id)) throw new ArtifactReviewError('无效的建议 ID');
+      return serializeFileMutation(path.join(dataRoot, 'review-locks', input.id), async () => {
+        const review = get(input.id);
+        if (!review || review.sessionId !== input.sessionId) throw new ArtifactReviewError('未找到修改建议', 404);
+        const remove = new Set(input.removeIds);
+        if (review.stale || review.reviewVersion !== input.expectedReviewVersion || !remove.size || review.changes.filter((c) => remove.has(c.id)).some((c) => c.status !== 'pending') || review.changes.filter((c) => remove.has(c.id)).length !== remove.size) throw new ArtifactReviewError('原文或审核状态已变化，请刷新后重试', 409);
+        const adapter = adapters[review.kind]; if (!adapter) throw new ArtifactReviewError('不支持编辑该建议');
+        const prepared = adapter.prepare?.(review.baseContent, input.operations) ?? input.operations;
+        const fresh: ArtifactReviewChange[] = prepared.map((operation) => ({ id: nanoid(), operation, status: 'pending', ...adapter.describe(review.baseContent, operation) }));
+        const at = review.changes.findIndex((c) => remove.has(c.id));
+        const changes = [...review.changes.slice(0, at).filter((c) => !remove.has(c.id)), ...fresh, ...review.changes.slice(at).filter((c) => !remove.has(c.id))];
+        const operations = changes.filter((c) => c.status === 'pending').map((c) => c.operation);
+        adapter.validateBatch?.(review.baseContent, operations);
+        const candidateContent = adapter.apply(review.baseContent, operations);
+        if (candidateContent === review.baseContent) throw new ArtifactReviewError('建议没有修改');
+        const next: ArtifactReview = { ...review, changes, candidateContent, status: finalStatus(changes), reviewVersion: review.reviewVersion + 1, updatedAt: new Date().toISOString() };
+        if (JSON.stringify(next).length > 16_000_000) throw new ArtifactReviewError('建议内容过大，请缩小修改范围');
+        persist(next, review.reviewVersion); return get(review.id) as ArtifactReview;
+      });
+    },
     async decide(input: { id: string; sessionId: string; expectedReviewVersion: number; changeIds: string[]; decision: ReviewDecision }): Promise<ArtifactReview> {
       if (input.decision !== 'accept' && input.decision !== 'reject') throw new ArtifactReviewError('无效的审核动作');
       if (!/^[\w-]{1,128}$/.test(input.id)) throw new ArtifactReviewError('无效的建议 ID');
