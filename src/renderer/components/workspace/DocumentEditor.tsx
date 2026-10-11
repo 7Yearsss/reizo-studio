@@ -435,7 +435,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
       <Button size="xs" variant="ghost" disabled={busy} onClick={() => askAI(undefined)}>引用全文</Button>
     </ReferenceStrip>}
     {error && <Alert variant="destructive" className="rounded-none border-x-0 border-t-0"><AlertDescription>{error}<div className="mt-2 flex gap-2"><Button size="xs" variant="outline" onClick={() => void flush().catch((): void => { /* Error is shown by the save/review handler. */ })}>重试保存</Button><Button size="xs" variant="outline" onClick={() => void recover().catch((cause) => setError(String(cause)))}>下载恢复副本并重新载入</Button></div></AlertDescription></Alert>}
-    <div className="flex min-h-0 flex-1">
+    <div className={cn('flex min-h-0 flex-1', activeReview && 'hidden')}>
     {outlineOpen && !activeReview && editor && <OutlinePanel editor={editor} scroller={scroller.current} />}
     <div ref={scroller} onPointerDown={() => { pointerDown.current = true; if (edit?.phase === 'input') closeEdit(false); }} onScroll={() => setBubble(null)} className={cn('relative min-h-0 min-w-0 flex-1 overflow-auto bg-paper-inset', activeReview && 'hidden')}>
       {find && editor && (
