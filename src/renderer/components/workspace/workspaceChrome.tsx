@@ -9,8 +9,9 @@ import { Empty, EmptyContent, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescript
 import { cn } from '../../lib/cn';
 
 /** Ask the chat composer of this session to take focus (after a reference was attached). */
-export function focusComposer(sessionId: string) {
-  window.dispatchEvent(new CustomEvent('reizo:focus-composer', { detail: { sessionId } }));
+export function focusComposer(sessionId: string, options: { cite?: boolean } = {}) {
+  // `cite`: a range was just attached; the composer drops its chip at the caret so it can be mentioned in the sentence.
+  window.dispatchEvent(new CustomEvent('reizo:focus-composer', { detail: { sessionId, ...(options.cite ? { cite: true } : {}) } }));
 }
 
 const hasFiles = (event: React.DragEvent) => Array.from(event.dataTransfer.types).includes('Files');

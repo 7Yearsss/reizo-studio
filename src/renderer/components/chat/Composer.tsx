@@ -7,6 +7,8 @@ import { AtSign, FileText, FileSpreadsheet, Presentation, Code2, Clapperboard, F
 import { isImeComposingEvent } from '../../lib/ime';
 import { cn } from '../../lib/cn';
 import { PromptInput } from '../agents/prompt-input';
+import type { PromptEditorHandle } from '../agents/prompt-editor';
+import { renumberCitations } from '../../../shared/promptDraft';
 import ModelPicker from './ModelPicker';
 import MentionMenu, { extractMentionQuery } from './MentionMenu';
 import SlashPalette, { applySlashArgs, buildSlashCommands, extractSlashQuery, type SlashCommand } from './SlashPalette';
@@ -94,6 +96,24 @@ export default function Composer({
   // Picked ranges are numbered across Doc then HTML, matching the labels sent with the message.
   const documentRefs = useMemo(() => labelSelections(rawDocumentRefs ?? []), [rawDocumentRefs]);
   const htmlRefs = useMemo(() => labelSelections(rawHtmlRefs ?? [], 1 + documentRefs.filter((r) => r.selection).length), [rawHtmlRefs, documentRefs]);
+  const editorRef = useRef<PromptEditorHandle>(null);
+  // Numbered ranges in display order; the inline chips in the draft resolve against these.
+  const ranges = useMemo(() => [
+    ...documentRefs.filter((r) => r.selection && r.label).map((ref) => ({ ref, kind: 'doc' as const, key: `doc:${ref.artifactId}:${JSON.stringify(ref.selection)}` })),
+    ...htmlRefs.filter((r) => r.selection && r.label).map((ref) => ({ ref, kind: 'html' as const, key: `html:${ref.artifactId}:${JSON.stringify(ref.selection)}` })),
+  ], [documentRefs, htmlRefs]);
+  const chipApi = useMemo(() => ({
+    info: (label: number) => {
+      const hit = ranges.find((r) => r.ref.label === label);
+      return hit ? { kind: hit.kind === 'doc' ? '文档' : 'HTML', name: hit.ref.name, text: hit.ref.selection?.text } : undefined;
+    },
+    open: (label: number) => {
+      const hit = ranges.find((r) => r.ref.label === label);
+      if (!hit || !sessionId) return;
+      if (hit.kind === 'doc') { selectDocument(sessionId, hit.ref.artifactId); uiStore.setRightPanelTab('documents'); }
+      else { selectHtml(sessionId, hit.ref.artifactId); uiStore.setRightPanelTab('html'); }
+    },
+  }), [ranges, sessionId]);
   const activeSheet = useSheetWorkspace((s) => sessionId ? s.activeBySession[sessionId] : undefined);
   const pinnedSheets = useSheetWorkspace((s) => sessionId ? s.pinnedBySession[sessionId] : undefined);
   const [syncingSheet, setSyncingSheet] = useState(false);
@@ -153,18 +173,32 @@ export default function Composer({
 
   /** Write [n] into the draft so the instruction that follows is tied to picked range n. */
   function citeReference(label: number) {
-    const area = composerBodyRef.current?.querySelector('textarea') ?? null;
-    const at = area && document.activeElement === area ? [area.selectionStart, area.selectionEnd] : null;
-    const token = `[${label}]`;
-    setDraft((d) => {
-      // Insert at the caret when the user is typing; otherwise append, as before.
-      const [from, to] = at ?? [d.length, d.length];
-      const before = d.slice(0, from);
-      const spaced = `${before && !/\s$/.test(before) ? ' ' : ''}${token} `;
-      requestAnimationFrame(() => { const pos = before.length + spaced.length; area?.setSelectionRange(pos, pos); area?.focus(); });
-      return `${before}${spaced}${d.slice(to)}`;
-    });
+    editorRef.current?.insertReference(label);
   }
+
+  // Ranges come and go: a removed one takes its chip with it and the numbers after it shift down;
+  // a newly added one (after "问 AI") gets its chip dropped into the sentence right away.
+  useEffect(() => {
+    const previous = rangeKeys.current;
+    const next = ranges.map((r) => r.key);
+    rangeKeys.current = next;
+    const added = next.filter((key) => !previous.includes(key));
+    const gone = previous.some((key) => !next.includes(key));
+    const shifted = previous.some((key, index) => next.includes(key) && next.indexOf(key) !== index);
+    if (gone || shifted) {
+      setDraft((d) => renumberCitations(d, (label) => {
+        const key = previous[label - 1];
+        if (key === undefined) return undefined;
+        const now = next.indexOf(key);
+        return now < 0 ? null : now + 1;
+      }));
+    }
+    if (citeNext.current && added.length) {
+      citeNext.current = false;
+      const label = next.indexOf(added[added.length - 1]) + 1;
+      window.setTimeout(() => editorRef.current?.insertReference(label), 0);
+    }
+  }, [ranges]);
 
   function buildSubmitPayload() {
     const selectionMentions = unpinnedSelectionNodes.map((n) => `canvas:${n.id}`);
@@ -248,10 +282,9 @@ export default function Composer({
   }
 
   /** ArrowUp at the start of the box recalls every queued message (Claude Code style). */
-  function recallQueuedMessages(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+  function recallQueuedMessages(textBeforeCaret: string) {
     if (!sessionId || queue.length === 0) return false;
-    const cursor = e.currentTarget.selectionStart ?? 0;
-    if (draft.slice(0, cursor).includes('\n')) return false;
+    if (textBeforeCaret.includes('\n')) return false;
     const items = chatStore.recallQueue(sessionId);
     if (items.length === 0) return false;
     const recalled = items.map((i) => i.text).join('\n');
@@ -351,11 +384,18 @@ export default function Composer({
   }, [onOverlayHeight]);
 
   const focusComposer = useCallback(() => {
-    composerBodyRef.current?.querySelector('textarea')?.focus();
+    editorRef.current?.focus();
   }, []);
+  const citeNext = useRef(false);
+  const rangeKeys = useRef<string[]>([]);
   // Workspace editors ask for focus right after attaching a reference ("问 AI" / Ctrl+L).
   useEffect(() => {
-    const onFocus = (event: Event) => { if ((event as CustomEvent<{ sessionId?: string }>).detail?.sessionId === sessionId) window.setTimeout(focusComposer, 0); };
+    const onFocus = (event: Event) => {
+      const detail = (event as CustomEvent<{ sessionId?: string; cite?: boolean }>).detail;
+      if (detail?.sessionId !== sessionId) return;
+      if (detail.cite) { citeNext.current = true; window.setTimeout(() => { citeNext.current = false; }, 1500); }
+      window.setTimeout(focusComposer, 0);
+    };
     window.addEventListener('reizo:focus-composer', onFocus);
     return () => window.removeEventListener('reizo:focus-composer', onFocus);
   }, [sessionId, focusComposer]);
@@ -682,7 +722,8 @@ export default function Composer({
               />
               <PromptInput
                 value={draft}
-                chipPattern={/\[\d+\]/g}
+                chips={chipApi}
+                editorRef={editorRef}
                 onValueChange={setDraft}
                 onSubmit={() => submit()}
                 loading={Boolean(sending && !interaction)}
@@ -706,7 +747,7 @@ export default function Composer({
                       ? `技能 /${activeSkill.id} 生效中 — 直接描述任务，退格或 × 退出`
                       : '输入消息，/ 调用技能，@ 引用文件…'
                 }
-                onKeyDown={(e) => {
+                onKeyDown={(e, { textBeforeCaret }) => {
                   if (isImeComposingEvent(e)) return;
                   if ((mentionQuery !== null || slash !== null) && e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
@@ -723,7 +764,7 @@ export default function Composer({
                     else removeDocumentReference(sessionId, documentRefs.length - 1);
                   }
                   // ↑ at the start of the box pulls queued messages back in for editing.
-                  if (e.key === 'ArrowUp' && recallQueuedMessages(e)) {
+                  if (e.key === 'ArrowUp' && recallQueuedMessages(textBeforeCaret)) {
                     e.preventDefault();
                   }
                 }}

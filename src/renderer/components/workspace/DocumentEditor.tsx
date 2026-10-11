@@ -207,7 +207,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
     setBubble(null);
     void act(async () => {
       addDocumentReference(artifact.sessionId, { artifactId: artifact.id, name: artifact.name, version: version.current, ...(selected ? { selection: selected } : {}) });
-      focusComposer(artifact.sessionId);
+      focusComposer(artifact.sessionId, { cite: Boolean(selected) });
     });
   }
   askRef.current = () => { if (!busy && !activeReview) askAI(selection); };
