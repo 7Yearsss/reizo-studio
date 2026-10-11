@@ -99,7 +99,7 @@ export default function ProjectDialog({
                 maxLength={80}
                 required
                 placeholder="例如：品牌官网重构"
-                className="rounded-[10px] bg-paper"
+                className="rounded-[9px] bg-paper"
               />
             </div>
 
@@ -112,7 +112,7 @@ export default function ProjectDialog({
                 onChange={(val) => setDescription(val)}
                 maxLength={240}
                 placeholder="一句话说明这个项目"
-                className="rounded-[10px] bg-paper"
+                className="rounded-[9px] bg-paper"
               />
             </div>
 
@@ -126,7 +126,7 @@ export default function ProjectDialog({
                 maxLength={4000}
                 rows={4}
                 placeholder="告诉 Agent 这个项目需要遵守的背景、语气或技术约束"
-                className="w-full resize-y rounded-[10px] border border-line/60 bg-paper px-3 py-2.5 text-sm leading-5 text-ink outline-none transition-colors focus:border-accent"
+                className="w-full resize-y rounded-[9px] border border-line/60 bg-paper px-3 py-2.5 text-sm leading-5 text-ink outline-none transition-colors focus:border-accent"
               />
             </label>
 
@@ -141,7 +141,7 @@ export default function ProjectDialog({
             <button
               type="button"
               onClick={close}
-              className="rounded-[10px] border border-line bg-paper-raised px-3.5 py-2 text-sm text-ink-muted hover:bg-paper-inset transition-colors"
+              className="rounded-[9px] border border-line bg-paper-raised px-3.5 py-2 text-sm text-ink-muted hover:bg-paper-inset transition-colors"
             >
               取消
             </button>
@@ -152,7 +152,7 @@ export default function ProjectDialog({
               loadingText="创建中"
               successText="已创建"
               errorText="重试"
-              className="rounded-[10px] bg-ink px-4 py-2 text-sm font-medium text-paper-raised disabled:opacity-50"
+              className="rounded-[9px] bg-ink px-4 py-2 text-sm font-medium text-paper-raised disabled:opacity-50"
             >
               创建项目
             </StatefulButton>

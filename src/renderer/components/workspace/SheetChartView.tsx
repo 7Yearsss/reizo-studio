@@ -120,7 +120,7 @@ export default function SheetChartDock({ content, charts, statuses, busy, select
         return <figure key={chart.id} className={`flex w-[380px] shrink-0 flex-col gap-1 rounded border p-2 ${status ? 'border-accent' : 'border-line'} ${status === 'removed' ? 'opacity-60' : ''}`}>
           <figcaption className="flex items-center gap-1.5 text-xs">
             <span className="min-w-0 flex-1 truncate font-medium" title={`${chart.name} · ${describeChartSource(content, chart)}`}>{chart.name}</span>
-            {status && <span className="rounded bg-accent/10 px-1 text-[10px] text-accent">{STATUS_LABELS[status]}</span>}
+            {status && <span className="rounded bg-accent/10 px-1 text-[11px] text-accent">{STATUS_LABELS[status]}</span>}
             {onChangeType && !status && <Select value={chart.type} disabled={busy} onValueChange={(type) => onChangeType(chart, type as SheetChartType)}>
               <SelectTrigger size="sm" className="h-6 text-xs" aria-label={`${chart.name} 图表类型`}><SelectValue /></SelectTrigger>
               <SelectContent><SelectGroup>{(Object.keys(SHEET_CHART_TYPE_LABELS) as SheetChartType[]).map((type) => <SelectItem key={type} value={type}>{SHEET_CHART_TYPE_LABELS[type]}</SelectItem>)}</SelectGroup></SelectContent>

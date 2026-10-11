@@ -5,7 +5,7 @@ import { cn } from '../../lib/cn';
 
 /** Numbered badge for a picked range; the same number marks the range in the workspace and cites it as [n] in the message. */
 export function ReferenceLabel({ label, className }: { label: number; className?: string }) {
-  return <span className={cn('inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-accent text-[10px] font-semibold leading-none text-accent-ink tabular-nums', className)}>{label}</span>;
+  return <span className={cn('inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-accent text-[11px] font-semibold leading-none text-accent-ink tabular-nums', className)}>{label}</span>;
 }
 
 /** A workspace reference attached to the next message: icon (or range number), name, what part of it, open and remove. */

@@ -1,9 +1,7 @@
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { motion, useIsPresent } from 'motion/react';
-import { Maximize2, Minimize2, X } from 'lucide-react';
+import { Maximize2, Minimize2, PanelRightClose } from 'lucide-react';
 import { cn } from '../../lib/cn';
-import { createPortal } from 'react-dom';
-import { useTitleBarSlot } from '../layout/titleBarSlots';
 import * as uiStore from '../../state/uiStore';
 import { useUiStore } from '../../state/useUiStore';
 import DirectoryPanel from './DirectoryPanel';
@@ -22,6 +20,18 @@ const SheetPanel = lazyWithRetry(() => import('./SheetPanel'));
 const DocumentPanel = lazyWithRetry(() => import('./DocumentPanel'));
 const HtmlPanel = lazyWithRetry(() => import('./HtmlPanel'));
 const PresentationPanel = lazyWithRetry(() => import('./PresentationPanel'));
+
+const PANEL_TITLES: Record<uiStore.RightPanelTab, string> = {
+  canvas: '画布',
+  documents: 'Doc 文档',
+  presentations: 'PPT 演示稿',
+  sheets: 'Excel 表格',
+  html: 'HTML 网页',
+  artifacts: '会话作品',
+  files: '工作区文件',
+  git: 'Git 变更',
+  terminal: '终端',
+};
 
 const PANEL_DURATION = 0.22;
 const PANEL_EASE: [number, number, number, number] = [0.16, 1, 0.3, 1];
@@ -49,7 +59,6 @@ export default function RightPanel({
     return () => window.clearTimeout(t);
   }, []);
   const showContent = contentReady && isPresent;
-  const rightSlot = useTitleBarSlot('right');
   const dragging = useRef(false);
   const startX = useRef(0);
   const startWidth = useRef(0);
@@ -169,10 +178,10 @@ export default function RightPanel({
       onAnimationComplete={() => setContentReady(true)}
       style={{ willChange: isDragging ? undefined : 'width, transform, opacity' }}
       className={cn(
-        'relative flex h-full flex-col overflow-hidden bg-sidebar',
+        'relative flex h-full flex-col overflow-hidden bg-paper-raised',
         maximized
           ? 'w-full'
-          : 'shrink-0 self-stretch my-2 mr-2 !h-auto rounded-xl border border-line/70 shadow-sm',
+          : 'shrink-0 self-stretch my-2 mr-2 !h-auto rounded-3xl shadow-[var(--shadow-outline)]',
         isDragging && 'select-none',
       )}
     >
@@ -191,30 +200,24 @@ export default function RightPanel({
           )}
         />
       </div>
-      {/* Panel chrome lives in the window title bar (right slot) — keeps a single top row */}
-      {rightSlot &&
-        createPortal(
-          <div className="ml-1 flex items-center gap-0.5 border-l border-line/60 pl-1.5">
-              <Tooltip content={maximized ? '还原宽度' : '最大化面板'} side="bottom">
-                <button type="button" onClick={() => uiStore.toggleRightPanelMaximized()} aria-label={maximized ? '还原宽度' : '最大化面板'}
-                  className="rounded-full p-1.5 text-ink-muted transition-colors hover:bg-paper-inset/70 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent">
-                  {maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-                </button>
-              </Tooltip>
-              <Tooltip content="关闭面板" side="bottom">
-                <button
-                  type="button"
-                  onClick={() => uiStore.closeRightPanel()}
-                  className="rounded-full p-1.5 text-ink-muted hover:bg-paper-inset/70 hover:text-ink transition-colors"
-                  aria-label="关闭面板"
-                >
-                  <X size={13} />
-                </button>
-              </Tooltip>
-            </div>,
-          rightSlot,
-        )}
-      <div className="min-h-0 flex-1 bg-sidebar">
+      {/* The panel's own close/maximize live here, not in the window title bar: next to the
+          app's close button they read as "close the app". */}
+      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-line pl-4 pr-2">
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink-muted">{PANEL_TITLES[activeTab]}</span>
+        <Tooltip content={maximized ? '还原宽度' : '最大化面板'} side="bottom">
+          <button type="button" onClick={() => uiStore.toggleRightPanelMaximized()} aria-label={maximized ? '还原宽度' : '最大化面板'}
+            className="inline-flex size-7 items-center justify-center rounded-[9px] text-ink-muted transition-colors hover:bg-paper-inset hover:text-ink">
+            {maximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+          </button>
+        </Tooltip>
+        <Tooltip content="收起面板" side="bottom">
+          <button type="button" onClick={() => uiStore.closeRightPanel()} aria-label="收起面板"
+            className="inline-flex size-7 items-center justify-center rounded-[9px] text-ink-muted transition-colors hover:bg-paper-inset hover:text-ink">
+            <PanelRightClose size={14} />
+          </button>
+        </Tooltip>
+      </div>
+      <div className="min-h-0 flex-1 bg-paper-raised">
         {activeTab === 'canvas' &&
           (showContent && sessionId ? (
             <Suspense fallback={<CanvasSkeleton />}>

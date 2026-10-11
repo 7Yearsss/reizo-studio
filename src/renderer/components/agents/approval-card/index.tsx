@@ -50,26 +50,26 @@ function getStatusLabel(status: ApprovalCardStatus) {
 
 function getStatusClass(status: ApprovalCardStatus) {
   if (status === "approved" || status === "answered") {
-    return "text-emerald-600 dark:text-emerald-400";
+    return "text-success";
   }
-  if (status === "rejected") return "text-rose-600 dark:text-rose-400";
+  if (status === "rejected") return "text-danger";
   if (status === "changes-requested") {
-    return "text-amber-600 dark:text-amber-400";
+    return "text-[var(--peach-ink)]";
   }
   return "text-muted-foreground";
 }
 
 function getStatusBadgeClass(status: ApprovalCardStatus) {
   if (status === "pending" || status === "changes-requested") {
-    return "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400";
+    return "border-transparent bg-[var(--peach)] text-[var(--peach-ink)]";
   }
   if (status === "submitting") {
-    return "border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400";
+    return "border-transparent bg-paper-inset text-ink-muted";
   }
   if (status === "approved" || status === "answered") {
-    return "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400";
+    return "border-transparent bg-success-bg text-success";
   }
-  return "border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400";
+  return "border-transparent bg-danger/10 text-danger";
 }
 
 function isAnswered(answer: ApprovalCardAnswer) {

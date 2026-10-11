@@ -52,7 +52,7 @@ export default function MemoryEventRow({
               <span className="min-w-0 flex-1 text-[12px] text-ink-muted/90">
                 <span className="font-medium text-ink">{item.name}</span>
                 {item.type && (
-                  <span className="ml-1.5 rounded bg-paper-inset px-1 py-px text-[10px] text-ink-muted">
+                  <span className="ml-1.5 rounded bg-paper-inset px-1 py-px text-[11px] text-ink-muted">
                     {TYPE_LABEL[item.type] ?? item.type}
                   </span>
                 )}

@@ -746,7 +746,7 @@ export function ContextMenuLabel({
   return (
     <div
       className={cn(
-        "px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground",
+        "px-2.5 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground",
         inset && "pl-8",
         className,
       )}
@@ -781,7 +781,7 @@ export function ContextMenuShortcut({
     <span
       aria-hidden="true"
       className={cn(
-        "ml-auto pl-4 text-[10px] font-medium tracking-wide text-muted-foreground",
+        "ml-auto pl-4 text-[11px] font-medium tracking-wide text-muted-foreground",
         className,
       )}
     >

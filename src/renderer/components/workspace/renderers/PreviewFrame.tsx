@@ -42,7 +42,7 @@ export default function PreviewFrame({ children }: { children: React.ReactNode }
           >
             <ZoomOut size={12} />
           </button>
-          <span className="w-9 text-center text-[10px] tabular-nums text-ink-muted">
+          <span className="w-9 text-center text-[11px] tabular-nums text-ink-muted">
             {Math.round(zoom * 100)}%
           </span>
           <button

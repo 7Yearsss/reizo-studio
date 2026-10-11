@@ -16,7 +16,7 @@ function VisualReview({ review }: { review: ArtifactReview }) {
 }
 export default function PresentationReview({ reviews, busy, decide }: { reviews: ArtifactReview[]; busy: boolean; decide(review: ArtifactReview, ids: string[], decision: 'accept' | 'reject'): void }) {
   const pending = reviews.filter((r) => r.changes.some((c) => c.status === 'pending'));
-  return <section aria-label="PPT 修改建议" className="flex flex-col gap-3 border-t border-line p-3"><div className="flex items-center justify-between"><h3 className="flex items-center gap-1.5 text-sm font-medium">AI 修改建议{pending.length ? <span className="rounded-full bg-accent px-1.5 text-[10px] leading-4 text-paper tabular-nums">{pending.reduce((n, r) => n + r.changes.filter((c) => c.status === 'pending').length, 0)}</span> : null}</h3><span className="text-xs text-ink-muted">接受后才会更新演示稿</span></div>
+  return <section aria-label="PPT 修改建议" className="flex flex-col gap-3 border-t border-line p-3"><div className="flex items-center justify-between"><h3 className="flex items-center gap-1.5 text-sm font-medium">AI 修改建议{pending.length ? <span className="rounded-full bg-accent px-1.5 text-[11px] leading-4 text-paper tabular-nums">{pending.reduce((n, r) => n + r.changes.filter((c) => c.status === 'pending').length, 0)}</span> : null}</h3><span className="text-xs text-ink-muted">接受后才会更新演示稿</span></div>
     {!pending.length && <p className="text-xs text-ink-muted">暂无待审核修改。引用当前页或选中元素，在对话中提出修改要求。</p>}
     {pending.map((review) => <div key={review.id} className="flex flex-col gap-2 rounded border border-line p-3">
       {review.stale && <Alert><AlertDescription>演示稿已有新版本，请重新生成这批建议。</AlertDescription></Alert>}

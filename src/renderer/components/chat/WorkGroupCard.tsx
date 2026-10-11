@@ -14,6 +14,9 @@ const PERSISTENT_TOOL_NAMES = new Set([
   'generate_image',
   'generate_diagram',
   'generate_sheet',
+  'generate_document',
+  'generate_presentation',
+  'generate_html',
   'propose_sheet_edits',
 ]);
 

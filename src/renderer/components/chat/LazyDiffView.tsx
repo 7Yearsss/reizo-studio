@@ -11,8 +11,8 @@ function DiffPlaceholder({ preview, className }: DiffProps, phase: 'loading' | '
       <span role={phase === 'loading' ? 'status' : undefined}>{phase === 'loading' ? '正在打开差异视图…' : '差异视图未加载'}</span>
     </div>
     <div className="max-h-[420px] overflow-auto" style={{ minHeight: Math.min(240, Math.max(80, preview.after.split('\n').length * 18 + 32)) }}>
-      {preview.before ? <div className="border-b border-line px-3 py-2"><p className="mb-1 text-[10px] text-ink-muted">原内容</p><pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-5">{preview.before}</pre></div> : null}
-      {preview.after ? <div className="px-3 py-2"><p className="mb-1 text-[10px] text-ink-muted">新内容</p><pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-5">{preview.after}</pre></div> : null}
+      {preview.before ? <div className="border-b border-line px-3 py-2"><p className="mb-1 text-[11px] text-ink-muted">原内容</p><pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-5">{preview.before}</pre></div> : null}
+      {preview.after ? <div className="px-3 py-2"><p className="mb-1 text-[11px] text-ink-muted">新内容</p><pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-5">{preview.after}</pre></div> : null}
     </div>
   </div>;
 }

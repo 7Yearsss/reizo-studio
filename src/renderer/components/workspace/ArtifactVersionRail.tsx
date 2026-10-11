@@ -97,16 +97,16 @@ export default function ArtifactVersionRail({
                 <button type="button" onClick={() => onPick(v.n)} aria-label={`查看版本 ${v.n}`} className="relative z-10 w-full text-left">
                 <div className="flex items-center gap-1.5">
                   <span className="text-[11px] font-semibold tabular-nums text-accent">v{v.n}</span>
-                  <span className="truncate text-[10px] text-ink-muted">{v.label}</span>
+                  <span className="truncate text-[11px] text-ink-muted">{v.label}</span>
                   {isActive && <Check size={11} className="ml-auto text-accent" />}
                 </div>
-                <div className="relative z-10 mt-0.5 truncate text-[10px] text-ink-muted/80">
+                <div className="relative z-10 mt-0.5 truncate text-[11px] text-ink-muted/80">
                   {relTime(v.createdAt)}
                 </div>
                 </button>
                 {v.origin?.prompt ? (
                   <div className="relative z-10 mt-1 flex items-start gap-1">
-                    <span className="line-clamp-2 flex-1 text-[10px] leading-4 text-ink-muted">
+                    <span className="line-clamp-2 flex-1 text-[11px] leading-4 text-ink-muted">
                       {v.origin.prompt}
                     </span>
                     <Tooltip content="复制这条提示">
@@ -131,7 +131,7 @@ export default function ArtifactVersionRail({
                       e.stopPropagation();
                       void restore(v.n);
                     }}
-                    className="relative z-10 mt-1.5 inline-flex items-center gap-1 rounded bg-paper-raised/60 px-1.5 py-0.5 text-[10px] text-ink-muted hover:bg-paper-raised hover:text-ink disabled:opacity-50 transition-colors"
+                    className="relative z-10 mt-1.5 inline-flex items-center gap-1 rounded bg-paper-raised/60 px-1.5 py-0.5 text-[11px] text-ink-muted hover:bg-paper-raised hover:text-ink disabled:opacity-50 transition-colors"
                   >
                     <RotateCcw size={10} className={cn(isBusy && 'animate-spin')} />
                     {isBusy ? '切换中…' : '切换到此版本'}

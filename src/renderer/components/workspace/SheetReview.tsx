@@ -114,7 +114,7 @@ export default function SheetReview({ reviews, totalDiff, busy, previewing, sele
                 <span className="block break-all text-xs font-medium">{change.label.replace(/（[^（]*）$/, '')}</span>
                 <span className="block text-[11px] text-ink-muted">{diff ? formatSheetDiffCounts(diff) : '无法预览，该项可能已失效'}</span>
               </span>
-              {destructive && <span className="shrink-0 rounded bg-danger/10 px-1 text-[10px] text-danger">需确认</span>}
+              {destructive && <span className="shrink-0 rounded bg-danger/10 px-1 text-[11px] text-danger">需确认</span>}
             </button>
             {open === change.id && diff && <div className="px-2 pb-2"><CellTable diff={diff} /></div>}
             <div className="flex justify-end gap-2 border-t border-line px-2 py-1.5">
