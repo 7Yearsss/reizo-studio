@@ -595,7 +595,7 @@ export async function importDocument(sessionId: string, file: File): Promise<Art
 export async function importPresentation(sessionId: string, file: File): Promise<ArtifactWithContent> {
   return (await (await api(`/api/sessions/${sessionId}/presentations/import?name=${encodeURIComponent(file.name)}`, { method: 'POST', body: file })).json()).artifact;
 }
-export async function exportDocument(id: string): Promise<Blob> { return (await api(`/api/artifacts/${id}/document.docx`)).blob(); }
+export async function exportDocument(id: string, options: { revisions?: boolean } = {}): Promise<Blob> { return (await api(`/api/artifacts/${id}/document.docx${options.revisions ? '?revisions=1' : ''}`)).blob(); }
 export async function listArtifactReviews(id: string): Promise<import('../shared/artifactReview').ArtifactReview[]> {
   return (await (await api(`/api/artifacts/${id}/reviews`)).json()).reviews;
 }

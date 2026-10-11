@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EditorContent, useEditor, useEditorState, type Editor as TiptapEditor } from '@tiptap/react';
-import { Bold, Italic, Underline, Strikethrough, List, ListOrdered, Table, Undo2, Redo2, Download, Quote, History, Sparkles, Info, PenLine } from 'lucide-react';
+import { Bold, Italic, Underline, Strikethrough, List, ListOrdered, Table, Undo2, Redo2, Quote, History, Sparkles, Info, PenLine } from 'lucide-react';
 import type { Artifact, ArtifactWithContent } from '../../../shared/artifact';
 import type { ArtifactReview } from '../../../shared/artifactReview';
 import { documentExtensions, documentSelectionIntact, documentSelectionBetween, normalizeDocumentContent, parseDocumentContent, typographyCss, type DocumentContent, type DocumentSelection } from '../../../shared/documentContent';
@@ -21,6 +21,7 @@ import DocumentReview from './DocumentReview';
 import { focusComposer, ReferenceStrip, ReviewLog, SaveStatus } from './workspaceChrome';
 import ArtifactHistoryDialog from './ArtifactHistoryDialog';
 import DocumentReadOnly from './DocumentReadOnly';
+import ExportMenu from './ExportMenu';
 import InlineEditCard, { type InlineEditPhase } from './InlineEditCard';
 import { inlineEditDecorations, inlineEditMarksKey, inlineEditMarksPlugin } from './inlineEditMarks';
 
@@ -318,7 +319,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
       <div className="ml-auto flex items-center gap-1 pl-2">
         <SaveStatus status={status} version={version.current} failed={Boolean(error)} />
         <Button size="icon-sm" variant="ghost" className="size-7" aria-label="文档版本历史" title="版本历史" disabled={busy} onClick={() => void act(async () => { setHistory(true); })}><History /></Button>
-        <Button size="xs" variant="outline" title="导出为 Word（保留原文件样式）" disabled={busy} onClick={() => void act(async () => { download(await api.exportDocument(artifact.id), `${artifact.name.replace(/\.docx$/i, '')}.docx`); })}><Download data-icon="inline-start" />导出</Button>
+        <ExportMenu disabled={busy} canTrackChanges={Boolean(value.current.docx?.groups?.length)} onExport={(revisions) => void act(async () => { download(await api.exportDocument(artifact.id, { revisions }), `${artifact.name.replace(/\.docx$/i, '')}${revisions ? '（修订）' : ''}.docx`); })} />
       </div>
     </div>
     {!activeReview && <ReferenceStrip attached={referenced.length ? (pickedRanges.length ? `${pickedRanges.length} 段选区${pickedRanges.length === 1 ? `「${pickedRanges[0].selection.text ?? ''}」` : '，可在对话里用 [编号] 分别说明'}` : '全文') : undefined}

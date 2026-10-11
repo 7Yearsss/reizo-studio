@@ -56,7 +56,9 @@ export function createDocumentsRouter(artifacts: ArtifactStore, sessions: Sessio
     const originalMeta = content.originalArtifactId ? artifacts.getMeta(content.originalArtifactId) : null;
     const originalPath = originalMeta ? artifacts.blobFilePath(originalMeta.id, originalMeta.version) : null;
     if (originalPath) original = await readFile(originalPath).catch((): undefined => undefined);
-    return new Response(new Uint8Array(await exportDocx(content, original)), { headers: { 'content-type': DOCX_MIME, 'content-disposition': `attachment; filename="document.docx"; filename*=UTF-8''${encodeURIComponent(filename).replace(/['()*]/g, (char) => `%${char.charCodeAt(0).toString(16)}`)}` } });
+    // ?revisions=1: what changed since the imported original is written as Word tracked changes.
+    const revisions = c.req.query('revisions') === '1' && original && content.docx ? { author: 'Reizo' } : undefined;
+    return new Response(new Uint8Array(await exportDocx(content, original, revisions ? { revisions } : {})), { headers: { 'content-type': DOCX_MIME, 'content-disposition': `attachment; filename="document.docx"; filename*=UTF-8''${encodeURIComponent(filename).replace(/['()*]/g, (char) => `%${char.charCodeAt(0).toString(16)}`)}` } });
   });
   router.get('/artifacts/:id/reviews', (c) => {
     if (!artifacts.getMeta(c.req.param('id'))) return c.json({ error: '文档不存在' }, 404);
