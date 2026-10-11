@@ -139,38 +139,38 @@ export default function DirectoryPanel({ embedded = false }: { embedded?: boolea
   return (
     <aside
       className={cn(
-        'flex h-full flex-col bg-sidebar',
+        'flex h-full flex-col bg-paper-raised',
         embedded ? 'w-full' : 'w-[260px] shrink-0 border-l border-line',
       )}
     >
-      <div className="flex items-center gap-2 border-b border-line/40 px-3 py-2.5">
-        <FolderOpen size={14} className="shrink-0 text-accent" />
-        <span className="flex-1 truncate text-xs font-medium text-ink">{name}</span>
+      <div className="flex h-[52px] shrink-0 items-center gap-2 border-b border-line px-3">
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-[9px] bg-paper-inset text-ink"><FolderOpen size={16} /></span>
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{name}</span>
         <Tooltip content="在系统资源管理器中打开" side="bottom">
           <button
             type="button"
-            className="rounded p-1 text-ink-muted hover:bg-paper-inset hover:text-ink transition-colors"
+            className="inline-flex size-8 items-center justify-center rounded-[9px] text-ink-muted transition-colors hover:bg-paper-inset hover:text-ink disabled:opacity-50"
             onClick={() => void window.reizo.revealInFolder().catch((error) => setError(error instanceof Error ? error.message : '文件夹未能打开'))}
             disabled={!workspacePath}
             aria-label="打开文件夹"
           >
-            <ExternalLink size={12} />
+            <ExternalLink size={14} />
           </button>
         </Tooltip>
         <Tooltip content="刷新文件" side="bottom">
           <button
             type="button"
-            className="rounded p-1 text-ink-muted hover:bg-paper-inset hover:text-ink transition-colors"
+            className="inline-flex size-8 items-center justify-center rounded-[9px] text-ink-muted transition-colors hover:bg-paper-inset hover:text-ink disabled:opacity-50"
             onClick={() => void refresh()}
             disabled={refreshing || !workspacePath}
             aria-label="刷新"
           >
-            <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} />
+            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
           </button>
         </Tooltip>
         <button
           type="button"
-          className="rounded px-2 py-0.5 text-[11px] text-ink-muted hover:bg-paper-inset hover:text-ink transition-colors"
+          className="h-8 rounded-[9px] px-2.5 text-xs text-ink-muted transition-colors hover:bg-paper-inset hover:text-ink"
           onClick={async () => {
             try {
               const path = await api.pickFolder();

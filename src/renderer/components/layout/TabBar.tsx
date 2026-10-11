@@ -37,14 +37,14 @@ export default function TabBar() {
                       tabStore.selectTab(tab.id);
                     }}
                     className={cn(
-                      'titlebar-no-drag group relative flex max-w-[200px] min-w-[120px] items-center gap-1.5 rounded-t-md px-3 py-1.5 text-[13px] transition-colors duration-150',
+                      'titlebar-no-drag group relative flex h-8 max-w-[200px] min-w-[120px] items-center gap-1.5 rounded-[9px] px-3 text-[13px] transition-colors duration-150',
                       active ? 'text-ink font-medium' : 'text-ink-muted hover:text-ink',
                     )}
                   >
                     {active && (
                       <motion.span
                         layoutId="active-tab-surface"
-                        className="absolute inset-0 rounded-t-md bg-paper shadow-[0_-1px_3px_rgba(0,0,0,0.03)]"
+                        className="absolute inset-0 rounded-[9px] bg-paper-raised shadow-[var(--shadow-outline)]"
                         transition={{ type: 'spring', stiffness: 450, damping: 35 }}
                       />
                     )}

@@ -65,8 +65,23 @@ function pendingKindFor(
 
 function PendingInteractionBadge({ kind }: { kind: 'ask' | 'permission' }) {
   return (
-    <span className="mt-0.5 shrink-0 self-start rounded-full bg-success-bg px-1.5 py-0.5 text-[10px] font-medium leading-none text-success">
+    <span className="mt-0.5 shrink-0 self-start rounded-full bg-[var(--peach)] px-2 py-0.5 text-[11px] font-medium leading-none text-[var(--peach-ink)]">
       {kind === 'ask' ? '待回答' : '待批准'}
+    </span>
+  );
+}
+
+/** Fixed 14px status slot: spinner = running, peach = waiting on you, ink = unread, empty otherwise. */
+function SessionStatus({ pending, unread, running }: { pending: boolean; unread: boolean; running: boolean }) {
+  return (
+    <span className="mt-1 flex size-3.5 shrink-0 items-center justify-center self-start" aria-hidden={!pending && !unread && !running}>
+      {running && !pending ? (
+        <span className="size-3 animate-spin rounded-full border-2 border-line border-t-ink" aria-label="运行中" />
+      ) : pending ? (
+        <span className="size-2 rounded-full bg-[var(--peach-bar)]" />
+      ) : unread ? (
+        <span className="size-1.5 rounded-full bg-ink" aria-label="有新回复" />
+      ) : null}
     </span>
   );
 }
@@ -123,6 +138,7 @@ export default function Sidebar() {
   const loaded = useChatStore((s) => s.sessionsLoaded);
   const interactionBySession = useChatStore((s) => s.interactionBySession);
   const unreadBySession = useChatStore((s) => s.unreadBySession);
+  const sendingBySession = useChatStore((s) => s.sendingBySession);
   const workspacePath = useSettingsStore((s) => s.settings.workspacePath);
   const activeTab = useTabStore((s) => s.tabs.find((t) => t.id === s.activeTabId));
   const projects = useProjectStore((s) => s.projects);
@@ -145,6 +161,7 @@ export default function Sidebar() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
+  const [confirmDeleteProject, setConfirmDeleteProject] = useState(false);
   const [projectsOpen, setProjectsOpen] = useState(() => localStorage.getItem(PROJECTS_FOLD_KEY) !== '0');
   const [chatsOpen, setChatsOpen] = useState(() => localStorage.getItem(CHATS_FOLD_KEY) !== '0');
 
@@ -221,12 +238,12 @@ export default function Sidebar() {
 
   const navRow = (active: boolean) =>
     cn(
-      'flex w-full items-center gap-3 rounded-[14px] px-3 py-2.5 text-left text-[14px] text-ink-muted outline-none transition-colors hover:bg-paper-inset/70 hover:text-ink',
-      active && 'bg-paper-inset/80 font-medium text-ink',
+      'flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-[14px] text-ink-muted outline-none transition-colors hover:bg-paper-inset hover:text-ink focus-visible:ring-2 focus-visible:ring-ink/40',
+      active && 'bg-paper-inset font-medium text-ink',
     );
 
   const foldRow =
-    'flex min-w-0 items-center gap-1 rounded-xl px-3 py-2 text-left text-[13px] text-ink-muted outline-none transition-colors hover:text-ink';
+    'flex min-w-0 items-center gap-1 rounded-xl px-3 py-2 text-left text-[13px] text-ink-muted outline-none transition-colors hover:text-ink focus-visible:ring-2 focus-visible:ring-ink/40';
 
   const onPointerDown = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -382,7 +399,7 @@ export default function Sidebar() {
                 <button
                   type="button"
                   onClick={() => setProjectDialogOpen(true)}
-                  className="w-full rounded-xl px-3 py-2 text-left text-xs leading-5 text-ink-muted hover:bg-paper-inset/70"
+                  className="w-full rounded-xl px-3 py-2 text-left text-xs leading-5 text-ink-muted hover:bg-paper-inset"
                 >
                   创建一个项目
                 </button>
@@ -399,8 +416,8 @@ export default function Sidebar() {
                       uiStore.setMode('chat');
                     }}
                     className={cn(
-                      'flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-[13px] text-ink-muted hover:bg-paper-inset/70 hover:text-ink',
-                      active && 'bg-paper-inset/80 text-ink',
+                      'flex w-full items-center gap-2 rounded-xl px-3 py-1.5 text-left text-[13px] text-ink-muted hover:bg-paper-inset hover:text-ink',
+                      active && 'bg-paper-inset text-ink',
                     )}
                     title={project.description || project.name}
                   >
@@ -441,32 +458,50 @@ export default function Sidebar() {
                             tabStore.openChatTab(session.id, session.title);
                           }}
                           className={cn(
-                            'flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-ink-muted hover:bg-paper-inset/70 hover:text-ink',
-                            active && 'bg-paper-inset/80 text-ink',
+                            'flex w-full items-center gap-2 rounded-xl px-3 py-1.5 text-left text-sm text-ink-muted hover:bg-paper-inset hover:text-ink',
+                            active && 'bg-paper-inset text-ink',
                           )}
                         >
-                          <SquarePen size={14} className="shrink-0 opacity-70" />
+                          <SessionStatus pending={!!pendingKind} unread={!!unreadBySession[session.id]} running={!!sendingBySession[session.id]} />
                           <span className="flex-1 truncate">{session.title}</span>
-                          {unreadBySession[session.id] && (
-                            <span className="size-2 shrink-0 rounded-full bg-blue-500" aria-label="有新回复" />
-                          )}
                           {pendingKind && <PendingInteractionBadge kind={pendingKind} />}
                         </button>
                       </SessionContextMenu>
                     );
                   })}
-                  <button
-                    type="button"
-                    className="mt-2 px-3 text-[11px] text-ink-muted transition-colors hover:text-danger"
-                    onClick={async () => {
-                      if (!window.confirm('删除这个项目？其中的对话会保留。')) return;
-                      await projectStore.deleteProject(selectedProjectId);
-                      uiStore.selectProject(null);
-                      await chatStore.loadSessions();
-                    }}
-                  >
-                    删除项目
-                  </button>
+                  {confirmDeleteProject ? (
+                    <div className="mt-2 flex items-center gap-2 rounded-xl bg-paper-inset px-3 py-2 text-[12px] text-ink" role="alertdialog" aria-label="确认删除项目">
+                      <span className="min-w-0 flex-1">删除项目？对话会保留。</span>
+                      <button
+                        type="button"
+                        autoFocus
+                        className="rounded-[9px] px-2 py-1 text-danger hover:bg-danger/10"
+                        onClick={async () => {
+                          setConfirmDeleteProject(false);
+                          await projectStore.deleteProject(selectedProjectId);
+                          uiStore.selectProject(null);
+                          await chatStore.loadSessions();
+                        }}
+                      >
+                        删除
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-[9px] px-2 py-1 text-ink-muted hover:bg-paper hover:text-ink"
+                        onClick={() => setConfirmDeleteProject(false)}
+                      >
+                        取消
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="mt-2 px-3 text-[11px] text-ink-muted transition-colors hover:text-danger"
+                      onClick={() => setConfirmDeleteProject(true)}
+                    >
+                      删除项目
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -508,11 +543,11 @@ export default function Sidebar() {
                         tabStore.openChatTab(session.id, session.title);
                       }}
                       className={cn(
-                        'group flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-ink-muted hover:bg-paper-inset/70 hover:text-ink',
-                        active && 'bg-paper-inset/80 text-ink',
+                        'group flex w-full items-center gap-2 rounded-xl px-3 py-1.5 text-left text-sm text-ink-muted hover:bg-paper-inset hover:text-ink',
+                        active && 'bg-paper-inset text-ink',
                       )}
                     >
-                      <SquarePen size={14} className="mt-0.5 shrink-0 self-start opacity-70" />
+                      <SessionStatus pending={!!pendingKind} unread={!!unreadBySession[session.id]} running={!!sendingBySession[session.id]} />
                       {renamingId === session.id ? (
                         <input
                           autoFocus
@@ -545,9 +580,6 @@ export default function Sidebar() {
                             </span>
                           )}
                         </span>
-                      )}
-                      {unreadBySession[session.id] && (
-                        <span className="mt-1 size-2 shrink-0 self-start rounded-full bg-blue-500" aria-label="有新回复" />
                       )}
                       {pendingKind && <PendingInteractionBadge kind={pendingKind} />}
                       <span
@@ -584,7 +616,7 @@ export default function Sidebar() {
       </div>
 
       <div className="mt-auto p-1 pb-1">
-        <div className="flex items-center gap-2 rounded-full bg-paper px-2 py-1.5">
+        <div className="flex items-center gap-2 rounded-full bg-paper-raised px-2 py-1.5">
           <span className="flex h-7 w-7 items-center justify-center rounded-full bg-paper-inset text-ink-muted">
             <UserRound size={14} />
           </span>
@@ -596,7 +628,7 @@ export default function Sidebar() {
             className="min-w-0 flex-1 text-left"
           >
             <div className="truncate text-xs font-medium text-ink">未登录</div>
-            <div className="truncate text-[10px] text-ink-muted">本地 · {APP_VERSION}</div>
+            <div className="truncate text-[11px] text-ink-muted">本地 · {APP_VERSION}</div>
           </button>
         </div>
       </div>
