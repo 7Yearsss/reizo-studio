@@ -54,6 +54,6 @@ it('shows progress with a stop, and a notice that can be dismissed', () => {
   act(() => { [...host.querySelectorAll('button')].find((b) => b.textContent?.includes('停止'))!.click(); });
   expect(working.onStop).toHaveBeenCalled();
   const notice = render({ phase: 'notice', notice: '已停止' });
-  act(() => { [...host.querySelectorAll('button')].find((b) => b.textContent === '知道了')!.click(); });
+  act(() => { [...host.querySelectorAll('button')].find((b) => b.textContent === '好')!.click(); });
   expect(notice.onCancel).toHaveBeenCalled();
 });

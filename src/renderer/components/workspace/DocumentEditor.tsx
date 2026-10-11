@@ -322,7 +322,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
       </div>
     </div>
     {!activeReview && <ReferenceStrip attached={referenced.length ? (pickedRanges.length ? `${pickedRanges.length} 段选区${pickedRanges.length === 1 ? `「${pickedRanges[0].selection.text ?? ''}」` : '，可在对话里用 [编号] 分别说明'}` : '全文') : undefined}
-      hint={selection ? `已选 ${selection.text?.replace(/\n/g, '').length ?? 0} 个字符${selection.tail ? '（跨段落）' : ''} · Ctrl+L 加入对话，可连续添加多段` : '选中文字交给 AI 修改（可添加多段），或把全文作为上下文'}>
+      hint={selection ? `已选 ${selection.text?.replace(/\n/g, '').length ?? 0} 字` : undefined}>
       <Button size="xs" variant="ghost" disabled={busy || !selection} title="把选中的文字加入对话，可多次添加（Ctrl+L）" onClick={() => askAI(selection)}><Quote data-icon="inline-start" />{pickedRanges.length ? '再加一段' : '引用选段'}</Button>
       <Button size="xs" variant="ghost" disabled={busy} onClick={() => askAI(undefined)}>引用全文</Button>
     </ReferenceStrip>}

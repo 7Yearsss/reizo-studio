@@ -60,7 +60,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
         <Button size="xs" variant="outline" disabled={busy} onClick={() => void act(async () => download(draft.getText(), /\.html?$/i.test(artifact.name) ? artifact.name : `${artifact.name}.html`))}><Download data-icon="inline-start" />导出</Button>
       </div>
     </div>
-    <ReferenceStrip attached={referenced.length ? (picked.length ? (picked.length === 1 ? `选区「${picked[0].selection!.text}」` : `${picked.length} 段选区，可在对话里用 [编号] 分别说明`) : '整页') : undefined} hint="在源码中选中一段交给 AI（可添加多段），或把整页作为上下文">
+    <ReferenceStrip attached={referenced.length ? (picked.length ? (picked.length === 1 ? `选区「${picked[0].selection!.text}」` : `${picked.length} 段选区，可在对话里用 [编号] 分别说明`) : '整页') : undefined}>
       <Button size="xs" variant="ghost" disabled={busy} title="引用源码中选中的内容" onClick={() => { const selection = code.current?.selection(); if (!selection) { draft.setError('请先在源码中选择一段内容'); return; } void act(async () => { addHtmlReference(artifact.sessionId, { artifactId: artifact.id, name: artifact.name, version: draft.getVersion(), selection }); focusComposer(artifact.sessionId, { cite: true }); }); }}><Quote data-icon="inline-start" />{picked.length ? '再加一段' : '引用选区'}</Button>
       <Button size="xs" variant="ghost" disabled={busy} onClick={() => void act(async () => { addHtmlReference(artifact.sessionId, { artifactId: artifact.id, name: artifact.name, version: draft.getVersion() }); focusComposer(artifact.sessionId); })}>引用页面</Button>
     </ReferenceStrip>
