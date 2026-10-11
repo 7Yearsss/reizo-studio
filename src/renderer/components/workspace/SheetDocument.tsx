@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { History, Pin, Sparkles, Table2, X } from 'lucide-react';
+import { History, Quote, Sparkles, Table2, X } from 'lucide-react';
 import type { Artifact, ArtifactWithContent } from '../../../shared/artifact';
 import type { ArtifactReview } from '../../../shared/artifactReview';
 import { parseSheetContent, serializeSheetContent, type SheetArtifactContent } from '../../../shared/sheetContent';
@@ -133,13 +133,18 @@ export default function SheetDocument({ artifact, onClose }: { artifact: Artifac
     try { await flushWorkbookEdits(artifact.id); setViewVersion(version); }
     catch (cause) { setError(cause instanceof Error ? cause.message : '请先保存表格'); }
   }
+  /** Quote the selected range: it is numbered in the composer and a [n] chip lands at the caret. */
+  function quoteSelection() {
+    if (!ownSelection?.range || !pinSheetSelection(artifact.sessionId)) return;
+    focusComposer(artifact.sessionId, { cite: true });
+  }
   const content = frame ? parseSheetContent(frame.doc.content) : null;
   // Charts read formula results from the live workbook; stored content may predate the last calculation.
   const chartContent = liveContent ?? (previewing ? reviewPreview?.candidate : content) ?? null;
   const charts = previewing && reviewPreview ? [...sheetCharts(reviewPreview.candidate), ...(content ? sheetCharts(content).filter((c) => reviewPreview.diff.charts.some((d) => d.id === c.id && d.status === 'removed')) : [])] : content ? sheetCharts(content) : [];
   const chartStatuses = previewing && reviewPreview ? Object.fromEntries(reviewPreview.diff.charts.map((c) => [c.id, c.status])) : undefined;
   const truncated = content?.importMeta && (content.importMeta.truncatedRows || content.importMeta.truncatedCols || content.importMeta.truncatedSheets);
-  return <div className="flex min-h-0 flex-1 flex-col">
+  return <div className="flex min-h-0 flex-1 flex-col" onKeyDownCapture={(event) => { if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'l') { event.preventDefault(); quoteSelection(); } }}>
     <div className="flex items-center gap-2 border-b border-line px-3 py-1.5">
       <span className="min-w-0 flex-1 truncate text-xs font-medium">{artifact.name} · v{frame?.doc.version ?? artifact.version}{viewVersion ? ' · 历史版本' : ''}</span>
       {viewVersion && <Button variant="ghost" size="sm" onClick={() => { current.current = null; setViewVersion(undefined); }}>返回最新</Button>}
@@ -147,8 +152,8 @@ export default function SheetDocument({ artifact, onClose }: { artifact: Artifac
       <Button variant="ghost" size="icon-sm" aria-label="表格版本历史" onClick={() => setShowHistory((v) => !v)}><History /></Button>
       <Button variant="ghost" size="icon-sm" aria-label="关闭表格" onClick={onClose}><X /></Button>
     </div>
-    {!viewVersion && <ReferenceStrip attached={ownSelection?.range ? `${ownSelection.sheetName ?? ''}!${ownSelection.range}${pinnedCount ? ` · 另有 ${pinnedCount} 个固定选区` : ''}` : pinnedCount ? `${pinnedCount} 个固定选区` : undefined}>
-      <Button size="xs" variant="ghost" disabled={!ownSelection?.range} title="固定这个选区，切换选择后仍会引用" onClick={() => pinSheetSelection(artifact.sessionId)}><Pin data-icon="inline-start" />固定选区</Button>
+    {!viewVersion && <ReferenceStrip attached={ownSelection?.range ? `${ownSelection.sheetName ?? ''}!${ownSelection.range}${pinnedCount ? ` · 另有 ${pinnedCount} 段已编号` : ''}` : pinnedCount ? `${pinnedCount} 段已编号选区` : undefined}>
+      <Button size="xs" variant="ghost" disabled={!ownSelection?.range} title="把选中的单元格范围编号后加入对话，可多次添加，分别用 [1] [2] 指代（Ctrl+L）" onClick={quoteSelection}><Quote data-icon="inline-start" />{pinnedCount ? '再引用一段' : '引用选区'}</Button>
       <Button size="xs" variant="ghost" title="跳到对话输入框" onClick={() => focusComposer(artifact.sessionId)}><Sparkles data-icon="inline-start" />问 AI</Button>
     </ReferenceStrip>}
     {error && <Alert variant="destructive"><AlertDescription>{error}<Button variant="outline" size="sm" onClick={() => void discardAndReload()}>丢弃未保存编辑并重新加载</Button></AlertDescription></Alert>}

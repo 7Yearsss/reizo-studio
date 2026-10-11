@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { emptyWorkbook, putSheetCell } from './sheetContent';
-import { parseSheetReferences, serializeSheetReference, summarizeSheet, splitSheetContext, wrapSheetContext } from './sheetReferences';
+import { type SheetReference, labelSheetRanges, parseSheetReferences, sameSheetPlace, serializeSheetReference, summarizeSheet, splitSheetContext, wrapSheetContext } from './sheetReferences';
 
 describe('sheet references', () => {
   it('keeps machine context out of user messages, including tag-like cell data', () => {
@@ -27,5 +27,24 @@ describe('sheet references', () => {
     putSheetCell(book.sheets[0], 500, 0, { v: 'outside' });
     expect(summarizeSheet(book)).toContain('Preview truncated');
     expect(summarizeSheet(book, { sheet: 'missing' })).toContain('Unknown worksheet');
+  });
+});
+
+describe('numbered ranges', () => {
+  it('labels only picked ranges, counting on from the earlier ones', () => {
+    const refs = labelSheetRanges<SheetReference>([{ artifactId: 'a', range: 'A1:B2' }, { artifactId: 'a' }, { artifactId: 'a', range: 'C1' }], 3);
+    expect(refs.map((r) => r.label)).toEqual([3, undefined, 4]);
+  });
+
+  it('round-trips the label and drops one that is not a range number', () => {
+    const [labelled] = parseSheetReferences([serializeSheetReference({ artifactId: 'a', range: 'A1:B2', label: 2 })]).refs;
+    expect(labelled.label).toBe(2);
+    expect(parseSheetReferences([serializeSheetReference({ artifactId: 'a', label: 2 })]).refs[0].label).toBeUndefined();
+    expect(parseSheetReferences([serializeSheetReference({ artifactId: 'a', range: 'A1', label: 0 })]).refs[0].label).toBeUndefined();
+  });
+
+  it('recognises the same place whatever the label', () => {
+    expect(sameSheetPlace({ artifactId: 'a', sheetId: 's', range: 'A1' }, { artifactId: 'a', sheetId: 's', range: 'A1', label: 1 })).toBe(true);
+    expect(sameSheetPlace({ artifactId: 'a', sheetId: 's', range: 'A1' }, { artifactId: 'a', sheetId: 's', range: 'A2' })).toBe(false);
   });
 });

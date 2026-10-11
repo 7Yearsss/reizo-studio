@@ -1,10 +1,13 @@
 import { a1Of, getCell, parseA1Range, usedRange, type SheetArtifactContent } from './sheetContent';
+import { isReferenceLabel } from './referenceLabels';
 
 export interface SheetReference {
   artifactId: string;
   sheetId?: string;
   sheetName?: string;
   range?: string;
+  /** Numbers a picked range within one message so the user can write [n] (see referenceLabels). Assigned at send time, never stored. */
+  label?: number;
 }
 
 export interface SheetDisplayReference extends SheetReference { name: string }
@@ -37,6 +40,20 @@ export function splitSheetContext(content: string): { text: string; refs: SheetD
   return { text: text.trimEnd(), refs };
 }
 
+/** Number the picked cell ranges 1..n from `first`; whole-sheet references carry no label. */
+export function labelSheetRanges<T extends SheetReference>(refs: T[], first = 1): T[] {
+  let next = first;
+  return refs.map((ref) => {
+    const copy = { ...ref }; delete copy.label;
+    return ref.range ? { ...copy, label: next++ } : copy;
+  });
+}
+
+/** Same place in the same workbook, whatever the label. */
+export function sameSheetPlace(a: SheetReference, b: SheetReference): boolean {
+  return a.artifactId === b.artifactId && (a.sheetId ?? a.sheetName) === (b.sheetId ?? b.sheetName) && a.range === b.range;
+}
+
 export function serializeSheetReference(ref: SheetReference): string {
   return `sheet:${encodeURIComponent(JSON.stringify(ref))}`;
 }
@@ -53,7 +70,7 @@ export function parseSheetReferences(mentions: string[]): { refs: SheetReference
       if (value.range !== undefined && (typeof value.range !== 'string' || !parseA1Range(value.range))) continue;
       if (value.sheetId !== undefined && (typeof value.sheetId !== 'string' || value.sheetId.length > 128)) continue;
       if (value.sheetName !== undefined && (typeof value.sheetName !== 'string' || value.sheetName.length > 80)) continue;
-      refs.push({ artifactId: value.artifactId, sheetId: value.sheetId, sheetName: value.sheetName, range: value.range });
+      refs.push({ artifactId: value.artifactId, sheetId: value.sheetId, sheetName: value.sheetName, range: value.range, ...(value.range && isReferenceLabel(value.label) ? { label: value.label } : {}) });
     } catch { /* A malformed reference is not a workspace path. */ }
   }
   return { refs, rest };
