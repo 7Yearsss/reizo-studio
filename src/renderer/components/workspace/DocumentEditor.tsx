@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EditorContent, useEditor, useEditorState, type Editor as TiptapEditor } from '@tiptap/react';
-import { Bold, Italic, Underline, Strikethrough, List, ListOrdered, Table, Undo2, Redo2, Download, Quote, History, Sparkles, Info } from 'lucide-react';
+import { Bold, Italic, Underline, Strikethrough, List, ListOrdered, Table, Undo2, Redo2, Download, Quote, History, Sparkles, Info, PenLine } from 'lucide-react';
 import type { Artifact, ArtifactWithContent } from '../../../shared/artifact';
 import type { ArtifactReview } from '../../../shared/artifactReview';
 import { documentExtensions, documentSelectionIntact, documentSelectionBetween, normalizeDocumentContent, parseDocumentContent, typographyCss, type DocumentContent, type DocumentSelection } from '../../../shared/documentContent';
 import * as api from '../../api';
+import * as chatStore from '../../state/chatStore';
+import { useChatStore } from '../../state/useChatStore';
+import { serializeDocumentReference } from '../../../shared/documentReferences';
 import * as artifacts from '../../state/artifactStore';
 import { clearEditorRecovery, getEditorRecovery, registerEditorFlusher, setEditorRecovery, trackEditorWrite } from '../../state/editorPersistence';
 import { addDocumentReference, dropDocumentSelection, reconcileDocumentSelection, syncDocumentReferenceVersion, useDocumentWorkspace } from '../../state/documentWorkspace';
@@ -18,6 +21,8 @@ import DocumentReview from './DocumentReview';
 import { focusComposer, ReferenceStrip, ReviewLog, SaveStatus } from './workspaceChrome';
 import ArtifactHistoryDialog from './ArtifactHistoryDialog';
 import DocumentReadOnly from './DocumentReadOnly';
+import InlineEditCard, { type InlineEditPhase } from './InlineEditCard';
+import { inlineEditDecorations, inlineEditMarksKey, inlineEditMarksPlugin } from './inlineEditMarks';
 
 function download(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob); const anchor = document.createElement('a');
@@ -82,6 +87,16 @@ function bubbleAt(editor: TiptapEditor, box: HTMLElement | null): { top: number;
   } catch { return null; }
 }
 
+/** Where the instruction card sits: just under the line the selection ends on. */
+function cardAt(editor: TiptapEditor, box: HTMLElement | null): { top: number; left: number } | null {
+  if (!box) return null;
+  try {
+    const at = editor.view.coordsAtPos(editor.state.selection.to);
+    const rect = box.getBoundingClientRect();
+    return { top: at.bottom - rect.top + box.scrollTop + 8, left: Math.min(Math.max(at.left - rect.left + box.scrollLeft - 24, 8), Math.max(8, box.clientWidth - 348)) };
+  } catch { return null; }
+}
+
 const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || navigator.userAgent);
 
 export default function DocumentEditor({ artifact }: { artifact: Artifact }) {
@@ -115,6 +130,11 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
   const [selection, setSelection] = useState<DocumentSelection | undefined>();
   const [reviews, setReviews] = useState<ArtifactReview[]>([]);
   const [bubble, setBubble] = useState<{ top: number; left: number } | null>(null);
+  const [edit, setEdit] = useState<{ selection: DocumentSelection; from: number; to: number; at: { top: number; left: number }; phase: InlineEditPhase; notice?: string } | null>(null);
+  const stopped = useRef(false);
+  const openEditRef = useRef<() => void>(() => { /* Assigned on every render below. */ });
+  const aiBusy = useChatStore((state) => Boolean(state.sendingBySession[artifact.sessionId]));
+  const aiWaiting = useChatStore((state) => Boolean(state.interactionBySession[artifact.sessionId]));
   const pointerDown = useRef(false);
   const settleTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const scroller = useRef<HTMLDivElement>(null);
@@ -160,6 +180,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
     editorProps: { attributes: { class: 'document-prose min-h-[60vh] px-8 py-7 outline-none', style: typographyCss(initial.content), 'aria-label': '文档正文', role: 'textbox', 'aria-multiline': 'true' },
       handleKeyDown: (_view, event) => {
         if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'l') { event.preventDefault(); askRef.current(); return true; }
+        if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'j') { event.preventDefault(); openEditRef.current(); return true; }
         return false;
       } },
     onBlur: () => setBubble(null),
@@ -201,8 +222,13 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
     editor.registerPlugin(referenceMarksPlugin());
-    return () => { if (!editor.isDestroyed) editor.unregisterPlugin(referenceMarksKey); };
+    editor.registerPlugin(inlineEditMarksPlugin());
+    return () => { if (!editor.isDestroyed) { editor.unregisterPlugin(referenceMarksKey); editor.unregisterPlugin(inlineEditMarksKey); } };
   }, [editor]);
+  useEffect(() => {
+    if (!editor || editor.isDestroyed || !inlineEditMarksKey.getState(editor.state)) return;
+    editor.view.dispatch(editor.state.tr.setMeta(inlineEditMarksKey, inlineEditDecorations(editor.state.doc, edit ? { from: edit.from, to: edit.to } : null)).setMeta('addToHistory', false));
+  }, [editor, edit?.from, edit?.to]);
   useEffect(() => {
     if (!editor || editor.isDestroyed || !referenceMarksKey.getState(editor.state)) return;
     editor.view.dispatch(editor.state.tr.setMeta(referenceMarksKey, referenceDecorations(editor.state.doc, pickedRanges)).setMeta('addToHistory', false));
@@ -228,6 +254,41 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
       focusComposer(artifact.sessionId, { cite: Boolean(selected) });
     });
   }
+  function openEdit() {
+    if (!editor || editor.isDestroyed || busy || activeReview || edit || !selection) return;
+    const { from, to, empty } = editor.state.selection;
+    if (empty) return;
+    setBubble(null);
+    setEdit({ selection, from, to, at: cardAt(editor, scroller.current) ?? { top: 8, left: 8 }, phase: 'input' });
+  }
+  function closeEdit(refocus = true) {
+    setEdit(null);
+    if (refocus && editor && !editor.isDestroyed) editor.commands.focus(undefined, { scrollIntoView: false });
+  }
+  /** Send the typed instruction about the picked range as a normal chat turn; the answer arrives as a reviewable suggestion in the page. */
+  async function submitEdit(instruction: string) {
+    const target = edit;
+    if (!target || !editor || editor.isDestroyed) return;
+    stopped.current = false;
+    setEdit({ ...target, phase: 'working' });
+    editor.setEditable(false, false);
+    let failure = '';
+    try {
+      await flush();
+      const ref = { artifactId: artifact.id, name: artifact.name, version: version.current, selection: target.selection, label: 1 };
+      await chatStore.sendMessage(artifact.sessionId, `修改 [1]：${instruction}`, [serializeDocumentReference(ref)]);
+      // The turn can outlive the send call while it waits on an approval; the card stays until it is really over.
+      while (mounted.current && chatStore.getSnapshot().sendingBySession[artifact.sessionId]) await new Promise((resolve) => setTimeout(resolve, 300));
+    } catch (cause) { failure = cause instanceof Error ? cause.message : '发送失败'; }
+    if (!mounted.current) return;
+    if (!editor.isDestroyed) editor.setEditable(true, false);
+    const next = await api.listArtifactReviews(artifact.id).catch(() => reviews);
+    if (!mounted.current) return;
+    setReviews(next);
+    if (next.some((review) => review.changes.some((change) => change.status === 'pending'))) { setEdit(null); return; }
+    setEdit((current) => current && { ...current, phase: 'notice', notice: failure || (stopped.current ? '已停止' : 'AI 在对话里回复了，没有生成修改建议') });
+  }
+  openEditRef.current = openEdit;
   askRef.current = () => { if (!busy && !activeReview) askAI(selection); };
   async function decide(review: ArtifactReview, ids: string[], decision: 'accept' | 'reject') {
     await act(async () => {
@@ -266,7 +327,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
       <Button size="xs" variant="ghost" disabled={busy} onClick={() => askAI(undefined)}>引用全文</Button>
     </ReferenceStrip>}
     {error && <Alert variant="destructive" className="rounded-none border-x-0 border-t-0"><AlertDescription>{error}<div className="mt-2 flex gap-2"><Button size="xs" variant="outline" onClick={() => void flush().catch((): void => { /* Error is shown by the save/review handler. */ })}>重试保存</Button><Button size="xs" variant="outline" onClick={() => void recover().catch((cause) => setError(String(cause)))}>下载恢复副本并重新载入</Button></div></AlertDescription></Alert>}
-    <div ref={scroller} onPointerDown={() => { pointerDown.current = true; }} onScroll={() => setBubble(null)} className={cn('relative min-h-0 flex-1 overflow-auto bg-paper-inset', activeReview && 'hidden')}>
+    <div ref={scroller} onPointerDown={() => { pointerDown.current = true; if (edit?.phase === 'input') closeEdit(false); }} onScroll={() => setBubble(null)} className={cn('relative min-h-0 flex-1 overflow-auto bg-paper-inset', activeReview && 'hidden')}>
       {warnings.length ? <details className="mx-auto mt-3 w-[calc(100%-1.5rem)] max-w-[816px] rounded-md border border-line bg-paper px-3 py-2 text-xs text-ink-muted">
         <summary className="cursor-pointer"><Info className="mr-1.5 inline size-3.5 align-[-2px]" />导入说明：{warnings.length} 处内容未完整保留</summary>
         {warnings.map((warning, i) => <p key={i} className="mt-1">{warning}</p>)}
@@ -276,18 +337,32 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
       <div className="mx-auto my-3 w-[calc(100%-1.5rem)] max-w-[816px] rounded-sm border border-line bg-paper shadow-sm" onClick={(event) => { if (event.target === event.currentTarget) editor?.commands.focus('end'); }}>
         <EditorContent editor={editor} />
       </div>
-      {bubble && selection && !busy && (
+      {bubble && selection && !busy && !edit && (
         <div className="absolute z-20 -translate-x-1/2" style={{ top: bubble.top, left: bubble.left }} onMouseDown={(event) => event.preventDefault()}>
-          <button
-            type="button"
-            title="把选中的内容加入对话，可多次添加"
-            onClick={() => askAI(selection)}
-            className="pop-in flex h-8 items-center gap-1.5 whitespace-nowrap rounded-[10px] bg-ink pl-2.5 pr-2 text-[12px] font-medium text-paper-raised shadow-[0_6px_20px_rgba(25,47,80,0.22)] transition-transform active:scale-[0.97]"
-          >
-            <Sparkles className="size-3.5" />
-            问 AI
-            <kbd className="ml-0.5 rounded-md bg-paper-raised/15 px-1.5 py-0.5 font-sans text-[11px] leading-none">{isMac ? '⌘L' : 'Ctrl L'}</kbd>
-          </button>
+          <div className="pop-in flex h-8 items-stretch whitespace-nowrap rounded-[10px] bg-ink text-[12px] font-medium text-paper-raised shadow-[0_6px_20px_rgba(25,47,80,0.22)]">
+            <button type="button" title="让 AI 直接改写所选内容" onClick={openEdit} className="flex items-center gap-1.5 rounded-l-[10px] pl-2.5 pr-2 transition-colors hover:bg-paper-raised/10">
+              <PenLine className="size-3.5" />改写
+              <kbd className="rounded-md bg-paper-raised/15 px-1.5 py-0.5 font-sans text-[11px] leading-none">{isMac ? '⌘J' : 'Ctrl J'}</kbd>
+            </button>
+            <span aria-hidden className="my-1.5 w-px bg-paper-raised/20" />
+            <button type="button" title="把选中的内容加入对话，可多次添加" onClick={() => askAI(selection)} className="flex items-center gap-1.5 rounded-r-[10px] pl-2 pr-2.5 transition-colors hover:bg-paper-raised/10">
+              <Sparkles className="size-3.5" />问 AI
+              <kbd className="rounded-md bg-paper-raised/15 px-1.5 py-0.5 font-sans text-[11px] leading-none">{isMac ? '⌘L' : 'Ctrl L'}</kbd>
+            </button>
+          </div>
+        </div>
+      )}
+      {edit && (
+        <div className="absolute z-20" style={{ top: edit.at.top, left: edit.at.left }}>
+          <InlineEditCard
+            phase={edit.phase}
+            notice={edit.notice}
+            blocked={aiBusy && edit?.phase === 'input'}
+            waiting={aiWaiting}
+            onSubmit={(instruction) => void submitEdit(instruction)}
+            onCancel={() => closeEdit()}
+            onStop={() => { stopped.current = true; void chatStore.stopMessage(artifact.sessionId); }}
+          />
         </div>
       )}
       <ReviewLog reviews={reviews} className="mx-auto mb-4 w-[calc(100%-1.5rem)] max-w-[816px]" />
