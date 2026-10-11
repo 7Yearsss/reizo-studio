@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DOMSerializer } from '@tiptap/pm/model';
-import { ChevronDown, ChevronUp, Check, X, Pencil } from 'lucide-react';
+import { ChevronDown, ChevronUp, Check, X, Pencil, RotateCw } from 'lucide-react';
+import RegenerateCard from './RegenerateCard';
 import { documentReviewSchema, reviewDocumentEdits } from '../../../shared/documentReview';
 import { parseDocumentContent, typographyCss, type DocumentEdit } from '../../../shared/documentContent';
 import type { ArtifactReview, ArtifactReviewChange } from '../../../shared/artifactReview';
@@ -58,18 +59,23 @@ const reasonOf = (change: ArtifactReviewChange | undefined): string | undefined 
 interface Props {
   review: ArtifactReview;
   otherBatches: number;
+  /** Accept every pending suggestion of every batch, oldest first (a long task arrives in several). */
+  acceptEverything?: () => void;
   busy: boolean;
   decide(review: ArtifactReview, ids: string[], decision: 'accept' | 'reject'): void;
   revise(review: ArtifactReview, change: ArtifactReviewChange, text: string): Promise<boolean>;
+  /** Ask the model to rewrite this suggestion again from the user's feedback. */
+  regenerate?(review: ArtifactReview, change: ArtifactReviewChange, feedback: string): Promise<boolean>;
 }
 
 /** Reviews AI edits in place: the document keeps its own layout, changed words are marked where they occur. */
-export default function DocumentReview({ review, otherBatches, busy, decide, revise }: Props) {
+export default function DocumentReview({ review, otherBatches, acceptEverything, busy, decide, revise, regenerate }: Props) {
   const [mode, setMode] = useState<Mode>('inline');
   const [activeId, setActiveId] = useState<string | undefined>();
   const [hoverId, setHoverId] = useState<string | undefined>();
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [editing, setEditing] = useState<string | null>(null);
+  const [regenerating, setRegenerating] = useState<{ id: string; busy: boolean } | null>(null);
   const [draft, setDraft] = useState('');
   const [failed, setFailed] = useState(false);
   const [order, setOrder] = useState<string[]>([]);
@@ -198,7 +204,8 @@ export default function DocumentReview({ review, otherBatches, busy, decide, rev
           {(['inline', 'split'] as const).map((value) => <button key={value} type="button" aria-pressed={mode === value} onClick={() => setMode(value)} className={`px-2 py-0.5 ${mode === value ? 'bg-paper-inset font-medium' : 'text-ink-muted'}`}>{value === 'inline' ? '内联' : '对照'}</button>)}
         </div>
         <Button size="xs" variant="outline" disabled={busy} onClick={() => decide(review, allIds, 'reject')}>全部拒绝</Button>
-        <Button size="xs" disabled={busy || review.stale} onClick={() => decide(review, allIds, 'accept')}>全部接受</Button>
+        <Button size="xs" variant={otherBatches > 0 ? 'outline' : 'default'} disabled={busy || review.stale} onClick={() => decide(review, allIds, 'accept')}>{otherBatches > 0 ? '接受这一批' : '全部接受'}</Button>
+        {otherBatches > 0 && acceptEverything && <Button size="xs" disabled={busy || review.stale} onClick={acceptEverything}>接受全部 {otherBatches + 1} 批</Button>}
       </div>
     </div>
     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 border-b border-line px-3 py-1.5 text-xs text-ink-muted">
@@ -222,6 +229,7 @@ export default function DocumentReview({ review, otherBatches, busy, decide, rev
         {/* Fixed gutter beside the changed line: the buttons never sit on top of the text being judged. */}
         {shown && mode === 'inline' && shownTop !== undefined && <div data-rv-toolbar className="absolute right-2 z-10 flex items-center gap-0.5 rounded-md border border-line bg-paper p-0.5 shadow-sm" style={{ top: Math.max(0, shownTop - 4) }}>
           {editable && <Button size="icon-xs" variant="ghost" aria-label="编辑此处" title="编辑这处的文字" disabled={busy || review.stale} onClick={() => { setActiveId(shown.id); setEditing(shown.id); setDraft((shown.operation as Extract<DocumentEdit, { op: 'replaceText' }>).text); }}><Pencil /></Button>}
+          {regenerate && <Button size="icon-xs" variant="ghost" aria-label="重写这条" title="按你的要求重写这条" disabled={busy || review.stale} onClick={() => { setActiveId(shown.id); setRegenerating({ id: shown.id, busy: false }); }}><RotateCw /></Button>}
           <Button size="icon-xs" variant="ghost" aria-label="拒绝此处" title="拒绝（⌫）" disabled={busy} onClick={() => act([shown.id], 'reject')}><X /></Button>
           <Button size="icon-xs" aria-label="接受此处" title="接受（Enter）" disabled={busy || review.stale || editing === shown.id} onClick={() => act([shown.id], 'accept')}><Check /></Button>
         </div>}
@@ -229,6 +237,10 @@ export default function DocumentReview({ review, otherBatches, busy, decide, rev
           <label htmlFor={`suggestion-${shown.id}`} className="text-xs">修改后的文字</label>
           <textarea id={`suggestion-${shown.id}`} autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} disabled={busy} className="min-h-16 w-full rounded border border-line bg-paper p-2 text-sm" />
           <div className="flex justify-end gap-2"><Button size="xs" variant="ghost" disabled={busy} onClick={() => setEditing(null)}>取消</Button><Button size="xs" disabled={busy || review.stale} onClick={() => { void revise(review, shown, draft).then((saved) => { if (saved) setEditing(null); }); }}>保存</Button></div>
+        </div>}
+        {shown && mode === 'inline' && regenerating?.id === shown.id && shownTop !== undefined && regenerate && <div className="absolute left-6 z-10" style={{ top: shownTop + 26 }}>
+          <RegenerateCard busy={regenerating.busy} onCancel={() => setRegenerating(null)}
+            onSubmit={(feedback) => { setRegenerating({ id: shown.id, busy: true }); void regenerate(review, shown, feedback).then((saved) => setRegenerating(saved ? null : { id: shown.id, busy: false })); }} />
         </div>}
         {active && mode === 'split' && <div className="sticky bottom-0 flex items-center gap-2 border-t border-line bg-paper p-2">
           <span className="min-w-0 flex-1 truncate text-xs" title={active.label}>{active.label}</span>

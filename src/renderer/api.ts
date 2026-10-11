@@ -546,11 +546,11 @@ export async function getArtifactVersions(id: string): Promise<ArtifactVersion[]
   return versions;
 }
 
-export async function addArtifactVersion(id: string, content: string, expectedVersion?: number): Promise<ArtifactWithContent> {
+export async function addArtifactVersion(id: string, content: string, expectedVersion?: number, label?: '排版'): Promise<ArtifactWithContent> {
   const res = await api(`/api/artifacts/${id}/versions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ content, expectedVersion }),
+    body: JSON.stringify({ content, expectedVersion, ...(label ? { label } : {}) }),
   });
   const { artifact } = await res.json();
   return artifact;
@@ -592,15 +592,23 @@ export async function createDocument(sessionId: string, name: string): Promise<A
 export async function importDocument(sessionId: string, file: File): Promise<ArtifactWithContent> {
   return (await (await api(`/api/sessions/${sessionId}/documents/import?name=${encodeURIComponent(file.name)}`, { method: 'POST', body: file })).json()).artifact;
 }
+/** The layout a reference .docx already has, as a spec to typeset another document by. */
+export async function referenceFormat(file: File): Promise<import('../shared/documentFormat').FormatSpec> {
+  return (await (await api(`/api/documents/reference-format?name=${encodeURIComponent(file.name)}`, { method: 'POST', body: file })).json()).spec;
+}
 export async function importPresentation(sessionId: string, file: File): Promise<ArtifactWithContent> {
   return (await (await api(`/api/sessions/${sessionId}/presentations/import?name=${encodeURIComponent(file.name)}`, { method: 'POST', body: file })).json()).artifact;
 }
-export async function exportDocument(id: string): Promise<Blob> { return (await api(`/api/artifacts/${id}/document.docx`)).blob(); }
+export async function exportDocument(id: string, options: { revisions?: boolean } = {}): Promise<Blob> { return (await api(`/api/artifacts/${id}/document.docx${options.revisions ? '?revisions=1' : ''}`)).blob(); }
 export async function listArtifactReviews(id: string): Promise<import('../shared/artifactReview').ArtifactReview[]> {
   return (await (await api(`/api/artifacts/${id}/reviews`)).json()).reviews;
 }
 export async function reviseArtifactReview(id: string, reviewId: string, changeId: string, expectedReviewVersion: number, operation: unknown): Promise<import('../shared/artifactReview').ArtifactReview> {
   return (await (await api(`/api/artifacts/${id}/reviews/${reviewId}/changes/${changeId}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedReviewVersion, operation }) })).json()).review;
+}
+/** Rewrite one suggestion again from the user's feedback; the suggestion's paragraph gets a fresh rewrite. */
+export async function regenerateReviewChange(id: string, reviewId: string, changeId: string, expectedReviewVersion: number, feedback: string): Promise<import('../shared/artifactReview').ArtifactReview> {
+  return (await (await api(`/api/artifacts/${id}/reviews/${reviewId}/changes/${changeId}/regenerate`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedReviewVersion, feedback }) })).json()).review;
 }
 export async function decideArtifactReview(id: string, reviewId: string, expectedReviewVersion: number, changeIds: string[], decision: 'accept' | 'reject'): Promise<{ review: import('../shared/artifactReview').ArtifactReview; artifact: ArtifactWithContent }> {
   return (await api(`/api/artifacts/${id}/reviews/${reviewId}/decide`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedReviewVersion, changeIds, decision }) })).json();

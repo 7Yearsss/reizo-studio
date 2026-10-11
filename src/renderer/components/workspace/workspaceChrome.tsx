@@ -9,8 +9,9 @@ import { Empty, EmptyContent, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescript
 import { cn } from '../../lib/cn';
 
 /** Ask the chat composer of this session to take focus (after a reference was attached). */
-export function focusComposer(sessionId: string) {
-  window.dispatchEvent(new CustomEvent('reizo:focus-composer', { detail: { sessionId } }));
+export function focusComposer(sessionId: string, options: { cite?: boolean } = {}) {
+  // `cite`: a range was just attached; the composer drops its chip at the caret so it can be mentioned in the sentence.
+  window.dispatchEvent(new CustomEvent('reizo:focus-composer', { detail: { sessionId, ...(options.cite ? { cite: true } : {}) } }));
 }
 
 const hasFiles = (event: React.DragEvent) => Array.from(event.dataTransfer.types).includes('Files');
@@ -95,9 +96,9 @@ export function SaveStatus({ status, version, failed }: { status: string; versio
 }
 
 /** The strip under an editor's toolbar that hands content to the chat: what is attached, plus the reference buttons. */
-export function ReferenceStrip({ attached, hint, children }: { attached?: string; hint: string; children: ReactNode }) {
+export function ReferenceStrip({ attached, hint, children }: { attached?: string; hint?: string; children: ReactNode }) {
   return <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-line bg-paper-inset px-4 py-2 text-xs" data-inline-edit-ignore="true">
-    <Sparkles className="size-3.5 shrink-0 text-ink-muted" />
+    {(attached || hint) && <Sparkles className="size-3.5 shrink-0 text-ink-muted" />}
     <span className={cn('min-w-0 flex-1 truncate', attached ? 'text-ink' : 'text-ink-muted')} title={attached ?? hint}>{attached ? `已引用到对话：${attached}` : hint}</span>
     <div className="flex shrink-0 items-center gap-0.5">{children}</div>
   </div>;

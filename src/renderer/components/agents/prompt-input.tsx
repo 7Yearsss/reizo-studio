@@ -5,12 +5,9 @@ import { ArrowUp, Plus, Square } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   type FormEvent,
-  type KeyboardEvent,
   type ReactNode,
+  type Ref,
   type TextareaHTMLAttributes,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -28,7 +25,7 @@ import {
 } from "@/renderer/components/motion/select";
 import { SPRING_SWAP } from "@/renderer/lib/ease";
 import { cn } from "@/renderer/lib/cn";
-import { isImeComposingEvent } from "@/renderer/lib/ime";
+import { PromptEditor, type ChipInfo, type PromptEditorHandle } from "./prompt-editor";
 
 export interface PromptModel {
   value: string;
@@ -47,8 +44,10 @@ export interface PromptAction {
 
 export interface PromptInputProps extends Omit<
   TextareaHTMLAttributes<HTMLTextAreaElement>,
-  "value" | "defaultValue" | "onChange" | "onSubmit" | "children"
+  "value" | "defaultValue" | "onChange" | "onSubmit" | "children" | "onKeyDown"
 > {
+  /** Runs before the editor handles a key; call `preventDefault` to claim it. */
+  onKeyDown?: (event: KeyboardEvent, context: { textBeforeCaret: string }) => void;
   value?: string;
   defaultValue?: string;
   onValueChange?: (value: string) => void;
@@ -70,6 +69,10 @@ export interface PromptInputProps extends Omit<
   minRows?: number;
   maxRows?: number;
   leadingAction?: ReactNode;
+  /** Resolves `[n]` citations in the draft to inline chips; `open` runs when a chip is clicked. */
+  chips?: { info(label: number): ChipInfo | undefined; open(label: number): void };
+  /** Imperative access to the editor: focus, insert a range chip at the caret. */
+  editorRef?: Ref<PromptEditorHandle>;
   className?: string;
 }
 
@@ -92,6 +95,8 @@ export function PromptInput({
   minRows = 2,
   maxRows = 8,
   leadingAction,
+  chips,
+  editorRef,
   className,
   disabled,
   placeholder = "Ask the agent to do something…",
@@ -100,8 +105,12 @@ export function PromptInput({
   ...textareaProps
 }: PromptInputProps) {
   const reduce = useReducedMotion() ?? false;
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const measurementRef = useRef<HTMLDivElement>(null);
+  const localEditorRef = useRef<PromptEditorHandle>(null);
+  const setEditorRef = (handle: PromptEditorHandle | null) => {
+    (localEditorRef as { current: PromptEditorHandle | null }).current = handle;
+    if (typeof editorRef === "function") editorRef(handle);
+    else if (editorRef) (editorRef as { current: PromptEditorHandle | null }).current = handle;
+  };
   const [internalValue, setInternalValue] = useState(defaultValue);
   const [internalModel, setInternalModel] = useState(
     defaultModel ?? models[0]?.value,
@@ -117,32 +126,6 @@ export function PromptInput({
   // While a run is live the button is a stop control only when the box is
   // empty; with text it becomes the queue/send button so Enter keeps working.
   const showStop = loading && !hasDraft;
-
-  const resizeTextarea = useCallback(() => {
-    const textarea = textareaRef.current;
-    const measurement = measurementRef.current;
-    if (!textarea || !measurement || textarea.value !== currentValue) return;
-
-    const lineHeight = 24;
-    const nextHeight = Math.min(
-      Math.max(measurement.scrollHeight, minRows * lineHeight),
-      maxRows * lineHeight,
-    );
-    const height = `${nextHeight}px`;
-    if (textarea.style.height !== height) textarea.style.height = height;
-  }, [currentValue, maxRows, minRows]);
-
-  useLayoutEffect(() => {
-    resizeTextarea();
-  }, [resizeTextarea]);
-
-  useEffect(() => {
-    const textarea = textareaRef.current;
-    if (!textarea || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(resizeTextarea);
-    observer.observe(textarea);
-    return () => observer.disconnect();
-  }, [resizeTextarea]);
 
   const setValue = (next: string) => {
     if (value === undefined) setInternalValue(next);
@@ -168,26 +151,12 @@ export function PromptInput({
       onSubmit?.(prompt, currentModelValue);
     }
     if (value === undefined) setInternalValue("");
-    textareaRef.current?.focus({ preventScroll: true });
+    localEditorRef.current?.focus();
   };
 
   const submit = (event?: FormEvent) => {
     event?.preventDefault();
     fire(false);
-  };
-
-  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    onKeyDown?.(event);
-    if (
-      event.defaultPrevented ||
-      event.key !== "Enter" ||
-      event.shiftKey ||
-      isImeComposingEvent(event, event.nativeEvent.isComposing)
-    ) {
-      return;
-    }
-    event.preventDefault();
-    fire(Boolean(event.metaKey || event.ctrlKey));
   };
 
   return (
@@ -199,24 +168,19 @@ export function PromptInput({
         className,
       )}
     >
-      <div
-        ref={measurementRef}
-        aria-hidden="true"
-        className="pointer-events-none invisible absolute inset-x-2 top-0 whitespace-pre-wrap px-2 text-sm leading-6 [overflow-wrap:break-word]"
-      >
-        {`${currentValue}\u200b`}
-      </div>
-      <textarea
-        ref={textareaRef}
+      <PromptEditor
+        ref={setEditorRef}
         value={currentValue}
-        disabled={disabled}
+        onChange={setValue}
+        chips={chips}
         placeholder={placeholder}
+        disabled={disabled}
+        autoFocus={textareaProps.autoFocus}
+        minRows={minRows}
+        maxRows={maxRows}
         aria-label={ariaLabel}
-        rows={minRows}
-        {...textareaProps}
-        onChange={(event) => setValue(event.target.value)}
-        onKeyDown={handleKeyDown}
-        className="scrollbar-hide block w-full resize-none overflow-y-auto bg-transparent px-2 pt-1.5 text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground/55"
+        onKeyDown={onKeyDown}
+        onEnter={fire}
       />
 
       <div className="mt-1 flex min-h-8 min-w-0 items-center gap-1">

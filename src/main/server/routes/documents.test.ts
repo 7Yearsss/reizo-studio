@@ -76,7 +76,9 @@ describe('document workspace boundary', () => {
     const read = await (toolset.read_document.execute as Function)({ artifactId: f.artifact.id }, {});
     expect(read.ok).toBe(false);
     const saveRouter = createArtifactsRouter(f.artifacts);
-    const request = (expectedVersion?: number) => saveRouter.request(`/${f.artifact.id}/versions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedVersion, content: f.artifact.content }) });
+    // An unchanged save is a no-op, so the saves that must bump the version carry a real edit.
+    const edited = JSON.stringify({ ...f.content, doc: { ...f.content.doc, content: [...f.content.doc.content!, { type: 'paragraph', content: [{ type: 'text', text: '新增一段' }] }] } });
+    const request = (expectedVersion?: number) => saveRouter.request(`/${f.artifact.id}/versions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedVersion, content: edited }) });
     expect((await request()).status).toBe(400);
     expect((await request(1)).status).toBe(200);
     expect((await request(1)).status).toBe(409);
@@ -119,5 +121,33 @@ describe('word-level review', () => {
     const done = await f.reviews.decide({ id: review.id, sessionId: f.session.id, expectedReviewVersion: second.reviewVersion, changeIds: [review.changes[0].id], decision: 'accept' });
     expect(done.status).toBe('accepted');
     expect(documentBlocks(parseDocumentContent((await f.artifacts.get(artifact.id))!.content)!)[0].text).toBe('甲方应在十五日内付款，乙方应在七日内交付。');
+  });
+  it('learns the layout of a reference .docx without adding it to the session', async () => {
+    const f = await setup();
+    const reference = await exportDocx(f.content);
+    const response = await f.router.request('/documents/reference-format?name=%E8%8C%83%E6%96%87.docx', { method: 'POST', body: new Uint8Array(reference) });
+    expect(response.status).toBe(200);
+    const { spec } = await response.json();
+    expect(spec.id).toBe('reference');
+    expect(Object.keys(spec.roles)).toEqual(['title', 'heading1', 'heading2', 'heading3', 'heading4', 'body']);
+    expect((await f.artifacts.listBySession(f.session.id)).length).toBe(1);
+    expect((await f.router.request('/documents/reference-format?name=a.txt', { method: 'POST', body: new Uint8Array([1]) })).status).toBe(400);
+  });
+  it('folds routine saves into one history entry but keeps a typeset save as its own', async () => {
+    const f = await setup();
+    const router = createArtifactsRouter(f.artifacts);
+    const save = async (text: string, expectedVersion: number, label?: string) => {
+      const next = { ...f.content, doc: { ...f.content.doc, content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] } };
+      const response = await router.request(`/${f.artifact.id}/versions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: JSON.stringify(next), expectedVersion, ...(label ? { label } : {}) }) });
+      expect(response.status).toBe(200);
+      return (await response.json()).artifact as { version: number; versionCount: number };
+    };
+    const a = await save('甲', 1);
+    const b = await save('甲乙', a.version);
+    expect(b.versionCount).toBe(a.versionCount); // the second routine save replaced the first
+    const c = await save('甲乙丙', b.version, '排版');
+    const d = await save('甲乙丙丁', c.version);
+    expect(d.versionCount).toBe(c.versionCount + 1); // the typeset save is kept; the next edit starts a new entry
+    expect((await f.artifacts.get(f.artifact.id, c.version))?.content).toContain('甲乙丙');
   });
 });

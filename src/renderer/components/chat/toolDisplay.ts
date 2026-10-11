@@ -50,6 +50,7 @@ export function toolLabel(name: string): string {
     case 'generate_sheet': return '生成表格';
     case 'read_sheet': return '读取表格';
     case 'read_document': return '读取文档';
+    case 'check_document': return '检查文档一致性';
     case 'generate_document': return '创建文档';
     case 'propose_document_edits': return '提出文档修改建议';
     case 'read_presentation': return '读取演示稿';

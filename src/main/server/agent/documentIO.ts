@@ -3,7 +3,7 @@ import mammoth from 'mammoth';
 import HTMLtoDOCX from '@turbodocx/html-to-docx';
 import { createDocumentContent, documentExtensions, documentSchema, type DocumentContent } from '../../../shared/documentContent';
 import { importDocxFidelity } from './docx/import';
-import { exportDocxFromOriginal } from './docx/export';
+import { exportDocxFromOriginal, type ExportOptions } from './docx/export';
 
 export const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 export const MAX_DOCX_UPLOAD_BYTES = 8 * 1024 * 1024;
@@ -30,13 +30,13 @@ export async function importDocx(bytes: Buffer): Promise<DocumentContent> {
  * With the original DOCX available, untouched content is copied byte-for-byte and only edited blocks are rewritten.
  * Without it (documents created in-app) the document is rendered from scratch.
  */
-export async function exportDocx(content: DocumentContent, original?: Buffer | Uint8Array): Promise<Uint8Array> {
+export async function exportDocx(content: DocumentContent, original?: Buffer | Uint8Array, options: ExportOptions = {}): Promise<Uint8Array> {
   // Never let a document trigger arbitrary network requests during server-side export.
   documentSchema.nodeFromJSON(content.doc).descendants((node) => {
     if (node.type.name === 'image' && !String(node.attrs.src).startsWith('data:')) throw new Error('导出前请将远程图片替换为内嵌图片');
   });
   if (original && content.docx) {
-    try { return await exportDocxFromOriginal(content, original); }
+    try { return await exportDocxFromOriginal(content, original, options); }
     catch (error) { console.warn('[documents] patching original failed, rendering from scratch', error); }
   }
   const html = generateHTML(content.doc, documentExtensions());

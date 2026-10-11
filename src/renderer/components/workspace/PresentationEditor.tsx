@@ -120,7 +120,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
       </div>
     </div>
     <ReferenceStrip attached={referenced ? (referenced.elementIds?.length ? `${referenced.elementIds.length} 个元素` : referenced.slideId ? `第 ${content.slides.findIndex((slide) => slide.id === referenced.slideId) + 1} 页` : '整份演示稿') : undefined}
-      hint={selection?.targetLabel ? `已选：${selection.targetLabel} · Ctrl+L 交给 AI` : '双击文字编辑，拖动元素调整位置；选中元素后点「问 AI」或按 Ctrl+L'}>
+      hint={selection?.targetLabel ? `已选：${selection.targetLabel}` : undefined}>
       <Button size="xs" variant="ghost" disabled={busy || !selection} title="把选中的元素交给 AI（Ctrl+L）" onClick={() => cite(true)}><MousePointerClick data-icon="inline-start" />引用选中元素</Button>
       <Button size="xs" variant="ghost" disabled={busy} onClick={() => cite(false)}>引用当前页</Button>
       <Button size="xs" variant="ghost" disabled={busy} onClick={() => cite(false, true)}>引用整稿</Button>

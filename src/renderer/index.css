@@ -15,6 +15,10 @@
   --accent: #1c1d1e; --accent-ink: #ffffff; --destructive: #c43128; --success: #1a7f4b;
   background: #ffffff; color: var(--ink); color-scheme: light;
   line-height: 1.8; overflow-wrap: anywhere;
+  /* Imported .docx tables carry absolute column widths (twips → px) that can exceed the
+     panel; a fixed-layout table grows to their sum, so scroll the sheet instead of
+     letting the table spill past the panel edge. */
+  max-width: 100%; overflow-x: auto;
 }
 .document-prose p { margin: .6em 0; }
 .document-prose h1 { font-size: 2em; font-weight: 700; margin: .8em 0; }
@@ -33,6 +37,11 @@
 .document-review ins { background: color-mix(in srgb, #16a34a 18%, transparent); text-decoration: none; border-bottom: 1.5px solid #16a34a; cursor: pointer; }
 .document-review del { background: color-mix(in srgb, var(--destructive) 14%, transparent); text-decoration: line-through; text-decoration-color: var(--destructive); cursor: pointer; }
 /* Ranges handed to the chat, numbered like their composer chips. */
+/* The range an instruction is being typed for stays visibly selected while focus is in the card. */
+/* Find-in-document matches; the current one is stronger. */
+.document-prose .doc-find-match { background: rgba(255, 213, 0, 0.45); border-radius: 2px; }
+.document-prose .doc-find-current { background: rgba(255, 150, 0, 0.7); border-radius: 2px; box-shadow: 0 0 0 1px rgba(255, 150, 0, 0.9); }
+.document-prose .doc-edit-target { background: color-mix(in srgb, var(--ink) 16%, transparent); border-radius: 2px; }
 .document-prose .doc-ref-range { background: color-mix(in srgb, var(--accent) 16%, transparent); border-bottom: 1.5px solid var(--accent); }
 .document-prose .doc-ref-label { display: inline-flex; align-items: center; justify-content: center; min-width: 1.1rem; height: 1.1rem; margin-right: 2px; padding: 0 3px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font: 600 10px/1 ui-sans-serif, system-ui, sans-serif; vertical-align: .15em; user-select: none; }
 .document-review [data-type="modification"] { outline: 1px dashed var(--accent); outline-offset: 1px; cursor: pointer; }
