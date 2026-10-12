@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { History, ListChecks, Table2, X } from 'lucide-react';
+import { History, ListChecks, Table2 } from 'lucide-react';
 import type { Artifact, ArtifactWithContent } from '../../../shared/artifact';
 import type { ArtifactReview } from '../../../shared/artifactReview';
 import { parseSheetContent, serializeSheetContent, type SheetArtifactContent } from '../../../shared/sheetContent';
@@ -25,7 +25,7 @@ import { applySheetChart, removeSheetChart, sheetCharts } from '../../../shared/
 const Editor = createDeferredView<SheetRendererProps>(() => import('./renderers/SheetRenderer'), { label: 'Excel 编辑器', minHeight: 420 });
 interface Frame { doc: ArtifactWithContent; generation: number; recovered: boolean; error?: string }
 
-export default function SheetDocument({ artifact, onClose }: { artifact: Artifact; onClose(): void }) {
+export default function SheetDocument({ artifact }: { artifact: Artifact; onClose?(): void }) {
   const [frame, setFrame] = useState<Frame | null>(null);
   const current = useRef<ArtifactWithContent | null>(null);
   const sequence = useRef(0);
@@ -172,10 +172,9 @@ export default function SheetDocument({ artifact, onClose }: { artifact: Artifac
   const truncated = content?.importMeta && (content.importMeta.truncatedRows || content.importMeta.truncatedCols || content.importMeta.truncatedSheets);
   const toolbar = <>
     {viewVersion && <Button variant="ghost" size="sm" onClick={() => { current.current = null; setViewVersion(undefined); }}>返回最新</Button>}
-    {!viewVersion && <Button variant={showAudit ? 'secondary' : 'ghost'} size="sm" disabled={previewing} title={previewing ? '请先处理或切到原表' : '检查错误值、不一致的公式、文本型数字等'} onClick={() => { setShowAudit((v) => !v); setShowPivots(false); }}><ListChecks data-icon="inline-start" />检查</Button>}
-    {!viewVersion && <Button variant={showPivots ? 'secondary' : 'ghost'} size="sm" disabled={previewing} title={previewing ? '请先处理或切到原表' : '新建或调整透视表'} onClick={() => { setShowPivots((v) => !v); setShowAudit(false); }}><Table2 data-icon="inline-start" />透视表</Button>}
+    {!viewVersion && <Button variant={showAudit ? 'secondary' : 'ghost'} size="icon-sm" aria-label="检查" disabled={previewing} title={previewing ? '请先处理或切到原表' : '检查错误值、不一致的公式、文本型数字等'} onClick={() => { setShowAudit((v) => !v); setShowPivots(false); }}><ListChecks /></Button>}
+    {!viewVersion && <Button variant={showPivots ? 'secondary' : 'ghost'} size="icon-sm" aria-label="透视表" disabled={previewing} title={previewing ? '请先处理或切到原表' : '新建或调整透视表'} onClick={() => { setShowPivots((v) => !v); setShowAudit(false); }}><Table2 /></Button>}
     <Button variant="ghost" size="icon-sm" aria-label="表格版本历史" title={`版本历史 · 当前 v${frame?.doc.version ?? artifact.version}`} onClick={() => setShowHistory((v) => !v)}><History /></Button>
-    <Button variant="ghost" size="icon-sm" aria-label="关闭表格" onClick={onClose}><X /></Button>
   </>;
   return <div className="flex min-h-0 flex-1 flex-col" onKeyDownCapture={(event) => { if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'l') { event.preventDefault(); quoteSelection(); } }}>
     {error && <Alert variant="destructive"><AlertDescription>{error}<Button variant="outline" size="sm" onClick={() => void discardAndReload()}>丢弃未保存编辑并重新加载</Button></AlertDescription></Alert>}

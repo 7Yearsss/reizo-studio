@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useRef, useState, type ReactNode } from 'react';
 import { Check, CircleAlert, FileUp, Loader2, Plus, Sparkles, Upload, X } from 'lucide-react';
 import type { Artifact } from '../../../shared/artifact';
 import type { ArtifactReview } from '../../../shared/artifactReview';
@@ -13,6 +13,10 @@ export function focusComposer(sessionId: string, options: { cite?: boolean } = {
   // `cite`: a range was just attached; the composer drops its chip at the caret so it can be mentioned in the sentence.
   window.dispatchEvent(new CustomEvent('reizo:focus-composer', { detail: { sessionId, ...(options.cite ? { cite: true } : {}) } }));
 }
+
+/** The workspace's picker row has a slot for the open editor's actions, so an editor needs no header row of its own. */
+const ShellSlot = createContext<HTMLElement | null>(null);
+export const useShellSlot = (): HTMLElement | null => useContext(ShellSlot);
 
 const hasFiles = (event: React.DragEvent) => Array.from(event.dataTransfer.types).includes('Files');
 
@@ -45,6 +49,7 @@ export function WorkspaceShell({ icon, title, noun, items, selected, flush, sele
   const dragDepth = useRef(0);
   const [busy, setBusy] = useState<'' | 'create' | 'import' | 'switch'>('');
   const [dragging, setDragging] = useState(false);
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
   const [error, setError] = useState('');
   async function action(kind: 'create' | 'import' | 'switch', run: () => Promise<void>) {
     setBusy(kind); setError('');
@@ -56,7 +61,7 @@ export function WorkspaceShell({ icon, title, noun, items, selected, flush, sele
   const newItem = (): void => void action('create', create);
   const pickFile = () => input.current?.click();
   const spinner = <Loader2 data-icon="inline-start" className="animate-spin" />;
-  return <div className="relative flex h-full min-h-0 flex-col"
+  return <ShellSlot.Provider value={slot}><div className="relative flex h-full min-h-0 flex-col"
     onDragEnter={(event) => { if (!hasFiles(event)) return; dragDepth.current += 1; setDragging(true); }}
     onDragOver={(event) => event.preventDefault()}
     onDragLeave={() => { dragDepth.current = Math.max(0, dragDepth.current - 1); if (!dragDepth.current) setDragging(false); }}
@@ -68,6 +73,7 @@ export function WorkspaceShell({ icon, title, noun, items, selected, flush, sele
         <SelectTrigger size="sm" className="w-full" aria-label={`选择${noun}`}><SelectValue placeholder={title} /></SelectTrigger>
         <SelectContent><SelectGroup>{items.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectGroup></SelectContent>
       </Select></div>
+      <div ref={setSlot} className="flex shrink-0 items-center gap-0.5 empty:hidden" />
       {items.length > 1 && <span className="hidden shrink-0 text-xs tabular-nums text-ink-muted sm:inline">{items.length} 份</span>}
       <Button variant="ghost" size="sm" disabled={Boolean(busy)} title={`新建${noun}`} onClick={newItem}>{busy === 'create' ? spinner : <Plus data-icon="inline-start" />}新建</Button>
       <Button variant="outline" size="sm" disabled={Boolean(busy)} title={`导入 ${importHint}，也可以直接拖进来`} onClick={pickFile}>{busy === 'import' ? spinner : <Upload data-icon="inline-start" />}{busy === 'import' ? '导入中…' : '导入'}</Button>
@@ -83,7 +89,7 @@ export function WorkspaceShell({ icon, title, noun, items, selected, flush, sele
     {dragging && <div className="pointer-events-none absolute inset-2 z-30 flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-accent bg-paper-raised/90 text-sm text-ink" aria-hidden>
       <FileUp className="size-6 text-accent" />松开即可{importLabel}<span className="text-xs text-ink-muted">{importHint}</span>
     </div>}
-  </div>;
+  </div></ShellSlot.Provider>;
 }
 
 /** Save state with an icon: saving / saved / unsaved / failed. */
