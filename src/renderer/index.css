@@ -106,6 +106,8 @@
   --duration-base: 200ms;
   /* Hairline around floating cards in place of a border. */
   --shadow-outline: 0 0 0 1px rgba(23, 35, 58, 0.05);
+  /* A floating panel: the hairline plus a soft, even glow on every side (no offset, so nothing looks lifted from one edge). */
+  --shadow-panel: 0 0 0 1px rgba(23, 35, 58, 0.05), 0 0 8px rgba(23, 35, 58, 0.09);
   /* The one warm color: "waiting on you". Never for buttons or links. */
   --peach: #fde7d6;
   --peach-ink: #653619;
@@ -132,6 +134,7 @@
 
   --paper-a0: rgb(15 16 17 / 0);
   --shadow-outline: 0 0 0 1px rgba(255, 255, 255, 0.08);
+  --shadow-panel: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 0 8px rgba(0, 0, 0, 0.35);
   --peach: #3a2a1c;
   --peach-ink: #fde7d6;
   --peach-bar: #e8a06a;
