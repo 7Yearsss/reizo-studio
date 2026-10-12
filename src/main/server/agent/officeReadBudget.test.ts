@@ -7,7 +7,6 @@ import { createArtifactStore } from '../storage/artifactStore';
 import { createArtifactReviewStore } from '../storage/artifactReviewStore';
 import { documentReviewAdapter } from './documentReviewAdapter';
 import { createDocumentTools } from './documentTools';
-import { createHtmlTools, htmlReviewAdapter } from './htmlTools';
 import { createArtifactTools } from './artifactTools';
 import { buildSheetContext } from './sheetContext';
 import { documentFromHtml } from './documentIO';
@@ -22,7 +21,7 @@ function setup() {
   const db = openDb(':memory:'); handles.push(db);
   const root = mkdtempSync(path.join(tmpdir(), 'office-read-'));
   const artifacts = createArtifactStore(db, root);
-  const reviews = createArtifactReviewStore(db, artifacts, root, { doc: documentReviewAdapter, html: htmlReviewAdapter });
+  const reviews = createArtifactReviewStore(db, artifacts, root, { doc: documentReviewAdapter });
   return { artifacts, reviews };
 }
 const call = async (tools: Record<string, { execute?: unknown }>, name: string, args: unknown) =>
@@ -75,24 +74,6 @@ describe('read_document paging', () => {
     const keys = Object.keys(await call(createDocumentTools({ sessionId: 's', artifacts, reviews }), 'read_document', { artifactId: doc.id }));
     expect(keys.indexOf('version')).toBeLessThan(keys.indexOf('blocks'));
     expect(keys.indexOf('pendingReviews')).toBeLessThan(keys.indexOf('blocks'));
-  });
-});
-
-describe('read_html paging', () => {
-  it('returns whole lines within budget and a nextStartLine', async () => {
-    const { artifacts, reviews } = setup();
-    const content = Array.from({ length: 100 }, (_, i) => `<p>line ${i} ${'y'.repeat(200)}</p>`).join('\n');
-    const page = await artifacts.create({ sessionId: 's', name: 'p.html', kind: 'html', source: 'manual', content });
-    const tools = createHtmlTools({ artifacts, reviews, sessionId: 's' });
-    let start = 1; let covered = 0;
-    for (let guard = 0; guard < 50; guard++) {
-      const out = await call(tools, 'read_html', { artifactId: page.id, startLine: start, limit: 200 });
-      expect(seenByModel('read_html', out)).toBe(JSON.stringify(out));
-      covered += (out.endLine as number) - (out.startLine as number) + 1; // endLine is inclusive
-      if (out.nextStartLine == null) break;
-      start = out.nextStartLine as number;
-    }
-    expect(covered).toBe(100);
   });
 });
 

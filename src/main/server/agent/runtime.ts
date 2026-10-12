@@ -1,7 +1,5 @@
 import { createPresentationTools } from './presentationTools';
 import { parsePresentationReferences, splitPresentationContext, wrapPresentationContext } from '../../../shared/presentationReferences';
-import { createHtmlTools } from './htmlTools';
-import { parseHtmlReferences, splitHtmlContext, wrapHtmlContext } from '../../../shared/htmlReferences';
 import type { ArtifactReviewStore } from '../storage/artifactReviewStore';
 import { createDocumentTools } from './documentTools';
 import { describeSessionArtifacts } from './sessionArtifactsHint';
@@ -25,7 +23,6 @@ import { createArtifactTools } from './artifactTools';
 import { buildSheetContext } from './sheetContext';
 import { buildDocumentContext } from './documentContext';
 import { buildPresentationContext } from './presentationContext';
-import { buildHtmlContext } from './htmlContext';
 import { parseSheetReferences, wrapSheetContext } from '../../../shared/sheetReferences';
 import { createImageTools } from './imageTools';
 import { createComputerTools, isComputerUseSupported } from './computerTools';
@@ -160,15 +157,13 @@ export function buildSteerContent(
   mentions: string[],
 ): string {
   const presentationRefs = parsePresentationReferences(mentions);
-  const htmlRefs = parseHtmlReferences(presentationRefs.rest);
-  const documentRefs = parseDocumentReferences(htmlRefs.rest);
+  const documentRefs = parseDocumentReferences(presentationRefs.rest);
   const sheetRefs = parseSheetReferences(documentRefs.rest);
   const { refs, paths } = parseCanvasRefs(sheetRefs.rest);
   const blocks = [
     paths.length > 0 ? `Referenced workspace paths:\n${paths.map((m) => `- ${m}`).join('\n')}` : '',
     buildCanvasRefBlock(canvasStore, sessionId, refs),
     documentRefs.refs.length ? wrapDocumentContext(documentRefs.refs) : '',
-    htmlRefs.refs.length ? wrapHtmlContext(htmlRefs.refs) : '',
     presentationRefs.refs.length ? wrapPresentationContext(presentationRefs.refs) : '',
     sheetRefs.refs.length ? wrapSheetContext(sheetRefs.refs.map((ref) => ({ ...ref, name: 'Excel 工作簿' })), 'Use read_sheet with the referenced artifactId before editing. Preserve the referenced sheet and range.') : '',
   ].filter(Boolean);
@@ -238,22 +233,19 @@ export async function runChatTurn(options: {
   }
 
   const presentationRefs = parsePresentationReferences(mentions);
-  const htmlRefs = parseHtmlReferences(presentationRefs.rest);
-  const documentRefs = parseDocumentReferences(htmlRefs.rest);
+  const documentRefs = parseDocumentReferences(presentationRefs.rest);
   const sheetRefs = parseSheetReferences(documentRefs.rest);
   const { refs: canvasRefs, paths: pathMentions } = parseCanvasRefs(sheetRefs.rest);
   const canvasRefBlock = buildCanvasRefBlock(canvasStore, sessionId, canvasRefs);
   const sheetRefBlock = await buildSheetContext(artifactStore, sessionId, sheetRefs.refs);
   const documentContext = await buildDocumentContext(artifactStore, sessionId, documentRefs.refs);
   const presentationContext = await buildPresentationContext(artifactStore, sessionId, presentationRefs.refs);
-  const htmlContext = await buildHtmlContext(artifactStore, sessionId, htmlRefs.refs);
 
   const extraBlocks = [
     pathMentions.length > 0 ? `Referenced workspace paths:\n${pathMentions.map((m) => `- ${m}`).join('\n')}` : '',
     canvasRefBlock,
     sheetRefBlock,
     documentRefs.refs.length ? wrapDocumentContext(documentRefs.refs, documentContext) : '',
-    htmlRefs.refs.length ? wrapHtmlContext(htmlRefs.refs, htmlContext) : '',
     presentationRefs.refs.length ? wrapPresentationContext(presentationRefs.refs, presentationContext) : '',
     attachments.length > 0
       ? attachments
@@ -360,7 +352,6 @@ export async function runChatTurn(options: {
     'When a request needs a visual direction (mood, palette, typography) before you generate or design something, call ask_user with kind:"direction" and 2-4 `directions` cards (title, palette hex list, displayFont/bodyFont stacks, one-line mood, real-world references) so the user picks by looking. If a direction maps to a node already on the canvas (e.g. a draft image the user can inspect), set the card\'s `nodeId` so the card shows that node\'s real thumbnail. To show real draft images on the cards: add the draft nodes directly (never asProposal — proposals need manual acceptance and stay idle), call run_node on each, and wait until their outputs land before sending the direction question. When a skill mentions preset sample images, set the card\'s `imageUrl` to the given `skill-asset:` URL instead.',
     options.artifactReviews ? 'For editable PPT decks use generate_presentation. When the message carries <presentation-context> with `current` content, propose_presentation_edits straight from its version and slide/element IDs without read_presentation first; otherwise read existing slide and element IDs with read_presentation, then propose_presentation_edits. Keep edits within referenced pages/elements and wait for user review. Never bypass review through shell, files, or HTTP.' : '',
     options.artifactReviews ? 'For Excel workbooks use generate_sheet only to create new ones. To change an existing workbook call read_sheet, then propose_sheet_edits with the current version; the original stays unchanged until the user accepts in the Excel panel. Keep each operation to its own non-overlapping range. For pivot tables, group-by summaries, or cross-tabs use an upsertPivot operation (live formulas, refreshable) instead of computing totals yourself. For charts use upsertChart, preferably bound to a pivot via pivotId (propose the chart after the pivot is accepted). Never bypass review through shell, files, or HTTP.' : '',
-    options.artifactReviews ? 'Use generate_html for new editable HTML pages. For changes: when the message carries <html-context> with `current` source, propose_html_edits straight from it without read_html first; otherwise read_html then propose_html_edits. Do not bypass review with file writes, shell commands, or HTTP requests.' : '',
     options.artifactReviews ? 'For editable documents use generate_document. When the message carries <document-context> with `current` content, edit straight from it: call propose_document_edits with that version and those block IDs, without read_document first. Otherwise call read_document before modifying an existing Doc, then propose_document_edits with the current version and stable block IDs. Proposals do not change the original. Only the user may accept or reject, on the suggestion card in chat or in the Doc panel. After proposing, reply with one short sentence at most: the card already shows the before/after, so never repeat, quote or re-explain the new text. Never use file writes, shell commands, or HTTP calls to bypass document review. Respect referenced selected ranges. To audit a Doc for consistency (numbering, punctuation, date and number formats, stray spaces, repeated words or paragraphs, terminology) call check_document, then propose_document_edits for the findings that have a replacement; do not invent problems it did not report. For a whole-document task on a long Doc (translate, unify tone, fix every occurrence) go through it in order: read a page with read_document, propose its edits (up to 40 operations per call, one call per page), then continue with nextOffset until the last block; every batch becomes its own review and the user can accept them all at once, so never stop early or skip sections.' : '',
     artifactStore
       ? 'When the user asks for a flowchart, sequence diagram, system architecture diagram, or mind map, call generate_diagram with Mermaid syntax to produce an interactive Excalidraw canvas artifact in the right panel. When the user asks for a spreadsheet, budget, financial report, or table calculation, call generate_sheet with rows, columns, and formulas to render a full-featured Excel sheet artifact in the right panel.'
@@ -494,7 +485,6 @@ export async function runChatTurn(options: {
   const scheduleTools = scheduleStore ? createScheduleTools({ scheduleStore, sessionId }) : undefined;
 
   let currentPresentationRefs = regenerate ? splitPresentationContext(userMessage?.content ?? '').refs : presentationRefs.refs;
-  let currentHtmlRefs = regenerate ? splitHtmlContext(userMessage?.content ?? '').refs : htmlRefs.refs;
   let currentDocumentRefs = regenerate ? splitDocumentContext(userMessage?.content ?? '').refs : documentRefs.refs;
   const tools =
     toolset?.tools || canvasTools || artifactTools || imageTools || computerTools || scheduleTools || askTool
@@ -504,7 +494,6 @@ export async function runChatTurn(options: {
           ...(canvasTools?.tools ?? {}),
           ...(artifactTools ?? {}),
           ...(artifactStore && options.artifactReviews ? createPresentationTools({ sessionId, projectId: session.projectId, artifacts: artifactStore, reviews: options.artifactReviews, getReferences: () => currentPresentationRefs }) : {}),
-          ...(artifactStore && options.artifactReviews ? createHtmlTools({ sessionId, projectId: session.projectId, artifacts: artifactStore, reviews: options.artifactReviews, getReferences: () => currentHtmlRefs }) : {}),
           ...(artifactStore && options.artifactReviews ? createDocumentTools({ sessionId, projectId: session.projectId, artifacts: artifactStore, reviews: options.artifactReviews, getReferences: () => currentDocumentRefs }) : {}),
           ...(imageTools ?? {}),
           ...(computerTools?.tools ?? {}),
@@ -594,8 +583,6 @@ export async function runChatTurn(options: {
         for (const steer of steers) {
           const steeredPresentation = splitPresentationContext(steer.content).refs;
           if (steeredPresentation.length) currentPresentationRefs = steeredPresentation;
-          const steeredHtml = splitHtmlContext(steer.content).refs;
-          if (steeredHtml.length) currentHtmlRefs = steeredHtml;
           const steeredDocs = splitDocumentContext(steer.content).refs;
           if (steeredDocs.length) currentDocumentRefs = steeredDocs;
           const message: ChatMessage = {

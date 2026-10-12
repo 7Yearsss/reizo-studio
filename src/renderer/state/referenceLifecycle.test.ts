@@ -1,9 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { parseDocumentReferences } from '../../shared/documentReferences';
-import { parseHtmlReferences } from '../../shared/htmlReferences';
 import { parsePresentationReferences } from '../../shared/presentationReferences';
 import { addDocumentReference, documentMentions, dropDocumentSelection, reconcileDocumentSelection, referenceDocument, removeDocumentReference, syncDocumentReferenceVersion } from './documentWorkspace';
-import { addHtmlReference, dropHtmlSelection, htmlMentions, referenceHtml } from './htmlWorkspace';
 import { dropPresentationScope, presentationMentions, referencePresentation } from './presentationWorkspace';
 
 const S = 's1';
@@ -83,26 +81,7 @@ describe('document reference lifecycle', () => {
   });
 });
 
-describe('html / presentation reference lifecycle', () => {
-  it('html: a sent source selection becomes a whole-page reference', () => {
-    referenceHtml(S, { artifactId: 'h1', name: 'index.html', version: 2, selection: { start: 1, end: 9, text: 'x' } });
-    dropHtmlSelection(S);
-    const ref = parseHtmlReferences(htmlMentions(S)).refs[0];
-    expect(ref).toMatchObject({ artifactId: 'h1', version: 2 });
-    expect(ref.selection).toBeUndefined();
-    referenceHtml(S);
-  });
-
-  it('html: ranges of the edited page are spent, other pages keep theirs', () => {
-    addHtmlReference(S, { artifactId: 'h1', name: 'a.html', version: 2, selection: { start: 1, end: 3, text: 'x' } });
-    addHtmlReference(S, { artifactId: 'h1', name: 'a.html', version: 2, selection: { start: 5, end: 8, text: 'y' } });
-    addHtmlReference(S, { artifactId: 'h2', name: 'b.html', version: 1, selection: { start: 0, end: 2, text: 'z' } });
-    expect(parseHtmlReferences(htmlMentions(S, 3)).refs.map((r) => r.label)).toEqual([3, 4, 5]);
-    dropHtmlSelection(S, 'h1');
-    expect(parseHtmlReferences(htmlMentions(S)).refs.map((r) => [r.artifactId, Boolean(r.selection)])).toEqual([['h1', false], ['h2', true]]);
-    referenceHtml(S);
-  });
-
+describe('presentation reference lifecycle', () => {
   it('presentation: slide/element scope is dropped, deck identity stays', () => {
     referencePresentation(S, { artifactId: 'p1', name: '路演', version: 5, slideId: 'sl1', elementIds: ['e1'] });
     dropPresentationScope(S);

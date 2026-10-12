@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type ComponentType } from 'react';
 import {
   Check,
-  Code2,
   FileSpreadsheet,
   FileText,
   FolderKanban,
@@ -45,7 +44,6 @@ const CREATE_PANELS: PanelEntry[] = [
   { tab: 'documents', label: 'Doc 文档', Icon: FileText },
   { tab: 'presentations', label: 'PPT 演示稿', Icon: Presentation },
   { tab: 'sheets', label: 'Excel 表格', Icon: FileSpreadsheet },
-  { tab: 'html', label: 'HTML 网页', Icon: Code2 },
 ];
 
 const WORKSPACE_PANELS: PanelEntry[] = [
@@ -99,7 +97,7 @@ export default function TopRightToolbar({
   const openPanel = (entry: PanelEntry) => {
     setPanelsOpen(false);
     if (entry.tab === 'canvas' && onOpenCanvas) onOpenCanvas();
-    else if (entry.tab !== 'canvas' && !sessionId && onOpenPanel && ['documents', 'html', 'presentations', 'sheets'].includes(entry.tab)) onOpenPanel(entry.tab);
+    else if (entry.tab !== 'canvas' && !sessionId && onOpenPanel && ['documents', 'presentations', 'sheets'].includes(entry.tab)) onOpenPanel(entry.tab);
     else uiStore.toggleRightPanelTab(entry.tab);
   };
 

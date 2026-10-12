@@ -6,7 +6,6 @@ const READERS: Partial<Record<ArtifactKind, { label: string; tool: string }>> = 
   doc: { label: 'Doc', tool: 'read_document' },
   sheet: { label: 'Excel', tool: 'read_sheet' },
   presentation: { label: 'PPT', tool: 'read_presentation' },
-  html: { label: 'HTML', tool: 'read_html' },
 };
 const PER_KIND = 3;
 const TOTAL = 8;

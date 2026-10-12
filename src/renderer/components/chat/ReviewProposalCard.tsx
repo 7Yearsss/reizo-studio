@@ -6,7 +6,6 @@ import * as api from '../../api';
 import * as artifacts from '../../state/artifactStore';
 import { refreshDocumentReviews, selectDocument, useDocumentWorkspace } from '../../state/documentWorkspace';
 import { refreshSheetReviews, selectWorkbook, useSheetWorkspace } from '../../state/sheetWorkspace';
-import { refreshHtmlReviews, selectHtml, useHtmlWorkspace } from '../../state/htmlWorkspace';
 import { refreshPresentationReviews, selectPresentation, usePresentationWorkspace } from '../../state/presentationWorkspace';
 import { useTabStore } from '../../state/useTabStore';
 import * as uiStore from '../../state/uiStore';
@@ -27,7 +26,6 @@ interface Kind {
 const KINDS: Record<string, Kind> = {
   propose_document_edits: { title: '文档修改建议', tab: 'documents', select: selectDocument, refresh: refreshDocumentReviews, decidable: true },
   propose_sheet_edits: { title: '表格修改建议', tab: 'sheets', select: selectWorkbook, refresh: refreshSheetReviews, decidable: true },
-  propose_html_edits: { title: 'HTML 修改建议', tab: 'html', select: selectHtml, refresh: refreshHtmlReviews, decidable: false },
   propose_presentation_edits: { title: 'PPT 修改建议', tab: 'presentations', select: selectPresentation, refresh: refreshPresentationReviews, decidable: false },
 };
 
@@ -73,9 +71,8 @@ export default function ReviewProposalCard({ proposal }: { proposal: ReviewPropo
   const sessionId = useTabStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.sessionId);
   const docRev = useDocumentWorkspace((s) => s.revisions[artifactId]);
   const sheetRev = useSheetWorkspace((s) => s.reviewRevisions[artifactId]);
-  const htmlRev = useHtmlWorkspace((s) => s.revisions[artifactId]);
   const deckRev = usePresentationWorkspace((s) => s.revisions[artifactId]);
-  const revision = `${docRev}.${sheetRev}.${htmlRev}.${deckRev}`;
+  const revision = `${docRev}.${sheetRev}.${deckRev}`;
   const [review, setReview] = useState<ArtifactReview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');

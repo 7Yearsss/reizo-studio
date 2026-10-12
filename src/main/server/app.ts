@@ -1,5 +1,4 @@
 import { presentationReviewAdapter } from './agent/presentationTools';
-import { htmlReviewAdapter } from './agent/htmlTools';
 import { createArtifactReviewStore } from './storage/artifactReviewStore';
 import { documentReviewAdapter } from './agent/documentReviewAdapter';
 import { sheetReviewAdapter } from './agent/sheetReviewAdapter';
@@ -163,7 +162,7 @@ export function createApp(options: CreateAppOptions) {
   // features work under `test:api` too.
   const db = options.db ?? openDb(':memory:');
   const artifactStore = createArtifactStore(db, options.dataRoot);
-  const artifactReviews = createArtifactReviewStore(db, artifactStore, options.dataRoot, { doc: documentReviewAdapter, html: htmlReviewAdapter, presentation: presentationReviewAdapter, sheet: sheetReviewAdapter });
+  const artifactReviews = createArtifactReviewStore(db, artifactStore, options.dataRoot, { doc: documentReviewAdapter, presentation: presentationReviewAdapter, sheet: sheetReviewAdapter });
   const canvasStore = createCanvasStore(db);
   recoverCanvasJobs(canvasStore);
   let canvasJobsStopped = false;

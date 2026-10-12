@@ -1,7 +1,5 @@
 import { splitPresentationContext } from '../../../shared/presentationReferences';
 import { selectPresentation } from '../../state/presentationWorkspace';
-import { splitHtmlContext } from '../../../shared/htmlReferences';
-import { selectHtml } from '../../state/htmlWorkspace';
 import { splitDocumentContext } from '../../../shared/documentReferences';
 import { selectDocument } from '../../state/documentWorkspace';
 import { useMemo, useState } from 'react';
@@ -25,6 +23,8 @@ function RefChipText({ label, name, quote }: { label?: number; name: string; quo
   );
 }
 
+const LEGACY_HTML_CONTEXT = /\n*<html-context>[^\n]*<\/html-context>/g;
+
 export default function UserMessage({
   content,
   sessionId,
@@ -43,12 +43,12 @@ export default function UserMessage({
   const [copied, setCopied] = useState(false);
   // The agent-facing node-ref block (raw ids + prompt dumps) is split out and
   // rendered as thumbnail chips — users shouldn't read machine identifiers.
-  const { text, nodeIds, sheetRefs, documentRefs, htmlRefs, presentationRefs } = useMemo(() => {
-    const presentation = splitPresentationContext(content);
-    const html = splitHtmlContext(presentation.text);
-    const document = splitDocumentContext(html.text);
+  const { text, nodeIds, sheetRefs, documentRefs, presentationRefs } = useMemo(() => {
+    // Older messages carry an <html-context> block from the removed HTML page integration.
+    const presentation = splitPresentationContext(content.replace(LEGACY_HTML_CONTEXT, ''));
+    const document = splitDocumentContext(presentation.text);
     const sheet = splitSheetContext(document.text);
-    return { ...splitCanvasRefs(sheet.text), sheetRefs: sheet.refs, documentRefs: document.refs, htmlRefs: html.refs, presentationRefs: presentation.refs };
+    return { ...splitCanvasRefs(sheet.text), sheetRefs: sheet.refs, documentRefs: document.refs, presentationRefs: presentation.refs };
   }, [content]);
 
   function copy() {
@@ -71,7 +71,6 @@ export default function UserMessage({
         </div>
         <CanvasRefChips nodeIds={nodeIds} sessionId={sessionId} />
         {documentRefs.length > 0 && <div className="mt-1.5 flex flex-wrap justify-end gap-1.5">{documentRefs.map((ref, index) => <Button key={index} variant="outline" size="xs" className="max-w-full min-w-0 shrink" onClick={() => { if (sessionId) { selectDocument(sessionId, ref.artifactId); setRightPanelTab('documents'); } }}><RefChipText label={ref.label} name={ref.name} quote={ref.selection?.text} /></Button>)}</div>}
-        {htmlRefs.length > 0 && <div className="mt-1.5 flex flex-wrap justify-end gap-1.5">{htmlRefs.map((ref, index) => <Button key={index} variant="outline" size="xs" className="max-w-full min-w-0 shrink" onClick={() => { if (sessionId) { selectHtml(sessionId, ref.artifactId); setRightPanelTab('html'); } }}><RefChipText label={ref.label} name={ref.name} quote={ref.selection?.text} /></Button>)}</div>}
         {presentationRefs.length > 0 && <div className="mt-1.5 flex flex-wrap justify-end gap-1.5">{presentationRefs.map((ref, index) => <Button key={index} variant="outline" size="xs" className="max-w-full min-w-0 shrink" onClick={() => { if (sessionId) { selectPresentation(sessionId, ref.artifactId); setRightPanelTab('presentations'); } }}><RefChipText name={ref.name} quote={ref.elementIds?.length ? `${ref.elementIds.length} 个元素` : undefined} /></Button>)}</div>}
         {sheetRefs.length > 0 && <div className="mt-1.5 flex flex-wrap justify-end gap-1.5">{sheetRefs.map((ref, index) => <Button key={`${ref.artifactId}:${index}`} variant="outline" size="xs" onClick={() => { if (sessionId) { selectWorkbook(sessionId, ref.artifactId); setRightPanelTab('sheets'); } }}><RefChipText label={ref.label} name={ref.name} quote={ref.range ? `${ref.sheetName ?? ''}!${ref.range}` : undefined} /></Button>)}</div>}
         <div className="mt-1 flex justify-end gap-2 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">

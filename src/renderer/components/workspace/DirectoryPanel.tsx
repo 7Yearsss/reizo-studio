@@ -10,27 +10,7 @@ import { Tooltip } from '../ui/Tooltip';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { Button } from '../ui/button';
 import { FileTree, FileTreeFolder, FileTreeFile } from '../motion/file-tree';
-import { CodeBlock, type CodeBlockProps } from '../agents/code-block';
-
-function detectLanguage(path: string): CodeBlockProps['language'] {
-  const ext = path.split('.').pop()?.toLowerCase();
-  switch (ext) {
-    case 'ts':
-      return 'typescript';
-    case 'tsx':
-    case 'jsx':
-      return 'tsx';
-    case 'js':
-      return 'typescript';
-    case 'json':
-      return 'json';
-    case 'sh':
-    case 'bash':
-      return 'bash';
-    default:
-      return 'text';
-  }
-}
+import FilePreview, { previewKind } from './FilePreview';
 
 export default function DirectoryPanel({ embedded = false }: { embedded?: boolean }) {
   const workspacePath = useSettingsStore((s) => s.settings.workspacePath);
@@ -203,7 +183,7 @@ export default function DirectoryPanel({ embedded = false }: { embedded?: boolea
       </div>
 
       {preview && (
-        <div className="flex max-h-[50%] flex-col border-t border-line bg-paper">
+        <div className={cn('flex flex-col border-t border-line bg-paper', previewKind(preview.path) === 'code' ? 'max-h-[50%]' : 'max-h-[70%]')}>
           <div className="flex items-center justify-between border-b border-line/40 px-3 py-1.5">
             <span className="truncate font-mono text-[11px] text-ink-muted">{preview.path}</span>
             <button
@@ -217,13 +197,7 @@ export default function DirectoryPanel({ embedded = false }: { embedded?: boolea
           </div>
           {preview.truncated ? <p role="status" className="px-3 py-2 text-xs text-ink-muted">文件预览已截断，仅显示前段内容。</p> : null}
           <div className="min-h-0 flex-1 overflow-auto">
-            <CodeBlock
-              code={preview.content}
-              language={detectLanguage(preview.path)}
-              filename={preview.path.split(/[/\\]/).pop()}
-              maxHeight={240}
-              showLineNumbers
-            />
+            <FilePreview path={preview.path} content={preview.content} />
           </div>
         </div>
       )}
