@@ -31,8 +31,8 @@ const KINDS: Record<string, Kind> = {
   propose_presentation_edits: { title: 'PPT 修改建议', tab: 'presentations', select: selectPresentation, refresh: refreshPresentationReviews, decidable: false },
 };
 
-const DEL = 'rounded-[3px] bg-rose-500/15 px-0.5 text-rose-700 line-through decoration-rose-500/70 dark:text-rose-300';
-const INS = 'rounded-[3px] bg-emerald-500/20 px-0.5 text-emerald-800 dark:text-emerald-300';
+const DEL = 'rounded-[3px] bg-[#ff0000]/12 px-0.5 text-ink line-through decoration-ink/40 dark:bg-rose-500/15 dark:text-rose-300 dark:decoration-rose-500/70';
+const INS = 'rounded-[3px] bg-[#9ccc2c]/25 px-0.5 text-ink dark:bg-emerald-500/20 dark:text-emerald-300';
 
 /** One inline line: unchanged text stays plain, only the words that changed are marked. */
 function InlineDiff({ before, after }: { before: string; after: string }) {
