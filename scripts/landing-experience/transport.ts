@@ -276,7 +276,7 @@ export function installShowcaseTransport() {
     windowMinimize: async (): Promise<void> => {}, windowClose: async (): Promise<void> => {}, windowToggleMaximize: async () => false,
     runCommand: unsupported, readDroppedFile: unsupported, revealInFolder: unsupported,
     deleteWorkspacePath: unsupported, createWorkspaceEntry: unsupported, gitStatus: async () => ({ available: false, branch: null, dirty: false, porcelain: '', recent: '' }),
-    installSkill: unsupported, uninstallSkill: unsupported, listPlugins: async () => [], installPlugin: unsupported, setPluginEnabled: unsupported, uninstallPlugin: unsupported, searchSkillHub: async () => ({ items: [], total: 0 }),
+    installSkill: unsupported, uninstallSkill: unsupported, listPlugins: async () => [], listMcpServers: async () => [], saveMcpServers: unsupported, testMcpServer: unsupported, listHooks: async () => [], saveHooks: unsupported, installPlugin: unsupported, setPluginEnabled: unsupported, uninstallPlugin: unsupported, searchSkillHub: async () => ({ items: [], total: 0 }),
     installSkillHubSkill: unsupported, previewSkillHubSkill: unsupported, exportPdf: unsupported,
   } satisfies Omit<ReizoBridge, 'platform'> & { platform: 'web' };
   window.reizo = bridge as unknown as ReizoBridge;

@@ -15,12 +15,14 @@ import { Input } from '../components/motion/input';
 import { AdminProvidersSection } from './settings/AdminProvidersSection';
 import StorageMaintenanceSection from './settings/StorageMaintenanceSection';
 import UsageCostsSection from './settings/UsageCostsSection';
+import ExtensionsSection from './settings/ExtensionsSection';
 
-type SectionId = 'general' | 'providers' | 'usage' | 'admin' | 'storage' | 'about';
+type SectionId = 'general' | 'providers' | 'extensions' | 'usage' | 'admin' | 'storage' | 'about';
 
 const SECTIONS: { id: SectionId; label: string }[] = [
   { id: 'general', label: '通用' },
   { id: 'providers', label: '模型供应商' },
+  { id: 'extensions', label: '扩展（MCP / Hooks）' },
   { id: 'usage', label: '用量与费用' },
   { id: 'admin', label: '平台管理 (Admin)' },
   { id: 'storage', label: '存储' },
@@ -64,6 +66,7 @@ export default function SettingsPage() {
       <div className="min-w-0 flex-1 overflow-y-auto px-10 py-8">
         {section === 'general' && <GeneralSection />}
         {section === 'providers' && <ProvidersSection />}
+        {section === 'extensions' && <ExtensionsSection />}
         {section === 'usage' && <UsageCostsSection onOpenProviders={() => setSection('providers')} />}
         {section === 'admin' && <AdminProvidersSection onOpenSystemProviders={() => setSection('providers')} />}
         {section === 'storage' && <StorageMaintenanceSection />}

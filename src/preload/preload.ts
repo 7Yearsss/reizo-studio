@@ -3,6 +3,7 @@ import { IPC } from '../shared/constants';
 import type { DirEntry } from '../shared/workspace';
 import type { SkillHubInstallRequest, SkillHubSearchQuery } from '../shared/skillhub';
 import type { PluginSummary } from '../shared/plugins';
+import type { HookEntry, McpServerEntry, McpTestResult } from '../shared/extensionConfig';
 
 contextBridge.exposeInMainWorld('reizo', {
   platform: process.platform,
@@ -31,6 +32,11 @@ contextBridge.exposeInMainWorld('reizo', {
   gitStatus: () => ipcRenderer.invoke(IPC.WORKSPACE_GIT),
   installSkill: () => ipcRenderer.invoke(IPC.SKILL_INSTALL),
   listPlugins: (): Promise<PluginSummary[]> => ipcRenderer.invoke(IPC.PLUGIN_LIST),
+  listMcpServers: (): Promise<McpServerEntry[]> => ipcRenderer.invoke(IPC.MCP_LIST),
+  saveMcpServers: (entries: McpServerEntry[]): Promise<void> => ipcRenderer.invoke(IPC.MCP_SAVE, entries),
+  testMcpServer: (entry: McpServerEntry): Promise<McpTestResult> => ipcRenderer.invoke(IPC.MCP_TEST, entry),
+  listHooks: (): Promise<HookEntry[]> => ipcRenderer.invoke(IPC.HOOKS_LIST),
+  saveHooks: (entries: HookEntry[]): Promise<void> => ipcRenderer.invoke(IPC.HOOKS_SAVE, entries),
   installPlugin: (): Promise<PluginSummary | null> => ipcRenderer.invoke(IPC.PLUGIN_INSTALL),
   setPluginEnabled: (id: string, enabled: boolean): Promise<void> => ipcRenderer.invoke(IPC.PLUGIN_SET_ENABLED, id, enabled),
   uninstallPlugin: (id: string): Promise<void> => ipcRenderer.invoke(IPC.PLUGIN_UNINSTALL, id),

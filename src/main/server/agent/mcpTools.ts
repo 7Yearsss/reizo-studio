@@ -26,7 +26,7 @@ export type McpServerConfig =
   | { name: string; kind: 'stdio'; command: string; args: string[]; env?: Record<string, string>; cwd?: string }
   | { name: string; kind: 'http' | 'sse'; url: string; headers?: Record<string, string> };
 
-const SERVER_NAME = /^[A-Za-z0-9-]{1,24}$/;
+export const SERVER_NAME = /^[A-Za-z0-9-]{1,24}$/;
 
 function stringRecord(value: unknown): Record<string, string> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
@@ -105,6 +105,8 @@ export interface ConnectOptions {
   connectTimeoutMs?: number;
   /** Servers contributed by enabled plugins; a user server with the same name wins. */
   extraServers?: McpServerConfig[];
+  /** Connect exactly these servers, ignoring mcp.json and leaving mcp-baseline.json untouched (the settings "test" button). */
+  onlyServers?: McpServerConfig[];
 }
 
 function defaultCreateClient(server: McpServerConfig): Promise<MCPClient> {
@@ -131,10 +133,13 @@ const EMPTY: McpToolset = { tools: {}, executeApproved: async () => ({ error: 'M
 
 /** Connect every configured server (in parallel, failures isolated) and expose their tools behind approval. */
 export async function connectMcpTools(options: ConnectOptions): Promise<McpToolset> {
-  let servers: McpServerConfig[] = [];
-  try { servers = parseMcpConfig(await readFile(path.join(options.dataRoot, 'mcp.json'), 'utf8')); } catch { /* no user config */ }
-  const taken = new Set(servers.map((s) => s.name));
-  for (const extra of options.extraServers ?? []) if (!taken.has(extra.name)) { taken.add(extra.name); servers.push(extra); }
+  const dryRun = options.onlyServers !== undefined;
+  let servers: McpServerConfig[] = [...(options.onlyServers ?? [])];
+  if (!dryRun) {
+    try { servers = parseMcpConfig(await readFile(path.join(options.dataRoot, 'mcp.json'), 'utf8')); } catch { /* no user config */ }
+    const taken = new Set(servers.map((s) => s.name));
+    for (const extra of options.extraServers ?? []) if (!taken.has(extra.name)) { taken.add(extra.name); servers.push(extra); }
+  }
   if (servers.length === 0) return EMPTY;
 
   const create = options.createClient ?? defaultCreateClient;
@@ -165,7 +170,7 @@ export async function connectMcpTools(options: ConnectOptions): Promise<McpTools
     const { serverTools } = outcome.value;
     const fingerprints = await fingerprintTools(serverTools as never);
     const verdict = applyBaseline(fingerprints, baseline[server.name]);
-    if (JSON.stringify(verdict.next) !== JSON.stringify(baseline[server.name] ?? null)) { baseline[server.name] = verdict.next; baselineChanged = true; }
+    if (!dryRun && JSON.stringify(verdict.next) !== JSON.stringify(baseline[server.name] ?? null)) { baseline[server.name] = verdict.next; baselineChanged = true; }
     for (const name of verdict.blocked) warnings.push(`MCP tool "${server.name}/${name}" changed since it was first trusted and is withheld (remove "${server.name}" from mcp-baseline.json to re-trust).`);
     for (const name of verdict.allowed) {
       const raw = serverTools[name];

@@ -1,5 +1,6 @@
 import type { DirEntry } from './workspace';
 import type { PluginSummary } from './plugins';
+import type { HookEntry, McpServerEntry, McpTestResult } from './extensionConfig';
 import type {
   SkillHubInstallRequest,
   SkillHubInstallResult,
@@ -32,6 +33,13 @@ export interface ReizoBridge {
   }>;
   installSkill(): Promise<{ id: string } | null>;
   listPlugins(): Promise<PluginSummary[]>;
+  /** User-level MCP servers (mcp.json), including disabled ones. Changes apply from the next turn. */
+  listMcpServers(): Promise<McpServerEntry[]>;
+  saveMcpServers(entries: McpServerEntry[]): Promise<void>;
+  /** Connect one server alone and list its tools; never saves anything. */
+  testMcpServer(entry: McpServerEntry): Promise<McpTestResult>;
+  listHooks(): Promise<HookEntry[]>;
+  saveHooks(entries: HookEntry[]): Promise<void>;
   /** Opens a folder picker and installs the chosen extension pack (disabled until the user enables it). */
   installPlugin(): Promise<PluginSummary | null>;
   setPluginEnabled(id: string, enabled: boolean): Promise<void>;
