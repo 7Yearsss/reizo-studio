@@ -1,9 +1,8 @@
 import { presentationMentions, usePresentationWorkspace, referencePresentation, selectPresentation, dropPresentationScope } from '../../state/presentationWorkspace';
-import { htmlMentions, htmlReferences, useHtmlWorkspace, selectHtml, dropHtmlSelection, removeHtmlReference } from '../../state/htmlWorkspace';
 import { documentMentions, documentReferences, useDocumentWorkspace, addDocumentReference, selectDocument, dropDocumentSelection, removeDocumentReference } from '../../state/documentWorkspace';
 import { labelSelections } from '../../../shared/referenceLabels';
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
-import { AtSign, FileText, FileSpreadsheet, Presentation, Code2, Clapperboard, FolderTree, Paperclip, Image as ImageIcon, Video, Type, Volume2, Bot, Sparkles, BoxSelect, Layers, Pin, Quote, Wrench } from 'lucide-react';
+import { AtSign, FileText, FileSpreadsheet, Presentation, Clapperboard, FolderTree, Paperclip, Image as ImageIcon, Video, Type, Volume2, Bot, Sparkles, BoxSelect, Layers, Pin, Quote, Wrench } from 'lucide-react';
 import { isImeComposingEvent } from '../../lib/ime';
 import { cn } from '../../lib/cn';
 import { PromptInput } from '../agents/prompt-input';
@@ -92,35 +91,31 @@ export default function Composer({
 }) {
   const [draft, setDraft] = useState('');
   const presentationRef = usePresentationWorkspace((s) => sessionId ? s.references[sessionId] : undefined);
-  const rawHtmlRefs = useHtmlWorkspace((s) => sessionId ? s.references[sessionId] : undefined);
   const rawDocumentRefs = useDocumentWorkspace((s) => sessionId ? s.references[sessionId] : undefined);
-  // Picked ranges are numbered across Doc then HTML, matching the labels sent with the message.
+  // Picked ranges are numbered across Doc ranges, matching the labels sent with the message.
   const documentRefs = useMemo(() => labelSelections(rawDocumentRefs ?? []), [rawDocumentRefs]);
-  const htmlRefs = useMemo(() => labelSelections(rawHtmlRefs ?? [], 1 + documentRefs.filter((r) => r.selection).length), [rawHtmlRefs, documentRefs]);
   const editorRef = useRef<PromptEditorHandle>(null);
   // Numbered ranges in display order; the inline chips in the draft resolve against these.
   const pinnedSheets = useSheetWorkspace((s) => sessionId ? s.pinnedBySession[sessionId] : undefined);
-  // Sheet ranges are numbered after the document and HTML ones, matching sheetMentions at send time.
-  const sheetFirst = 1 + documentRefs.filter((r) => r.selection).length + htmlRefs.filter((r) => r.selection).length;
+  // Sheet ranges are numbered after the document ones, matching sheetMentions at send time.
+  const sheetFirst = 1 + documentRefs.filter((r) => r.selection).length;
   const sheetRefs = useMemo(() => labelSheetRanges(pinnedSheets ?? [], sheetFirst), [pinnedSheets, sheetFirst]);
   const ranges = useMemo(() => [
     ...documentRefs.filter((r) => r.selection && r.label).map((ref) => ({ label: ref.label!, name: ref.name, text: ref.selection?.text, kind: 'doc' as const, key: `doc:${ref.artifactId}:${JSON.stringify(ref.selection)}` })),
-    ...htmlRefs.filter((r) => r.selection && r.label).map((ref) => ({ label: ref.label!, name: ref.name, text: ref.selection?.text, kind: 'html' as const, key: `html:${ref.artifactId}:${JSON.stringify(ref.selection)}` })),
     ...sheetRefs.filter((r) => r.range && r.label).map((ref) => ({ label: ref.label!, name: ref.name, text: `${ref.sheetName ? `${ref.sheetName}!` : ''}${ref.range}`, kind: 'sheet' as const, artifactId: ref.artifactId, key: `sheet:${ref.artifactId}:${ref.sheetId ?? ref.sheetName ?? ''}:${ref.range}` })),
-  ], [documentRefs, htmlRefs, sheetRefs]);
+  ], [documentRefs, sheetRefs]);
   const chipApi = useMemo(() => ({
     info: (label: number) => {
       const hit = ranges.find((r) => r.label === label);
-      return hit ? { kind: hit.kind === 'doc' ? '文档' : hit.kind === 'html' ? 'HTML' : '表格', name: hit.name, text: hit.text } : undefined;
+      return hit ? { kind: hit.kind === 'doc' ? '文档' : '表格', name: hit.name, text: hit.text } : undefined;
     },
     open: (label: number) => {
       const hit = ranges.find((r) => r.label === label);
       if (!hit || !sessionId) return;
       if (hit.kind === 'doc') { selectDocument(sessionId, documentRefs.find((r) => r.label === label)!.artifactId); uiStore.setRightPanelTab('documents'); }
-      else if (hit.kind === 'html') { selectHtml(sessionId, htmlRefs.find((r) => r.label === label)!.artifactId); uiStore.setRightPanelTab('html'); }
       else { selectWorkbook(sessionId, hit.artifactId); uiStore.setRightPanelTab('sheets'); }
     },
-  }), [ranges, sessionId, documentRefs, htmlRefs]);
+  }), [ranges, sessionId, documentRefs]);
   const activeSheet = useSheetWorkspace((s) => sessionId ? s.activeBySession[sessionId] : undefined);
   const [syncingSheet, setSyncingSheet] = useState(false);
   const preparing = useRef(false);
@@ -214,7 +209,7 @@ export default function Composer({
         : `canvas:${r.id}`,
     );
     return {
-      mentions: [...mentions, ...refMentions, ...selectionMentions, ...(sessionId ? [...sheetMentions(sessionId, 1 + documentReferences(sessionId).filter((r) => r.selection).length + htmlReferences(sessionId).filter((r) => r.selection).length), ...documentMentions(sessionId), ...htmlMentions(sessionId, 1 + documentReferences(sessionId).filter((r) => r.selection).length), ...presentationMentions(sessionId)] : [])],
+      mentions: [...mentions, ...refMentions, ...selectionMentions, ...(sessionId ? [...sheetMentions(sessionId, 1 + documentReferences(sessionId).filter((r) => r.selection).length), ...documentMentions(sessionId), ...presentationMentions(sessionId)] : [])],
       extra: { skillId, attachments, replaceFromId: replaceFromIdRef.current },
     };
   }
@@ -230,7 +225,7 @@ export default function Composer({
       chatStore.clearNodeRefs(sessionId);
       clearPinnedSheets(sessionId);
       // A picked range / slide / element is spent once sent; the file itself stays referenced as a whole.
-      dropDocumentSelection(sessionId); dropHtmlSelection(sessionId); dropPresentationScope(sessionId);
+      dropDocumentSelection(sessionId); dropPresentationScope(sessionId);
       chatStore.setPickingReference(sessionId, false);
     }
   }
@@ -703,13 +698,11 @@ export default function Composer({
                   </span>
                 </div>
               )}
-              {sessionId && (documentRefs.length || htmlRefs.length || presentationRef || activeSheet || sheetRefs.length) ? <div className="mb-1.5 flex flex-wrap items-center gap-1 px-1">
+              {sessionId && (documentRefs.length || presentationRef || activeSheet || sheetRefs.length) ? <div className="mb-1.5 flex flex-wrap items-center gap-1 px-1">
                 {documentRefs.map((ref, index) => <WorkspaceRefChip key={`doc:${index}`} icon={<FileText />} kind="文档" name={ref.name} detail={ref.selection ? `「${ref.selection.text ?? ''}」` : '全文'} label={ref.label} cite={() => citeReference(ref.label!)}
                   open={() => { selectDocument(sessionId, ref.artifactId); uiStore.setRightPanelTab('documents'); }} remove={() => removeDocumentReference(sessionId, index)} />)}
                 {presentationRef && <WorkspaceRefChip icon={<Presentation />} kind=" PPT " name={presentationRef.name} detail={presentationRef.elementIds?.length ? `${presentationRef.elementIds.length} 个元素` : presentationRef.slideId ? '当前页' : '整份演示稿'}
                   open={() => { selectPresentation(sessionId, presentationRef.artifactId); uiStore.setRightPanelTab('presentations'); }} remove={() => referencePresentation(sessionId)} />}
-                {htmlRefs.map((ref, index) => <WorkspaceRefChip key={`html:${index}`} icon={<Code2 />} kind=" HTML " name={ref.name} detail={ref.selection ? `「${ref.selection.text ?? ''}」` : '整页'} label={ref.label} cite={() => citeReference(ref.label!)}
-                  open={() => { selectHtml(sessionId, ref.artifactId); uiStore.setRightPanelTab('html'); }} remove={() => removeHtmlReference(sessionId, index)} />)}
                 {sheetRefs.map((ref, index) => <WorkspaceRefChip key={`${ref.artifactId}:${index}`} icon={<Pin />} kind="表格" name={ref.name} detail={ref.range ? `${ref.sheetName ?? ''}!${ref.range}` : '整个工作簿'} label={ref.label} cite={() => citeReference(ref.label!)}
                   open={() => { selectWorkbook(sessionId, ref.artifactId); uiStore.setRightPanelTab('sheets'); }} remove={() => removePinnedSheet(sessionId, index)} />)}
                 {activeSheet && !sheetRefs.some((ref) => sameSheetPlace(ref, activeSheet)) && <WorkspaceRefChip icon={<FileSpreadsheet />} kind="表格" name={activeSheet.name} detail={`${activeSheet.range ? `${activeSheet.sheetName ?? ''}!${activeSheet.range}` : '当前工作表'} · 当前选区`} pinned={false}
@@ -760,14 +753,13 @@ export default function Composer({
                     return;
                   }
                   // Atomic chip delete: Backspace on an empty draft unpins the
-                  // skill, then the last Doc/HTML chip, mirroring how Cursor/Linear remove context chips.
+                  // skill, then the last Doc chip, mirroring how Cursor/Linear remove context chips.
                   if (e.key === 'Backspace' && draft === '' && skillId) {
                     e.preventDefault();
                     setSkillId(undefined);
-                  } else if (e.key === 'Backspace' && draft === '' && sessionId && (htmlRefs.length || documentRefs.length)) {
+                  } else if (e.key === 'Backspace' && draft === '' && sessionId && documentRefs.length) {
                     e.preventDefault();
-                    if (htmlRefs.length) removeHtmlReference(sessionId, htmlRefs.length - 1);
-                    else removeDocumentReference(sessionId, documentRefs.length - 1);
+                    removeDocumentReference(sessionId, documentRefs.length - 1);
                   }
                   // ↑ at the start of the box pulls queued messages back in for editing.
                   if (e.key === 'ArrowUp' && recallQueuedMessages(textBeforeCaret)) {

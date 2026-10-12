@@ -56,9 +56,6 @@ export function toolLabel(name: string): string {
     case 'read_presentation': return '读取演示稿';
     case 'generate_presentation': return '创建演示稿';
     case 'propose_presentation_edits': return '提出 PPT 修改建议';
-    case 'read_html': return '读取 HTML 页面';
-    case 'generate_html': return '创建 HTML 页面';
-    case 'propose_html_edits': return '提出 HTML 修改建议';
     case 'propose_sheet_edits': return '提出表格修改建议';
     default: return name.replace(/[_-]+/g, ' ');
   }
@@ -97,7 +94,7 @@ export function toolTarget(part: ToolCallPart): string {
 }
 
 export function toolDetail(part: ToolCallPart): string {
-  if (['read_document', 'generate_document', 'propose_document_edits', 'read_html', 'generate_html', 'propose_html_edits', 'read_presentation', 'generate_presentation', 'propose_presentation_edits'].includes(part.name) && part.result) {
+  if (['read_document', 'generate_document', 'propose_document_edits', 'read_presentation', 'generate_presentation', 'propose_presentation_edits'].includes(part.name) && part.result) {
     try {
       const result = JSON.parse(part.result);
       if (result.error) return String(result.error);

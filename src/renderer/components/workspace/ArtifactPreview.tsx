@@ -14,13 +14,11 @@ import SheetDocument from './SheetDocument';
 
 const DocumentEditor = createDeferredView<{ artifact: Artifact }>(() => import('./DocumentEditor'), { label: 'Doc', minHeight: 420 });
 
-const HtmlEditor = createDeferredView<{ artifact: Artifact }>(() => import('./HtmlEditor'), { label: 'HTML', minHeight: 420 });
 
 const PresentationEditor = createDeferredView<{ artifact: Artifact }>(() => import('./PresentationEditor'), { label: 'PPT', minHeight: 420 });
 
 export default function ArtifactPreview(props: { artifact: Artifact; onClose: () => void }) {
   if (props.artifact.kind === 'presentation') return <PresentationEditor key={props.artifact.id} artifact={props.artifact} />;
-  if (props.artifact.kind === 'html') return <HtmlEditor key={props.artifact.id} artifact={props.artifact} />;
   if (props.artifact.kind === 'doc') return <DocumentEditor key={props.artifact.id} artifact={props.artifact} />;
   return props.artifact.kind === 'sheet' ? <SheetDocument key={props.artifact.id} {...props} /> : <GeneralArtifactPreview {...props} />;
 }

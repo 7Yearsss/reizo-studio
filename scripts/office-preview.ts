@@ -12,7 +12,6 @@ import { serializeSheetContent, workbookFromCreateSheets } from '../src/shared/s
 import { documentFromHtml } from '../src/main/server/agent/documentIO';
 import { documentBlocks, parseDocumentContent } from '../src/shared/documentContent';
 import { splitDocumentContext } from '../src/shared/documentReferences';
-import { splitHtmlContext } from '../src/shared/htmlReferences';
 import { createPresentation, parsePresentation, presentationElements } from '../src/shared/presentationContent';
 import { splitPresentationContext } from '../src/shared/presentationReferences';
 
@@ -31,8 +30,6 @@ async function main() {
   const workbook = existingWorkbook ?? await artifacts.create({ sessionId: session.id, name: '验收预算.xlsx', kind: 'sheet', content: serializeSheetContent(result.content), source: 'manual' });
   const existingDocument = (await artifacts.listBySession(session.id)).find((item) => item.name === 'Doc 审核验收');
   if (!existingDocument) await artifacts.create({ sessionId: session.id, name: 'Doc 审核验收', kind: 'doc', source: 'manual', content: JSON.stringify(documentFromHtml('<h2>发布计划</h2><p>预计周一发布。</p><p><strong>预算保持 100 元不变。</strong></p>')) });
-  const existingHtml = (await artifacts.listBySession(session.id)).find((item) => item.name === 'HTML-review.html');
-  if (!existingHtml) await artifacts.create({ sessionId: session.id, name: 'HTML-review.html', kind: 'html', source: 'manual', content: '<!doctype html>\n<html lang="zh-CN">\n<head>\n<meta charset="utf-8">\n<title>页面验收</title>\n<style>body{font-family:system-ui;padding:36px;background:#faf7f2;color:#292524}h1{color:#c05a2b}button{padding:10px 16px;border-radius:8px;border:1px solid #c05a2b;background:white}</style>\n</head>\n<body>\n<h1>原始标题</h1>\n<p>保留这段说明。</p>\n<button id="counter">计数：0</button>\n<script>let count=0;document.getElementById("counter").onclick=function(){this.textContent="计数："+(++count)}</script>\n</body>\n</html>' });
   const settings = createSettingsStore(dataRoot);
   const existingDeck = (await artifacts.listBySession(session.id)).find((item) => item.name === 'PPT 审核验收');
   if (!existingDeck) await artifacts.create({ sessionId: session.id, name: 'PPT 审核验收', kind: 'presentation', source: 'manual', content: JSON.stringify(createPresentation('发布计划')) });
@@ -65,7 +62,6 @@ async function main() {
     let delta: Record<string, unknown>;
     let finish = 'stop';
     const docRef = splitDocumentContext(context).refs[0];
-    const htmlRef = splitHtmlContext(context).refs[0];
     const pptRef = splitPresentationContext(context).refs[0];
     if (pptRef && tools.length < 2) {
       finish = 'tool_calls';
@@ -76,13 +72,6 @@ async function main() {
       const args = tools.length === 0 ? { artifactId: pptRef.artifactId, slideId: slide?.id } : { artifactId: pptRef.artifactId, expectedVersion: artifact?.version, operations: [{ op: 'updateElement', slideId: slide?.id, elementId: element?.id, patch: { runs: [{ text: '审核后的发布计划' }] } }] };
       delta = { role: 'assistant', tool_calls: [{ index: 0, id: `fixture-${name}-${Date.now()}`, type: 'function', function: { name, arguments: JSON.stringify(args) } }] };
     } else if (pptRef) delta = { role: 'assistant', content: 'PPT 修改建议已生成，标题尚未改动。请查看修改前后页面再接受或拒绝。' };
-    else if (htmlRef && tools.length < 2) {
-      finish = 'tool_calls';
-      const page = await artifacts.get(htmlRef.artifactId);
-      const name = tools.length === 0 ? 'read_html' : 'propose_html_edits';
-      const args = tools.length === 0 ? { artifactId: htmlRef.artifactId } : { artifactId: htmlRef.artifactId, expectedVersion: page?.version, edits: [{ oldText: htmlRef.selection ? page?.content.slice(htmlRef.selection.start, htmlRef.selection.end) : '<h1>原始标题</h1>', newText: '<h1>审核后的标题</h1>' }] };
-      delta = { role: 'assistant', tool_calls: [{ index: 0, id: `fixture-${name}-${Date.now()}`, type: 'function', function: { name, arguments: JSON.stringify(args) } }] };
-    } else if (htmlRef) delta = { role: 'assistant', content: 'HTML 建议已生成，源码暂未修改。请查看差异与页面效果后接受或拒绝。' };
     else if (docRef && tools.length < 2) {
       finish = 'tool_calls';
       const doc = await artifacts.get(docRef.artifactId);

@@ -1,7 +1,5 @@
 import { selectPresentation, refreshPresentationReviews, referencePresentation } from './presentationWorkspace';
 import { splitPresentationContext } from '../../shared/presentationReferences';
-import { selectHtml, refreshHtmlReviews, restoreHtmlReferences } from './htmlWorkspace';
-import { splitHtmlContext } from '../../shared/htmlReferences';
 import { selectDocument, refreshDocumentReviews, restoreDocumentReferences } from './documentWorkspace';
 import { splitDocumentContext } from '../../shared/documentReferences';
 import * as api from '../api';
@@ -774,9 +772,7 @@ export function editLastUserMessage(sessionId: string): void {
   if (!lastUser) return;
   const presentation = splitPresentationContext(lastUser.content);
   referencePresentation(sessionId, presentation.refs[0]);
-  const html = splitHtmlContext(presentation.text);
-  restoreHtmlReferences(sessionId, html.refs);
-  const document = splitDocumentContext(html.text);
+  const document = splitDocumentContext(presentation.text);
   restoreDocumentReferences(sessionId, document.refs);
   const sheet = splitSheetContext(document.text);
   restoreSheetReferences(sessionId, sheet.refs);
@@ -933,11 +929,6 @@ function makeEventFolder(
         if ((event.name === 'generate_presentation' || event.name === 'propose_presentation_edits') && event.result) {
           try { const result = JSON.parse(event.result) as { ok?: boolean; artifactId?: string };
             if (result.ok && result.artifactId) { selectPresentation(sessionId, result.artifactId); refreshPresentationReviews(result.artifactId); uiStore.setRightPanelTab('presentations'); void artifactStore.loadSessionArtifacts(sessionId); }
-          } catch { /* Incomplete tool output. */ }
-        }
-        if ((event.name === 'generate_html' || event.name === 'propose_html_edits') && event.result) {
-          try { const result = JSON.parse(event.result) as { ok?: boolean; artifactId?: string };
-            if (result.ok && result.artifactId) { selectHtml(sessionId, result.artifactId); refreshHtmlReviews(result.artifactId); uiStore.setRightPanelTab('html'); void artifactStore.loadSessionArtifacts(sessionId); }
           } catch { /* Incomplete tool output. */ }
         }
         if ((event.name === 'generate_document' || event.name === 'propose_document_edits') && event.result) {

@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { wrapDocumentContext } from './documentReferences';
-import { wrapHtmlContext } from './htmlReferences';
 import { wrapPresentationContext } from './presentationReferences';
 import { compactReferenceContext } from './referenceContext';
 import { wrapSheetContext } from './sheetReferences';
@@ -21,18 +20,16 @@ describe('compactReferenceContext', () => {
     expect(out.length).toBeLessThan(content.length / 10);
   });
 
-  it('keeps identity and a short selection excerpt for doc/ppt/html refs and drops instructions', () => {
+  it('keeps identity and a short selection excerpt for doc/ppt refs and drops instructions', () => {
     const long = '这是一段非常非常长的选中文字'.repeat(20);
     const content = [
       '改一下',
       wrapDocumentContext([{ artifactId: 'doc-1', name: '合同.docx', version: 2, selection: { blockId: 'b1', start: 0, end: long.length, text: long } }]),
       wrapPresentationContext([{ artifactId: 'ppt-1', name: '路演', version: 1, slideId: 's1', elementIds: ['e1', 'e2'] }]),
-      wrapHtmlContext([{ artifactId: 'html-1', name: 'page.html', version: 1 }]),
     ].join('\n\n');
     const out = compactReferenceContext(content);
     expect(out).toContain('Doc "合同.docx" id=doc-1 selected');
     expect(out).toContain('PPT "路演" id=ppt-1 slide=s1 elements=2');
-    expect(out).toContain('HTML "page.html" id=html-1');
     expect(out).not.toContain(long);
     expect(out).not.toContain('propose_document_edits');
     expect(out).not.toContain('<document-context>');

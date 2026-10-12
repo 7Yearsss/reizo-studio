@@ -18,7 +18,6 @@ const CanvasPanel = lazyWithRetry(() => import('../canvas/CanvasPanel'));
 const ArtifactPanel = lazyWithRetry(() => import('./ArtifactPanel'));
 const SheetPanel = lazyWithRetry(() => import('./SheetPanel'));
 const DocumentPanel = lazyWithRetry(() => import('./DocumentPanel'));
-const HtmlPanel = lazyWithRetry(() => import('./HtmlPanel'));
 const PresentationPanel = lazyWithRetry(() => import('./PresentationPanel'));
 
 const PANEL_TITLES: Record<uiStore.RightPanelTab, string> = {
@@ -26,7 +25,6 @@ const PANEL_TITLES: Record<uiStore.RightPanelTab, string> = {
   documents: 'Doc 文档',
   presentations: 'PPT 演示稿',
   sheets: 'Excel 表格',
-  html: 'HTML 网页',
   artifacts: '会话作品',
   files: '工作区文件',
   git: 'Git 变更',
@@ -237,7 +235,6 @@ export default function RightPanel({
             )}
             {activeTab === 'sheets' && sessionId && <Suspense fallback={null}><SheetPanel key={sessionId} sessionId={sessionId} /></Suspense>}
             {activeTab === 'documents' && sessionId && <Suspense fallback={null}><DocumentPanel key={sessionId} sessionId={sessionId} /></Suspense>}
-            {activeTab === 'html' && sessionId && <Suspense fallback={null}><HtmlPanel key={sessionId} sessionId={sessionId} /></Suspense>}
             {activeTab === 'presentations' && sessionId && <Suspense fallback={null}><PresentationPanel key={sessionId} sessionId={sessionId} /></Suspense>}
             {activeTab === 'files' && <DirectoryPanel embedded />}
             {activeTab === 'git' && <GitPanel />}
