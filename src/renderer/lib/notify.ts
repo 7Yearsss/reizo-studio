@@ -3,6 +3,8 @@
  * focused. No-ops when the window is visible, permission is denied, or the
  * environment has no Notification API. Bursts are collapsed.
  */
+import logoUrl from '../assets/logo.png';
+
 let lastAt = 0;
 
 export function primeNotifications(): void {
@@ -26,7 +28,7 @@ export function notifyJobDone(title: string, body: string): void {
     const now = Date.now();
     if (now - lastAt < 1500) return;
     lastAt = now;
-    const n = new Notification(title, { body, tag: 'reizo-canvas-job' });
+    const n = new Notification(title, { body, tag: 'reizo-canvas-job', icon: logoUrl });
     n.onclick = () => {
       try {
         window.focus();
@@ -56,7 +58,7 @@ export function notifyNeedsInput(title: string, body: string): void {
     const now = Date.now();
     if (now - lastAt < 1500) return;
     lastAt = now;
-    const n = new Notification(title, { body, tag: 'reizo-needs-input' });
+    const n = new Notification(title, { body, tag: 'reizo-needs-input', icon: logoUrl });
     n.onclick = () => {
       try {
         window.focus();

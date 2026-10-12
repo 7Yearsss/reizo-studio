@@ -4,6 +4,7 @@ import { selectHtml, refreshHtmlReviews, restoreHtmlReferences } from './htmlWor
 import { splitHtmlContext } from '../../shared/htmlReferences';
 import { selectDocument, refreshDocumentReviews, restoreDocumentReferences } from './documentWorkspace';
 import { splitDocumentContext } from '../../shared/documentReferences';
+import logoUrl from '../assets/logo.png';
 import * as api from '../api';
 import type { ChatMessage, ReplyActivity, SessionSummary, ToolCallPart } from '../../shared/chat';
 import type {
@@ -787,7 +788,7 @@ function notifyIfHidden(title: string): void {
   if (typeof document === 'undefined' || !document.hidden) return;
   if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
   try {
-    new Notification('Reizo', { body: title });
+    new Notification('Reizo', { body: title, icon: logoUrl });
   } catch {
     /* ignore */
   }

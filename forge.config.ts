@@ -43,10 +43,10 @@ const config: ForgeConfig = {
   },
   rebuildConfig: {},
   makers: [
-    new MakerSquirrel({}),
+    new MakerSquirrel({ setupIcon: 'resources/icon.ico' }),
     new MakerZIP({}, ['darwin']),
-    new MakerRpm({}),
-    new MakerDeb({}),
+    new MakerRpm({ options: { icon: 'resources/icon.png' } }),
+    new MakerDeb({ options: { icon: 'resources/icon.png' } }),
   ],
   plugins: [
     new VitePlugin({
