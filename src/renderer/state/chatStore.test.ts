@@ -82,6 +82,9 @@ function feed(lines: string): void {
   );
 }
 
+/** dispatchTurn first flushes pending sheet edits, so state lands a few microtasks after sendMessage is called. */
+const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
 describe('chatStore streaming fold', () => {
   it('folds text deltas and a tool result, then reconciles from getSession', async () => {
     feed(
@@ -125,7 +128,7 @@ describe('chatStore streaming fold', () => {
         }),
     );
     const pending = store.sendMessage('s1', 'do it');
-    await Promise.resolve();
+    await settle();
     const started = store.getSnapshot().turnStartedAtBySession.s1;
     expect(started).toBeGreaterThan(Date.now() - 2_000);
     expect(store.getSnapshot().interactionBySession['s1']).toMatchObject({
@@ -159,7 +162,7 @@ describe('chatStore streaming fold', () => {
         }),
     );
     const pending = store.sendMessage('s1', 'hi');
-    await Promise.resolve();
+    await settle();
     expect(store.getSnapshot().turnStartedAtBySession.s1).toBeGreaterThanOrEqual(started);
     expect(store.getSnapshot().lastTextAtBySession.s1).toBeGreaterThanOrEqual(started);
     release();
@@ -180,7 +183,7 @@ describe('chatStore streaming fold', () => {
           }),
       );
       const pending = store.sendMessage('s1', 'hi');
-      await Promise.resolve();
+      await settle();
       const first = store.getSnapshot().streamingBySession.s1;
       expect(first.length).toBeGreaterThan(0);
       expect(first.length).toBeLessThan(20);
@@ -210,7 +213,7 @@ describe('chatStore streaming fold', () => {
         }),
     );
     const pending = store.sendMessage('s1', 'do it');
-    await Promise.resolve();
+    await settle();
     expect(store.getSnapshot().interactionBySession['s1']).toMatchObject({
       kind: 'permission',
       id: 'p1',
@@ -240,7 +243,7 @@ describe('chatStore streaming fold', () => {
       );
     });
     const pending = store.sendMessage('s1', 'do it');
-    await Promise.resolve();
+    await settle();
     await store.answerPermission('s1', 'allow');
     expect(store.getSnapshot().interactionBySession['s1']).toMatchObject({
       kind: 'permission',
@@ -263,9 +266,9 @@ describe('chatStore streaming fold', () => {
     apiMock.getSession.mockResolvedValueOnce({ ...sessionRow, lastTurnOutcome: 'interrupted' });
 
     const pending = store.sendMessage('s1', 'long task');
-    await Promise.resolve();
+    await settle();
     const stopping = store.stopMessage('s1');
-    await Promise.resolve();
+    await settle();
 
     expect(store.getSnapshot().sendingBySession['s1']).toBe(true);
     expect(store.getSnapshot().interruptRequestedBySession['s1']).toBe(true);
@@ -393,7 +396,7 @@ describe('chatStore streaming fold', () => {
         }),
     );
     const pending = store.sendMessage('s1', 'hi');
-    await Promise.resolve();
+    await settle();
     apiMock.getSession.mockResolvedValueOnce({
       ...sessionRow,
       lastTurnOutcome: 'interrupted',
