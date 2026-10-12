@@ -170,21 +170,20 @@ export default function SheetDocument({ artifact, onClose }: { artifact: Artifac
   const charts = previewing && reviewPreview ? [...sheetCharts(reviewPreview.candidate), ...(content ? sheetCharts(content).filter((c) => reviewPreview.diff.charts.some((d) => d.id === c.id && d.status === 'removed')) : [])] : content ? sheetCharts(content) : [];
   const chartStatuses = previewing && reviewPreview ? Object.fromEntries(reviewPreview.diff.charts.map((c) => [c.id, c.status])) : undefined;
   const truncated = content?.importMeta && (content.importMeta.truncatedRows || content.importMeta.truncatedCols || content.importMeta.truncatedSheets);
+  const toolbar = <>
+    {viewVersion && <Button variant="ghost" size="sm" onClick={() => { current.current = null; setViewVersion(undefined); }}>返回最新</Button>}
+    {!viewVersion && <Button variant={showAudit ? 'secondary' : 'ghost'} size="sm" disabled={previewing} title={previewing ? '请先处理或切到原表' : '检查错误值、不一致的公式、文本型数字等'} onClick={() => { setShowAudit((v) => !v); setShowPivots(false); }}><ListChecks data-icon="inline-start" />检查</Button>}
+    {!viewVersion && <Button variant={showPivots ? 'secondary' : 'ghost'} size="sm" disabled={previewing} title={previewing ? '请先处理或切到原表' : '新建或调整透视表'} onClick={() => { setShowPivots((v) => !v); setShowAudit(false); }}><Table2 data-icon="inline-start" />透视表</Button>}
+    <Button variant="ghost" size="icon-sm" aria-label="表格版本历史" title={`版本历史 · 当前 v${frame?.doc.version ?? artifact.version}`} onClick={() => setShowHistory((v) => !v)}><History /></Button>
+    <Button variant="ghost" size="icon-sm" aria-label="关闭表格" onClick={onClose}><X /></Button>
+  </>;
   return <div className="flex min-h-0 flex-1 flex-col" onKeyDownCapture={(event) => { if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'l') { event.preventDefault(); quoteSelection(); } }}>
-    <div className="flex items-center gap-2 border-b border-line px-3 py-1.5">
-      <span className="min-w-0 flex-1 truncate text-xs font-medium">{artifact.name} · v{frame?.doc.version ?? artifact.version}{viewVersion ? ' · 历史版本' : ''}</span>
-      {viewVersion && <Button variant="ghost" size="sm" onClick={() => { current.current = null; setViewVersion(undefined); }}>返回最新</Button>}
-      {!viewVersion && <Button variant={showAudit ? 'secondary' : 'ghost'} size="sm" disabled={previewing} title={previewing ? '请先处理或切到原表' : '检查错误值、不一致的公式、文本型数字等'} onClick={() => { setShowAudit((v) => !v); setShowPivots(false); }}><ListChecks data-icon="inline-start" />检查</Button>}
-      {!viewVersion && <Button variant={showPivots ? 'secondary' : 'ghost'} size="sm" disabled={previewing} title={previewing ? '请先处理或切到原表' : '新建或调整透视表'} onClick={() => { setShowPivots((v) => !v); setShowAudit(false); }}><Table2 data-icon="inline-start" />透视表</Button>}
-      <Button variant="ghost" size="icon-sm" aria-label="表格版本历史" onClick={() => setShowHistory((v) => !v)}><History /></Button>
-      <Button variant="ghost" size="icon-sm" aria-label="关闭表格" onClick={onClose}><X /></Button>
-    </div>
     {error && <Alert variant="destructive"><AlertDescription>{error}<Button variant="outline" size="sm" onClick={() => void discardAndReload()}>丢弃未保存编辑并重新加载</Button></AlertDescription></Alert>}
     {truncated && <Alert><AlertDescription>文件超过当前表格容量，已导入部分内容；原文件未被修改。最多 8 张工作表、2000 行、50 列和 40000 个单元格。</AlertDescription></Alert>}
     <div className="flex min-h-0 flex-1">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto">
-        {frame && previewing && reviewPreview && activeReview ? <Editor key={`preview:${activeReview.id}:${activeReview.reviewVersion}`} artifact={frame.doc} version={frame.doc.version} text={reviewPreview.text} rawUrl="" readOnlyLabel="修改预览 · 只读，接受后写入" onSelectCell={setSelectedCell} focus={focus} onLiveContent={setLiveContent} />
-          : frame ? <Editor key={`${artifact.id}:${frame.generation}`} artifact={frame.doc} version={frame.doc.version} text={frame.doc.content} rawUrl="" onCommitDraft={!viewVersion ? save : undefined} initialDirty={frame.recovered} initialError={frame.error} focus={focus} onLiveContent={setLiveContent} /> : <p role="status" className="p-4 text-xs text-ink-muted">正在加载表格…</p>}
+        {frame && previewing && reviewPreview && activeReview ? <Editor key={`preview:${activeReview.id}:${activeReview.reviewVersion}`} artifact={frame.doc} version={frame.doc.version} text={reviewPreview.text} rawUrl="" readOnlyLabel="修改预览 · 只读，接受后写入" onSelectCell={setSelectedCell} focus={focus} onLiveContent={setLiveContent} toolbar={toolbar} />
+          : frame ? <Editor key={`${artifact.id}:${frame.generation}`} artifact={frame.doc} version={frame.doc.version} text={frame.doc.content} rawUrl="" onCommitDraft={!viewVersion ? save : undefined} initialDirty={frame.recovered} initialError={frame.error} focus={focus} onLiveContent={setLiveContent} toolbar={toolbar} /> : <p role="status" className="p-4 text-xs text-ink-muted">正在加载表格…</p>}
         {chartContent && <SheetChartDock content={chartContent} charts={charts} statuses={chartStatuses} busy={reviewBusy}
           selection={!previewing && !viewVersion ? ownSelection : undefined}
           onChangeType={!previewing && !viewVersion ? (chart, type) => void commitContent((latest) => applySheetChart(latest, { id: chart.id, type }).content) : undefined}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Download, LoaderCircle } from 'lucide-react';
 import { CalculationMode, UniverSheetsCorePreset } from '@univerjs/preset-sheets-core';
 // eslint-disable-next-line import/no-unresolved
@@ -38,11 +38,13 @@ export interface SheetRendererProps extends ArtifactRenderProps {
   readOnlyLabel?: string;
   onSelectCell?(cell: { sheetId: string; row: number; col: number }): void;
   focus?: SheetCellFocus;
+  /** Actions shown in the editor's own bar, so the workbook has one header row instead of two. */
+  toolbar?: ReactNode;
   /** Workbook content with current formula results, emitted after load and after edits settle (for charts). */
   onLiveContent?(content: SheetArtifactContent): void;
 }
 
-export default function SheetRenderer({ artifact, text, onCommitDraft, initialDirty = false, initialError, readOnlyLabel, onSelectCell, focus, onLiveContent }: SheetRendererProps) {
+export default function SheetRenderer({ artifact, text, onCommitDraft, initialDirty = false, initialError, readOnlyLabel, onSelectCell, focus, onLiveContent, toolbar }: SheetRendererProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const workbookRef = useRef<Workbook | null>(null);
   const formulaRef = useRef<ReturnType<UniverAPI['getFormula']> | null>(null);
@@ -241,8 +243,9 @@ export default function SheetRenderer({ artifact, text, onCommitDraft, initialDi
 
   if (initError) return <Alert variant="destructive"><AlertDescription>{initError}</AlertDescription></Alert>;
   return <div className="relative flex min-h-[420px] min-w-0 flex-1 flex-col overflow-hidden bg-paper-raised">
-    <div className="flex shrink-0 items-center justify-end gap-2 px-3 py-1">
-      <span role="status" className="text-xs text-ink-muted">{saving ? '正在保存…' : busy ? 'Agent 正在处理，暂时只读' : onCommitDraft ? '自动保存 · 选中单元格可在对话中引用' : readOnlyLabel ?? '历史版本 · 只读'}</span>
+    <div className="flex shrink-0 items-center gap-1 border-b border-line px-3 py-1">
+      <span role="status" className="min-w-0 flex-1 truncate text-xs text-ink-muted">{saving ? '正在保存…' : busy ? 'Agent 正在处理，暂时只读' : onCommitDraft ? '' : readOnlyLabel ?? '历史版本 · 只读'}</span>
+      {toolbar}
       <Button variant="ghost" size="sm" onClick={() => void download()} disabled={!ready || saving || exporting}><Download data-icon="inline-start" />{exporting ? '正在导出…' : '导出 Excel'}</Button>
     </div>
     {error && <Alert variant="destructive"><AlertDescription>{error}<Button variant="outline" size="sm" onClick={() => void flushRef.current().catch((): void => undefined)}>重试保存</Button></AlertDescription></Alert>}
