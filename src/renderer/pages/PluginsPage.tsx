@@ -23,6 +23,7 @@ import * as skillStore from '../state/skillStore';
 import type { SkillSummary } from '../state/skillStore';
 import * as api from '../api';
 import SkillDetailModal from '../components/skills/SkillDetailModal';
+import ExtensionPacksSection from '../components/skills/ExtensionPacksSection';
 import * as tabStore from '../state/tabStore';
 import * as chatStore from '../state/chatStore';
 import * as uiStore from '../state/uiStore';
@@ -306,6 +307,8 @@ export default function PluginsPage() {
           安装 SKILL.md
         </button>
       </div>
+
+      <ExtensionPacksSection />
 
       <section className="mb-8">
         <h2 className="mb-3 flex items-center gap-2 text-sm font-medium text-ink">

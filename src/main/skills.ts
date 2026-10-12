@@ -92,7 +92,8 @@ async function loadDir(dir: string, source: Skill['source']): Promise<Skill[]> {
 export async function loadSkills(dirs: string[]): Promise<Skill[]> {
   const byId = new Map<string, Skill>();
   for (const dir of dirs) {
-    const source: Skill['source'] = dir.replace(/\\/g, '/').includes('/data/skills') ? 'user' : 'bundled';
+    const normalized = dir.replace(/\\/g, '/');
+    const source: Skill['source'] = normalized.includes('/data/skills') || normalized.includes('/data/plugins/') ? 'user' : 'bundled';
     const loaded = await loadDir(dir, source);
     for (const skill of loaded) byId.set(skill.id, skill);
   }

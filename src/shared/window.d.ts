@@ -1,4 +1,5 @@
 import type { DirEntry } from './workspace';
+import type { PluginSummary } from './plugins';
 import type {
   SkillHubInstallRequest,
   SkillHubInstallResult,
@@ -30,6 +31,11 @@ export interface ReizoBridge {
     recent: string;
   }>;
   installSkill(): Promise<{ id: string } | null>;
+  listPlugins(): Promise<PluginSummary[]>;
+  /** Opens a folder picker and installs the chosen extension pack (disabled until the user enables it). */
+  installPlugin(): Promise<PluginSummary | null>;
+  setPluginEnabled(id: string, enabled: boolean): Promise<void>;
+  uninstallPlugin(id: string): Promise<void>;
   uninstallSkill(id: string): Promise<void>;
   searchSkillHub(query: SkillHubSearchQuery): Promise<SkillHubSearchResult>;
   installSkillHubSkill(request: SkillHubInstallRequest): Promise<SkillHubInstallResult>;
