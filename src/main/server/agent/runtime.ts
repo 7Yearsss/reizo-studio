@@ -43,6 +43,12 @@ import { consumeInteractions, waitForInteractions } from './permissions';
 import { translateOpenAiChunk } from './translators/openai';
 import { compactAssistantParts, compactModelMessages } from './modelHistory';
 import { CONTINUE_USER_MESSAGE, MAX_CONTINUE_PASSES, shouldContinueAgentPass } from './continuePass';
+import { appendHookNote, createHookRunner, loadHooks, wrapToolsWithHooks } from './hooks';
+import { connectMcpTools, MCP_TOOL_PREFIX } from './mcpTools';
+import { hasReasoningLeak } from './reasoningLeak';
+import { createSubagentTool, pickReadOnlyTools } from './subagentTools';
+import { loadPluginContributions } from '../plugins/pluginStore';
+import { createTurnTraceCollector, writeTurnTrace } from './turnTrace';
 import { readWorkspaceMemory } from '../../workspaceMemory';
 import type { MemoryEntry } from '../../workspaceMemoryDir';
 import {
@@ -361,7 +367,7 @@ export async function runChatTurn(options: {
     options.artifactReviews ? 'For editable PPT decks use generate_presentation. When the message carries <presentation-context> with `current` content, propose_presentation_edits straight from its version and slide/element IDs without read_presentation first; otherwise read existing slide and element IDs with read_presentation, then propose_presentation_edits. Keep edits within referenced pages/elements and wait for user review. Never bypass review through shell, files, or HTTP.' : '',
     options.artifactReviews ? 'For Excel workbooks use generate_sheet only to create new ones. To change an existing workbook call read_sheet, then propose_sheet_edits with the current version; the original stays unchanged until the user accepts in the Excel panel. Keep each operation to its own non-overlapping range. Keep formulas live: never replace a formula with its computed value unless the user asks, and write new calculations as formulas. If the tool result carries warnings, tell the user plainly and, unless they are intended, re-propose with formulas. To audit a workbook (errors, formulas that differ from their column, hand-typed numbers inside formula columns, SUM ranges that stop short, numbers stored as text, stray spaces, hard-coded constants) call check_sheet, then propose_sheet_edits for the findings that have a fix; do not invent problems it did not report. For pivot tables, group-by summaries, or cross-tabs use an upsertPivot operation (live formulas, refreshable) instead of computing totals yourself. For charts use upsertChart, preferably bound to a pivot via pivotId (propose the chart after the pivot is accepted). Never bypass review through shell, files, or HTTP.' : '',
     options.artifactReviews ? 'Use generate_html for new editable HTML pages. For changes: when the message carries <html-context> with `current` source, propose_html_edits straight from it without read_html first; otherwise read_html then propose_html_edits. Do not bypass review with file writes, shell commands, or HTTP requests.' : '',
-    options.artifactReviews ? 'For editable documents use generate_document. When the message carries <document-context> with `current` content, edit straight from it: call propose_document_edits with that version and those block IDs, without read_document first. Otherwise call read_document before modifying an existing Doc, then propose_document_edits with the current version and stable block IDs. Proposals do not change the original. Only the user may accept or reject in the Doc panel. Never use file writes, shell commands, or HTTP calls to bypass document review. Respect referenced selected ranges. To audit a Doc for consistency (numbering, punctuation, date and number formats, stray spaces, repeated words or paragraphs, terminology) call check_document, then propose_document_edits for the findings that have a replacement; do not invent problems it did not report. For a whole-document task on a long Doc (translate, unify tone, fix every occurrence) go through it in order: read a page with read_document, propose its edits (up to 40 operations per call, one call per page), then continue with nextOffset until the last block; every batch becomes its own review and the user can accept them all at once, so never stop early or skip sections.' : '',
+    options.artifactReviews ? 'For editable documents use generate_document. When the message carries <document-context> with `current` content, edit straight from it: call propose_document_edits with that version and those block IDs, without read_document first. Otherwise call read_document before modifying an existing Doc, then propose_document_edits with the current version and stable block IDs. Proposals do not change the original. Only the user may accept or reject, on the suggestion card in chat or in the Doc panel. After proposing, reply with one short sentence at most: the card already shows the before/after, so never repeat, quote or re-explain the new text. Never use file writes, shell commands, or HTTP calls to bypass document review. Respect referenced selected ranges. To audit a Doc for consistency (numbering, punctuation, date and number formats, stray spaces, repeated words or paragraphs, terminology) call check_document, then propose_document_edits for the findings that have a replacement; do not invent problems it did not report. For a whole-document task on a long Doc (translate, unify tone, fix every occurrence) go through it in order: read a page with read_document, propose its edits (up to 40 operations per call, one call per page), then continue with nextOffset until the last block; every batch becomes its own review and the user can accept them all at once, so never stop early or skip sections.' : '',
     artifactStore
       ? 'When the user asks for a flowchart, sequence diagram, system architecture diagram, or mind map, call generate_diagram with Mermaid syntax to produce an interactive Excalidraw canvas artifact in the right panel. When the user asks for a spreadsheet, budget, financial report, or table calculation, call generate_sheet with rows, columns, and formulas to render a full-featured Excel sheet artifact in the right panel.'
       : '',
@@ -426,6 +432,7 @@ export async function runChatTurn(options: {
   let emit: (event: ChatStreamEvent) => void = () => undefined;
   const todos: TodoItem[] = [];
   const loopGuard = createToolLoopGuard();
+  const trace = createTurnTraceCollector({ sessionId, model: modelId });
 
   const toolset = workspacePath
     ? createWorkspaceTools({
@@ -496,7 +503,10 @@ export async function runChatTurn(options: {
   let currentPresentationRefs = regenerate ? splitPresentationContext(userMessage?.content ?? '').refs : presentationRefs.refs;
   let currentHtmlRefs = regenerate ? splitHtmlContext(userMessage?.content ?? '').refs : htmlRefs.refs;
   let currentDocumentRefs = regenerate ? splitDocumentContext(userMessage?.content ?? '').refs : documentRefs.refs;
-  const tools =
+  // Enabled extension packs add hooks and MCP servers (their skills reach the shared skills-dir list separately).
+  const pluginPack = await loadPluginContributions(dataRoot);
+  const hookRunner = createHookRunner({ hooks: [...(await loadHooks(dataRoot)), ...pluginPack.hooks], sessionId, cwd: workspacePath ?? dataRoot ?? process.cwd() });
+  const rawTools =
     toolset?.tools || canvasTools || artifactTools || imageTools || computerTools || scheduleTools || askTool
       ? {
           ask_user: askTool,
@@ -512,6 +522,20 @@ export async function runChatTurn(options: {
           ...(skill?.contract && canvasStore && dataRoot ? createDeliveryTools({ skill, canvasStore, sessionId, dataRoot, artifactStore }) : {}),
         }
       : undefined;
+  // MCP servers (user-level mcp.json): their tools join the set behind approval; the clients close when the turn ends.
+  const mcp = dataRoot ? await connectMcpTools({ dataRoot, sessionId, permissionMode: settings.permissionMode, extraServers: pluginPack.mcpServers }) : undefined;
+  const hasMcpTools = mcp !== undefined && Object.keys(mcp.tools).length > 0;
+  // Read-only research sub-agent: only the read tools, hook-wrapped like the main agent's. `model` is built below, hence the getters.
+  const subagentTools = toolset
+    ? createSubagentTool({
+        getModel: () => model,
+        tools: wrapToolsWithHooks(pickReadOnlyTools(toolset.tools), hookRunner),
+        getProviderOptions: () => providerOptions,
+      })
+    : undefined;
+  const tools = rawTools || hasMcpTools
+    ? wrapToolsWithHooks({ ...(rawTools ?? {}), ...(subagentTools ?? {}), ...(mcp?.tools ?? {}) } as NonNullable<typeof rawTools>, hookRunner)
+    : undefined;
 
   const accounting = options.usageStore ?? canvasStore?.usage;
   const model = createOpenAiModel({ apiKey, modelId, baseUrl,
@@ -665,7 +689,12 @@ export async function runChatTurn(options: {
       };
     },
     createStream: (signal) => buildStream(history, signal),
+    onEvent: (event) => trace.onEvent(event),
     onTurnTerminal: ({ outcome, text }) => {
+      void mcp?.close();
+      const reasoningLeak = hasReasoningLeak({ userText, reply: text });
+      if (reasoningLeak) console.warn(`[chat] reasoning leaked into the reply session=${sessionId} model=${modelId}`);
+      if (dataRoot) void writeTurnTrace(dataRoot, trace.finish({ outcome, text, reasoningLeak }));
       if (outcome !== 'completed' || !workspacePath) return;
       scheduleMemoryExtraction({
         workspaceRoot: workspacePath,
@@ -722,18 +751,26 @@ export async function runChatTurn(options: {
             ? ((await computerTools?.executeApproved(item.args)) ?? {
                 error: 'Computer control is not enabled for this turn',
               })
-            : item.name === CANVAS_BUDGET_TOOL
-              ? ((await canvasTools?.executeApproved(item.args, item.toolCallId)) ?? {
-                  error: 'This turn has no canvas tools',
+            : item.name.startsWith(MCP_TOOL_PREFIX)
+              ? ((await mcp?.executeApproved(item.name, item.args, item.toolCallId)) ?? {
+                  error: 'This turn has no MCP tools',
                 })
-              : ((await toolset?.executeApproved(item.name, item.args)) ?? {
-                  error: 'This turn has no workspace tools',
-                });
+              : item.name === CANVAS_BUDGET_TOOL
+                ? ((await canvasTools?.executeApproved(item.args, item.toolCallId)) ?? {
+                    error: 'This turn has no canvas tools',
+                  })
+                : ((await toolset?.executeApproved(item.name, item.args)) ?? {
+                    error: 'This turn has no workspace tools',
+                  });
+        // PreToolUse already ran when the model made the call; PostToolUse fires once the approved run finished.
+        const hookNote = hookRunner && !outcome.error && resultName !== CANVAS_BUDGET_TOOL
+          ? await hookRunner.post(resultName, item.args, outcome.result, signal)
+          : undefined;
         emitToolResult({
           toolCallId: item.toolCallId,
           name: resultName,
           args: item.args,
-          result: outcome.result,
+          result: hookNote && outcome.result !== undefined ? (appendHookNote(outcome.result, hookNote) as string) : outcome.result,
           error: outcome.error,
         });
       }
@@ -762,6 +799,7 @@ export async function runChatTurn(options: {
       const reason = shouldContinueAgentPass({ text: snap.text, todos, finishReason });
       if (!reason) return null;
       console.info(`[chat] continue pass reason=${reason} pass=${passIndex + 1}`);
+      trace.onContinue(reason);
       return buildStream(
         [
           ...history,
