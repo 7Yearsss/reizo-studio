@@ -13,6 +13,18 @@ import { selectWorkbook } from '../../state/sheetWorkspace';
 import { setRightPanelTab } from '../../state/uiStore';
 import { Button } from '../ui/button';
 
+/** One-line reference chip: the quoted part truncates at the end so the start of the selection stays readable. */
+function RefChipText({ label, name, quote }: { label?: number; name: string; quote?: string }) {
+  const body = quote ? quote.replace(/s+/g, ' ').trim() : '';
+  return (
+    <span className="min-w-0 truncate">
+      {label ? <span className="mr-1 font-semibold">[{label}]</span> : null}
+      {body ? body : name}
+      {body ? <span className="ml-1.5 text-ink-muted">· {name}</span> : null}
+    </span>
+  );
+}
+
 export default function UserMessage({
   content,
   sessionId,
@@ -58,10 +70,10 @@ export default function UserMessage({
           <HighlightedText text={text} query={searchQuery} />
         </div>
         <CanvasRefChips nodeIds={nodeIds} sessionId={sessionId} />
-        {documentRefs.length > 0 && <div className="mt-1.5 flex flex-wrap justify-end gap-1.5">{documentRefs.map((ref, index) => <Button key={index} variant="outline" size="xs" onClick={() => { if (sessionId) { selectDocument(sessionId, ref.artifactId); setRightPanelTab('documents'); } }}>{ref.label ? `[${ref.label}] ` : ''}{ref.name}{ref.selection ? ` · ${ref.selection.text?.slice(0, 35)}` : ''}</Button>)}</div>}
-        {htmlRefs.length > 0 && <div className="mt-1.5 flex flex-wrap justify-end gap-1.5">{htmlRefs.map((ref, index) => <Button key={index} variant="outline" size="xs" onClick={() => { if (sessionId) { selectHtml(sessionId, ref.artifactId); setRightPanelTab('html'); } }}>{ref.label ? `[${ref.label}] ` : ''}{ref.name}{ref.selection ? ` · ${ref.selection.text?.slice(0, 35)}` : ''}</Button>)}</div>}
-        {presentationRefs.length > 0 && <div className="mt-1.5 flex flex-wrap justify-end gap-1.5">{presentationRefs.map((ref, index) => <Button key={index} variant="outline" size="xs" onClick={() => { if (sessionId) { selectPresentation(sessionId, ref.artifactId); setRightPanelTab('presentations'); } }}>{ref.name}{ref.elementIds?.length ? ` · ${ref.elementIds.length} 个元素` : ''}</Button>)}</div>}
-        {sheetRefs.length > 0 && <div className="mt-1.5 flex flex-wrap justify-end gap-1.5">{sheetRefs.map((ref, index) => <Button key={`${ref.artifactId}:${index}`} variant="outline" size="xs" onClick={() => { if (sessionId) { selectWorkbook(sessionId, ref.artifactId); setRightPanelTab('sheets'); } }}>{ref.label ? `[${ref.label}] ` : ''}{ref.name}{ref.range ? ` · ${ref.sheetName ?? ''}!${ref.range}` : ''}</Button>)}</div>}
+        {documentRefs.length > 0 && <div className="mt-1.5 flex flex-wrap justify-end gap-1.5">{documentRefs.map((ref, index) => <Button key={index} variant="outline" size="xs" className="max-w-full min-w-0 shrink" onClick={() => { if (sessionId) { selectDocument(sessionId, ref.artifactId); setRightPanelTab('documents'); } }}><RefChipText label={ref.label} name={ref.name} quote={ref.selection?.text} /></Button>)}</div>}
+        {htmlRefs.length > 0 && <div className="mt-1.5 flex flex-wrap justify-end gap-1.5">{htmlRefs.map((ref, index) => <Button key={index} variant="outline" size="xs" className="max-w-full min-w-0 shrink" onClick={() => { if (sessionId) { selectHtml(sessionId, ref.artifactId); setRightPanelTab('html'); } }}><RefChipText label={ref.label} name={ref.name} quote={ref.selection?.text} /></Button>)}</div>}
+        {presentationRefs.length > 0 && <div className="mt-1.5 flex flex-wrap justify-end gap-1.5">{presentationRefs.map((ref, index) => <Button key={index} variant="outline" size="xs" className="max-w-full min-w-0 shrink" onClick={() => { if (sessionId) { selectPresentation(sessionId, ref.artifactId); setRightPanelTab('presentations'); } }}><RefChipText name={ref.name} quote={ref.elementIds?.length ? `${ref.elementIds.length} 个元素` : undefined} /></Button>)}</div>}
+        {sheetRefs.length > 0 && <div className="mt-1.5 flex flex-wrap justify-end gap-1.5">{sheetRefs.map((ref, index) => <Button key={`${ref.artifactId}:${index}`} variant="outline" size="xs" onClick={() => { if (sessionId) { selectWorkbook(sessionId, ref.artifactId); setRightPanelTab('sheets'); } }}><RefChipText label={ref.label} name={ref.name} quote={ref.range ? `${ref.sheetName ?? ''}!${ref.range}` : undefined} /></Button>)}</div>}
         <div className="mt-1 flex justify-end gap-2 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
           {canEdit && (
             <button
