@@ -3,6 +3,7 @@ import { Streamdown } from 'streamdown';
 import { code } from '@streamdown/code';
 import { Check, Copy } from 'lucide-react';
 import { normalizeMarkdownFences } from '../../lib/markdown/normalizeMarkdownFences';
+import { stripThinkTags } from '../../lib/markdown/stripThinkTags';
 import * as tabStore from '../../state/tabStore';
 import * as canvasStore from '../../state/canvasStore';
 import * as uiStore from '../../state/uiStore';
@@ -51,7 +52,7 @@ export default function MarkdownContent({
   content: string;
   streaming?: boolean;
 }) {
-  const markdown = useMemo(() => linkSheetCells(normalizeMarkdownFences(content)), [content]);
+  const markdown = useMemo(() => linkSheetCells(normalizeMarkdownFences(stripThinkTags(content))), [content]);
 
   const handleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement;
