@@ -4,6 +4,7 @@ import type { DirEntry } from '../shared/workspace';
 import type { SkillHubInstallRequest, SkillHubSearchQuery } from '../shared/skillhub';
 import type { PluginSummary } from '../shared/plugins';
 import type { HookEntry, McpServerEntry, McpTestResult } from '../shared/extensionConfig';
+import type { McpCatalogPage, PluginCatalog } from '../shared/catalog';
 
 contextBridge.exposeInMainWorld('reizo', {
   platform: process.platform,
@@ -32,6 +33,9 @@ contextBridge.exposeInMainWorld('reizo', {
   gitStatus: () => ipcRenderer.invoke(IPC.WORKSPACE_GIT),
   installSkill: () => ipcRenderer.invoke(IPC.SKILL_INSTALL),
   listPlugins: (): Promise<PluginSummary[]> => ipcRenderer.invoke(IPC.PLUGIN_LIST),
+  searchMcpCatalog: (query: { search?: string; cursor?: string }): Promise<McpCatalogPage> => ipcRenderer.invoke(IPC.CATALOG_MCP_SEARCH, query),
+  listPluginCatalog: (): Promise<PluginCatalog> => ipcRenderer.invoke(IPC.CATALOG_PLUGINS),
+  installCatalogPlugin: (id: string): Promise<PluginSummary> => ipcRenderer.invoke(IPC.CATALOG_PLUGIN_INSTALL, id),
   listMcpServers: (): Promise<McpServerEntry[]> => ipcRenderer.invoke(IPC.MCP_LIST),
   saveMcpServers: (entries: McpServerEntry[]): Promise<void> => ipcRenderer.invoke(IPC.MCP_SAVE, entries),
   testMcpServer: (entry: McpServerEntry): Promise<McpTestResult> => ipcRenderer.invoke(IPC.MCP_TEST, entry),

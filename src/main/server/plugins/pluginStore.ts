@@ -72,7 +72,7 @@ export async function inspectPluginDir(dir: string): Promise<Inspection | null> 
     if (parsed && typeof parsed === 'object') { manifest = parsed as Record<string, unknown>; format = candidate.format; hasManifest = true; break; }
   }
   const skillsDir = path.join(root, 'skills');
-  if (!hasManifest && !(await exists(skillsDir))) return null;
+  if (!hasManifest && !(await exists(skillsDir)) && !(await exists(path.join(root, 'commands')))) return null;
 
   const name = typeof manifest.name === 'string' && manifest.name.trim() ? manifest.name.trim() : path.basename(root);
   const id = pluginIdFrom(name);
@@ -84,13 +84,16 @@ export async function inspectPluginDir(dir: string): Promise<Inspection | null> 
   if (typeof manifest.skills === 'string' && !skillsPath) warnings.push('The manifest points "skills" outside the plugin folder; ignored.');
   const skillsDirs: string[] = [];
   const skillNames: string[] = [];
-  if (skillsPath && (await exists(skillsPath))) {
-    skillsDirs.push(skillsPath);
-    for (const entry of await readdir(skillsPath, { withFileTypes: true })) {
-      if (entry.isDirectory() && (await exists(path.join(skillsPath, entry.name, 'SKILL.md')))) skillNames.push(entry.name);
+  // Claude "slash commands" are Markdown prompts with frontmatter, the same shape as a skill, so `commands/` loads as skills too.
+  for (const dir of [skillsPath, path.join(root, 'commands')]) {
+    if (!dir || !(await exists(dir))) continue;
+    skillsDirs.push(dir);
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      if (entry.isDirectory() && (await exists(path.join(dir, entry.name, 'SKILL.md')))) skillNames.push(entry.name);
       else if (entry.isFile() && entry.name.endsWith('.md')) skillNames.push(entry.name.replace(/\.md$/i, ''));
     }
   }
+  if (await exists(path.join(root, 'agents'))) warnings.push('This plugin defines sub-agents (agents/), which Reizo does not support yet.');
 
   // MCP servers: inline object, a path, or the default `.mcp.json`.
   let mcpRaw: string | undefined;

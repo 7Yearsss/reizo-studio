@@ -3,6 +3,8 @@ import { Package, Plus, Trash2 } from 'lucide-react';
 import type { PluginSummary } from '../../../shared/plugins';
 import * as skillStore from '../../state/skillStore';
 
+export const PACKS_CHANGED = 'reizo:packs-changed';
+
 const FORMAT_LABEL: Record<PluginSummary['format'], string> = { claude: 'Claude 格式', codex: 'Codex 格式', plain: '通用' };
 
 /** What turning the pack on will run or contact — the user agrees to exactly this list. */
@@ -81,6 +83,12 @@ export default function ExtensionPacksSection() {
     try { setPacks(await window.reizo.listPlugins()); } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
+  // The Discover section installs packs too; it announces that here.
+  useEffect(() => {
+    const onChanged = () => { void refresh(); };
+    window.addEventListener(PACKS_CHANGED, onChanged);
+    return () => window.removeEventListener(PACKS_CHANGED, onChanged);
+  }, [refresh]);
 
   /** Run an action, then reload packs and skills (a pack's skills appear or vanish with it). */
   async function act(id: string | null, action: () => Promise<unknown>) {

@@ -13,12 +13,12 @@ const FIELD = 'w-full rounded-lg border border-line bg-paper-raised px-3 py-1.5 
 const LABEL = 'mb-1 block text-xs text-ink-muted';
 const TRANSPORT_LABEL: Record<McpTransport, string> = { stdio: '本地程序', http: 'HTTP', sse: 'SSE' };
 
-function message(error: unknown): string {
+export function message(error: unknown): string {
   return error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(error);
 }
 
 /** The editor shared by "add" and "edit": a draft that only reaches the file on save. */
-function McpForm({ initial, onSave, onCancel }: { initial: McpServerEntry; onSave: (entry: McpServerEntry) => void; onCancel: () => void }) {
+export function McpForm({ initial, onSave, onCancel, hint }: { initial: McpServerEntry; onSave: (entry: McpServerEntry) => void; onCancel: () => void; hint?: React.ReactNode }) {
   const [name, setName] = useState(initial.name);
   const [transport, setTransport] = useState<McpTransport>(initial.transport);
   const [command, setCommand] = useState(initial.command ?? '');
@@ -85,6 +85,7 @@ function McpForm({ initial, onSave, onCancel }: { initial: McpServerEntry; onSav
           </div>
         </>
       )}
+      {hint}
       {test === 'running' ? (
         <p className="flex items-center gap-2 text-xs text-ink-muted"><LoaderCircle size={13} className="animate-spin" />正在连接…</p>
       ) : test ? (

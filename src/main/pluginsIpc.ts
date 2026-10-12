@@ -2,6 +2,7 @@ import { BrowserWindow, dialog, ipcMain } from 'electron';
 import { IPC } from '../shared/constants';
 import type { HookEntry, McpServerEntry } from '../shared/extensionConfig';
 import { readHookEntries, readMcpEntries, testMcpEntry, writeHookEntries, writeMcpEntries } from './server/plugins/extensionConfig';
+import { fetchPluginCatalog, installCatalogPlugin, searchMcpRegistry } from './server/plugins/catalog';
 import { installPlugin, listPlugins, setPluginEnabled, syncPluginSkillsDirs, uninstallPlugin } from './server/plugins/pluginStore';
 
 /** Extension-pack management. Every change re-syncs the shared skills-dir list so the skills page sees it at once. */
@@ -9,6 +10,15 @@ export function registerPluginIpc(dataRoot: string, skillsDirs: string[]): void 
   void syncPluginSkillsDirs(dataRoot, skillsDirs);
 
   ipcMain.handle(IPC.PLUGIN_LIST, () => listPlugins(dataRoot));
+
+  // Discover catalogs: public read-only sources; installs land disabled.
+  ipcMain.handle(IPC.CATALOG_MCP_SEARCH, (_event, query: { search?: string; cursor?: string }) => searchMcpRegistry({ search: query?.search, cursor: query?.cursor }));
+  ipcMain.handle(IPC.CATALOG_PLUGINS, () => fetchPluginCatalog());
+  ipcMain.handle(IPC.CATALOG_PLUGIN_INSTALL, async (_event, id: string) => {
+    const installed = await installCatalogPlugin(dataRoot, String(id));
+    await syncPluginSkillsDirs(dataRoot, skillsDirs);
+    return installed;
+  });
 
   // User-level MCP servers and hooks (Settings → Extensions). Both are read fresh each turn, so no restart.
   ipcMain.handle(IPC.MCP_LIST, () => readMcpEntries(dataRoot));

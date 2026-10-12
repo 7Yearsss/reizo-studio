@@ -1,6 +1,7 @@
 import type { DirEntry } from './workspace';
 import type { PluginSummary } from './plugins';
 import type { HookEntry, McpServerEntry, McpTestResult } from './extensionConfig';
+import type { McpCatalogPage, PluginCatalog } from './catalog';
 import type {
   SkillHubInstallRequest,
   SkillHubInstallResult,
@@ -33,6 +34,12 @@ export interface ReizoBridge {
   }>;
   installSkill(): Promise<{ id: string } | null>;
   listPlugins(): Promise<PluginSummary[]>;
+  /** Official MCP registry, searchable and paged by cursor. */
+  searchMcpCatalog(query: { search?: string; cursor?: string }): Promise<McpCatalogPage>;
+  /** Claude plugin marketplace (GitHub-hosted plugins). */
+  listPluginCatalog(): Promise<PluginCatalog>;
+  /** Downloads and installs a catalog plugin; it starts disabled. */
+  installCatalogPlugin(id: string): Promise<PluginSummary>;
   /** User-level MCP servers (mcp.json), including disabled ones. Changes apply from the next turn. */
   listMcpServers(): Promise<McpServerEntry[]>;
   saveMcpServers(entries: McpServerEntry[]): Promise<void>;

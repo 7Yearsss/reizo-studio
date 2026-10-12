@@ -72,6 +72,17 @@ describe('inspectPluginDir', () => {
     expect(await inspectPluginDir(empty)).toBeNull();
   });
 
+  it('loads Claude slash commands as skills and says plainly that sub-agents are not supported', async () => {
+    const src = path.join(tmp, 'cmds');
+    await write(path.join(src, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'cmds' }));
+    await write(path.join(src, 'commands', 'review.md'), ['---', 'description: review the diff', '---', 'Review $ARGUMENTS'].join('\n'));
+    await write(path.join(src, 'agents', 'helper.md'), ['---', 'name: helper', '---', 'You help.'].join('\n'));
+    const found = await inspectPluginDir(src);
+    expect(found?.summary.skills).toEqual(['review']);
+    expect(found?.contributions.skillsDirs).toEqual([path.join(path.resolve(src), 'commands')]);
+    expect(found?.summary.warnings.join(' ')).toContain('sub-agents');
+  });
+
   it('refuses manifest paths that escape the plugin folder', async () => {
     const src = path.join(tmp, 'evil');
     await write(path.join(src, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'evil', skills: '../outside', hooks: '../../hooks.json' }));
