@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { AlertTriangle, ChevronRight } from 'lucide-react';
 import type { ArtifactReview, ArtifactReviewChange } from '../../../shared/artifactReview';
-import { parseSheetContent, type SheetArtifactContent } from '../../../shared/sheetContent';
+import { parseSheetContent, type SheetArtifactContent, type SheetCellValue } from '../../../shared/sheetContent';
 import {
   SHEET_CHANGE_COLORS,
   SHEET_CHANGE_LABELS,
@@ -10,6 +10,9 @@ import {
   formatSheetCell,
   formatSheetDiffCounts,
   isDestructiveSheetChange,
+  sheetChangeFindings,
+  sheetChangeRisks,
+  type SheetImpact,
   sheetReviewTarget,
   sheetTargetRange,
   type SheetCellChange,
@@ -23,20 +26,39 @@ import { Alert, AlertDescription } from '../ui/alert';
 const SHOWN_CELLS = 60;
 
 export interface SheetSelectedCell { sheetId: string; row: number; col: number }
-interface ChangeView { change: ArtifactReviewChange; diff: SheetDiff | null; destructive: boolean; focus?: { sheetId: string; range: string } }
+interface ChangeView { change: ArtifactReviewChange; diff: SheetDiff | null; destructive: boolean; risks: string[]; problems: string[]; focus?: { sheetId: string; range: string } }
 
 function describe(base: SheetArtifactContent | null, change: ArtifactReviewChange): ChangeView {
   const operation = change.operation as SheetReviewOperation;
-  if (!base) return { change, diff: null, destructive: true };
+  if (!base) return { change, diff: null, destructive: true, risks: [], problems: [] };
   try {
-    const diff = diffSheetContent(base, applySheetReviewOperations(base, [operation]));
+    const candidate = applySheetReviewOperations(base, [operation]);
+    const diff = diffSheetContent(base, candidate);
     const sheet = diff.sheets[0];
     const target = operation.op === 'addSheet' ? undefined : sheetReviewTarget(base, operation);
     const range = (target && sheetTargetRange(target)) ?? sheet?.cells[0]?.a1 ?? 'A1';
-    return { change, diff, destructive: isDestructiveSheetChange(operation, diff), focus: sheet ? { sheetId: sheet.sheetId, range } : undefined };
+    const problems = sheetChangeFindings(base, candidate).slice(0, 4).map((finding) => `${finding.sheet}!${finding.range}：${finding.message}`);
+    return { change, diff, destructive: isDestructiveSheetChange(operation, diff), risks: sheetChangeRisks(operation, diff), problems, focus: sheet ? { sheetId: sheet.sheetId, range } : undefined };
   } catch {
-    return { change, diff: null, destructive: true };
+    return { change, diff: null, destructive: true, risks: [], problems: [] };
   }
+}
+
+const shownNumber = (value: SheetCellValue): string => (typeof value === 'number' ? String(Math.round(value * 1e6) / 1e6) : value === null || value === '' ? '（空）' : String(value));
+
+/** Formulas nobody touched whose results move because of the pending edits: the knock-on effects of a change. */
+function Impacts({ impacts, onFocus }: { impacts: SheetImpact[]; onFocus(target: { sheetId: string; range: string }): void }) {
+  const multiSheet = new Set(impacts.map((impact) => impact.sheetId)).size > 1;
+  return <details className="rounded border border-line bg-paper-raised px-2 py-1.5 text-xs">
+    <summary className="cursor-pointer font-medium">连带变化的结果 {impacts.length} 处</summary>
+    <ul className="mt-1.5 flex flex-col gap-0.5">{impacts.slice(0, 30).map((impact) => <li key={`${impact.sheetId}:${impact.a1}`}>
+      <button type="button" className="flex w-full items-baseline gap-1.5 text-left hover:text-accent" onClick={() => onFocus({ sheetId: impact.sheetId, range: impact.a1 })}>
+        <span className="shrink-0 font-mono">{multiSheet ? `${impact.sheetName}!` : ''}{impact.a1}</span>
+        <span className="min-w-0 truncate text-ink-muted">{shownNumber(impact.before)} → <span className="text-ink">{shownNumber(impact.after)}</span></span>
+      </button>
+    </li>)}</ul>
+    {impacts.length > 30 && <p className="mt-1 text-[11px] text-ink-muted">另有 {impacts.length - 30} 处</p>}
+  </details>;
 }
 
 export function Swatch({ kind }: { kind: SheetCellChangeKind }) {
@@ -67,9 +89,11 @@ function SelectedCell({ change }: { change: SheetCellChange }) {
   </div>;
 }
 
-export default function SheetReview({ reviews, totalDiff, busy, previewing, selected, onTogglePreview, onFocus, decide }: {
+export default function SheetReview({ reviews, totalDiff, impacts = [], busy, previewing, selected, onTogglePreview, onFocus, decide }: {
   reviews: ArtifactReview[];
   totalDiff: SheetDiff | null;
+  /** Untouched formulas whose result changes, once the preview has been calculated. */
+  impacts?: SheetImpact[];
   busy: boolean;
   previewing: boolean;
   selected?: SheetSelectedCell;
@@ -92,6 +116,7 @@ export default function SheetReview({ reviews, totalDiff, busy, previewing, sele
       <p className="text-xs text-ink-muted">接受后才会写入表格{previewing ? '；点击高亮单元格查看前后对比' : ''}</p>
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-ink-muted">{(Object.keys(SHEET_CHANGE_LABELS) as SheetCellChangeKind[]).map((kind) => <span key={kind} className="flex items-center gap-1"><Swatch kind={kind} />{SHEET_CHANGE_LABELS[kind]}{totalDiff ? ` ${totalDiff.counts[kind]}` : ''}</span>)}</div>
       {selectedChange && previewing && <SelectedCell change={selectedChange} />}
+      {previewing && impacts.length > 0 && <Impacts impacts={impacts} onFocus={(target) => onFocus(target)} />}
     </div>
     <div className="min-h-0 flex-1 overflow-y-auto">
       {!pending.length && <p className="p-3 text-xs text-ink-muted">暂无待审核修改。</p>}
@@ -107,14 +132,16 @@ export default function SheetReview({ reviews, totalDiff, busy, previewing, sele
             <Button size="xs" disabled={busy || review.stale || !safe.length} onClick={() => decide(review, safe, 'accept')}>{safe.length === all.length ? '全部接受' : `接受其余 ${safe.length} 项`}</Button>
           </div>
           {safe.length < all.length && <p className="flex items-start gap-1.5 text-[11px] text-ink-muted"><AlertTriangle className="mt-px size-3 shrink-0 text-danger" />清空、删除或覆盖公式的修改需逐项确认</p>}
-          {items.map(({ change, diff, destructive, focus }) => <div key={change.id} className="rounded border border-line">
+          {items.map(({ change, diff, destructive, risks, problems, focus }) => <div key={change.id} className="rounded border border-line">
             <button type="button" className="flex w-full items-start gap-1.5 px-2 py-1.5 text-left hover:bg-paper-raised" aria-expanded={open === change.id} onClick={() => { setOpen(open === change.id ? null : change.id); if (focus) onFocus(focus); }}>
               <ChevronRight className={`mt-0.5 size-3 shrink-0 transition-transform ${open === change.id ? 'rotate-90' : ''}`} />
               <span className="min-w-0 flex-1">
                 <span className="block break-all text-xs font-medium">{change.label.replace(/（[^（]*）$/, '')}</span>
                 <span className="block text-[11px] text-ink-muted">{diff ? formatSheetDiffCounts(diff) : '无法预览，该项可能已失效'}</span>
+                {risks.map((risk) => <span key={risk} className="mt-0.5 block text-[11px] text-danger">{risk}</span>)}
+                {problems.map((problem) => <span key={problem} className="mt-0.5 block text-[11px] text-amber-600 dark:text-amber-400">{problem}</span>)}
               </span>
-              {destructive && <span className="shrink-0 rounded bg-danger/10 px-1 text-[11px] text-danger">需确认</span>}
+              {destructive && <span className="shrink-0 rounded bg-danger/10 px-1 text-[11px] text-danger">{risks.length ? '会丢数据' : '需确认'}</span>}
             </button>
             {open === change.id && diff && <div className="px-2 pb-2"><CellTable diff={diff} /></div>}
             <div className="flex justify-end gap-2 border-t border-line px-2 py-1.5">

@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { History, Table2, X } from 'lucide-react';
+import { History, ListChecks, Table2, X } from 'lucide-react';
 import type { Artifact, ArtifactWithContent } from '../../../shared/artifact';
 import type { ArtifactReview } from '../../../shared/artifactReview';
 import { parseSheetContent, serializeSheetContent, type SheetArtifactContent } from '../../../shared/sheetContent';
-import { buildSheetDiffPreview, diffSheetContent } from '../../../shared/sheetReview';
+import { buildSheetDiffPreview, diffSheetContent, sheetImpacts } from '../../../shared/sheetReview';
 import * as api from '../../api';
 import * as artifactStore from '../../state/artifactStore';
+import * as chatStore from '../../state/chatStore';
+import { serializeSheetReference } from '../../../shared/sheetReferences';
 import { clearSheetRecovery, discardWorkbookEdits, flushWorkbookEdits, getSheetRecovery, setSheetRecovery, trackSheetWrite, useSheetWorkspace, pinSheetSelection } from '../../state/sheetWorkspace';
 import { createDeferredView } from '../DeferredView';
 import type { SheetCellFocus, SheetRendererProps } from './renderers/SheetRenderer';
@@ -56,6 +58,11 @@ export default function SheetDocument({ artifact, onClose }: { artifact: Artifac
     return { diff, candidate, text: serializeSheetContent({ ...candidate, univerSnapshot: buildSheetDiffPreview(base, candidate, diff, artifact.name) }) };
   }, [activeReview?.id, activeReview?.reviewVersion, artifact.name]);
   const previewing = Boolean(reviewPreview && !showOriginal && !viewVersion);
+  // The preview editor calculates the candidate; compare it with what the saved workbook showed.
+  const impacts = useMemo(() => {
+    const base = activeReview ? parseSheetContent(activeReview.baseContent) : null;
+    return previewing && reviewPreview && base && liveContent ? sheetImpacts(base, liveContent, reviewPreview.diff) : [];
+  }, [previewing, reviewPreview, activeReview?.baseContent, liveContent]);
   useEffect(() => { setLiveContent(null); }, [frame?.generation, previewing, viewVersion]);
 
   async function decide(review: ArtifactReview, ids: string[], decision: 'accept' | 'reject') {
@@ -137,6 +144,14 @@ export default function SheetDocument({ artifact, onClose }: { artifact: Artifac
     if (!ownSelection?.range || !pinSheetSelection(artifact.sessionId)) return;
     focusComposer(artifact.sessionId, { cite: true });
   }
+  /** Ask the agent for a workbook audit; it runs check_sheet and proposes the fixes for review. */
+  async function audit() {
+    try {
+      await flushWorkbookEdits(artifact.id);
+      void chatStore.sendMessage(artifact.sessionId, '检查这份表格（错误值、与同列不一致的公式、公式列里混入的手写数值、汇总范围漏掉的数据、文本型数字、多余空格），并给出可逐条审核的修改建议', [serializeSheetReference({ artifactId: artifact.id })]);
+      focusComposer(artifact.sessionId);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '请先保存表格'); }
+  }
   const content = frame ? parseSheetContent(frame.doc.content) : null;
   // Charts read formula results from the live workbook; stored content may predate the last calculation.
   const chartContent = liveContent ?? (previewing ? reviewPreview?.candidate : content) ?? null;
@@ -147,6 +162,7 @@ export default function SheetDocument({ artifact, onClose }: { artifact: Artifac
     <div className="flex items-center gap-2 border-b border-line px-3 py-1.5">
       <span className="min-w-0 flex-1 truncate text-xs font-medium">{artifact.name} · v{frame?.doc.version ?? artifact.version}{viewVersion ? ' · 历史版本' : ''}</span>
       {viewVersion && <Button variant="ghost" size="sm" onClick={() => { current.current = null; setViewVersion(undefined); }}>返回最新</Button>}
+      {!viewVersion && <Button variant="ghost" size="sm" disabled={previewing || reviewBusy} title={previewing ? '请先处理或切到原表' : '检查错误值、不一致的公式、文本型数字等'} onClick={() => void audit()}><ListChecks data-icon="inline-start" />检查</Button>}
       {!viewVersion && <Button variant={showPivots ? 'secondary' : 'ghost'} size="sm" disabled={previewing} title={previewing ? '请先处理或切到原表' : '新建或调整透视表'} onClick={() => setShowPivots((v) => !v)}><Table2 data-icon="inline-start" />透视表</Button>}
       <Button variant="ghost" size="icon-sm" aria-label="表格版本历史" onClick={() => setShowHistory((v) => !v)}><History /></Button>
       <Button variant="ghost" size="icon-sm" aria-label="关闭表格" onClick={onClose}><X /></Button>
@@ -163,7 +179,7 @@ export default function SheetDocument({ artifact, onClose }: { artifact: Artifac
           onDelete={!previewing && !viewVersion ? (chart) => void commitContent((latest) => removeSheetChart(latest, chart.id)) : undefined}
           onCreateFromSelection={!previewing && !viewVersion && ownSelection?.range ? () => void commitContent((latest) => applySheetChart(latest, { source: { sheet: ownSelection.sheetId, range: ownSelection.range! } }).content) : undefined} />}
       </div>
-      {activeReview && !viewVersion && <SheetReview reviews={reviews} totalDiff={reviewPreview?.diff ?? null} busy={reviewBusy} previewing={previewing} selected={selectedCell} onTogglePreview={() => setShowOriginal((v) => !v)} onFocus={(target) => { setShowOriginal(false); setFocus({ ...target, nonce: Date.now() }); }} decide={(review, ids, decision) => void decide(review, ids, decision)} />}
+      {activeReview && !viewVersion && <SheetReview reviews={reviews} totalDiff={reviewPreview?.diff ?? null} impacts={impacts} busy={reviewBusy} previewing={previewing} selected={selectedCell} onTogglePreview={() => setShowOriginal((v) => !v)} onFocus={(target) => { setShowOriginal(false); setFocus({ ...target, nonce: Date.now() }); }} decide={(review, ids, decision) => void decide(review, ids, decision)} />}
       {showPivots && !viewVersion && !previewing && content && <SheetPivotPanel content={content} selection={ownSelection} busy={reviewBusy} commit={commitContent} onClose={() => setShowPivots(false)} />}
       {showHistory && <ArtifactVersionRail artifactId={artifact.id} activeVersion={frame?.doc.version ?? artifact.version} onPick={(n) => void pickVersion(n)} onBeforeRestore={() => flushWorkbookEdits(artifact.id)} onRestored={() => { current.current = null; setViewVersion(undefined); setReload((n) => n + 1); void artifactStore.loadSessionArtifacts(artifact.sessionId); }} />}
     </div>
