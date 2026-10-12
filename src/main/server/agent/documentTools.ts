@@ -76,7 +76,7 @@ export function createDocumentTools(options: { sessionId: string; projectId?: st
           // Several picked ranges: each operation must land inside one of them.
           if (selectedRefs.length) for (const operation of operations as DocumentEdit[]) applyDocumentEdit(content, operation, (selectedRefs.find((ref) => documentEditWithinSelection(operation, ref.selection!, pmDoc)) ?? selectedRefs[0]).selection);
           const review = await reviews.create({ artifactId, sessionId, expectedVersion, operations, origin: { surface: 'chat' } });
-          return { ok: true, artifactId, reviewId: review.id, pending: review.changes.length, summary: '修改建议已显示在 Doc 面板，原文保持不变，等待用户审核。' };
+          return { ok: true, artifactId, reviewId: review.id, pending: review.changes.length, summary: '修改建议已生成（聊天里有对照卡片，Doc 面板也可审核），原文保持不变，等待用户审核。请只用一句话回复，不要复述修改后的文字。' };
         } catch (error) { return { ok: false, error: error instanceof Error ? error.message : '创建建议失败' }; }
       },
     }),
