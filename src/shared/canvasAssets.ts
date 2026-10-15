@@ -49,6 +49,8 @@ export interface CanvasAssetReuseInput {
   sourceNodeId?: string;
   sourceCanvasId?: string;
   assetIndex?: number;
+  /** Reject a stale legacy index rather than silently selecting a different version. */
+  expectedPath?: string;
   x?: number;
   y?: number;
   title?: string;

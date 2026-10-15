@@ -19,8 +19,10 @@ const ArtifactPanel = lazyWithRetry(() => import('./ArtifactPanel'));
 const SheetPanel = lazyWithRetry(() => import('./SheetPanel'));
 const DocumentPanel = lazyWithRetry(() => import('./DocumentPanel'));
 const PresentationPanel = lazyWithRetry(() => import('./PresentationPanel'));
+const VideoEditorPanel = lazyWithRetry(() => import('./VideoEditorPanel'));
 
 const PANEL_TITLES: Record<uiStore.RightPanelTab, string> = {
+  video: '视频剪辑',
   canvas: '画布',
   documents: 'Doc 文档',
   presentations: 'PPT 演示稿',
@@ -48,6 +50,19 @@ export default function RightPanel({
   const maximized = useUiStore((s) => s.rightPanelMaximized);
   const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
   const sidebarWidth = useUiStore((s) => s.sidebarWidth);
+
+  useEffect(() => {
+    if (activeTab !== 'video' || maximized) return;
+    const fitVideoPanel = () => {
+      const available = window.innerWidth - (sidebarCollapsed ? 0 : sidebarWidth) - uiStore.CHAT_PANEL_MIN - 8;
+      if (uiStore.getSnapshot().rightPanelWidth > available) {
+        uiStore.setRightPanelWidth(Math.max(uiStore.RIGHT_PANEL_MIN, available));
+      }
+    };
+    fitVideoPanel();
+    window.addEventListener('resize', fitVideoPanel);
+    return () => window.removeEventListener('resize', fitVideoPanel);
+  }, [activeTab, maximized, sidebarCollapsed, sidebarWidth]);
 
   const [isDragging, setIsDragging] = useState(false);
   const [contentReady, setContentReady] = useState(false);
@@ -234,6 +249,8 @@ export default function RightPanel({
               </Suspense>
             )}
             {activeTab === 'sheets' && sessionId && <Suspense fallback={null}><SheetPanel key={sessionId} sessionId={sessionId} /></Suspense>}
+            {activeTab === 'video' && sessionId && <Suspense fallback={null}><VideoEditorPanel key={sessionId} sessionId={sessionId} /></Suspense>}
+            {activeTab === 'video' && !sessionId && <p className="p-6 text-sm text-ink-muted">先创建一个对话，再打开视频剪辑。</p>}
             {activeTab === 'documents' && sessionId && <Suspense fallback={null}><DocumentPanel key={sessionId} sessionId={sessionId} /></Suspense>}
             {activeTab === 'presentations' && sessionId && <Suspense fallback={null}><PresentationPanel key={sessionId} sessionId={sessionId} /></Suspense>}
             {activeTab === 'files' && <DirectoryPanel embedded />}

@@ -8,6 +8,7 @@
  * Run: node --require ./scripts/electron-stub.cjs -r tsx/cjs scripts/api-smoke-test.ts
  */
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createApp } from '../src/main/server/app';
@@ -304,7 +305,8 @@ async function main() {
   {
     const root = await mkdtemp(path.join(tmpdir(), 'reizo-workspace-'));
     const inside = resolveInsideWorkspace(root, path.join('src', 'app.ts'));
-    check('workspace-inside', inside === path.join(root, 'src', 'app.ts'), inside);
+    // Windows TEMP may use an 8.3 alias; the resolver intentionally returns the canonical root.
+    check('workspace-inside', inside === path.join(realpathSync.native(root), 'src', 'app.ts'), inside);
     let escaped = false;
     try {
       resolveInsideWorkspace(root, path.join('..', 'outside', 'System32'));

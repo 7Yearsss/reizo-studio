@@ -8,7 +8,7 @@ import * as store from '../../state/canvasStore';
 import Shelf from './AssetShelf';
 
 const harness = vi.hoisted(() => ({
-  snapshots: {} as Record<string, CanvasSnapshot>, list: vi.fn(), reuse: vi.fn(), edges: vi.fn(), runs: vi.fn(),
+  snapshots: {} as Record<string, CanvasSnapshot>, list: vi.fn(), reuse: vi.fn(), edges: vi.fn(), runs: vi.fn(), sendToEditor: vi.fn(),
   screenToFlowPosition: vi.fn(() => ({ x: 140, y: 180 })),
   flowState: { width: 640, height: 480, domNode: { getBoundingClientRect: () => ({ left: 120, top: 80, width: 640, height: 480 }) } },
 }));
@@ -21,6 +21,7 @@ vi.mock('@xyflow/react', () => ({
 vi.mock('../../state/tabStore', () => ({ activeSessionId: (): string | null => null, subscribe: (): (() => void) => (): void => undefined }));
 vi.mock('../../state/settingsStore', () => ({ getSnapshot: () => ({ settings: {} }) }));
 vi.mock('../../lib/notify', () => ({ primeNotifications: vi.fn(), notifyJobDone: vi.fn() }));
+vi.mock('../../lib/sendToVideoEditor', () => ({ sendAssetToVideoEditor: harness.sendToEditor }));
 vi.mock('../../api', async (original) => ({ ...await original<typeof import('../../api')>(),
   getCanvas: vi.fn(async (sessionId: string) => harness.snapshots[sessionId]),
   canvasAssetUrl: vi.fn(async (path: string) => `http://localhost/assets/${path}`),
@@ -86,6 +87,14 @@ afterEach(async () => {
 });
 
 describe('asset shelf public workflows', () => {
+  it('sends the version selected in the shelf to the current conversation editor', async () => {
+    await render();
+    await act(async () => { click('素材栏'); });
+    await chooseVersion('版本 2');
+    await act(async () => { click('送到剪辑'); });
+    expect(harness.sendToEditor).toHaveBeenCalledWith('s1', expect.objectContaining({ sourceNodeId: 'producer', assetIndex: 1, expectedPath: 'c1/old.png' }));
+    expect(harness.runs).not.toHaveBeenCalled();
+  });
   it('reuses the selected fixed version once, retries safely and rejects a late library response after switching canvases', async () => {
     const first = deferred<{ node: CanvasNode; asset: CanvasAsset }>();
     harness.reuse.mockReturnValueOnce(first.promise);

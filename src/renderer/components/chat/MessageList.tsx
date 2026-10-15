@@ -16,6 +16,7 @@ import UserMessage from './UserMessage';
 import AssistantMessage from './AssistantMessage';
 import EmptyChatHints from './EmptyChatHints';
 import MemoryEventRow from './MemoryEventRow';
+import VideoEditorActivity from './VideoEditorActivity';
 
 const GROW_TRIGGER_PX = 160;
 // The composer overlay pads this much transparent-to-paper fade above its card
@@ -211,6 +212,7 @@ export default function MessageList({
           );
         })}
         {sending && sessionId && <StreamingAssistant sessionId={sessionId} />}
+        {sessionId && <VideoEditorActivity sessionId={sessionId} />}
       </MessageScroller>
       <AnimatePresence>
         {!following && (

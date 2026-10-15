@@ -46,6 +46,10 @@ import { stopCanvasRun, stopCanvasRunsForStore } from './canvas/graphExecutor';
 import { resumeVideoJobs, stopVideoJobsForStore } from './canvas/asyncJobManager';
 import { createCanvasMaintenanceRouter } from './routes/canvasMaintenance';
 import { createUsageRouter } from './routes/usage';
+import { createVideoEditorRouter } from './routes/videoEditor';
+import { stopEditorMedia } from './videoEditor/mediaExchange';
+import { stopVideoEditor } from './videoEditor/service';
+import { videoExportTasksFor, stopVideoExportTasks } from './videoEditor/exportTaskService';
 
 export interface CreateAppOptions {
   /** Directory the local session/settings JSON files live under. */
@@ -171,9 +175,13 @@ export function createApp(options: CreateAppOptions) {
   const startCanvasJobs = () => {
     if (canvasJobsStarted || canvasJobsStopped) return;
     canvasJobsStarted = true;
+    void videoExportTasksFor(options.dataRoot, canvasStore).start().catch((error) => console.error('导出任务恢复失败', error));
     resumeVideoJobs({ canvasStore, settingsStore, providerStore, dataRoot: options.dataRoot });
   };
   const stopCanvasJobs = () => {
+    stopVideoExportTasks(options.dataRoot);
+    stopVideoEditor(options.dataRoot);
+    stopEditorMedia(options.dataRoot);
     if (canvasJobsStopped) return;
     canvasJobsStopped = true;
     stopVideoJobsForStore(canvasStore);
@@ -194,6 +202,7 @@ export function createApp(options: CreateAppOptions) {
   });
 
   app.get('/api/health', (c) => c.json({ ok: true }));
+  app.route('/api/video-editor', createVideoEditorRouter(options.dataRoot, sessionStore, canvasStore, artifactStore));
   const skillsDirs = options.skillsDirs ?? [];
   const memoryEventsStore = createMemoryEventsStore(options.dataRoot);
   const scheduleStore = options.scheduleStore ?? createScheduleStore(options.dataRoot);

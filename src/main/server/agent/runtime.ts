@@ -1,4 +1,6 @@
 import { createPresentationTools } from './presentationTools';
+import { createVideoEditorTools } from './videoEditorTools';
+import { tryVideoApplyTurn } from './videoApplyTurn';
 import { parsePresentationReferences, splitPresentationContext, wrapPresentationContext } from '../../../shared/presentationReferences';
 import type { ArtifactReviewStore } from '../storage/artifactReviewStore';
 import { createDocumentTools } from './documentTools';
@@ -217,6 +219,9 @@ export async function runChatTurn(options: {
   if (!session) {
     return Response.json({ error: 'Session not found' }, { status: 404 });
   }
+
+  const localVideoTurn = await tryVideoApplyTurn(options);
+  if (localVideoTurn) return localVideoTurn;
 
   const settings = await settingsStore.get();
   let resolved: ReturnType<typeof resolveSettingsModel>;
@@ -493,6 +498,7 @@ export async function runChatTurn(options: {
           ...(toolset?.tools ?? {}),
           ...(canvasTools?.tools ?? {}),
           ...(artifactTools ?? {}),
+          ...(dataRoot ? createVideoEditorTools(sessionId, dataRoot, canvasStore) : {}),
           ...(artifactStore && options.artifactReviews ? createPresentationTools({ sessionId, projectId: session.projectId, artifacts: artifactStore, reviews: options.artifactReviews, getReferences: () => currentPresentationRefs }) : {}),
           ...(artifactStore && options.artifactReviews ? createDocumentTools({ sessionId, projectId: session.projectId, artifacts: artifactStore, reviews: options.artifactReviews, getReferences: () => currentDocumentRefs }) : {}),
           ...(imageTools ?? {}),

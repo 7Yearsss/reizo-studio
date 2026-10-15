@@ -14,6 +14,7 @@ import {
   Terminal,
   Trash2,
   Workflow,
+  Film,
 } from 'lucide-react';
 import * as uiStore from '../../state/uiStore';
 import { useUiStore } from '../../state/useUiStore';
@@ -40,6 +41,7 @@ interface PanelEntry {
 }
 
 const CREATE_PANELS: PanelEntry[] = [
+  { tab: 'video', label: '视频剪辑', Icon: Film },
   { tab: 'canvas', label: '画布', Icon: Workflow },
   { tab: 'documents', label: 'Doc 文档', Icon: FileText },
   { tab: 'presentations', label: 'PPT 演示稿', Icon: Presentation },
@@ -96,8 +98,13 @@ export default function TopRightToolbar({
 
   const openPanel = (entry: PanelEntry) => {
     setPanelsOpen(false);
+    if (entry.tab === 'video' && rightPanelTab !== 'video') {
+      const layout = uiStore.getSnapshot();
+      const available = window.innerWidth - (layout.sidebarCollapsed ? 0 : layout.sidebarWidth) - uiStore.CHAT_PANEL_MIN - 8;
+      uiStore.setRightPanelWidth(Math.max(uiStore.RIGHT_PANEL_MIN, Math.min(960, available)));
+    }
     if (entry.tab === 'canvas' && onOpenCanvas) onOpenCanvas();
-    else if (entry.tab !== 'canvas' && !sessionId && onOpenPanel && ['documents', 'presentations', 'sheets'].includes(entry.tab)) onOpenPanel(entry.tab);
+    else if (entry.tab !== 'canvas' && !sessionId && onOpenPanel && ['documents', 'presentations', 'sheets', 'video'].includes(entry.tab)) onOpenPanel(entry.tab);
     else uiStore.toggleRightPanelTab(entry.tab);
   };
 

@@ -64,6 +64,7 @@ function devServerOrigin(): string | undefined {
 }
 
 async function bootstrap(): Promise<void> {
+  if (app.isPackaged) process.env.REIZO_VIDEO_EDITOR_RUNTIME = path.join(process.resourcesPath, 'video-editor', 'runtime.json');
   const dataRoot = path.join(app.getPath('userData'), 'data');
   mkdirSync(dataRoot, { recursive: true });
   const settingsStore = createSettingsStore(dataRoot);

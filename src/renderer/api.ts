@@ -1,4 +1,7 @@
 import type { Session, SessionSummary } from '../shared/chat';
+import type { EditorImportJob, EditorImportResult, VideoEditorWorkspace } from '../shared/videoEditor';
+import type { EditorActivity, EditorContext, EditorObservation } from '../shared/videoEditorContext';
+
 import type { Project } from '../shared/project';
 import type { Artifact, ArtifactVersion, ArtifactWithContent } from '../shared/artifact';
 import type { DirEntry } from '../shared/workspace';
@@ -16,6 +19,57 @@ import type {
   ProviderCategory,
   ManagedProviderConfig,
 } from '../shared/providerRegistry';
+
+export async function openVideoEditor(sessionId: string, reconnect = false): Promise<VideoEditorWorkspace> {
+  const response = await api(`/api/video-editor/${encodeURIComponent(sessionId)}/open`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reconnect }) });
+  return response.json();
+}
+
+export async function editorApprovalMode(sessionId: string, mode?: 'manual' | 'auto'): Promise<{ mode: 'manual' | 'auto' }> {
+  return (await api(`/api/video-editor/${encodeURIComponent(sessionId)}/approval`, mode === undefined ? undefined : {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }),
+  })).json();
+}
+
+function editorMediaPath(sessionId: string) { return `/api/video-editor/${encodeURIComponent(sessionId)}/media`; }
+export async function listEditorMedia(sessionId: string): Promise<{ assets: CanvasAsset[] }> {
+  return (await api(editorMediaPath(sessionId))).json();
+}
+export async function importEditorMedia(sessionId: string, assetId: string): Promise<EditorImportResult> {
+  return (await api(`${editorMediaPath(sessionId)}/import`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assetId }) })).json();
+}
+export async function editorMediaJobs(sessionId: string): Promise<{ jobs: EditorImportJob[] }> {
+  return (await api(`${editorMediaPath(sessionId)}/jobs`)).json();
+}
+export async function editorMediaFile(sessionId: string, jobId: string): Promise<Blob> {
+  return (await api(`${editorMediaPath(sessionId)}/jobs/${encodeURIComponent(jobId)}/file`)).blob();
+}
+export async function completeEditorMedia(sessionId: string, jobId: string, result: { asset?: EditorImportResult; error?: string }): Promise<void> {
+  await api(`${editorMediaPath(sessionId)}/jobs/${encodeURIComponent(jobId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(result) });
+}
+export async function saveEditorExport(sessionId: string, projectId: string, name: string, blob: Blob, purpose: 'export' | 'source' = 'export'): Promise<{ asset: CanvasAsset }> {
+  return (await api(`${editorMediaPath(sessionId)}/exports?${new URLSearchParams({ projectId, name, purpose })}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: blob })).json();
+}
+export async function prepareEditorArtifact(sessionId: string, artifactId: string, version: number): Promise<{ asset: CanvasAsset }> {
+  return (await api(`${editorMediaPath(sessionId)}/artifact`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ artifactId, version }) })).json();
+}
+export async function readEditorContext(sessionId: string): Promise<EditorObservation> {
+  return (await api(`/api/video-editor/${encodeURIComponent(sessionId)}/context`)).json();
+}
+export async function editorRenderRequest(sessionId: string, method: 'GET' | 'POST' | 'DELETE', id?: string, payload?: unknown): Promise<unknown> {
+  return (await api(`/api/video-editor/${encodeURIComponent(sessionId)}/render-jobs${id ? `/${encodeURIComponent(id)}` : ''}`, {
+    method, ...(payload === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
+  })).json();
+}
+export async function retryEditorExport(sessionId: string, id: string): Promise<void> {
+  await api(`/api/video-editor/${encodeURIComponent(sessionId)}/render-jobs/${encodeURIComponent(id)}/retry`, { method: 'POST' });
+}
+export async function readCompositionImage(sessionId: string, id: string, index: number): Promise<Blob> {
+  return (await api(`/api/video-editor/${encodeURIComponent(sessionId)}/previews/${encodeURIComponent(id)}/${index}`)).blob();
+}
+export async function updateEditorContext(sessionId: string, context: EditorContext, activities: EditorActivity[]): Promise<void> {
+  await api(`/api/video-editor/${encodeURIComponent(sessionId)}/context`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ context, activities }) });
+}
 
 export interface StreamMeta {
   rev: number;

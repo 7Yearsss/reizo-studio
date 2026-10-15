@@ -11,6 +11,7 @@ import ArtifactVersionRail from './ArtifactVersionRail';
 import HandoffMenu from './HandoffMenu';
 import { parseSheetContent } from '../../../shared/sheetContent';
 import SheetDocument from './SheetDocument';
+import { sendArtifactToVideoEditor } from '../../lib/sendToVideoEditor';
 
 const DocumentEditor = createDeferredView<{ artifact: Artifact }>(() => import('./DocumentEditor'), { label: 'Doc', minHeight: 420 });
 
@@ -139,6 +140,7 @@ function GeneralArtifactPreview({
         {artifact.status === 'streaming' && (
           <span className="rounded bg-accent/10 px-1.5 text-[11px] text-accent">生成中…</span>
         )}
+        {['image', 'video', 'audio'].includes(artifact.kind) && artifact.status === 'complete' && <button type="button" disabled={loading} className="shrink-0 rounded border border-line px-2 py-1 text-xs disabled:opacity-50" onClick={() => void sendArtifactToVideoEditor(artifact.sessionId, artifact.id, version)} title={`发送当前预览版本 v${version} 到该作品所属对话的剪辑工程`}>送到剪辑</button>}
         {artifact.status === 'error' && (
           <span className="rounded bg-red-500/10 px-1.5 text-[11px] text-red-500">中断</span>
         )}
