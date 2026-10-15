@@ -143,8 +143,22 @@ Extended the one-click quick integrations suite to fully support key Chinese dom
 
 Completed the multi-color brand logo integration and expanded the built-in quick integrations suite to 8 services (5 domestic, 3 global):
 
-1. **Brand Vector Logos & Simple Icons Component (`src/renderer/components/ui/BrandIcon.tsx`)**:
-   - Supports authentic official multi-color vector SVGs for domestic & global services (`feishu`, `wecom`, `dingtalk`, `yuque`, `gitee`, `notion`, `gmail`, `github`, `bilibili`).
+1. **Brand Vector Logos & LobeHub Squircle App Avatars (`src/renderer/components/ui/BrandIcon.tsx`)**:
+   - Upgraded to authentic official vector brand assets:
+     - **Feishu**: Official ByteDance 3-layer soaring origami wings (`#00D6B9`, `#3370FF`, `#133C9A`).
+     - **WeCom**: Official Tencent `tdesign-icons` dual speech bubbles (`#1875F0` & `#2FD89F`).
+     - **DingTalk**: Official Ant Design/Alibaba `DingtalkCircleFilled` flying lightning wing on `#0089FF`.
+     - **Yuque**: Official Ant Group `YuqueFilled` emerald sparrow on `#00B96B`.
+     - **Gitee**: Official crimson roundel (`#C71D23`) with white G.
+     - **Notion**: SVGL official 3D book block with white paper base and serif N.
+     - **Google Mail**: SVGL official 5-color Google envelope (`#4285F4`, `#34A853`, `#FBBC04`, `#EA4335`, `#C5221F`).
+     - **GitHub**: Crisp Invertocat on midnight base.
+     - **AI & Giants**: Built-in support for DeepSeek (`#4D6BFE`), Claude (`#D97757`), OpenAI (`#10A37F`), ByteDance, Alibaba Cloud, Tencent.
+   - **LobeHub-style App Avatar Squircle Design**:
+     - Custom squircle radius (`rounded-[10px]`, `rounded-[12px]`, `rounded-[14px]`).
+     - 1px hairline border (`border border-white/10 dark:border-white/12`).
+     - Top inner bevel highlight (`shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]`).
+     - Subtle brand-tuned dark gradients for each service, eliminating the plain/monochrome flat look.
    - `SimpleIcon` fallback component dynamically loads brand logos via `https://cdn.simpleicons.org/{slug}` with deterministic letter-tile fallback.
    - 100% offline reliability for built-in services, zero broken glyphs.
    - Comprehensive unit test coverage in `src/renderer/components/ui/BrandIcon.test.tsx` (5/5 passing).
