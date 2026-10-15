@@ -45,6 +45,10 @@ export const IPC = {
   INTEGRATIONS_STATUS: 'reizo:integrations-status',
   INTEGRATIONS_CONNECT_NOTION: 'reizo:integrations-connect-notion',
   INTEGRATIONS_CONNECT_GOOGLE: 'reizo:integrations-connect-google',
+  INTEGRATIONS_CONNECT_FEISHU: 'reizo:integrations-connect-feishu',
+  INTEGRATIONS_CONNECT_WECOM: 'reizo:integrations-connect-wecom',
+  INTEGRATIONS_CONNECT_DINGTALK: 'reizo:integrations-connect-dingtalk',
+  INTEGRATIONS_CONNECT_YUQUE: 'reizo:integrations-connect-yuque',
   INTEGRATIONS_DISCONNECT: 'reizo:integrations-disconnect',
 } as const;
 

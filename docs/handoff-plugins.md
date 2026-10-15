@@ -103,6 +103,43 @@ Built a zero-friction "常用服务直连" (Quick Integrations) experience in Re
    - Automated CDP E2E verification script (`scripts/verify-quick-integrations.mjs`) tested against the live running Electron app: verified status IPC, settings navigation, DOM elements, and modal openings.
    - UI screenshots captured and verified: `quick-integrations-overview.png`, `notion-modal-opened.png`, `google-modal-opened.png`.
 
+## COMPLETED: Domestic Quick Integrations for Feishu, WeCom, DingTalk & Yuque (done & verified)
+
+Extended the one-click quick integrations suite to fully support key Chinese domestic collaboration and knowledge services ("主攻国内的 国内的要集成全一点"):
+
+1. **Zero-Dependency Built-in MCP Servers (`src/main/server/mcp-builtin/`)**:
+   - Packaged standalone JSON-RPC 2.0 stdio servers running via Electron's built-in Node.js engine (`process.execPath` + `ELECTRON_RUN_AS_NODE: '1'`).
+   - Requires zero npm install, zero external node dependencies, and works out-of-the-box on clean client machines:
+     - `wecom-server.cjs`: Enterprise WeChat custom group bot webhook runner (`wecom_send_markdown`, `wecom_send_text`).
+     - `dingtalk-server.cjs`: DingTalk custom group bot webhook runner with HMAC-SHA256 timestamp signature authentication (`dingtalk_send_markdown`, `dingtalk_send_text`).
+     - `yuque-server.cjs`: Yuque cloud knowledge base client using personal access tokens (`yuque_get_user`, `yuque_list_repos`, `yuque_search_docs`, `yuque_get_doc`, `yuque_create_doc`).
+     - `feishu-server.cjs`: Feishu/Lark open platform runner using App ID & App Secret with auto-refreshed tenant access tokens (`feishu_get_bot_info`, `feishu_send_message`, `feishu_get_bitable_records`).
+2. **Backend Authentication & Connectivity Validation (`src/main/server/auth/quickIntegrations.ts`)**:
+   - Added `connectFeishuIntegration`: fetches tenant token and queries bot name for live verification.
+   - Added `connectWeComIntegration`: validates webhook structure, stores optional bot name, registers built-in MCP entry.
+   - Added `connectDingTalkIntegration`: verifies Webhook URL and optional sign secret, registers built-in MCP entry.
+   - Added `connectYuqueIntegration`: queries Yuque `/api/v2/user` to verify personal access token before registration.
+   - Disconnect cleanup: gracefully disconnects domestic services, invalidates session pools, and cleans `mcp.json`.
+   - Comprehensive unit test coverage: `src/main/server/auth/quickIntegrations.test.ts` (11/11 passing).
+3. **Frontend UI Integration (`src/renderer/pages/settings/QuickIntegrationsBlock.tsx`)**:
+   - Category filter tabs: `全部 (6)`, `国内办公 (4)`, `海外服务 (2)`.
+   - Brand SVG icons for Feishu (cyan), WeCom (blue), DingTalk (sky), Yuque (emerald).
+   - Interactive configuration dialogs:
+     - `FeishuConnectModal`: App ID + App Secret input with guide to Feishu Open Platform.
+     - `WeComConnectModal`: Webhook URL/key input with guide to creating WeCom bots.
+     - `DingTalkConnectModal`: Webhook URL + optional HMAC sign secret input with guide.
+     - `YuqueConnectModal`: Personal access token input with link to Yuque token settings.
+4. **Live Verification**:
+   - Vitest suite passing (11/11 tests).
+   - E2E script `scripts/verify-quick-integrations.mjs` ran against the live Electron app, capturing:
+     - `quick-integrations-all-services.png`
+     - `quick-integrations-domestic-tab.png`
+     - `feishu-modal-opened.png`
+     - `wecom-modal-opened.png`
+     - `dingtalk-modal-opened.png`
+     - `yuque-modal-opened.png`
+
+
 ## Remaining ideas / next steps
 
 - Plugins that only define **sub-agents** (`agents/`) install as empty packs (a warning is shown). Claude `commands/` are loaded as skills; `$ARGUMENTS` placeholders are not substituted.

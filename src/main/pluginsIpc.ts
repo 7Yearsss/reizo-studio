@@ -1,12 +1,25 @@
 import { BrowserWindow, dialog, ipcMain } from 'electron';
 import { IPC } from '../shared/constants';
-import type { GoogleOAuthParams, HookEntry, McpServerEntry } from '../shared/extensionConfig';
+import type {
+  DingTalkConnectParams,
+  FeishuConnectParams,
+  GoogleOAuthParams,
+  HookEntry,
+  McpServerEntry,
+  QuickIntegrationId,
+  WeComConnectParams,
+  YuqueConnectParams,
+} from '../shared/extensionConfig';
 import { checkNodeEnvironment, readHookEntries, readMcpEntries, testMcpEntry, writeHookEntries, writeMcpEntries } from './server/plugins/extensionConfig';
 import { fetchPluginCatalog, installCatalogPlugin, searchMcpRegistry } from './server/plugins/catalog';
 import { installPlugin, listPlugins, setPluginEnabled, syncPluginSkillsDirs, uninstallPlugin } from './server/plugins/pluginStore';
 import { resetMcpBaseline } from './server/agent/mcpTools';
 import {
+  connectDingTalkIntegration,
+  connectFeishuIntegration,
   connectNotionIntegration,
+  connectWeComIntegration,
+  connectYuqueIntegration,
   disconnectQuickIntegration,
   getQuickIntegrationsStatus,
   startGoogleOAuthFlow,
@@ -38,7 +51,11 @@ export function registerPluginIpc(dataRoot: string, skillsDirs: string[]): void 
   ipcMain.handle(IPC.INTEGRATIONS_STATUS, () => getQuickIntegrationsStatus(dataRoot));
   ipcMain.handle(IPC.INTEGRATIONS_CONNECT_NOTION, (_event, token: string) => connectNotionIntegration(dataRoot, String(token || '')));
   ipcMain.handle(IPC.INTEGRATIONS_CONNECT_GOOGLE, (_event, params: GoogleOAuthParams) => startGoogleOAuthFlow(dataRoot, params));
-  ipcMain.handle(IPC.INTEGRATIONS_DISCONNECT, (_event, id: 'notion' | 'gmail') => disconnectQuickIntegration(dataRoot, id));
+  ipcMain.handle(IPC.INTEGRATIONS_CONNECT_FEISHU, (_event, params: FeishuConnectParams) => connectFeishuIntegration(dataRoot, params));
+  ipcMain.handle(IPC.INTEGRATIONS_CONNECT_WECOM, (_event, params: WeComConnectParams) => connectWeComIntegration(dataRoot, params));
+  ipcMain.handle(IPC.INTEGRATIONS_CONNECT_DINGTALK, (_event, params: DingTalkConnectParams) => connectDingTalkIntegration(dataRoot, params));
+  ipcMain.handle(IPC.INTEGRATIONS_CONNECT_YUQUE, (_event, params: YuqueConnectParams) => connectYuqueIntegration(dataRoot, params));
+  ipcMain.handle(IPC.INTEGRATIONS_DISCONNECT, (_event, id: QuickIntegrationId) => disconnectQuickIntegration(dataRoot, id));
 
   ipcMain.handle(IPC.PLUGIN_INSTALL, async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;

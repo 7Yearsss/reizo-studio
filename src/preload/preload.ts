@@ -4,13 +4,18 @@ import type { DirEntry } from '../shared/workspace';
 import type { SkillHubInstallRequest, SkillHubSearchQuery } from '../shared/skillhub';
 import type { PluginSummary } from '../shared/plugins';
 import type {
+  DingTalkConnectParams,
+  FeishuConnectParams,
   GoogleOAuthParams,
   HookEntry,
   IntegrationConnectResult,
   McpServerEntry,
   McpTestResult,
   NodeEnvStatus,
+  QuickIntegrationId,
   QuickIntegrationsStatus,
+  WeComConnectParams,
+  YuqueConnectParams,
 } from '../shared/extensionConfig';
 import type { McpCatalogPage, PluginCatalog } from '../shared/catalog';
 
@@ -62,5 +67,9 @@ contextBridge.exposeInMainWorld('reizo', {
   getQuickIntegrationsStatus: (): Promise<QuickIntegrationsStatus> => ipcRenderer.invoke(IPC.INTEGRATIONS_STATUS),
   connectNotion: (token: string): Promise<IntegrationConnectResult> => ipcRenderer.invoke(IPC.INTEGRATIONS_CONNECT_NOTION, token),
   startGoogleOAuth: (params: GoogleOAuthParams): Promise<IntegrationConnectResult> => ipcRenderer.invoke(IPC.INTEGRATIONS_CONNECT_GOOGLE, params),
-  disconnectIntegration: (id: 'notion' | 'gmail'): Promise<IntegrationConnectResult> => ipcRenderer.invoke(IPC.INTEGRATIONS_DISCONNECT, id),
+  connectFeishu: (params: FeishuConnectParams): Promise<IntegrationConnectResult> => ipcRenderer.invoke(IPC.INTEGRATIONS_CONNECT_FEISHU, params),
+  connectWeCom: (params: WeComConnectParams): Promise<IntegrationConnectResult> => ipcRenderer.invoke(IPC.INTEGRATIONS_CONNECT_WECOM, params),
+  connectDingTalk: (params: DingTalkConnectParams): Promise<IntegrationConnectResult> => ipcRenderer.invoke(IPC.INTEGRATIONS_CONNECT_DINGTALK, params),
+  connectYuque: (params: YuqueConnectParams): Promise<IntegrationConnectResult> => ipcRenderer.invoke(IPC.INTEGRATIONS_CONNECT_YUQUE, params),
+  disconnectIntegration: (id: QuickIntegrationId): Promise<IntegrationConnectResult> => ipcRenderer.invoke(IPC.INTEGRATIONS_DISCONNECT, id),
 });

@@ -1,13 +1,18 @@
 import type { DirEntry } from './workspace';
 import type { PluginSummary } from './plugins';
 import type {
+  DingTalkConnectParams,
+  FeishuConnectParams,
   GoogleOAuthParams,
   HookEntry,
   IntegrationConnectResult,
   McpServerEntry,
   McpTestResult,
   NodeEnvStatus,
+  QuickIntegrationId,
   QuickIntegrationsStatus,
+  WeComConnectParams,
+  YuqueConnectParams,
 } from './extensionConfig';
 import type { McpCatalogPage, PluginCatalog } from './catalog';
 import type {
@@ -72,7 +77,11 @@ export interface ReizoBridge {
   getQuickIntegrationsStatus(): Promise<QuickIntegrationsStatus>;
   connectNotion(token: string): Promise<IntegrationConnectResult>;
   startGoogleOAuth(params: GoogleOAuthParams): Promise<IntegrationConnectResult>;
-  disconnectIntegration(id: 'notion' | 'gmail'): Promise<IntegrationConnectResult>;
+  connectFeishu(params: FeishuConnectParams): Promise<IntegrationConnectResult>;
+  connectWeCom(params: WeComConnectParams): Promise<IntegrationConnectResult>;
+  connectDingTalk(params: DingTalkConnectParams): Promise<IntegrationConnectResult>;
+  connectYuque(params: YuqueConnectParams): Promise<IntegrationConnectResult>;
+  disconnectIntegration(id: QuickIntegrationId): Promise<IntegrationConnectResult>;
 }
 
 declare global {

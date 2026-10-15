@@ -38,6 +38,8 @@ export interface NodeEnvStatus {
   version?: string;
 }
 
+export type QuickIntegrationId = 'notion' | 'gmail' | 'feishu' | 'wecom' | 'dingtalk' | 'yuque';
+
 export interface QuickIntegrationsStatus {
   notion: {
     connected: boolean;
@@ -48,6 +50,27 @@ export interface QuickIntegrationsStatus {
     serverName?: string;
     email?: string;
   };
+  feishu: {
+    connected: boolean;
+    serverName?: string;
+    appName?: string;
+    appId?: string;
+  };
+  wecom: {
+    connected: boolean;
+    serverName?: string;
+    botName?: string;
+  };
+  dingtalk: {
+    connected: boolean;
+    serverName?: string;
+    botName?: string;
+  };
+  yuque: {
+    connected: boolean;
+    serverName?: string;
+    userName?: string;
+  };
 }
 
 export interface GoogleOAuthParams {
@@ -55,10 +78,31 @@ export interface GoogleOAuthParams {
   clientSecret: string;
 }
 
+export interface FeishuConnectParams {
+  appId: string;
+  appSecret: string;
+}
+
+export interface WeComConnectParams {
+  webhookUrl: string;
+  botName?: string;
+}
+
+export interface DingTalkConnectParams {
+  webhookUrl: string;
+  secret?: string;
+  botName?: string;
+}
+
+export interface YuqueConnectParams {
+  token: string;
+}
+
 export interface IntegrationConnectResult {
   ok: boolean;
   error?: string;
   email?: string;
+  name?: string;
   toolsCount?: number;
 }
 

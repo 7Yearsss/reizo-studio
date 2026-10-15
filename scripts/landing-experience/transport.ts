@@ -280,9 +280,20 @@ export function installShowcaseTransport() {
     installSkillHubSkill: unsupported, previewSkillHubSkill: unsupported, exportPdf: unsupported,
     checkNodeEnvironment: async () => ({ available: true, version: 'v20.0.0' }),
     resetMcpBaseline: unsupported,
-    getQuickIntegrationsStatus: async () => ({ notion: { connected: false }, gmail: { connected: false } }),
+    getQuickIntegrationsStatus: async () => ({
+      notion: { connected: false },
+      gmail: { connected: false },
+      feishu: { connected: false },
+      wecom: { connected: false },
+      dingtalk: { connected: false },
+      yuque: { connected: false },
+    }),
     connectNotion: unsupported,
     startGoogleOAuth: unsupported,
+    connectFeishu: unsupported,
+    connectWeCom: unsupported,
+    connectDingTalk: unsupported,
+    connectYuque: unsupported,
     disconnectIntegration: unsupported,
   } satisfies Omit<ReizoBridge, 'platform'> & { platform: 'web' };
   window.reizo = bridge as unknown as ReizoBridge;

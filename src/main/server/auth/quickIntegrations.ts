@@ -1,8 +1,20 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import http, { type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import path from 'node:path';
 import { shell } from 'electron';
-import type { GoogleOAuthParams, IntegrationConnectResult, McpServerEntry, QuickIntegrationsStatus } from '../../../shared/extensionConfig';
+import type {
+  DingTalkConnectParams,
+  FeishuConnectParams,
+  GoogleOAuthParams,
+  IntegrationConnectResult,
+  McpServerEntry,
+  QuickIntegrationId,
+  QuickIntegrationsStatus,
+  WeComConnectParams,
+  YuqueConnectParams,
+} from '../../../shared/extensionConfig';
 import { readMcpEntries, testMcpEntry, writeMcpEntries } from '../plugins/extensionConfig';
 import { closeAllMcpSessions } from '../agent/mcpTools';
 
@@ -19,10 +31,63 @@ export function isGmailEntry(e: McpServerEntry): boolean {
   );
 }
 
+export function isFeishuEntry(e: McpServerEntry): boolean {
+  return (
+    e.name === 'feishu' ||
+    /feishu|lark/i.test(e.command ?? '') ||
+    (e.args ?? []).some((a) => /feishu|lark/i.test(a)) ||
+    Boolean(e.env?.FEISHU_APP_ID)
+  );
+}
+
+export function isWeComEntry(e: McpServerEntry): boolean {
+  return (
+    e.name === 'wecom' ||
+    /wecom/i.test(e.command ?? '') ||
+    (e.args ?? []).some((a) => /wecom/i.test(a)) ||
+    Boolean(e.env?.WECOM_WEBHOOK_URL || e.env?.WECOM_KEY)
+  );
+}
+
+export function isDingTalkEntry(e: McpServerEntry): boolean {
+  return (
+    e.name === 'dingtalk' ||
+    /dingtalk/i.test(e.command ?? '') ||
+    (e.args ?? []).some((a) => /dingtalk/i.test(a)) ||
+    Boolean(e.env?.DINGTALK_WEBHOOK_URL)
+  );
+}
+
+export function isYuqueEntry(e: McpServerEntry): boolean {
+  return (
+    e.name === 'yuque' ||
+    /yuque/i.test(e.command ?? '') ||
+    (e.args ?? []).some((a) => /yuque/i.test(a)) ||
+    Boolean(e.env?.YUQUE_TOKEN)
+  );
+}
+
+export function getBuiltinMcpScript(scriptName: string): string {
+  const candidates = [
+    path.resolve(__dirname, 'mcp-builtin', scriptName),
+    path.resolve(__dirname, '../server/mcp-builtin', scriptName),
+    path.resolve(__dirname, '../../src/main/server/mcp-builtin', scriptName),
+    path.resolve(process.cwd(), 'src/main/server/mcp-builtin', scriptName),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return candidates[candidates.length - 1];
+}
+
 export async function getQuickIntegrationsStatus(dataRoot: string): Promise<QuickIntegrationsStatus> {
   const entries = await readMcpEntries(dataRoot);
   const notion = entries.find((e) => isNotionEntry(e) && !e.disabled);
   const gmail = entries.find((e) => isGmailEntry(e) && !e.disabled);
+  const feishu = entries.find((e) => isFeishuEntry(e) && !e.disabled);
+  const wecom = entries.find((e) => isWeComEntry(e) && !e.disabled);
+  const dingtalk = entries.find((e) => isDingTalkEntry(e) && !e.disabled);
+  const yuque = entries.find((e) => isYuqueEntry(e) && !e.disabled);
 
   return {
     notion: {
@@ -32,6 +97,22 @@ export async function getQuickIntegrationsStatus(dataRoot: string): Promise<Quic
     gmail: {
       connected: Boolean(gmail),
       ...(gmail ? { serverName: gmail.name, email: gmail.env?.GOOGLE_GMAIL_USER_EMAIL } : {}),
+    },
+    feishu: {
+      connected: Boolean(feishu),
+      ...(feishu ? { serverName: feishu.name, appName: feishu.env?.FEISHU_APP_NAME, appId: feishu.env?.FEISHU_APP_ID } : {}),
+    },
+    wecom: {
+      connected: Boolean(wecom),
+      ...(wecom ? { serverName: wecom.name, botName: wecom.env?.WECOM_BOT_NAME } : {}),
+    },
+    dingtalk: {
+      connected: Boolean(dingtalk),
+      ...(dingtalk ? { serverName: dingtalk.name, botName: dingtalk.env?.DINGTALK_BOT_NAME } : {}),
+    },
+    yuque: {
+      connected: Boolean(yuque),
+      ...(yuque ? { serverName: yuque.name, userName: yuque.env?.YUQUE_USER_NAME } : {}),
     },
   };
 }
@@ -75,12 +156,243 @@ export async function connectNotionIntegration(
   };
 }
 
+export async function connectFeishuIntegration(
+  dataRoot: string,
+  params: FeishuConnectParams,
+  options: { fetchImpl?: typeof fetch } = {},
+): Promise<IntegrationConnectResult> {
+  const appId = params.appId.trim();
+  const appSecret = params.appSecret.trim();
+  if (!appId || !appSecret) {
+    return { ok: false, error: '飞书 App ID 和 App Secret 不能为空。' };
+  }
+
+  const fetchFn = options.fetchImpl ?? globalThis.fetch;
+  try {
+    const tokenRes = await fetchFn('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ app_id: appId, app_secret: appSecret }),
+    });
+    const tokenData = (await tokenRes.json()) as { code: number; msg?: string; tenant_access_token?: string };
+    if (tokenData.code !== 0 || !tokenData.tenant_access_token) {
+      return { ok: false, error: `飞书应用鉴权失败 (${tokenData.code}): ${tokenData.msg || 'App ID 或 App Secret 无效'}` };
+    }
+
+    let botName = '飞书协同助手';
+    try {
+      const botRes = await fetchFn('https://open.feishu.cn/open-apis/bot/v3/info', {
+        headers: { Authorization: `Bearer ${tokenData.tenant_access_token}` },
+      });
+      const botData = (await botRes.json()) as { code: number; bot?: { app_name?: string } };
+      if (botData.code === 0 && botData.bot?.app_name) {
+        botName = botData.bot.app_name;
+      }
+    } catch {
+      // Bot info is optional enhancement
+    }
+
+    const script = getBuiltinMcpScript('feishu-server.cjs');
+    const entry: McpServerEntry = {
+      name: 'feishu',
+      transport: 'stdio',
+      command: process.execPath,
+      args: [script],
+      env: {
+        ELECTRON_RUN_AS_NODE: '1',
+        FEISHU_APP_ID: appId,
+        FEISHU_APP_SECRET: appSecret,
+        FEISHU_APP_NAME: botName,
+      },
+    };
+
+    const test = await testMcpEntry(dataRoot, entry);
+    const existing = await readMcpEntries(dataRoot);
+    const filtered = existing.filter((e) => !isFeishuEntry(e));
+    filtered.push(entry);
+
+    await writeMcpEntries(dataRoot, filtered);
+    await closeAllMcpSessions();
+
+    return {
+      ok: true,
+      name: botName,
+      toolsCount: test.tools.length,
+    };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: `连接飞书服务时发生异常: ${message}` };
+  }
+}
+
+export async function connectWeComIntegration(
+  dataRoot: string,
+  params: WeComConnectParams,
+): Promise<IntegrationConnectResult> {
+  let raw = params.webhookUrl.trim();
+  if (!raw) {
+    return { ok: false, error: '企业微信机器人 Webhook 地址或 Key 不能为空。' };
+  }
+  if (!raw.startsWith('http://') && !raw.startsWith('https://')) {
+    raw = `https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=${raw}`;
+  }
+  if (!raw.includes('qyapi.weixin.qq.com/cgi-bin/webhook/send?key=')) {
+    return { ok: false, error: '无效的企业微信 Webhook 地址，格式应为 https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...' };
+  }
+
+  const botName = params.botName?.trim() || '企微群机器人';
+  const script = getBuiltinMcpScript('wecom-server.cjs');
+  const entry: McpServerEntry = {
+    name: 'wecom',
+    transport: 'stdio',
+    command: process.execPath,
+    args: [script],
+    env: {
+      ELECTRON_RUN_AS_NODE: '1',
+      WECOM_WEBHOOK_URL: raw,
+      WECOM_BOT_NAME: botName,
+    },
+  };
+
+  const test = await testMcpEntry(dataRoot, entry);
+  const existing = await readMcpEntries(dataRoot);
+  const filtered = existing.filter((e) => !isWeComEntry(e));
+  filtered.push(entry);
+
+  await writeMcpEntries(dataRoot, filtered);
+  await closeAllMcpSessions();
+
+  return {
+    ok: true,
+    name: botName,
+    toolsCount: test.tools.length,
+  };
+}
+
+export async function connectDingTalkIntegration(
+  dataRoot: string,
+  params: DingTalkConnectParams,
+): Promise<IntegrationConnectResult> {
+  let raw = params.webhookUrl.trim();
+  if (!raw) {
+    return { ok: false, error: '钉钉机器人 Webhook 地址或 Token 不能为空。' };
+  }
+  if (!raw.startsWith('http://') && !raw.startsWith('https://')) {
+    raw = `https://oapi.dingtalk.com/robot/send?access_token=${raw}`;
+  }
+  if (!raw.includes('oapi.dingtalk.com/robot/send?access_token=')) {
+    return { ok: false, error: '无效的钉钉 Webhook 地址，格式应为 https://oapi.dingtalk.com/robot/send?access_token=...' };
+  }
+
+  const botName = params.botName?.trim() || '钉钉群机器人';
+  const script = getBuiltinMcpScript('dingtalk-server.cjs');
+  const entry: McpServerEntry = {
+    name: 'dingtalk',
+    transport: 'stdio',
+    command: process.execPath,
+    args: [script],
+    env: {
+      ELECTRON_RUN_AS_NODE: '1',
+      DINGTALK_WEBHOOK_URL: raw,
+      DINGTALK_SECRET: params.secret?.trim() || '',
+      DINGTALK_BOT_NAME: botName,
+    },
+  };
+
+  const test = await testMcpEntry(dataRoot, entry);
+  const existing = await readMcpEntries(dataRoot);
+  const filtered = existing.filter((e) => !isDingTalkEntry(e));
+  filtered.push(entry);
+
+  await writeMcpEntries(dataRoot, filtered);
+  await closeAllMcpSessions();
+
+  return {
+    ok: true,
+    name: botName,
+    toolsCount: test.tools.length,
+  };
+}
+
+export async function connectYuqueIntegration(
+  dataRoot: string,
+  params: YuqueConnectParams,
+  options: { fetchImpl?: typeof fetch } = {},
+): Promise<IntegrationConnectResult> {
+  const token = params.token.trim();
+  if (!token) {
+    return { ok: false, error: '语雀个人访问令牌 (Token) 不能为空。' };
+  }
+
+  const fetchFn = options.fetchImpl ?? globalThis.fetch;
+  try {
+    const userRes = await fetchFn('https://www.yuque.com/api/v2/user', {
+      headers: {
+        'X-Auth-Token': token,
+        'User-Agent': 'ReizoStudio/0.1.0',
+      },
+    });
+    if (!userRes.ok) {
+      return { ok: false, error: `语雀 Token 校验失败 (${userRes.status}): 请确认 Token 是否正确且具有权限。` };
+    }
+    const userData = (await userRes.json()) as { data?: { name?: string; login?: string } };
+    const userName = userData.data?.name || userData.data?.login || '语雀用户';
+
+    const script = getBuiltinMcpScript('yuque-server.cjs');
+    const entry: McpServerEntry = {
+      name: 'yuque',
+      transport: 'stdio',
+      command: process.execPath,
+      args: [script],
+      env: {
+        ELECTRON_RUN_AS_NODE: '1',
+        YUQUE_TOKEN: token,
+        YUQUE_USER_NAME: userName,
+      },
+    };
+
+    const test = await testMcpEntry(dataRoot, entry);
+    const existing = await readMcpEntries(dataRoot);
+    const filtered = existing.filter((e) => !isYuqueEntry(e));
+    filtered.push(entry);
+
+    await writeMcpEntries(dataRoot, filtered);
+    await closeAllMcpSessions();
+
+    return {
+      ok: true,
+      name: userName,
+      toolsCount: test.tools.length,
+    };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: `连接语雀服务时发生异常: ${message}` };
+  }
+}
+
 export async function disconnectQuickIntegration(
   dataRoot: string,
-  id: 'notion' | 'gmail',
+  id: QuickIntegrationId,
 ): Promise<IntegrationConnectResult> {
   const existing = await readMcpEntries(dataRoot);
-  const filtered = existing.filter((e) => (id === 'notion' ? !isNotionEntry(e) : !isGmailEntry(e)));
+  const filtered = existing.filter((e) => {
+    switch (id) {
+      case 'notion':
+        return !isNotionEntry(e);
+      case 'gmail':
+        return !isGmailEntry(e);
+      case 'feishu':
+        return !isFeishuEntry(e);
+      case 'wecom':
+        return !isWeComEntry(e);
+      case 'dingtalk':
+        return !isDingTalkEntry(e);
+      case 'yuque':
+        return !isYuqueEntry(e);
+      default:
+        return true;
+    }
+  });
   await writeMcpEntries(dataRoot, filtered);
   await closeAllMcpSessions();
   return { ok: true };

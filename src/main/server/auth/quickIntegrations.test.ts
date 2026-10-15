@@ -3,7 +3,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  connectDingTalkIntegration,
+  connectFeishuIntegration,
   connectNotionIntegration,
+  connectWeComIntegration,
+  connectYuqueIntegration,
   disconnectQuickIntegration,
   getQuickIntegrationsStatus,
   startGoogleOAuthFlow,
@@ -26,6 +30,10 @@ describe('quickIntegrations', () => {
     expect(status).toEqual({
       notion: { connected: false },
       gmail: { connected: false },
+      feishu: { connected: false },
+      wecom: { connected: false },
+      dingtalk: { connected: false },
+      yuque: { connected: false },
     });
   });
 
@@ -147,5 +155,137 @@ describe('quickIntegrations', () => {
     const status = await getQuickIntegrationsStatus(root);
     expect(status.gmail.connected).toBe(true);
     expect(status.gmail.email).toBe('hello@reizo.ai');
+  });
+
+  it('connects Feishu integration after verifying credentials', async () => {
+    const mockFetch = async (input: RequestInfo | URL): Promise<Response> => {
+      const url = String(input);
+      if (url.includes('auth/v3/tenant_access_token/internal')) {
+        return new Response(JSON.stringify({ code: 0, msg: 'ok', tenant_access_token: 't-test-token', expire: 7200 }));
+      }
+      if (url.includes('bot/v3/info')) {
+        return new Response(JSON.stringify({ code: 0, bot: { app_name: 'Reizo 飞书助手' } }));
+      }
+      return new Response('not found', { status: 404 });
+    };
+
+    const res = await connectFeishuIntegration(
+      root,
+      { appId: 'cli_test_123', appSecret: 'sec_test_456' },
+      { fetchImpl: mockFetch as unknown as typeof globalThis.fetch },
+    );
+
+    expect(res.ok).toBe(true);
+    expect(res.name).toBe('Reizo 飞书助手');
+
+    const status = await getQuickIntegrationsStatus(root);
+    expect(status.feishu.connected).toBe(true);
+    expect(status.feishu.appName).toBe('Reizo 飞书助手');
+    expect(status.feishu.appId).toBe('cli_test_123');
+
+    // Test disconnect
+    const disc = await disconnectQuickIntegration(root, 'feishu');
+    expect(disc.ok).toBe(true);
+    const afterStatus = await getQuickIntegrationsStatus(root);
+    expect(afterStatus.feishu.connected).toBe(false);
+  });
+
+  it('rejects invalid Feishu credentials', async () => {
+    const mockFetch = async (): Promise<Response> => {
+      return new Response(JSON.stringify({ code: 10003, msg: 'app_id or app_secret invalid' }));
+    };
+
+    const res = await connectFeishuIntegration(
+      root,
+      { appId: 'bad_id', appSecret: 'bad_secret' },
+      { fetchImpl: mockFetch as unknown as typeof globalThis.fetch },
+    );
+
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain('飞书应用鉴权失败');
+  });
+
+  it('connects WeCom integration and normalizes key or URL', async () => {
+    const res = await connectWeComIntegration(root, {
+      webhookUrl: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=12345678-abcd-1234-abcd-1234567890ab',
+      botName: '技术通知群',
+    });
+
+    expect(res.ok).toBe(true);
+    expect(res.name).toBe('技术通知群');
+
+    const status = await getQuickIntegrationsStatus(root);
+    expect(status.wecom.connected).toBe(true);
+    expect(status.wecom.botName).toBe('技术通知群');
+
+    // Disconnect
+    await disconnectQuickIntegration(root, 'wecom');
+    const after = await getQuickIntegrationsStatus(root);
+    expect(after.wecom.connected).toBe(false);
+  });
+
+  it('connects DingTalk integration and supports signature secret', async () => {
+    const res = await connectDingTalkIntegration(root, {
+      webhookUrl: 'https://oapi.dingtalk.com/robot/send?access_token=mock-ding-token',
+      secret: 'SEC12345678',
+      botName: '钉钉运维群',
+    });
+
+    expect(res.ok).toBe(true);
+    expect(res.name).toBe('钉钉运维群');
+
+    const status = await getQuickIntegrationsStatus(root);
+    expect(status.dingtalk.connected).toBe(true);
+    expect(status.dingtalk.botName).toBe('钉钉运维群');
+
+    // Disconnect
+    await disconnectQuickIntegration(root, 'dingtalk');
+    const after = await getQuickIntegrationsStatus(root);
+    expect(after.dingtalk.connected).toBe(false);
+  });
+
+  it('connects Yuque integration after verifying user token', async () => {
+    const mockFetch = async (input: RequestInfo | URL): Promise<Response> => {
+      const url = String(input);
+      if (url.includes('/api/v2/user')) {
+        return new Response(JSON.stringify({ data: { name: '语雀架构师', login: 'reizo_architect' } }), {
+          status: 200,
+        });
+      }
+      return new Response('not found', { status: 404 });
+    };
+
+    const res = await connectYuqueIntegration(
+      root,
+      { token: 'mock-yuque-token' },
+      { fetchImpl: mockFetch as unknown as typeof globalThis.fetch },
+    );
+
+    expect(res.ok).toBe(true);
+    expect(res.name).toBe('语雀架构师');
+
+    const status = await getQuickIntegrationsStatus(root);
+    expect(status.yuque.connected).toBe(true);
+    expect(status.yuque.userName).toBe('语雀架构师');
+
+    // Disconnect
+    await disconnectQuickIntegration(root, 'yuque');
+    const after = await getQuickIntegrationsStatus(root);
+    expect(after.yuque.connected).toBe(false);
+  });
+
+  it('rejects invalid Yuque token', async () => {
+    const mockFetch = async (): Promise<Response> => {
+      return new Response(JSON.stringify({ message: '401 Unauthorized' }), { status: 401 });
+    };
+
+    const res = await connectYuqueIntegration(
+      root,
+      { token: 'bad-token' },
+      { fetchImpl: mockFetch as unknown as typeof globalThis.fetch },
+    );
+
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain('语雀 Token 校验失败');
   });
 });
