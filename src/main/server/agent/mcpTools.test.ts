@@ -3,7 +3,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ApprovalRequiredError, needsApproval, resetPermissionsForTests } from './permissions';
-import { applyBaseline, connectMcpTools, parseMcpConfig, qualifiedToolName } from './mcpTools';
+import {
+  applyBaseline,
+  closeSessionMcp,
+  connectMcpTools,
+  getActiveMcpSessionCount,
+  parseMcpConfig,
+  qualifiedToolName,
+  resetMcpBaseline,
+  resetMcpPoolForTests,
+} from './mcpTools';
 
 /** A tiny newline-delimited JSON-RPC MCP server: initialize, tools/list, tools/call. Unknown methods error out. */
 const FIXTURE_SERVER = `
@@ -88,12 +97,16 @@ describe('connectMcpTools (real stdio server)', () => {
     JSON.stringify({ mcpServers: { fx: { command: process.execPath, args: [serverFile], env: { ...process.env, ...env } }, ...extra } });
 
   beforeEach(async () => {
+    await resetMcpPoolForTests();
     resetPermissionsForTests();
     root = await mkdtemp(path.join(os.tmpdir(), 'mcp-'));
     serverFile = path.join(root, 'server.cjs');
     await writeFile(serverFile, FIXTURE_SERVER);
   });
-  afterEach(async () => { await rm(root, { recursive: true, force: true }); });
+  afterEach(async () => {
+    await resetMcpPoolForTests();
+    await rm(root, { recursive: true, force: true });
+  });
 
   const connect = () => connectMcpTools({ dataRoot: root, sessionId: 's1', permissionMode: 'ask' });
 
@@ -138,6 +151,41 @@ describe('connectMcpTools (real stdio server)', () => {
     }
   }, 30_000);
 
+  it('re-trusts a withheld tool when resetMcpBaseline is called for that server', async () => {
+    await writeFile(path.join(root, 'mcp.json'), config());
+    const first = await connect();
+    await first.close();
+
+    await writeFile(path.join(root, 'mcp.json'), config({ ECHO_DESCRIPTION: 'Updated description' }));
+    const second = await connect();
+    expect(second.tools).toEqual({});
+    expect(second.warnings.join('\n')).toContain('changed since it was first trusted');
+    await second.close();
+
+    await resetMcpBaseline(root, 'fx');
+
+    const third = await connect();
+    try {
+      expect(Object.keys(third.tools)).toEqual(['mcp__fx__echo_text']);
+      expect(third.warnings).toEqual([]);
+      const baseline = JSON.parse(await readFile(path.join(root, 'mcp-baseline.json'), 'utf8'));
+      expect(baseline.fx['echo.text']).toBeTypeOf('string');
+    } finally {
+      await third.close();
+    }
+  }, 30_000);
+
+  it('clears all server baselines when resetMcpBaseline is called without serverName', async () => {
+    await writeFile(path.join(root, 'mcp.json'), config());
+    const first = await connect();
+    await first.close();
+    const baselineFile = path.join(root, 'mcp-baseline.json');
+    expect(JSON.parse(await readFile(baselineFile, 'utf8')).fx).toBeDefined();
+
+    await resetMcpBaseline(root);
+    expect(JSON.parse(await readFile(baselineFile, 'utf8'))).toEqual({});
+  });
+
   it('isolates a server that fails to start', async () => {
     await writeFile(path.join(root, 'mcp.json'), config({}, { broken: { command: 'definitely-not-a-real-binary-xyz' } }));
     const set = await connect();
@@ -147,5 +195,60 @@ describe('connectMcpTools (real stdio server)', () => {
     } finally {
       await set.close();
     }
+  }, 30_000);
+
+  it('reuses MCP client connections across multiple turns in the same session', async () => {
+    await writeFile(path.join(root, 'mcp.json'), config());
+
+    // Turn 1
+    const set1 = await connect();
+    expect(getActiveMcpSessionCount()).toBe(1);
+    const approved1 = await set1.executeApproved('mcp__fx__echo_text', { text: 'turn-1' }, 'c1');
+    expect(approved1.result).toContain('echo:turn-1');
+
+    // Turn 2 for the same session (simulates subsequent turn without calling close)
+    const set2 = await connect();
+    expect(getActiveMcpSessionCount()).toBe(1);
+    const approved2 = await set2.executeApproved('mcp__fx__echo_text', { text: 'turn-2' }, 'c2');
+    expect(approved2.result).toContain('echo:turn-2');
+
+    // Clean up
+    await set2.close();
+    expect(getActiveMcpSessionCount()).toBe(0);
+  }, 30_000);
+
+  it('reconnects when the server configuration changes', async () => {
+    await writeFile(path.join(root, 'mcp.json'), config({ TURN: '1' }));
+    const set1 = await connect();
+    expect(getActiveMcpSessionCount()).toBe(1);
+    expect(Object.keys(set1.tools)).toEqual(['mcp__fx__echo_text']);
+
+    // Update configuration
+    await writeFile(path.join(root, 'mcp.json'), config({ TURN: '2' }));
+
+    // Reconnecting the same session detects the config change and reconnects
+    const set2 = await connect();
+    expect(getActiveMcpSessionCount()).toBe(1);
+    const approved = await set2.executeApproved('mcp__fx__echo_text', { text: 'new-turn' }, 'c2');
+    expect(approved.result).toContain('echo:new-turn');
+
+    await set2.close();
+    expect(getActiveMcpSessionCount()).toBe(0);
+  }, 30_000);
+
+  it('closes session MCP processes cleanly when closeSessionMcp is called', async () => {
+    await writeFile(path.join(root, 'mcp.json'), config());
+    const set = await connect();
+    expect(getActiveMcpSessionCount()).toBe(1);
+    expect(Object.keys(set.tools)).toEqual(['mcp__fx__echo_text']);
+
+    await closeSessionMcp('s1');
+    expect(getActiveMcpSessionCount()).toBe(0);
+
+    // Subsequent connection recreates cleanly
+    const set2 = await connect();
+    expect(getActiveMcpSessionCount()).toBe(1);
+    await set2.close();
+    expect(getActiveMcpSessionCount()).toBe(0);
   }, 30_000);
 });

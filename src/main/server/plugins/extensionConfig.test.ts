@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { McpServerEntry } from '../../../shared/extensionConfig';
-import { readHookEntries, readMcpEntries, testMcpEntry, validateHookEntries, validateMcpEntries, writeHookEntries, writeMcpEntries } from './extensionConfig';
+import { checkNodeEnvironment, readHookEntries, readMcpEntries, resetNodeEnvironmentCacheForTests, testMcpEntry, validateHookEntries, validateMcpEntries, writeHookEntries, writeMcpEntries } from './extensionConfig';
 
 let root: string;
 beforeEach(async () => { root = await mkdtemp(path.join(os.tmpdir(), 'extcfg-')); });
@@ -73,5 +73,29 @@ describe('hook entries', () => {
   it('rejects empty commands and invalid regexes', () => {
     expect(() => validateHookEntries([{ event: 'PreToolUse', command: '  ' }])).toThrow('命令');
     expect(() => validateHookEntries([{ event: 'PreToolUse', matcher: '(', command: 'x' }])).toThrow('正则');
+  });
+});
+
+describe('checkNodeEnvironment', () => {
+  beforeEach(() => { resetNodeEnvironmentCacheForTests(); });
+
+  it('detects available Node.js environment when runner succeeds', async () => {
+    const mockRunner = async () => ({ stdout: 'v22.13.0\n' });
+    const status = await checkNodeEnvironment(mockRunner);
+    expect(status).toEqual({ available: true, version: 'v22.13.0' });
+  });
+
+  it('handles missing Node.js gracefully without throwing', async () => {
+    const failingRunner = async () => { throw new Error('spawn node ENOENT'); };
+    const status = await checkNodeEnvironment(failingRunner);
+    expect(status).toEqual({ available: false });
+  });
+
+  it('returns real environment info using the default runner', async () => {
+    const status = await checkNodeEnvironment();
+    expect(typeof status.available).toBe('boolean');
+    if (status.available) {
+      expect(status.version).toMatch(/^v\d+/);
+    }
   });
 });

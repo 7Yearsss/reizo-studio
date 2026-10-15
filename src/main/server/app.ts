@@ -47,6 +47,7 @@ import { stopCanvasRun, stopCanvasRunsForStore } from './canvas/graphExecutor';
 import { resumeVideoJobs, stopVideoJobsForStore } from './canvas/asyncJobManager';
 import { createCanvasMaintenanceRouter } from './routes/canvasMaintenance';
 import { createUsageRouter } from './routes/usage';
+import { closeAllMcpSessions, closeSessionMcp } from './agent/mcpTools';
 
 export interface CreateAppOptions {
   /** Directory the local session/settings JSON files live under. */
@@ -182,6 +183,7 @@ export function createApp(options: CreateAppOptions) {
     nodeJobsFor(canvasStore).shutdown();
     stopCanvasRunsForStore(canvasStore);
     recoverCanvasJobs(canvasStore, 'shutdown');
+    void closeAllMcpSessions();
   };
 
   // Ask cards the user never answered survive an app restart.
@@ -200,6 +202,7 @@ export function createApp(options: CreateAppOptions) {
   const scheduleStore = options.scheduleStore ?? createScheduleStore(options.dataRoot);
   const thoughtStore = options.thoughtStore ?? createThoughtStore(options.dataRoot);
   app.route('/api/sessions', createSessionsRouter(sessionStore, artifactStore, (sessionId) => {
+    void closeSessionMcp(sessionId);
     const canvasId = canvasStore.findCanvasBySession(sessionId)?.id;
     if (!canvasId) return;
     return () => { stopCanvasRun(canvasId, canvasStore); };

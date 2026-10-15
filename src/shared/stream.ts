@@ -111,6 +111,7 @@ export type ChatStreamEvent =
   | { type: 'ask'; id: string; questions: AskQuestion[] }
   | { type: 'todos'; items: TodoItem[] }
   | { type: 'tool_loop'; tier: 'warn' | 'halt'; reason: string }
+  | { type: 'notice'; tone: 'warn' | 'info'; text: string }
   // Memory activity surfaced to the user: files the agent recalled into this
   // turn, wrote via extraction/tools, or deleted. Rendered inline after the
   // message it follows (matched by createdAt at event time).

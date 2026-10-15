@@ -1,6 +1,8 @@
+import { execFile } from 'node:child_process';
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { HookEntry, McpServerEntry, McpTestResult } from '../../../shared/extensionConfig';
+import { promisify } from 'node:util';
+import type { HookEntry, McpServerEntry, McpTestResult, NodeEnvStatus } from '../../../shared/extensionConfig';
 import { parseHooksConfigDetailed } from '../agent/hooks';
 import { connectMcpTools, parseMcpConfig, SERVER_NAME } from '../agent/mcpTools';
 
@@ -119,3 +121,34 @@ export async function writeHookEntries(dataRoot: string, entries: HookEntry[]): 
   }));
   await writeFile(hooksFile(dataRoot), `${JSON.stringify({ hooks }, null, 2)}\n`, 'utf8');
 }
+
+const execFileAsync = promisify(execFile);
+
+let cachedNodeStatus: { status: NodeEnvStatus; checkedAt: number } | null = null;
+const NODE_STATUS_TTL_MS = 10_000;
+
+export async function checkNodeEnvironment(
+  runner?: (cmd: string, args: string[]) => Promise<{ stdout: string }>,
+): Promise<NodeEnvStatus> {
+  const now = Date.now();
+  if (!runner && cachedNodeStatus && now - cachedNodeStatus.checkedAt < NODE_STATUS_TTL_MS) {
+    return cachedNodeStatus.status;
+  }
+  try {
+    const run = runner ?? ((cmd, args) => execFileAsync(cmd, args, { timeout: 3000, windowsHide: true }));
+    const { stdout } = await run('node', ['--version']);
+    const version = stdout.trim();
+    const status: NodeEnvStatus = { available: Boolean(version), ...(version ? { version } : {}) };
+    if (!runner) cachedNodeStatus = { status, checkedAt: now };
+    return status;
+  } catch {
+    const status: NodeEnvStatus = { available: false };
+    if (!runner) cachedNodeStatus = { status, checkedAt: now };
+    return status;
+  }
+}
+
+export function resetNodeEnvironmentCacheForTests(): void {
+  cachedNodeStatus = null;
+}
+

@@ -522,7 +522,7 @@ export async function runChatTurn(options: {
           ...(skill?.contract && canvasStore && dataRoot ? createDeliveryTools({ skill, canvasStore, sessionId, dataRoot, artifactStore }) : {}),
         }
       : undefined;
-  // MCP servers (user-level mcp.json): their tools join the set behind approval; the clients close when the turn ends.
+  // MCP servers (user-level mcp.json): their tools join the set behind approval; clients are pooled per-session.
   const mcp = dataRoot ? await connectMcpTools({ dataRoot, sessionId, permissionMode: settings.permissionMode, extraServers: pluginPack.mcpServers }) : undefined;
   const hasMcpTools = mcp !== undefined && Object.keys(mcp.tools).length > 0;
   // Read-only research sub-agent: only the read tools, hook-wrapped like the main agent's. `model` is built below, hence the getters.
@@ -575,7 +575,7 @@ export async function runChatTurn(options: {
   const buildStream = (messages: ModelMessage[], signal: AbortSignal) =>
     streamText({
       model,
-      instructions,
+      instructions: mcp?.warnings?.length ? `${instructions}\n\n[MCP Notice]\n${mcp.warnings.map((w) => `- ${w}`).join('\n')}` : instructions,
       messages: compactModelMessages(messages),
       tools,
       stopWhen: tools ? isStepCount(64) : undefined,
@@ -584,6 +584,16 @@ export async function runChatTurn(options: {
       providerOptions,
       abortSignal: signal,
       prepareStep: async ({ messages: stepMessages, stepNumber }) => {
+        if (stepNumber === 0 && mcp && mcp.warnings.length > 0) {
+          const withheld = mcp.warnings.filter((w) => w.includes('withheld'));
+          if (withheld.length > 0) {
+            emit({
+              type: 'notice',
+              tone: 'warn',
+              text: '已拦截发生变更的 MCP 工具：检测到工具定义自首次信任后被修改。可在「设置 → 扩展」中重新信任。',
+            });
+          }
+        }
         const compacted = compactModelMessages(stepMessages as ModelMessage[]);
         // Recall never holds the first token hostage: the first step waits a
         // short grace, later steps pick it up once it has settled.
@@ -691,7 +701,6 @@ export async function runChatTurn(options: {
     createStream: (signal) => buildStream(history, signal),
     onEvent: (event) => trace.onEvent(event),
     onTurnTerminal: ({ outcome, text }) => {
-      void mcp?.close();
       const reasoningLeak = hasReasoningLeak({ userText, reply: text });
       if (reasoningLeak) console.warn(`[chat] reasoning leaked into the reply session=${sessionId} model=${modelId}`);
       if (dataRoot) void writeTurnTrace(dataRoot, trace.finish({ outcome, text, reasoningLeak }));

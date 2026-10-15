@@ -30,6 +30,7 @@ import { splitSheetContext } from '../../shared/sheetReferences';
 import { recordRecentSkill } from './skillStore';
 import { appendTerminalLine } from './terminalStore';
 import { notifyNeedsInput } from '../lib/notify';
+import { toast } from '../lib/toast';
 
 export interface PendingPermission {
   id: string;
@@ -1047,6 +1048,10 @@ function makeEventFolder(
             [sessionId]: event.tier === 'halt' ? `已停止：${event.reason}` : `这一轮可能卡住了：${event.reason}`,
           },
         });
+        break;
+      case 'notice':
+        if (event.tone === 'warn') toast.error(event.text);
+        else toast.info(event.text);
         break;
       case 'error':
         setState({
