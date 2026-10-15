@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Package, Plus, Trash2 } from 'lucide-react';
 import type { PluginSummary } from '../../../shared/plugins';
 import * as skillStore from '../../state/skillStore';
+import { CatalogIcon } from './CatalogIcon';
 
 export const PACKS_CHANGED = 'reizo:packs-changed';
 
@@ -31,6 +32,7 @@ function PackCard({ pack, busy, onToggle, onRemove }: { pack: PluginSummary; bus
   return (
     <div className="rounded-2xl border border-line bg-paper-raised p-4">
       <div className="flex items-start gap-3">
+        <CatalogIcon name={pack.name} letterOnly className="h-10 w-10 text-sm" />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="truncate text-sm font-medium text-ink">{pack.name}</span>

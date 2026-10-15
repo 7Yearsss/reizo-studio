@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, ExternalLink, Globe, LoaderCircle, Package, Plug, Search } from 'lucide-react';
 import { mcpCatalogDraft, type McpCatalogItem, type PluginCatalogItem } from '../../../shared/catalog';
-import type { McpServerEntry } from '../../../shared/extensionConfig';
+import type { McpServerEntry, NodeEnvStatus } from '../../../shared/extensionConfig';
 import { cn } from '../../lib/cn';
 import { toast } from '../../lib/toast';
 import { Button } from '../../components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../../components/ui/dialog';
 import { McpForm, message } from '../../pages/settings/ExtensionsSection';
 import * as skillStore from '../../state/skillStore';
+import { CatalogIcon } from './CatalogIcon';
 import { PACKS_CHANGED } from './ExtensionPacksSection';
 
 type Tab = 'plugins' | 'mcp';
@@ -29,26 +30,45 @@ export function freeServerName(wanted: string, taken: Set<string>): string {
   return wanted;
 }
 
-function Badge({ children, tone = 'plain' }: { children: React.ReactNode; tone?: 'plain' | 'warn' }) {
-  return <span className={cn('rounded-full px-1.5 py-0.5 text-[11px]', tone === 'warn' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' : 'bg-paper-inset text-ink-muted')}>{children}</span>;
+function Badge({ children, tone = 'plain', title }: { children: React.ReactNode; tone?: 'plain' | 'warn' | 'positive'; title?: string }) {
+  const tones = {
+    plain: 'bg-paper-inset text-ink-muted',
+    warn: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
+    positive: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+  };
+  return <span title={title} className={cn('rounded-full px-1.5 py-0.5 text-[11px]', tones[tone])}>{children}</span>;
 }
 
 // --- MCP servers -----------------------------------------------------------------------------------
 
-function McpCard({ item, onAdd }: { item: McpCatalogItem; onAdd: () => void }) {
+function McpCard({ item, onAdd, nodeStatus }: { item: McpCatalogItem; onAdd: () => void; nodeStatus?: NodeEnvStatus | null }) {
   const needsKey = (item.install.kind === 'remote' ? item.install.headers : item.install.env).some((f) => f.required);
+  const isNpm = item.install.kind === 'npm';
+  const nodeMissing = isNpm && nodeStatus !== null && nodeStatus !== undefined && !nodeStatus.available;
+
   return (
     <div className="flex flex-col rounded-2xl border border-line bg-paper-raised p-4">
-      <div className="flex items-start gap-2">
-        <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink" title={item.id}>{item.title}</span>
-        {item.website ? (
-          <a href={item.website} target="_blank" rel="noreferrer" title="官网" className="text-ink-muted hover:text-ink"><ExternalLink size={13} /></a>
-        ) : null}
+      <div className="flex items-start gap-3">
+        <CatalogIcon icons={item.icons} name={item.title || item.id} className="h-10 w-10 text-sm" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink" title={item.id}>{item.title}</span>
+            {item.website ? (
+              <a href={item.website} target="_blank" rel="noreferrer" title="官网" className="shrink-0 text-ink-muted hover:text-ink"><ExternalLink size={13} /></a>
+            ) : null}
+          </div>
+          <p className="mt-1 line-clamp-2 text-xs text-ink-muted">{item.description || '没有描述'}</p>
+        </div>
       </div>
-      <p className="mt-1 line-clamp-3 flex-1 text-xs text-ink-muted">{item.description || '没有描述'}</p>
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
         <Badge>{item.install.kind === 'remote' ? '在线服务' : '本地运行'}</Badge>
-        {item.install.kind === 'npm' ? <Badge>需要 Node.js</Badge> : null}
+        {isNpm ? (
+          nodeMissing ? (
+            <Badge tone="warn" title="未在环境变量中检测到 Node.js，运行此服务需要安装 Node.js">缺少 Node.js</Badge>
+          ) : (
+            <Badge title={nodeStatus?.version ? `已检测到 Node.js ${nodeStatus.version}` : undefined}>需要 Node.js</Badge>
+          )
+        ) : null}
         {needsKey ? <Badge tone="warn">需要密钥</Badge> : null}
         <Button size="xs" className="ml-auto" onClick={onAdd}>添加</Button>
       </div>
@@ -65,6 +85,11 @@ function McpDiscover() {
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState<McpCatalogItem | null>(null);
   const [existing, setExisting] = useState<McpServerEntry[]>([]);
+  const [nodeStatus, setNodeStatus] = useState<NodeEnvStatus | null>(null);
+
+  useEffect(() => {
+    window.reizo?.checkNodeEnvironment?.().then(setNodeStatus).catch(() => setNodeStatus({ available: false }));
+  }, []);
 
   const load = useCallback(async (query: string, after?: string) => {
     setLoading(true);
@@ -103,7 +128,7 @@ function McpDiscover() {
       </div>
       {error ? <p className="mb-3 rounded-2xl border border-danger/40 bg-danger/5 px-4 py-2 text-xs text-danger">加载失败：{error}</p> : null}
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {items.map((item) => <McpCard key={item.id} item={item} onAdd={() => void openAdd(item)} />)}
+        {items.map((item) => <McpCard key={item.id} item={item} nodeStatus={nodeStatus} onAdd={() => void openAdd(item)} />)}
       </div>
       {!loading && items.length === 0 && !error ? <p className="rounded-2xl border border-dashed border-line px-5 py-6 text-center text-sm text-ink-muted">没有找到匹配的服务。</p> : null}
       <div className="mt-4 flex justify-center">
@@ -112,8 +137,13 @@ function McpDiscover() {
       <Dialog open={adding !== null} onOpenChange={(open) => { if (!open) setAdding(null); }}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>添加 {adding?.title}</DialogTitle>
-            <DialogDescription>{adding?.description}</DialogDescription>
+            <div className="flex items-center gap-3">
+              {adding ? <CatalogIcon icons={adding.icons} name={adding.title || adding.id} className="h-10 w-10 text-sm" /> : null}
+              <div className="min-w-0 flex-1">
+                <DialogTitle>添加 {adding?.title}</DialogTitle>
+                <DialogDescription className="mt-0.5">{adding?.description}</DialogDescription>
+              </div>
+            </div>
           </DialogHeader>
           {adding && draft ? (
             <McpForm
@@ -128,7 +158,15 @@ function McpDiscover() {
                     {draft.fields.map((f) => <li key={f.name}><span className="font-mono text-ink">{f.name}</span>{f.required ? '（必填）' : ''}{f.description ? ` ${f.description}` : ''}</li>)}
                   </ul>
                 </div>
-              ) : adding.install.kind === 'npm' ? <p className="text-xs text-ink-muted">这个服务通过 npx 在本机运行，需要已安装 Node.js。</p> : null}
+              ) : adding.install.kind === 'npm' ? (
+                nodeStatus && !nodeStatus.available ? (
+                  <p className="rounded-xl border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
+                    ⚠️ 未在环境变量中检测到 Node.js。这个服务通过 npx 在本机运行，添加后需要先安装 Node.js (https://nodejs.org) 才能正常使用。
+                  </p>
+                ) : (
+                  <p className="text-xs text-ink-muted">这个服务通过 npx 在本机运行{nodeStatus?.version ? `（已检测到 Node.js ${nodeStatus.version}）` : '，需要已安装 Node.js'}。</p>
+                )
+              ) : null}
             />
           ) : null}
         </DialogContent>
@@ -140,13 +178,19 @@ function McpDiscover() {
 // --- Plugins ---------------------------------------------------------------------------------------
 
 function PluginCard({ item, installed, busy, onInstall }: { item: PluginCatalogItem; installed: boolean; busy: boolean; onInstall: () => void }) {
+  const title = item.title || item.name;
   return (
     <div className="flex flex-col rounded-2xl border border-line bg-paper-raised p-4">
-      <div className="flex items-start gap-2">
-        <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink" title={item.name}>{item.name}</span>
-        {item.homepage ? <a href={item.homepage} target="_blank" rel="noreferrer" title="主页" className="text-ink-muted hover:text-ink"><ExternalLink size={13} /></a> : null}
+      <div className="flex items-start gap-3">
+        <CatalogIcon icons={item.icons} name={title} className="h-10 w-10 text-sm" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink" title={item.name}>{title}</span>
+            {item.homepage ? <a href={item.homepage} target="_blank" rel="noreferrer" title="主页" className="shrink-0 text-ink-muted hover:text-ink"><ExternalLink size={13} /></a> : null}
+          </div>
+          <p className="mt-1 line-clamp-2 text-xs text-ink-muted">{item.description || '没有描述'}</p>
+        </div>
       </div>
-      <p className="mt-1 line-clamp-3 flex-1 text-xs text-ink-muted">{item.description || '没有描述'}</p>
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
         {item.category ? <Badge>{item.category}</Badge> : null}
         {item.author ? <Badge>{item.author}</Badge> : null}

@@ -23,6 +23,34 @@ const MAX_ZIP_BYTES = 60 * 1024 * 1024;
 const MAX_FILES = 5_000;
 const CACHE_MS = 10 * 60 * 1000;
 
+/** A GitHub owner's avatar; GitHub serves these without auth for any user or org. */
+export function githubAvatar(owner: string): string {
+  return `https://github.com/${encodeURIComponent(owner)}.png?size=80`;
+}
+
+function githubOwnerOf(url: unknown): string | null {
+  const match = typeof url === 'string' ? /github\.com\/([\w.-]+)(?:\/|$)/i.exec(url) : null;
+  return match ? match[1] : null;
+}
+
+function httpUrl(value: unknown): string | null {
+  return typeof value === 'string' && /^https?:\/\/[^\s]+$/i.test(value) ? value : null;
+}
+
+/** Registry-provided icons first, then the repo owner's avatar, then the site's own favicon. */
+function mcpIcons(server: Record<string, unknown>): string[] {
+  const urls: string[] = [];
+  for (const icon of Array.isArray(server.icons) ? (server.icons as Array<Record<string, unknown>>) : []) {
+    const src = httpUrl(icon?.src);
+    if (src) urls.push(src);
+  }
+  const owner = githubOwnerOf((server.repository as { url?: unknown } | undefined)?.url);
+  if (owner) urls.push(githubAvatar(owner));
+  const site = httpUrl(server.websiteUrl);
+  if (site) { try { urls.push(`${new URL(site).origin}/favicon.ico`); } catch { /* not a URL */ } }
+  return [...new Set(urls)];
+}
+
 // --- MCP registry ---------------------------------------------------------------------------------
 
 function fields(raw: unknown): CatalogSecretField[] {
@@ -45,6 +73,7 @@ export function parseMcpRegistryServer(raw: unknown): McpCatalogItem | null {
     id: server.name,
     title: typeof server.title === 'string' && server.title ? server.title : server.name,
     description: typeof server.description === 'string' ? server.description : '',
+    icons: mcpIcons(server),
     ...(typeof server.websiteUrl === 'string' ? { website: server.websiteUrl } : {}),
     ...(typeof server.version === 'string' ? { version: server.version } : {}),
   };
@@ -118,6 +147,8 @@ export function parseMarketplace(json: unknown): { name: string; entries: Market
       item: {
         id: raw.name,
         name: raw.name,
+        title: typeof raw.displayName === 'string' && raw.displayName ? raw.displayName : raw.name,
+        icons: [githubAvatar(source.owner)],
         description: typeof raw.description === 'string' ? raw.description : '',
         ...(typeof raw.category === 'string' ? { category: raw.category } : {}),
         ...((raw.author as { name?: unknown } | undefined)?.name && typeof (raw.author as { name: unknown }).name === 'string' ? { author: (raw.author as { name: string }).name } : {}),

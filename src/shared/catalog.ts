@@ -17,6 +17,8 @@ export interface McpCatalogItem {
   description: string;
   website?: string;
   version?: string;
+  /** Candidate logo URLs in preference order; the UI falls back to a letter tile if none load. */
+  icons: string[];
   install:
     | { kind: 'remote'; transport: 'http' | 'sse'; url: string; headers: CatalogSecretField[] }
     | { kind: 'npm'; identifier: string; version?: string; env: CatalogSecretField[] };
@@ -31,7 +33,10 @@ export interface McpCatalogPage {
 export interface PluginCatalogItem {
   id: string;
   name: string;
+  /** Display name when the catalog gives one. */
+  title: string;
   description: string;
+  icons: string[];
   category?: string;
   author?: string;
   homepage?: string;

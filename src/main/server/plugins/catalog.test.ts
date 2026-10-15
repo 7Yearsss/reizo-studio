@@ -34,6 +34,21 @@ describe('parseMcpRegistryServer', () => {
     expect(parseMcpRegistryServer({ server: { name: 'c' } })).toBeNull();
     expect(parseMcpRegistryServer(null)).toBeNull();
   });
+
+  it('collects candidate logo URLs in order (icons -> GitHub avatar -> website favicon) and drops non-http URLs', () => {
+    const item = parseMcpRegistryServer({ server: {
+      name: 'ai.test/srv',
+      remotes: [{ type: 'sse', url: 'https://test.ai/sse' }],
+      icons: [{ src: 'https://test.ai/logo.png' }, { src: 'ftp://evil.com/icon.png' }, { src: 'not a url' }],
+      repository: { url: 'https://github.com/my-org/my-repo.git' },
+      websiteUrl: 'https://test.ai/home?foo=1',
+    } });
+    expect(item?.icons).toEqual([
+      'https://test.ai/logo.png',
+      'https://github.com/my-org.png?size=80',
+      'https://test.ai/favicon.ico',
+    ]);
+  });
 });
 
 describe('searchMcpRegistry', () => {
@@ -61,11 +76,11 @@ describe('searchMcpRegistry', () => {
 describe('mcpCatalogDraft', () => {
   it('names the server safely and lists required secrets first', () => {
     expect(suggestServerName('ai.smithery/Smithery-AI GitHub!!')).toBe('smithery-ai-github');
-    const { entry, fields } = mcpCatalogDraft({ id: 'io.x/Srv', title: 't', description: '', install: { kind: 'npm', identifier: '@x/srv', version: '1.0.0', env: [{ name: 'OPTIONAL', required: false, secret: false }, { name: 'API_KEY', required: true, secret: true }] } });
+    const { entry, fields } = mcpCatalogDraft({ id: 'io.x/Srv', title: 't', description: '', icons: [], install: { kind: 'npm', identifier: '@x/srv', version: '1.0.0', env: [{ name: 'OPTIONAL', required: false, secret: false }, { name: 'API_KEY', required: true, secret: true }] } });
     expect(entry).toMatchObject({ name: 'srv', transport: 'stdio', command: 'npx', args: ['-y', '@x/srv@1.0.0'], env: { API_KEY: '', OPTIONAL: '' } });
     expect(Object.keys(entry.env ?? {})[0]).toBe('API_KEY');
     expect(fields[0].name).toBe('API_KEY');
-    const remote = mcpCatalogDraft({ id: 'a/b', title: 't', description: '', install: { kind: 'remote', transport: 'http', url: 'https://e.com/mcp', headers: [] } });
+    const remote = mcpCatalogDraft({ id: 'a/b', title: 't', description: '', icons: [], install: { kind: 'remote', transport: 'http', url: 'https://e.com/mcp', headers: [] } });
     expect(remote.entry).toMatchObject({ transport: 'http', url: 'https://e.com/mcp' });
     expect(remote.entry.headers).toBeUndefined();
   });
@@ -92,7 +107,17 @@ describe('parseMarketplace', () => {
       { description: 'no name', source: './x' },
     ] });
     expect(name).toBe('m');
-    expect(entries.map((e) => e.item)).toEqual([{ id: 'a', name: 'a', description: 'da', category: 'security', author: 'Acme', homepage: 'https://a.dev', repo: 'o/a' }]);
+    expect(entries.map((e) => e.item)).toEqual([{
+      id: 'a',
+      name: 'a',
+      title: 'a',
+      icons: ['https://github.com/o.png?size=80'],
+      description: 'da',
+      category: 'security',
+      author: 'Acme',
+      homepage: 'https://a.dev',
+      repo: 'o/a',
+    }]);
   });
 });
 
