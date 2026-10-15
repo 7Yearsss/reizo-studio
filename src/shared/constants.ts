@@ -30,6 +30,7 @@ export const IPC = {
   CATALOG_PLUGIN_INSTALL: 'reizo:catalog-plugin-install',
   MCP_SAVE: 'reizo:mcp-save',
   MCP_TEST: 'reizo:mcp-test',
+  MCP_RESET_BASELINE: 'reizo:mcp-reset-baseline',
   HOOKS_LIST: 'reizo:hooks-list',
   HOOKS_SAVE: 'reizo:hooks-save',
   PLUGIN_INSTALL: 'reizo:plugin-install',
@@ -39,7 +40,12 @@ export const IPC = {
   SKILLHUB_SEARCH: 'reizo:skillhub-search',
   SKILLHUB_INSTALL: 'reizo:skillhub-install',
   SKILLHUB_PREVIEW: 'reizo:skillhub-preview',
+  NODE_ENV_CHECK: 'reizo:node-env-check',
   EXPORT_PDF: 'reizo:export-pdf',
+  INTEGRATIONS_STATUS: 'reizo:integrations-status',
+  INTEGRATIONS_CONNECT_NOTION: 'reizo:integrations-connect-notion',
+  INTEGRATIONS_CONNECT_GOOGLE: 'reizo:integrations-connect-google',
+  INTEGRATIONS_DISCONNECT: 'reizo:integrations-disconnect',
 } as const;
 
 /** @deprecated use IPC.GET_API_ORIGIN */

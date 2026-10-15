@@ -1,6 +1,14 @@
 import type { DirEntry } from './workspace';
 import type { PluginSummary } from './plugins';
-import type { HookEntry, McpServerEntry, McpTestResult } from './extensionConfig';
+import type {
+  GoogleOAuthParams,
+  HookEntry,
+  IntegrationConnectResult,
+  McpServerEntry,
+  McpTestResult,
+  NodeEnvStatus,
+  QuickIntegrationsStatus,
+} from './extensionConfig';
 import type { McpCatalogPage, PluginCatalog } from './catalog';
 import type {
   SkillHubInstallRequest,
@@ -45,6 +53,8 @@ export interface ReizoBridge {
   saveMcpServers(entries: McpServerEntry[]): Promise<void>;
   /** Connect one server alone and list its tools; never saves anything. */
   testMcpServer(entry: McpServerEntry): Promise<McpTestResult>;
+  /** Clears the trust-on-first-use baseline for one or all servers (re-trusting their current schema). */
+  resetMcpBaseline(serverName?: string): Promise<void>;
   listHooks(): Promise<HookEntry[]>;
   saveHooks(entries: HookEntry[]): Promise<void>;
   /** Opens a folder picker and installs the chosen extension pack (disabled until the user enables it). */
@@ -58,6 +68,11 @@ export interface ReizoBridge {
   previewSkillHubSkill(request: SkillHubInstallRequest): Promise<string>;
   /** Render an HTML document to PDF; resolves to base64 bytes. */
   exportPdf(html: string): Promise<string>;
+  checkNodeEnvironment(): Promise<NodeEnvStatus>;
+  getQuickIntegrationsStatus(): Promise<QuickIntegrationsStatus>;
+  connectNotion(token: string): Promise<IntegrationConnectResult>;
+  startGoogleOAuth(params: GoogleOAuthParams): Promise<IntegrationConnectResult>;
+  disconnectIntegration(id: 'notion' | 'gmail'): Promise<IntegrationConnectResult>;
 }
 
 declare global {

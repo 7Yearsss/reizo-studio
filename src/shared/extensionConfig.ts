@@ -32,3 +32,33 @@ export interface HookEntry {
   command: string;
   timeoutMs?: number;
 }
+
+export interface NodeEnvStatus {
+  available: boolean;
+  version?: string;
+}
+
+export interface QuickIntegrationsStatus {
+  notion: {
+    connected: boolean;
+    serverName?: string;
+  };
+  gmail: {
+    connected: boolean;
+    serverName?: string;
+    email?: string;
+  };
+}
+
+export interface GoogleOAuthParams {
+  clientId: string;
+  clientSecret: string;
+}
+
+export interface IntegrationConnectResult {
+  ok: boolean;
+  error?: string;
+  email?: string;
+  toolsCount?: number;
+}
+

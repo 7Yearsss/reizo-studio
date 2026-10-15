@@ -1,9 +1,16 @@
 import { BrowserWindow, dialog, ipcMain } from 'electron';
 import { IPC } from '../shared/constants';
-import type { HookEntry, McpServerEntry } from '../shared/extensionConfig';
-import { readHookEntries, readMcpEntries, testMcpEntry, writeHookEntries, writeMcpEntries } from './server/plugins/extensionConfig';
+import type { GoogleOAuthParams, HookEntry, McpServerEntry } from '../shared/extensionConfig';
+import { checkNodeEnvironment, readHookEntries, readMcpEntries, testMcpEntry, writeHookEntries, writeMcpEntries } from './server/plugins/extensionConfig';
 import { fetchPluginCatalog, installCatalogPlugin, searchMcpRegistry } from './server/plugins/catalog';
 import { installPlugin, listPlugins, setPluginEnabled, syncPluginSkillsDirs, uninstallPlugin } from './server/plugins/pluginStore';
+import { resetMcpBaseline } from './server/agent/mcpTools';
+import {
+  connectNotionIntegration,
+  disconnectQuickIntegration,
+  getQuickIntegrationsStatus,
+  startGoogleOAuthFlow,
+} from './server/auth/quickIntegrations';
 
 /** Extension-pack management. Every change re-syncs the shared skills-dir list so the skills page sees it at once. */
 export function registerPluginIpc(dataRoot: string, skillsDirs: string[]): void {
@@ -24,8 +31,14 @@ export function registerPluginIpc(dataRoot: string, skillsDirs: string[]): void 
   ipcMain.handle(IPC.MCP_LIST, () => readMcpEntries(dataRoot));
   ipcMain.handle(IPC.MCP_SAVE, (_event, entries: McpServerEntry[]) => writeMcpEntries(dataRoot, Array.isArray(entries) ? entries : []));
   ipcMain.handle(IPC.MCP_TEST, (_event, entry: McpServerEntry) => testMcpEntry(dataRoot, entry));
+  ipcMain.handle(IPC.MCP_RESET_BASELINE, (_event, serverName?: string) => resetMcpBaseline(dataRoot, typeof serverName === 'string' ? serverName : undefined));
   ipcMain.handle(IPC.HOOKS_LIST, () => readHookEntries(dataRoot));
   ipcMain.handle(IPC.HOOKS_SAVE, (_event, entries: HookEntry[]) => writeHookEntries(dataRoot, Array.isArray(entries) ? entries : []));
+  ipcMain.handle(IPC.NODE_ENV_CHECK, () => checkNodeEnvironment());
+  ipcMain.handle(IPC.INTEGRATIONS_STATUS, () => getQuickIntegrationsStatus(dataRoot));
+  ipcMain.handle(IPC.INTEGRATIONS_CONNECT_NOTION, (_event, token: string) => connectNotionIntegration(dataRoot, String(token || '')));
+  ipcMain.handle(IPC.INTEGRATIONS_CONNECT_GOOGLE, (_event, params: GoogleOAuthParams) => startGoogleOAuthFlow(dataRoot, params));
+  ipcMain.handle(IPC.INTEGRATIONS_DISCONNECT, (_event, id: 'notion' | 'gmail') => disconnectQuickIntegration(dataRoot, id));
 
   ipcMain.handle(IPC.PLUGIN_INSTALL, async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;

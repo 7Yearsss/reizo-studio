@@ -278,6 +278,12 @@ export function installShowcaseTransport() {
     deleteWorkspacePath: unsupported, createWorkspaceEntry: unsupported, gitStatus: async () => ({ available: false, branch: null, dirty: false, porcelain: '', recent: '' }),
     installSkill: unsupported, uninstallSkill: unsupported, listPlugins: async () => [], searchMcpCatalog: async () => ({ items: [] }), listPluginCatalog: async () => ({ marketplace: '', items: [] }), installCatalogPlugin: unsupported, listMcpServers: async () => [], saveMcpServers: unsupported, testMcpServer: unsupported, listHooks: async () => [], saveHooks: unsupported, installPlugin: unsupported, setPluginEnabled: unsupported, uninstallPlugin: unsupported, searchSkillHub: async () => ({ items: [], total: 0 }),
     installSkillHubSkill: unsupported, previewSkillHubSkill: unsupported, exportPdf: unsupported,
+    checkNodeEnvironment: async () => ({ available: true, version: 'v20.0.0' }),
+    resetMcpBaseline: unsupported,
+    getQuickIntegrationsStatus: async () => ({ notion: { connected: false }, gmail: { connected: false } }),
+    connectNotion: unsupported,
+    startGoogleOAuth: unsupported,
+    disconnectIntegration: unsupported,
   } satisfies Omit<ReizoBridge, 'platform'> & { platform: 'web' };
   window.reizo = bridge as unknown as ReizoBridge;
   return transport;

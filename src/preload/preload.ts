@@ -3,7 +3,15 @@ import { IPC } from '../shared/constants';
 import type { DirEntry } from '../shared/workspace';
 import type { SkillHubInstallRequest, SkillHubSearchQuery } from '../shared/skillhub';
 import type { PluginSummary } from '../shared/plugins';
-import type { HookEntry, McpServerEntry, McpTestResult } from '../shared/extensionConfig';
+import type {
+  GoogleOAuthParams,
+  HookEntry,
+  IntegrationConnectResult,
+  McpServerEntry,
+  McpTestResult,
+  NodeEnvStatus,
+  QuickIntegrationsStatus,
+} from '../shared/extensionConfig';
 import type { McpCatalogPage, PluginCatalog } from '../shared/catalog';
 
 contextBridge.exposeInMainWorld('reizo', {
@@ -39,6 +47,7 @@ contextBridge.exposeInMainWorld('reizo', {
   listMcpServers: (): Promise<McpServerEntry[]> => ipcRenderer.invoke(IPC.MCP_LIST),
   saveMcpServers: (entries: McpServerEntry[]): Promise<void> => ipcRenderer.invoke(IPC.MCP_SAVE, entries),
   testMcpServer: (entry: McpServerEntry): Promise<McpTestResult> => ipcRenderer.invoke(IPC.MCP_TEST, entry),
+  resetMcpBaseline: (serverName?: string): Promise<void> => ipcRenderer.invoke(IPC.MCP_RESET_BASELINE, serverName),
   listHooks: (): Promise<HookEntry[]> => ipcRenderer.invoke(IPC.HOOKS_LIST),
   saveHooks: (entries: HookEntry[]): Promise<void> => ipcRenderer.invoke(IPC.HOOKS_SAVE, entries),
   installPlugin: (): Promise<PluginSummary | null> => ipcRenderer.invoke(IPC.PLUGIN_INSTALL),
@@ -48,5 +57,10 @@ contextBridge.exposeInMainWorld('reizo', {
   searchSkillHub: (query: SkillHubSearchQuery) => ipcRenderer.invoke(IPC.SKILLHUB_SEARCH, query),
   installSkillHubSkill: (request: SkillHubInstallRequest) => ipcRenderer.invoke(IPC.SKILLHUB_INSTALL, request),
   previewSkillHubSkill: (request: SkillHubInstallRequest) => ipcRenderer.invoke(IPC.SKILLHUB_PREVIEW, request),
+  checkNodeEnvironment: (): Promise<NodeEnvStatus> => ipcRenderer.invoke(IPC.NODE_ENV_CHECK),
   exportPdf: (html: string): Promise<string> => ipcRenderer.invoke(IPC.EXPORT_PDF, html),
+  getQuickIntegrationsStatus: (): Promise<QuickIntegrationsStatus> => ipcRenderer.invoke(IPC.INTEGRATIONS_STATUS),
+  connectNotion: (token: string): Promise<IntegrationConnectResult> => ipcRenderer.invoke(IPC.INTEGRATIONS_CONNECT_NOTION, token),
+  startGoogleOAuth: (params: GoogleOAuthParams): Promise<IntegrationConnectResult> => ipcRenderer.invoke(IPC.INTEGRATIONS_CONNECT_GOOGLE, params),
+  disconnectIntegration: (id: 'notion' | 'gmail'): Promise<IntegrationConnectResult> => ipcRenderer.invoke(IPC.INTEGRATIONS_DISCONNECT, id),
 });
