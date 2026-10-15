@@ -7,6 +7,8 @@ import { shell } from 'electron';
 import type {
   DingTalkConnectParams,
   FeishuConnectParams,
+  GiteeConnectParams,
+  GitHubConnectParams,
   GoogleOAuthParams,
   IntegrationConnectResult,
   McpServerEntry,
@@ -15,6 +17,7 @@ import type {
   WeComConnectParams,
   YuqueConnectParams,
 } from '../../../shared/extensionConfig';
+
 import { readMcpEntries, testMcpEntry, writeMcpEntries } from '../plugins/extensionConfig';
 import { closeAllMcpSessions } from '../agent/mcpTools';
 
@@ -67,6 +70,24 @@ export function isYuqueEntry(e: McpServerEntry): boolean {
   );
 }
 
+export function isGiteeEntry(e: McpServerEntry): boolean {
+  return (
+    e.name === 'gitee' ||
+    /gitee/i.test(e.command ?? '') ||
+    (e.args ?? []).some((a) => /gitee/i.test(a)) ||
+    Boolean(e.env?.GITEE_TOKEN)
+  );
+}
+
+export function isGitHubEntry(e: McpServerEntry): boolean {
+  return (
+    e.name === 'github' ||
+    /github/i.test(e.command ?? '') ||
+    (e.args ?? []).some((a) => /github/i.test(a)) ||
+    Boolean(e.env?.GITHUB_TOKEN)
+  );
+}
+
 export function getBuiltinMcpScript(scriptName: string): string {
   const candidates = [
     path.resolve(__dirname, 'mcp-builtin', scriptName),
@@ -88,6 +109,8 @@ export async function getQuickIntegrationsStatus(dataRoot: string): Promise<Quic
   const wecom = entries.find((e) => isWeComEntry(e) && !e.disabled);
   const dingtalk = entries.find((e) => isDingTalkEntry(e) && !e.disabled);
   const yuque = entries.find((e) => isYuqueEntry(e) && !e.disabled);
+  const gitee = entries.find((e) => isGiteeEntry(e) && !e.disabled);
+  const github = entries.find((e) => isGitHubEntry(e) && !e.disabled);
 
   return {
     notion: {
@@ -114,8 +137,17 @@ export async function getQuickIntegrationsStatus(dataRoot: string): Promise<Quic
       connected: Boolean(yuque),
       ...(yuque ? { serverName: yuque.name, userName: yuque.env?.YUQUE_USER_NAME } : {}),
     },
+    gitee: {
+      connected: Boolean(gitee),
+      ...(gitee ? { serverName: gitee.name, userName: gitee.env?.GITEE_USER_NAME, login: gitee.env?.GITEE_USER_LOGIN } : {}),
+    },
+    github: {
+      connected: Boolean(github),
+      ...(github ? { serverName: github.name, userName: github.env?.GITHUB_USER_NAME, login: github.env?.GITHUB_USER_LOGIN } : {}),
+    },
   };
 }
+
 
 export async function connectNotionIntegration(
   dataRoot: string,
@@ -370,6 +402,120 @@ export async function connectYuqueIntegration(
   }
 }
 
+export async function connectGiteeIntegration(
+  dataRoot: string,
+  params: GiteeConnectParams,
+  options: { fetchImpl?: typeof fetch } = {},
+): Promise<IntegrationConnectResult> {
+  const token = params.token.trim();
+  if (!token) {
+    return { ok: false, error: 'Gitee 个人访问令牌 (Token) 不能为空。' };
+  }
+
+  const fetchFn = options.fetchImpl ?? globalThis.fetch;
+  try {
+    const userRes = await fetchFn(`https://gitee.com/api/v5/user?access_token=${encodeURIComponent(token)}`, {
+      headers: {
+        'User-Agent': 'ReizoStudio/0.1.0',
+      },
+    });
+    if (!userRes.ok) {
+      return { ok: false, error: `Gitee Token 校验失败 (${userRes.status}): 请确认私人令牌是否有效并勾选了 projects 权限。` };
+    }
+    const userData = (await userRes.json()) as { name?: string; login?: string };
+    const userName = userData.name || userData.login || 'Gitee 用户';
+
+    const script = getBuiltinMcpScript('gitee-server.cjs');
+    const entry: McpServerEntry = {
+      name: 'gitee',
+      transport: 'stdio',
+      command: process.execPath,
+      args: [script],
+      env: {
+        ELECTRON_RUN_AS_NODE: '1',
+        GITEE_TOKEN: token,
+        GITEE_USER_NAME: userName,
+        ...(userData.login ? { GITEE_USER_LOGIN: userData.login } : {}),
+      },
+    };
+
+    const test = await testMcpEntry(dataRoot, entry);
+    const existing = await readMcpEntries(dataRoot);
+    const filtered = existing.filter((e) => !isGiteeEntry(e));
+    filtered.push(entry);
+
+    await writeMcpEntries(dataRoot, filtered);
+    await closeAllMcpSessions();
+
+    return {
+      ok: true,
+      name: userName,
+      toolsCount: test.tools.length,
+    };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: `连接 Gitee 服务时发生异常: ${message}` };
+  }
+}
+
+export async function connectGitHubIntegration(
+  dataRoot: string,
+  params: GitHubConnectParams,
+  options: { fetchImpl?: typeof fetch } = {},
+): Promise<IntegrationConnectResult> {
+  const token = params.token.trim();
+  if (!token) {
+    return { ok: false, error: 'GitHub Personal Access Token 不能为空。' };
+  }
+
+  const fetchFn = options.fetchImpl ?? globalThis.fetch;
+  try {
+    const userRes = await fetchFn('https://api.github.com/user', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'User-Agent': 'ReizoStudio/0.1.0',
+        Accept: 'application/vnd.github+json',
+      },
+    });
+    if (!userRes.ok) {
+      return { ok: false, error: `GitHub Token 校验失败 (${userRes.status}): 请确认 Token 是否正确且具有 repo 权限。` };
+    }
+    const userData = (await userRes.json()) as { name?: string; login?: string };
+    const userName = userData.name || userData.login || 'GitHub 用户';
+
+    const script = getBuiltinMcpScript('github-server.cjs');
+    const entry: McpServerEntry = {
+      name: 'github',
+      transport: 'stdio',
+      command: process.execPath,
+      args: [script],
+      env: {
+        ELECTRON_RUN_AS_NODE: '1',
+        GITHUB_TOKEN: token,
+        GITHUB_USER_NAME: userName,
+        ...(userData.login ? { GITHUB_USER_LOGIN: userData.login } : {}),
+      },
+    };
+
+    const test = await testMcpEntry(dataRoot, entry);
+    const existing = await readMcpEntries(dataRoot);
+    const filtered = existing.filter((e) => !isGitHubEntry(e));
+    filtered.push(entry);
+
+    await writeMcpEntries(dataRoot, filtered);
+    await closeAllMcpSessions();
+
+    return {
+      ok: true,
+      name: userName,
+      toolsCount: test.tools.length,
+    };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: `连接 GitHub 服务时发生异常: ${message}` };
+  }
+}
+
 export async function disconnectQuickIntegration(
   dataRoot: string,
   id: QuickIntegrationId,
@@ -389,6 +535,10 @@ export async function disconnectQuickIntegration(
         return !isDingTalkEntry(e);
       case 'yuque':
         return !isYuqueEntry(e);
+      case 'gitee':
+        return !isGiteeEntry(e);
+      case 'github':
+        return !isGitHubEntry(e);
       default:
         return true;
     }
@@ -397,6 +547,7 @@ export async function disconnectQuickIntegration(
   await closeAllMcpSessions();
   return { ok: true };
 }
+
 
 export interface GoogleOAuthOptions {
   opener?: (url: string) => Promise<void> | void;

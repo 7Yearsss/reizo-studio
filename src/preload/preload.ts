@@ -6,6 +6,8 @@ import type { PluginSummary } from '../shared/plugins';
 import type {
   DingTalkConnectParams,
   FeishuConnectParams,
+  GiteeConnectParams,
+  GitHubConnectParams,
   GoogleOAuthParams,
   HookEntry,
   IntegrationConnectResult,
@@ -17,6 +19,7 @@ import type {
   WeComConnectParams,
   YuqueConnectParams,
 } from '../shared/extensionConfig';
+
 import type { McpCatalogPage, PluginCatalog } from '../shared/catalog';
 
 contextBridge.exposeInMainWorld('reizo', {
@@ -71,5 +74,8 @@ contextBridge.exposeInMainWorld('reizo', {
   connectWeCom: (params: WeComConnectParams): Promise<IntegrationConnectResult> => ipcRenderer.invoke(IPC.INTEGRATIONS_CONNECT_WECOM, params),
   connectDingTalk: (params: DingTalkConnectParams): Promise<IntegrationConnectResult> => ipcRenderer.invoke(IPC.INTEGRATIONS_CONNECT_DINGTALK, params),
   connectYuque: (params: YuqueConnectParams): Promise<IntegrationConnectResult> => ipcRenderer.invoke(IPC.INTEGRATIONS_CONNECT_YUQUE, params),
+  connectGitee: (params: GiteeConnectParams): Promise<IntegrationConnectResult> => ipcRenderer.invoke(IPC.INTEGRATIONS_CONNECT_GITEE, params),
+  connectGitHub: (params: GitHubConnectParams): Promise<IntegrationConnectResult> => ipcRenderer.invoke(IPC.INTEGRATIONS_CONNECT_GITHUB, params),
   disconnectIntegration: (id: QuickIntegrationId): Promise<IntegrationConnectResult> => ipcRenderer.invoke(IPC.INTEGRATIONS_DISCONNECT, id),
 });
+

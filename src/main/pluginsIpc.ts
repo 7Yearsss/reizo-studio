@@ -3,6 +3,8 @@ import { IPC } from '../shared/constants';
 import type {
   DingTalkConnectParams,
   FeishuConnectParams,
+  GiteeConnectParams,
+  GitHubConnectParams,
   GoogleOAuthParams,
   HookEntry,
   McpServerEntry,
@@ -17,6 +19,8 @@ import { resetMcpBaseline } from './server/agent/mcpTools';
 import {
   connectDingTalkIntegration,
   connectFeishuIntegration,
+  connectGiteeIntegration,
+  connectGitHubIntegration,
   connectNotionIntegration,
   connectWeComIntegration,
   connectYuqueIntegration,
@@ -24,6 +28,7 @@ import {
   getQuickIntegrationsStatus,
   startGoogleOAuthFlow,
 } from './server/auth/quickIntegrations';
+
 
 /** Extension-pack management. Every change re-syncs the shared skills-dir list so the skills page sees it at once. */
 export function registerPluginIpc(dataRoot: string, skillsDirs: string[]): void {
@@ -55,7 +60,10 @@ export function registerPluginIpc(dataRoot: string, skillsDirs: string[]): void 
   ipcMain.handle(IPC.INTEGRATIONS_CONNECT_WECOM, (_event, params: WeComConnectParams) => connectWeComIntegration(dataRoot, params));
   ipcMain.handle(IPC.INTEGRATIONS_CONNECT_DINGTALK, (_event, params: DingTalkConnectParams) => connectDingTalkIntegration(dataRoot, params));
   ipcMain.handle(IPC.INTEGRATIONS_CONNECT_YUQUE, (_event, params: YuqueConnectParams) => connectYuqueIntegration(dataRoot, params));
+  ipcMain.handle(IPC.INTEGRATIONS_CONNECT_GITEE, (_event, params: GiteeConnectParams) => connectGiteeIntegration(dataRoot, params));
+  ipcMain.handle(IPC.INTEGRATIONS_CONNECT_GITHUB, (_event, params: GitHubConnectParams) => connectGitHubIntegration(dataRoot, params));
   ipcMain.handle(IPC.INTEGRATIONS_DISCONNECT, (_event, id: QuickIntegrationId) => disconnectQuickIntegration(dataRoot, id));
+
 
   ipcMain.handle(IPC.PLUGIN_INSTALL, async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;

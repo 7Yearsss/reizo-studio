@@ -139,6 +139,32 @@ Extended the one-click quick integrations suite to fully support key Chinese dom
      - `dingtalk-modal-opened.png`
      - `yuque-modal-opened.png`
 
+## COMPLETED: Official Multi-Color Brand Logos & Gitee / GitHub Integrations (done & verified)
+
+Completed the multi-color brand logo integration and expanded the built-in quick integrations suite to 8 services (5 domestic, 3 global):
+
+1. **Brand Vector Logos & Simple Icons Component (`src/renderer/components/ui/BrandIcon.tsx`)**:
+   - Supports authentic official multi-color vector SVGs for domestic & global services (`feishu`, `wecom`, `dingtalk`, `yuque`, `gitee`, `notion`, `gmail`, `github`, `bilibili`).
+   - `SimpleIcon` fallback component dynamically loads brand logos via `https://cdn.simpleicons.org/{slug}` with deterministic letter-tile fallback.
+   - 100% offline reliability for built-in services, zero broken glyphs.
+   - Comprehensive unit test coverage in `src/renderer/components/ui/BrandIcon.test.tsx` (5/5 passing).
+
+2. **Gitee (码云) Integration (Domestic #1 Code Hosting)**:
+   - Built-in zero-dependency MCP server `src/main/server/mcp-builtin/gitee-server.cjs` implementing `gitee_get_user`, `gitee_list_repos`, `gitee_get_file`, `gitee_search_issues`, `gitee_create_issue`.
+   - Token validation against `https://gitee.com/api/v5/user` before saving to `mcp.json`.
+   - `GiteeConnectModal` with 10-second token guidance and link to personal access tokens.
+
+3. **GitHub Integration (Global Open Source & Code Hosting)**:
+   - Built-in zero-dependency MCP server `src/main/server/mcp-builtin/github-server.cjs` implementing `github_get_user`, `github_list_repos`, `github_get_file`, `github_search_issues`, `github_create_issue`.
+   - Token validation against `https://api.github.com/user` before saving to `mcp.json`.
+   - `GitHubConnectModal` with 10-second token guidance and link to personal access tokens.
+
+4. **Testing & Verification**:
+   - `npm run typecheck`: clean 0 errors.
+   - `npx eslint`: clean 0 errors.
+   - Vitest unit tests: 20/20 tests passing across `quickIntegrations.test.ts` and `BrandIcon.test.tsx`.
+   - E2E script `scripts/verify-quick-integrations.mjs` ran against the live Electron app, verifying all 8 cards, category tabs (`全部 (8)`, `国内办公 (5)`, `海外服务 (3)`), and opening modals (`gitee-modal-opened.png`, `github-modal-opened.png`).
+
 
 ## Remaining ideas / next steps
 

@@ -287,6 +287,8 @@ export function installShowcaseTransport() {
       wecom: { connected: false },
       dingtalk: { connected: false },
       yuque: { connected: false },
+      gitee: { connected: false },
+      github: { connected: false },
     }),
     connectNotion: unsupported,
     startGoogleOAuth: unsupported,
@@ -294,8 +296,11 @@ export function installShowcaseTransport() {
     connectWeCom: unsupported,
     connectDingTalk: unsupported,
     connectYuque: unsupported,
+    connectGitee: unsupported,
+    connectGitHub: unsupported,
     disconnectIntegration: unsupported,
   } satisfies Omit<ReizoBridge, 'platform'> & { platform: 'web' };
+
   window.reizo = bridge as unknown as ReizoBridge;
   return transport;
 }

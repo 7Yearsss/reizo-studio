@@ -2,9 +2,6 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   ExternalLink,
   LoaderCircle,
-  Mail,
-  MessageSquare,
-  Send,
   Unlink,
   Upload,
 } from 'lucide-react';
@@ -22,66 +19,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../../components/ui/dialog';
+import { BrandIcon } from '../../components/ui/BrandIcon';
 
 const FIELD =
   'w-full rounded-lg border border-line bg-paper-raised px-3 py-1.5 text-sm text-ink outline-none placeholder:text-ink-muted focus:border-accent';
 const LABEL = 'mb-1 block text-xs text-ink-muted';
 
-// --- Brand Icons ------------------------------------------------------------------------------------
-
-function NotionSvg() {
-  return (
-    <svg className="h-9 w-9 shrink-0" viewBox="0 0 100 100" fill="currentColor">
-      <path d="M60.6 14.8c-7.9-.6-29.6 1.8-40.4 9.5-3.3 2.4-4.2 5.1-4.2 9.5v44.4c0 5.4 3 8.7 8.1 9.3 11.4 1.2 38.6-1.5 50.3-8.7 4.2-2.7 5.1-5.7 5.1-10.2V24.1c0-5.7-3.6-8.7-18.9-9.3zm-13.8 62.1c-15.6 0-16.5-.9-16.5-6.6V37.2c0-3.3.9-4.8 4.2-6.6 6.3-3.6 17.7-4.8 24.6-4.8 14.7 0 16.5 1.5 16.5 6.9v33.3c0 5.1-2.4 8.7-13.5 10.5-5.1.4-10.5.4-15.3.4zm10.5-36.9c0-2.4-1.2-3.6-4.5-3.6-3 0-6.9.6-9.6 1.5-1.5.6-2.1 1.8-2.1 3.3v27.3c0 2.4 1.2 3.6 4.5 3.6 3 0 6.9-.6 9.6-1.5 1.5-.6 2.1-1.8 2.1-3.3V40z" />
-    </svg>
-  );
-}
-
-function GmailSvg() {
-  return (
-    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-500/10 text-red-500">
-      <Mail size={20} />
-    </div>
-  );
-}
-
-function FeishuSvg() {
-  return (
-    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-cyan-500/10 text-cyan-500">
-      <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M12 2L3 7v10l9 5 9-5V7l-9-5zm0 2.2l6.5 3.6-6.5 3.6-6.5-3.6L12 4.2zM5 8.7l6 3.3v6.7l-6-3.3V8.7zm8 10V12l6-3.3v6.7l-6 3.3z" />
-      </svg>
-    </div>
-  );
-}
-
-function WeComSvg() {
-  return (
-    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-500/10 text-blue-500">
-      <MessageSquare size={20} />
-    </div>
-  );
-}
-
-function DingTalkSvg() {
-  return (
-    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-500/10 text-sky-500">
-      <Send size={20} />
-    </div>
-  );
-}
-
-function YuqueSvg() {
-  return (
-    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-500">
-      <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15h-2v-6h2v6zm4 0h-2v-4h2v4zm0-6h-2V7h2v4z" />
-      </svg>
-    </div>
-  );
-}
-
 // --- Feishu Modal -----------------------------------------------------------------------------------
+
 
 function FeishuConnectModal({
   open,
@@ -127,9 +72,10 @@ function FeishuConnectModal({
       <DialogContent className="max-w-md">
         <DialogHeader>
           <div className="flex items-center gap-3">
-            <FeishuSvg />
+            <BrandIcon brand="feishu" />
             <div>
               <DialogTitle>连接飞书 (Feishu / Lark)</DialogTitle>
+
               <DialogDescription>
                 支持读取飞书云文档、多维表格 (Bitable) 以及群消息收发。
               </DialogDescription>
@@ -250,9 +196,10 @@ function WeComConnectModal({
       <DialogContent className="max-w-md">
         <DialogHeader>
           <div className="flex items-center gap-3">
-            <WeComSvg />
+            <BrandIcon brand="wecom" />
             <div>
               <DialogTitle>连接企业微信 (WeCom)</DialogTitle>
+
               <DialogDescription>
                 通过群机器人 Webhook，Agent 可一键推送 Markdown 报告与分镜通知。
               </DialogDescription>
@@ -365,9 +312,10 @@ function DingTalkConnectModal({
       <DialogContent className="max-w-md">
         <DialogHeader>
           <div className="flex items-center gap-3">
-            <DingTalkSvg />
+            <BrandIcon brand="dingtalk" />
             <div>
               <DialogTitle>连接钉钉群机器人 (DingTalk)</DialogTitle>
+
               <DialogDescription>
                 支持向钉钉群推送富文本、Markdown 格式的自动化通知与分析。
               </DialogDescription>
@@ -483,7 +431,7 @@ function YuqueConnectModal({
       <DialogContent className="max-w-md">
         <DialogHeader>
           <div className="flex items-center gap-3">
-            <YuqueSvg />
+            <BrandIcon brand="yuque" />
             <div>
               <DialogTitle>连接语雀知识库 (Yuque)</DialogTitle>
               <DialogDescription>
@@ -492,6 +440,7 @@ function YuqueConnectModal({
             </div>
           </div>
         </DialogHeader>
+
 
         <div className="space-y-4 pt-2">
           <div className="rounded-xl bg-paper-inset p-3 text-xs text-ink-muted">
@@ -548,7 +497,220 @@ function YuqueConnectModal({
   );
 }
 
+// --- Gitee Modal ------------------------------------------------------------------------------------
+
+function GiteeConnectModal({
+  open,
+  onClose,
+  onSuccess,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [token, setToken] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleConnect = async () => {
+    if (!token.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await window.reizo?.connectGitee?.({ token: token.trim() });
+      if (res?.ok) {
+        toast.success(`已连接 Gitee 账号「${res.name || 'Gitee 用户'}」！`, res.toolsCount ? `已载入 ${res.toolsCount} 个代码与协作工具` : undefined);
+        setToken('');
+        onSuccess();
+        onClose();
+      } else {
+        setError(res?.error || '连接 Gitee 失败，请检查私人令牌权限或网络。');
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <div className="flex items-center gap-3">
+            <BrandIcon brand="gitee" />
+            <div>
+              <DialogTitle>连接 Gitee (码云) 代码平台</DialogTitle>
+              <DialogDescription>
+                读取 Gitee 仓库源码、查询 Issue 任务与自动创建工作项。
+              </DialogDescription>
+            </div>
+          </div>
+        </DialogHeader>
+
+        <div className="space-y-4 pt-2">
+          <div className="rounded-xl bg-paper-inset p-3 text-xs text-ink-muted">
+            <p className="font-medium text-ink">10 秒获取 Gitee 私人令牌 (Token) 指引：</p>
+            <ol className="mt-1.5 list-decimal space-y-1 pl-4">
+              <li>
+                前往{' '}
+                <a
+                  href="https://gitee.com/profile/personal_access_tokens"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-0.5 text-accent hover:underline"
+                >
+                  Gitee 私人令牌设置 <ExternalLink size={11} />
+                </a>；
+              </li>
+              <li>点击「+ 生成新令牌」，权限勾选 <code>projects</code> 与 <code>pull_requests</code>；</li>
+              <li>复制生成的 Token 粘贴在下方即可。</li>
+            </ol>
+          </div>
+
+          <div>
+            <label className={LABEL}>Gitee Personal Access Token (私人令牌)</label>
+            <input
+              type="password"
+              placeholder="输入 Gitee 私人令牌"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              className={FIELD}
+              autoFocus
+            />
+          </div>
+
+          {error && <p className="text-xs text-danger">{error}</p>}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="ghost" onClick={onClose} disabled={busy}>
+              取消
+            </Button>
+            <Button onClick={handleConnect} disabled={busy || !token.trim()}>
+              {busy ? (
+                <>
+                  <LoaderCircle size={14} className="mr-1.5 animate-spin" />
+                  校验并连接中...
+                </>
+              ) : (
+                '连接并测试'
+              )}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// --- GitHub Modal -----------------------------------------------------------------------------------
+
+function GitHubConnectModal({
+  open,
+  onClose,
+  onSuccess,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [token, setToken] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleConnect = async () => {
+    if (!token.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await window.reizo?.connectGitHub?.({ token: token.trim() });
+      if (res?.ok) {
+        toast.success(`已连接 GitHub 账号「${res.name || 'GitHub 用户'}」！`, res.toolsCount ? `已载入 ${res.toolsCount} 个代码与协作工具` : undefined);
+        setToken('');
+        onSuccess();
+        onClose();
+      } else {
+        setError(res?.error || '连接 GitHub 失败，请确认 Token 是否具备 repo 访问权限。');
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <div className="flex items-center gap-3">
+            <BrandIcon brand="github" />
+            <div>
+              <DialogTitle>连接 GitHub 平台</DialogTitle>
+              <DialogDescription>
+                检索全球开源项目、读取指定代码文件并管理 Issues 与 PRs。
+              </DialogDescription>
+            </div>
+          </div>
+        </DialogHeader>
+
+        <div className="space-y-4 pt-2">
+          <div className="rounded-xl bg-paper-inset p-3 text-xs text-ink-muted">
+            <p className="font-medium text-ink">10 秒获取 GitHub Token 指引：</p>
+            <ol className="mt-1.5 list-decimal space-y-1 pl-4">
+              <li>
+                前往{' '}
+                <a
+                  href="https://github.com/settings/tokens"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-0.5 text-accent hover:underline"
+                >
+                  GitHub Personal Access Tokens <ExternalLink size={11} />
+                </a>；
+              </li>
+              <li>点击「Generate new token (classic)」，勾选 <code>repo</code> 权限；</li>
+              <li>复制生成的 <code>ghp_...</code> 令牌粘贴在下方。</li>
+            </ol>
+          </div>
+
+          <div>
+            <label className={LABEL}>GitHub Personal Access Token</label>
+            <input
+              type="password"
+              placeholder="ghp_... 或 github_pat_..."
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              className={FIELD}
+              autoFocus
+            />
+          </div>
+
+          {error && <p className="text-xs text-danger">{error}</p>}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="ghost" onClick={onClose} disabled={busy}>
+              取消
+            </Button>
+            <Button onClick={handleConnect} disabled={busy || !token.trim()}>
+              {busy ? (
+                <>
+                  <LoaderCircle size={14} className="mr-1.5 animate-spin" />
+                  校验并连接中...
+                </>
+              ) : (
+                '连接并测试'
+              )}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // --- Notion Connect Modal --------------------------------------------------------------------------
+
 
 function NotionConnectModal({
   open,
@@ -589,9 +751,10 @@ function NotionConnectModal({
       <DialogContent className="max-w-md">
         <DialogHeader>
           <div className="flex items-center gap-3">
-            <NotionSvg />
+            <BrandIcon brand="notion" />
             <div>
               <DialogTitle>连接 Notion 工作区</DialogTitle>
+
               <DialogDescription>
                 通过 Notion 官方 MCP 服务免本地安装直连。
               </DialogDescription>
@@ -722,9 +885,10 @@ function GoogleConnectModal({
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <div className="flex items-center gap-3">
-            <GmailSvg />
+            <BrandIcon brand="gmail" />
             <div>
               <DialogTitle>连接 Google Mail (Gmail)</DialogTitle>
+
               <DialogDescription>
                 通过本地 PKCE 回环授权，直连您的 Google 邮箱。
               </DialogDescription>
@@ -836,8 +1000,11 @@ export function QuickIntegrationsBlock({
   const [wecomModal, setWecomModal] = useState(false);
   const [dingtalkModal, setDingtalkModal] = useState(false);
   const [yuqueModal, setYuqueModal] = useState(false);
+  const [giteeModal, setGiteeModal] = useState(false);
+  const [githubModal, setGitHubModal] = useState(false);
 
   const [disconnecting, setDisconnecting] = useState<QuickIntegrationId | null>(null);
+
 
   const loadStatus = useCallback(async () => {
     try {
@@ -885,7 +1052,7 @@ export function QuickIntegrationsBlock({
       title: '飞书 (Feishu)',
       subtitle: '企业协同与知识库',
       desc: '支持读写飞书云文档、检索团队多维表格 (Bitable) 以及群消息收发。',
-      icon: <FeishuSvg />,
+      icon: <BrandIcon brand="feishu" />,
       connected: Boolean(status?.feishu?.connected),
       extra: status?.feishu?.appName || status?.feishu?.appId,
       onConnect: () => setFeishuModal(true),
@@ -897,7 +1064,7 @@ export function QuickIntegrationsBlock({
       title: '企业微信 (WeCom)',
       subtitle: '群机器人消息通知',
       desc: '支持向企微群一键推送 Markdown 自动化报告、电商分镜成果及文本提醒。',
-      icon: <WeComSvg />,
+      icon: <BrandIcon brand="wecom" />,
       connected: Boolean(status?.wecom?.connected),
       extra: status?.wecom?.botName,
       onConnect: () => setWecomModal(true),
@@ -909,7 +1076,7 @@ export function QuickIntegrationsBlock({
       title: '钉钉 (DingTalk)',
       subtitle: '自定义群机器人',
       desc: '支持向钉钉群推送富文本与 Markdown 卡片通知，支持安全加签验证。',
-      icon: <DingTalkSvg />,
+      icon: <BrandIcon brand="dingtalk" />,
       connected: Boolean(status?.dingtalk?.connected),
       extra: status?.dingtalk?.botName,
       onConnect: () => setDingtalkModal(true),
@@ -921,11 +1088,23 @@ export function QuickIntegrationsBlock({
       title: '语雀 (Yuque)',
       subtitle: '云端知识库与专栏',
       desc: '检索语雀个人与团队知识库、读取文档正文，并将生成内容一键归档至知识库。',
-      icon: <YuqueSvg />,
+      icon: <BrandIcon brand="yuque" />,
       connected: Boolean(status?.yuque?.connected),
       extra: status?.yuque?.userName ? `用户: ${status.yuque.userName}` : undefined,
       onConnect: () => setYuqueModal(true),
       btnLabel: status?.yuque?.connected ? '重新配置' : '一键连接语雀',
+    },
+    {
+      id: 'gitee' as const,
+      group: 'domestic' as const,
+      title: 'Gitee (码云)',
+      subtitle: '代码托管与项目协同',
+      desc: '支持读取 Gitee 代码仓库源码、检索任务与 Issue，以及提交 Bug 工作项。',
+      icon: <BrandIcon brand="gitee" />,
+      connected: Boolean(status?.gitee?.connected),
+      extra: status?.gitee?.userName ? `用户: ${status.gitee.userName}` : undefined,
+      onConnect: () => setGiteeModal(true),
+      btnLabel: status?.gitee?.connected ? '重新配置' : '一键连接 Gitee',
     },
     {
       id: 'notion' as const,
@@ -933,7 +1112,7 @@ export function QuickIntegrationsBlock({
       title: 'Notion',
       subtitle: '知识库与文档管理',
       desc: '让 Agent 直接检索您的工作区文档、查询知识库以及更新 Notion 页面。',
-      icon: <NotionSvg />,
+      icon: <BrandIcon brand="notion" />,
       connected: Boolean(status?.notion?.connected),
       extra: undefined,
       onConnect: () => setNotionModal(true),
@@ -945,13 +1124,26 @@ export function QuickIntegrationsBlock({
       title: 'Google Mail',
       subtitle: 'Gmail 邮箱助手',
       desc: '支持邮件智能搜索、往来阅读、标签归档以及起草邮件等全套操作。',
-      icon: <GmailSvg />,
+      icon: <BrandIcon brand="gmail" />,
       connected: Boolean(status?.gmail?.connected),
       extra: status?.gmail?.email,
       onConnect: () => setGoogleModal(true),
       btnLabel: status?.gmail?.connected ? '重新配置' : '启动 Google 授权',
     },
+    {
+      id: 'github' as const,
+      group: 'global' as const,
+      title: 'GitHub',
+      subtitle: '全球开源与代码协作',
+      desc: '检索全球开源项目、读取指定分支代码文件，并管理仓库 Issues 与 PRs。',
+      icon: <BrandIcon brand="github" />,
+      connected: Boolean(status?.github?.connected),
+      extra: status?.github?.userName ? `用户: ${status.github.userName}` : undefined,
+      onConnect: () => setGitHubModal(true),
+      btnLabel: status?.github?.connected ? '重新配置' : '一键连接 GitHub',
+    },
   ];
+
 
   const visibleCards = cards.filter((c) => {
     if (tab === 'domestic') return c.group === 'domestic';
@@ -1077,6 +1269,8 @@ export function QuickIntegrationsBlock({
       <WeComConnectModal open={wecomModal} onClose={() => setWecomModal(false)} onSuccess={handleSuccess} />
       <DingTalkConnectModal open={dingtalkModal} onClose={() => setDingtalkModal(false)} onSuccess={handleSuccess} />
       <YuqueConnectModal open={yuqueModal} onClose={() => setYuqueModal(false)} onSuccess={handleSuccess} />
+      <GiteeConnectModal open={giteeModal} onClose={() => setGiteeModal(false)} onSuccess={handleSuccess} />
+      <GitHubConnectModal open={githubModal} onClose={() => setGitHubModal(false)} onSuccess={handleSuccess} />
       <NotionConnectModal open={notionModal} onClose={() => setNotionModal(false)} onSuccess={handleSuccess} />
       <GoogleConnectModal open={googleModal} onClose={() => setGoogleModal(false)} onSuccess={handleSuccess} />
     </section>

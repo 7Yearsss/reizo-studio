@@ -49,8 +49,11 @@ export const IPC = {
   INTEGRATIONS_CONNECT_WECOM: 'reizo:integrations-connect-wecom',
   INTEGRATIONS_CONNECT_DINGTALK: 'reizo:integrations-connect-dingtalk',
   INTEGRATIONS_CONNECT_YUQUE: 'reizo:integrations-connect-yuque',
+  INTEGRATIONS_CONNECT_GITEE: 'reizo:integrations-connect-gitee',
+  INTEGRATIONS_CONNECT_GITHUB: 'reizo:integrations-connect-github',
   INTEGRATIONS_DISCONNECT: 'reizo:integrations-disconnect',
 } as const;
+
 
 /** @deprecated use IPC.GET_API_ORIGIN */
 export const IPC_GET_API_ORIGIN = IPC.GET_API_ORIGIN;

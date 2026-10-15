@@ -22,6 +22,7 @@ const config: ForgeConfig = {
       identityValidation: false,
       preAutoEntitlements: false,
       preEmbedProvisioningProfile: false,
+      // @ts-expect-error electron-packager osxSign runtime option
       continueOnError: false,
       // osx-sign defaults to hardened runtime, whose library validation rejects
       // the ad-hoc Electron Framework at launch ("different Team IDs"). Without

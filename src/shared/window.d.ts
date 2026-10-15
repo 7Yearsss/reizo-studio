@@ -3,6 +3,8 @@ import type { PluginSummary } from './plugins';
 import type {
   DingTalkConnectParams,
   FeishuConnectParams,
+  GiteeConnectParams,
+  GitHubConnectParams,
   GoogleOAuthParams,
   HookEntry,
   IntegrationConnectResult,
@@ -14,6 +16,7 @@ import type {
   WeComConnectParams,
   YuqueConnectParams,
 } from './extensionConfig';
+
 import type { McpCatalogPage, PluginCatalog } from './catalog';
 import type {
   SkillHubInstallRequest,
@@ -81,8 +84,11 @@ export interface ReizoBridge {
   connectWeCom(params: WeComConnectParams): Promise<IntegrationConnectResult>;
   connectDingTalk(params: DingTalkConnectParams): Promise<IntegrationConnectResult>;
   connectYuque(params: YuqueConnectParams): Promise<IntegrationConnectResult>;
+  connectGitee(params: GiteeConnectParams): Promise<IntegrationConnectResult>;
+  connectGitHub(params: GitHubConnectParams): Promise<IntegrationConnectResult>;
   disconnectIntegration(id: QuickIntegrationId): Promise<IntegrationConnectResult>;
 }
+
 
 declare global {
   interface Window {

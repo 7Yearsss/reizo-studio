@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   connectDingTalkIntegration,
   connectFeishuIntegration,
+  connectGiteeIntegration,
+  connectGitHubIntegration,
   connectNotionIntegration,
   connectWeComIntegration,
   connectYuqueIntegration,
@@ -34,6 +36,8 @@ describe('quickIntegrations', () => {
       wecom: { connected: false },
       dingtalk: { connected: false },
       yuque: { connected: false },
+      gitee: { connected: false },
+      github: { connected: false },
     });
   });
 
@@ -288,4 +292,97 @@ describe('quickIntegrations', () => {
     expect(res.ok).toBe(false);
     expect(res.error).toContain('语雀 Token 校验失败');
   });
+
+  it('connects Gitee integration after verifying token', async () => {
+    const mockFetch = async (input: RequestInfo | URL): Promise<Response> => {
+      const url = String(input);
+      if (url.includes('gitee.com/api/v5/user')) {
+        return new Response(JSON.stringify({ name: '开源贡献者', login: 'reizo_gitee' }), {
+          status: 200,
+        });
+      }
+      return new Response('not found', { status: 404 });
+    };
+
+    const res = await connectGiteeIntegration(
+      root,
+      { token: 'mock-gitee-token' },
+      { fetchImpl: mockFetch as unknown as typeof globalThis.fetch },
+    );
+
+    expect(res.ok).toBe(true);
+    expect(res.name).toBe('开源贡献者');
+
+    const status = await getQuickIntegrationsStatus(root);
+    expect(status.gitee.connected).toBe(true);
+    expect(status.gitee.userName).toBe('开源贡献者');
+    expect(status.gitee.login).toBe('reizo_gitee');
+
+    // Disconnect
+    await disconnectQuickIntegration(root, 'gitee');
+    const after = await getQuickIntegrationsStatus(root);
+    expect(after.gitee.connected).toBe(false);
+  });
+
+  it('rejects invalid Gitee token', async () => {
+    const mockFetch = async (): Promise<Response> => {
+      return new Response(JSON.stringify({ message: '401 Unauthorized' }), { status: 401 });
+    };
+
+    const res = await connectGiteeIntegration(
+      root,
+      { token: 'bad-gitee-token' },
+      { fetchImpl: mockFetch as unknown as typeof globalThis.fetch },
+    );
+
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain('Gitee Token 校验失败');
+  });
+
+  it('connects GitHub integration after verifying token', async () => {
+    const mockFetch = async (input: RequestInfo | URL): Promise<Response> => {
+      const url = String(input);
+      if (url.includes('api.github.com/user')) {
+        return new Response(JSON.stringify({ name: 'Octocat Developer', login: 'octocat' }), {
+          status: 200,
+        });
+      }
+      return new Response('not found', { status: 404 });
+    };
+
+    const res = await connectGitHubIntegration(
+      root,
+      { token: 'ghp_mock_token_123' },
+      { fetchImpl: mockFetch as unknown as typeof globalThis.fetch },
+    );
+
+    expect(res.ok).toBe(true);
+    expect(res.name).toBe('Octocat Developer');
+
+    const status = await getQuickIntegrationsStatus(root);
+    expect(status.github.connected).toBe(true);
+    expect(status.github.userName).toBe('Octocat Developer');
+    expect(status.github.login).toBe('octocat');
+
+    // Disconnect
+    await disconnectQuickIntegration(root, 'github');
+    const after = await getQuickIntegrationsStatus(root);
+    expect(after.github.connected).toBe(false);
+  });
+
+  it('rejects invalid GitHub token', async () => {
+    const mockFetch = async (): Promise<Response> => {
+      return new Response(JSON.stringify({ message: 'Bad credentials' }), { status: 401 });
+    };
+
+    const res = await connectGitHubIntegration(
+      root,
+      { token: 'bad-github-token' },
+      { fetchImpl: mockFetch as unknown as typeof globalThis.fetch },
+    );
+
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain('GitHub Token 校验失败');
+  });
 });
+

@@ -75,7 +75,7 @@ async function main() {
   })()`);
   console.log('getQuickIntegrationsStatus result:', JSON.stringify(status, null, 2));
 
-  const expectedKeys = ['feishu', 'wecom', 'dingtalk', 'yuque', 'notion', 'gmail'];
+  const expectedKeys = ['feishu', 'wecom', 'dingtalk', 'yuque', 'gitee', 'github', 'notion', 'gmail'];
   for (const k of expectedKeys) {
     if (!status || typeof status[k]?.connected !== 'boolean') {
       throw new Error(`Missing expected status key ${k} in ` + JSON.stringify(status));
@@ -207,6 +207,12 @@ async function main() {
 
   // 7. Test Yuque Modal
   await openAndVerifyModal('一键连接语雀', '语雀', 'yuque-modal-opened.png');
+
+  // 8. Test Gitee Modal
+  await openAndVerifyModal('一键连接 Gitee', 'Gitee', 'gitee-modal-opened.png');
+
+  // 9. Test GitHub Modal
+  await openAndVerifyModal('一键连接 GitHub', 'GitHub', 'github-modal-opened.png');
 
   console.log('All domestic and international quick integration E2E checks passed!');
   ws.close();

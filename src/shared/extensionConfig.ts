@@ -38,7 +38,15 @@ export interface NodeEnvStatus {
   version?: string;
 }
 
-export type QuickIntegrationId = 'notion' | 'gmail' | 'feishu' | 'wecom' | 'dingtalk' | 'yuque';
+export type QuickIntegrationId =
+  | 'notion'
+  | 'gmail'
+  | 'feishu'
+  | 'wecom'
+  | 'dingtalk'
+  | 'yuque'
+  | 'gitee'
+  | 'github';
 
 export interface QuickIntegrationsStatus {
   notion: {
@@ -71,6 +79,18 @@ export interface QuickIntegrationsStatus {
     serverName?: string;
     userName?: string;
   };
+  gitee: {
+    connected: boolean;
+    serverName?: string;
+    userName?: string;
+    login?: string;
+  };
+  github: {
+    connected: boolean;
+    serverName?: string;
+    userName?: string;
+    login?: string;
+  };
 }
 
 export interface GoogleOAuthParams {
@@ -97,6 +117,15 @@ export interface DingTalkConnectParams {
 export interface YuqueConnectParams {
   token: string;
 }
+
+export interface GiteeConnectParams {
+  token: string;
+}
+
+export interface GitHubConnectParams {
+  token: string;
+}
+
 
 export interface IntegrationConnectResult {
   ok: boolean;
