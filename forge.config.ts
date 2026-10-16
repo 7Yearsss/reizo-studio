@@ -1,13 +1,27 @@
 import type { ForgeConfig } from '@electron-forge/shared-types';
-import { MakerSquirrel } from '@electron-forge/maker-squirrel';
+import { OfflineSquirrelMaker } from './scripts/offline-squirrel-maker';
 import { MakerZIP } from '@electron-forge/maker-zip';
 import { MakerDeb } from '@electron-forge/maker-deb';
 import { MakerRpm } from '@electron-forge/maker-rpm';
 import { VitePlugin } from '@electron-forge/plugin-vite';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 
 const config: ForgeConfig = {
+  hooks: {
+    generateAssets: async (_config, platform, arch) => {
+      if (platform !== 'win32' || arch !== 'x64') throw new Error('The integrated video editor package currently targets Windows x64.');
+      execFileSync(process.execPath, ['scripts/build-openchatcut-runtime.mjs'], { stdio: 'inherit', windowsHide: true });
+      const packaged = JSON.parse(readFileSync('.cache/openchatcut-package.json', 'utf8')) as { directory: string };
+      const relative = path.relative(path.resolve('.cache/package-resources'), packaged.directory);
+      if (!relative || relative.startsWith('..') || path.isAbsolute(relative) || path.basename(packaged.directory) !== 'video-editor') throw new Error('Invalid packaged editor resource path');
+      const resources = _config.packagerConfig?.extraResource;
+      _config.packagerConfig = { ..._config.packagerConfig, extraResource: [...(Array.isArray(resources) ? resources : resources ? [resources] : []), packaged.directory] };
+    },
+  },
   packagerConfig: {
     asar: true,
     icon: 'resources/icon',
@@ -22,8 +36,6 @@ const config: ForgeConfig = {
       identityValidation: false,
       preAutoEntitlements: false,
       preEmbedProvisioningProfile: false,
-      // @ts-expect-error electron-packager osxSign runtime option
-      continueOnError: false,
       // osx-sign defaults to hardened runtime, whose library validation rejects
       // the ad-hoc Electron Framework at launch ("different Team IDs"). Without
       // a Developer ID there is no shared Team ID, so leave it off.
@@ -44,13 +56,15 @@ const config: ForgeConfig = {
   },
   rebuildConfig: {},
   makers: [
-    new MakerSquirrel({ setupIcon: 'resources/icon.ico' }),
+    new OfflineSquirrelMaker({}),
     new MakerZIP({}, ['darwin']),
     new MakerRpm({ options: { icon: 'resources/icon.png' } }),
     new MakerDeb({ options: { icon: 'resources/icon.png' } }),
   ],
   plugins: [
     new VitePlugin({
+      // The editor and document workspaces are large; avoid overlapping bundle heaps.
+      concurrent: 1,
       // `build` can specify multiple entry builds, which can be Main process, Preload scripts, Worker process, etc.
       // If you are familiar with Vite configuration, it will look really familiar.
       build: [

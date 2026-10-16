@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { RotateCcw, Square } from 'lucide-react';
+import { RotateCcw } from 'lucide-react';
 import type { TodoItem } from '../../../shared/stream';
 import type { ReplyPhase } from '../../../shared/stream';
 import type { ChatInteraction } from '../../state/chatStore';
@@ -25,7 +25,6 @@ export default function ReplyStatusBar({
   recovering = false,
   lastTextAt,
   lastProgressAt,
-  onStop,
   onRetry,
   skillName,
 }: {
@@ -37,8 +36,6 @@ export default function ReplyStatusBar({
   recovering?: boolean;
   lastTextAt?: number;
   lastProgressAt?: number;
-  /** When set, shows a small stop button (used while the composer is in send mode). */
-  onStop?: () => void;
   /** Shown once the upstream has been silent past the stale threshold. */
   onRetry?: () => void;
   /** Name of the pinned skill this turn is running under. */
@@ -100,17 +97,6 @@ export default function ReplyStatusBar({
           >
             <RotateCcw size={10} />
             重试
-          </button>
-        )}
-        {onStop && (
-          <button
-            type="button"
-            aria-label="停止"
-            title="停止当前回合"
-            onClick={onStop}
-            className="flex h-5 w-5 items-center justify-center rounded-full border border-line text-ink-muted transition-colors hover:bg-paper-inset hover:text-ink"
-          >
-            <Square size={9} className="fill-current" />
           </button>
         )}
       </span>

@@ -13,6 +13,7 @@ import { cn } from '../../lib/cn';
 import FloatingNodeHeader from './FloatingNodeHeader';
 import { type CanvasNodeData } from './ImageNode';
 import { useHoverIntent } from './NodeActionBar';
+import SendToVideoEditorButton from './SendToVideoEditorButton';
 import MagneticHandle from './MagneticHandle';
 import NodeFloatingPanel from './NodeFloatingPanel';
 import { canvasInputSources } from '../../state/canvasInputSources';
@@ -487,6 +488,7 @@ function VideoNode({ id, data, selected }: NodeProps) {
                 <Download size={12} />
               </a>
               </Tooltip>
+              <SendToVideoEditorButton sessionId={sessionId} node={node} assetIndex={Math.min(assetIdx, assets.length - 1)} />
               <Tooltip content="存到作品库" side="bottom" wrapperClassName="inline-flex">
               <button
                 type="button"

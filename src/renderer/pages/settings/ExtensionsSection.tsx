@@ -158,13 +158,15 @@ function McpBlock() {
   }, []);
 
   const load = useCallback(async () => {
-    try { setEntries(await window.reizo.listMcpServers()); } catch (cause) { toast.error('读取 MCP 配置失败', message(cause)); setEntries([]); }
+    try { setEntries((await window.reizo?.listMcpServers?.()) ?? []); } catch (cause) { toast.error('读取 MCP 配置失败', message(cause)); setEntries([]); }
   }, []);
   useEffect(() => { void load(); }, [load]);
 
   async function persist(next: McpServerEntry[], done?: string) {
     try {
-      await window.reizo.saveMcpServers(next);
+      if (window.reizo?.saveMcpServers) {
+        await window.reizo.saveMcpServers(next);
+      }
       setEntries(next);
       setEditing(null);
       if (done) toast.success(done);
@@ -281,13 +283,15 @@ function HooksBlock() {
   const [editing, setEditing] = useState<{ index: number; entry: HookEntry } | null>(null);
 
   const load = useCallback(async () => {
-    try { setEntries(await window.reizo.listHooks()); } catch (cause) { toast.error('读取 Hooks 失败', message(cause)); setEntries([]); }
+    try { setEntries((await window.reizo?.listHooks?.()) ?? []); } catch (cause) { toast.error('读取 Hooks 失败', message(cause)); setEntries([]); }
   }, []);
   useEffect(() => { void load(); }, [load]);
 
   async function persist(next: HookEntry[], done?: string) {
     try {
-      await window.reizo.saveHooks(next);
+      if (window.reizo?.saveHooks) {
+        await window.reizo.saveHooks(next);
+      }
       setEntries(next);
       setEditing(null);
       if (done) toast.success(done);

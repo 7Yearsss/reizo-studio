@@ -62,10 +62,14 @@
   /* Layers, not lines: gray app ground (`paper`), white cards on it
      (`paper-raised`), gray modules inside cards (`paper-inset`). Tokens follow
      v2-design so desktop and web Studio share one language. */
-  --paper: #f6f6f7;
+  --paper: #fafafb;
   --paper-raised: #ffffff;
   --paper-inset: #eeeff1;
-  --sidebar: #f6f6f7;
+  --sidebar: #eeeff1;
+  --sidebar-line: rgb(28 29 30 / 6%);
+  --sidebar-hover: rgb(255 255 255 / 48%);
+  --sidebar-selected: rgb(255 255 255 / 88%);
+  --sidebar-account: rgb(255 255 255 / 36%);
   --ink: #1c1d1e;
   --ink-muted: #62656d;
   --line: #e6e7e9;
@@ -79,7 +83,7 @@
 
   /* Zero-alpha `--paper` for gradient masks. `transparent` interpolates
      through black in WebKit and leaves a dirty edge. */
-  --paper-a0: rgb(246 246 247 / 0);
+  --paper-a0: rgb(250 250 251 / 0);
 
   /* shadcn / beUI semantic aliases — keep Reizo paper/ink as the source. */
   --background: var(--paper);
@@ -121,7 +125,11 @@
   --paper: #0f1011;
   --paper-raised: #17181a;
   --paper-inset: #1f2023;
-  --sidebar: #0f1011;
+  --sidebar: #17181b;
+  --sidebar-line: rgb(255 255 255 / 7%);
+  --sidebar-hover: rgb(255 255 255 / 4%);
+  --sidebar-selected: rgb(255 255 255 / 8%);
+  --sidebar-account: rgb(255 255 255 / 3%);
   --ink: #f2f2f3;
   --ink-muted: #9a9da5;
   --line: #2a2b2f;
@@ -200,8 +208,8 @@ body,
 body {
   font-family:
     'Segoe UI',
-    'Microsoft YaHei',
     'Microsoft YaHei UI',
+    'Microsoft YaHei',
     'PingFang SC',
     -apple-system,
     BlinkMacSystemFont,

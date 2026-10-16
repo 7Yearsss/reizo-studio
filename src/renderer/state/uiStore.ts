@@ -1,8 +1,11 @@
 export type SidebarMode = 'chat' | 'projects' | 'skills' | 'artifacts' | 'automation' | 'settings';
-export type RightPanelTab = 'canvas' | 'sheets' | 'documents' | 'html' | 'presentations' | 'artifacts' | 'files' | 'git' | 'terminal';
+export type SettingsSection = 'general' | 'providers' | 'extensions' | 'usage' | 'admin' | 'storage' | 'about';
+export type RightPanelTab = 'canvas' | 'video' | 'sheets' | 'documents' | 'presentations' | 'artifacts' | 'files' | 'git' | 'terminal';
 
 export interface UiState {
   mode: SidebarMode;
+  settingsSection: SettingsSection;
+  settingsOpen: boolean;
   selectedProjectId: string | null;
   artifactsOpen: boolean;
   canvasOpen: boolean;
@@ -44,8 +47,7 @@ function readMode(): SidebarMode {
     raw === 'projects' ||
     raw === 'skills' ||
     raw === 'artifacts' ||
-    raw === 'automation' ||
-    raw === 'settings'
+    raw === 'automation'
   ) return raw;
   return 'chat';
 }
@@ -67,7 +69,7 @@ function readSidebarWidth(): number {
 function readRightTab(): RightPanelTab | null {
   if (typeof localStorage === 'undefined') return null;
   const raw = localStorage.getItem(RIGHT_TAB_KEY);
-  if (raw === 'canvas' || raw === 'sheets' || raw === 'documents' || raw === 'html' || raw === 'presentations' || raw === 'artifacts' || raw === 'files' || raw === 'git' || raw === 'terminal') {
+  if (raw === 'canvas' || raw === 'video' || raw === 'sheets' || raw === 'documents' || raw === 'presentations' || raw === 'artifacts' || raw === 'files' || raw === 'git' || raw === 'terminal') {
     return raw;
   }
   if (localStorage.getItem(CANVAS_KEY) === '1') return 'canvas';
@@ -84,6 +86,8 @@ const initialTab = readRightTab();
 
 let state: UiState = {
   mode: readMode(),
+  settingsSection: 'providers',
+  settingsOpen: false,
   selectedProjectId: typeof localStorage !== 'undefined' ? localStorage.getItem(PROJECT_KEY) : null,
   artifactsOpen: initialTab === 'artifacts',
   canvasOpen: initialTab === 'canvas',
@@ -133,7 +137,16 @@ export function getSnapshot(): UiState {
   return state;
 }
 
+export function openSettings(section: SettingsSection = 'providers'): void {
+  setState({ settingsOpen: true, settingsSection: section });
+}
+
+export function closeSettings(): void {
+  setState({ settingsOpen: false });
+}
+
 export function setMode(mode: SidebarMode): void {
+  if (mode === 'settings') { openSettings(); return; }
   setState({ mode });
 }
 

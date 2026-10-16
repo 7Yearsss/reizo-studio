@@ -46,6 +46,7 @@ export default function AssistantMessage({
   activities?: ReplyActivity[];
   turnOutcome?: TurnOutcome | null;
 }) {
+  const proposedEdits = parts?.some((part) => /^propose_.*_edits$/.test(part.name)) ?? false;
   return (
     <div className={`anim-msg group space-y-3 ${currentMatch ? 'chat-search-current' : ''}`}>
       <WorkGroupCard
@@ -82,7 +83,7 @@ export default function AssistantMessage({
             <span className="text-[11px] text-danger/80">回复失败{durationMs ? ` · ${formatDuration(durationMs)}` : ''}</span>
           ) : (
             <span className="text-[11px] text-ink-muted/70">
-              已完成{durationMs !== undefined && durationMs > 0 ? ` · ${formatDuration(durationMs)}` : ''}
+              已完成{durationMs !== undefined && durationMs > 0 && (parts?.length ?? 0) === 0 ? ` · ${formatDuration(durationMs)}` : ''}
             </span>
           )}
           <div className="flex gap-3 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
@@ -94,10 +95,11 @@ export default function AssistantMessage({
               <button
                 type="button"
                 onClick={onRetry}
+                title={proposedEdits ? '重新让 AI 提出修改建议；已接受的修改不会撤销' : undefined}
                 className="inline-flex items-center gap-1 text-[11px] text-ink-muted hover:text-ink"
               >
                 <RotateCcw size={11} />
-                重新生成
+                {proposedEdits ? '重新提出修改' : '重新生成'}
               </button>
             )}
           </div>

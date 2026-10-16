@@ -6,15 +6,13 @@ import {
   LayoutGrid,
   Pencil,
   Plus,
-  Settings,
   Sparkles,
   SquarePen,
   Timer,
   Trash2,
-  UserRound,
 } from 'lucide-react';
 import { cn } from '../../lib/cn';
-import { APP_VERSION } from '../../../shared/constants';
+import AccountControl from './AccountControl';
 import { useChatStore } from '../../state/useChatStore';
 import { useSettingsStore } from '../../state/useSettingsStore';
 import { useTabStore } from '../../state/useTabStore';
@@ -238,12 +236,12 @@ export default function Sidebar() {
 
   const navRow = (active: boolean) =>
     cn(
-      'flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-[14px] text-ink-muted outline-none transition-colors hover:bg-paper-inset hover:text-ink focus-visible:ring-2 focus-visible:ring-ink/40',
-      active && 'bg-paper-inset font-medium text-ink',
+      'flex min-h-10 w-full items-center gap-3 rounded-[10px] px-3 py-2 text-left text-[14px] leading-5 text-ink/75 outline-none transition-colors duration-150 hover:bg-[var(--sidebar-hover)] hover:text-ink focus-visible:inset-ring-2 focus-visible:inset-ring-ink/30 motion-reduce:transition-none',
+      active && 'bg-[var(--sidebar-selected)] font-medium text-ink shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:bg-[var(--sidebar-selected)]',
     );
 
   const foldRow =
-    'flex min-w-0 items-center gap-1 rounded-xl px-3 py-2 text-left text-[13px] text-ink-muted outline-none transition-colors hover:text-ink focus-visible:ring-2 focus-visible:ring-ink/40';
+    'flex min-w-0 shrink-0 items-center gap-1.5 rounded-lg px-3 py-2 text-left text-xs font-medium leading-5 text-ink-muted outline-none transition-colors hover:text-ink focus-visible:inset-ring-2 focus-visible:inset-ring-ink/30';
 
   const onPointerDown = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -307,7 +305,7 @@ export default function Sidebar() {
     <aside
       ref={asideRef}
       className={cn(
-        'relative flex h-full shrink-0 flex-col overflow-hidden bg-sidebar',
+        'relative flex h-full shrink-0 flex-col overflow-hidden border-r border-[var(--sidebar-line)] bg-sidebar',
         isDragging
           ? 'transition-none select-none'
           : 'transition-[width] duration-[var(--duration-base)] ease-[var(--ease-drawer)] motion-reduce:transition-none',
@@ -316,10 +314,10 @@ export default function Sidebar() {
       style={{ width: collapsed ? 0 : sidebarWidth }}
     >
       <div
-        className="anim-fade flex h-full w-full min-w-0 flex-col px-3 py-2.5 overflow-hidden"
+        className="anim-fade flex h-full w-full min-w-0 flex-col overflow-hidden px-3 pb-3 pt-3"
         style={collapsed ? { display: 'none' } : undefined}
       >
-        <nav className="flex flex-col gap-0.5" aria-label="Studio 导航">
+        <nav className="flex flex-col gap-1" aria-label="Studio 导航">
         <button
           type="button"
           onClick={() => {
@@ -358,19 +356,9 @@ export default function Sidebar() {
           <Timer size={18} className="shrink-0" strokeWidth={1.8} />
           自动化
         </button>
-        <button
-          type="button"
-          onClick={() => {
-            uiStore.setMode('settings');
-          }}
-          className={navRow(mode === 'settings')}
-        >
-          <Settings size={18} className="shrink-0" strokeWidth={1.8} />
-          设置
-        </button>
       </nav>
 
-      <div className="mt-5 flex min-h-0 flex-1 flex-col gap-1 overflow-hidden">
+      <div className="mt-7 flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
         <div className="flex min-h-0 shrink-0 flex-col">
           <div className="flex items-center gap-1">
             <button type="button" onClick={toggleProjectsOpen} className={cn(foldRow, 'flex-1')} aria-expanded={projectsOpen}>
@@ -388,7 +376,7 @@ export default function Sidebar() {
               onClick={() => setProjectDialogOpen(true)}
               title="新建项目"
               aria-label="新建项目"
-              className="mr-1 inline-flex size-7 items-center justify-center rounded-lg text-ink-muted hover:bg-paper-inset hover:text-ink"
+              className="mr-1 inline-flex size-7 items-center justify-center rounded-lg text-ink-muted hover:bg-[var(--sidebar-hover)] hover:text-ink"
             >
               <Plus size={14} />
             </button>
@@ -399,7 +387,7 @@ export default function Sidebar() {
                 <button
                   type="button"
                   onClick={() => setProjectDialogOpen(true)}
-                  className="w-full rounded-xl px-3 py-2 text-left text-xs leading-5 text-ink-muted hover:bg-paper-inset"
+                  className="w-full rounded-xl px-3 py-2 text-left text-xs leading-5 text-ink-muted hover:bg-[var(--sidebar-hover)]"
                 >
                   创建一个项目
                 </button>
@@ -416,8 +404,8 @@ export default function Sidebar() {
                       uiStore.setMode('chat');
                     }}
                     className={cn(
-                      'flex w-full items-center gap-2 rounded-xl px-3 py-1.5 text-left text-[13px] text-ink-muted hover:bg-paper-inset hover:text-ink',
-                      active && 'bg-paper-inset text-ink',
+                      'flex w-full items-center gap-2 rounded-[10px] px-3 py-2 text-left text-[13px] leading-5 text-ink/75 outline-none transition-colors focus-visible:inset-ring-2 focus-visible:inset-ring-ink/30 hover:bg-[var(--sidebar-hover)] hover:text-ink',
+                      active && 'bg-[var(--sidebar-selected)] font-medium text-ink hover:bg-[var(--sidebar-selected)]',
                     )}
                     title={project.description || project.name}
                   >
@@ -458,8 +446,8 @@ export default function Sidebar() {
                             tabStore.openChatTab(session.id, session.title);
                           }}
                           className={cn(
-                            'flex w-full items-center gap-2 rounded-xl px-3 py-1.5 text-left text-sm text-ink-muted hover:bg-paper-inset hover:text-ink',
-                            active && 'bg-paper-inset text-ink',
+                            'flex w-full items-center gap-2 rounded-[10px] px-3 py-2 text-left text-[13px] leading-5 text-ink/75 outline-none transition-colors focus-visible:inset-ring-2 focus-visible:inset-ring-ink/30 hover:bg-[var(--sidebar-hover)] hover:text-ink',
+                            active && 'bg-[var(--sidebar-selected)] font-medium text-ink hover:bg-[var(--sidebar-selected)]',
                           )}
                         >
                           <SessionStatus pending={!!pendingKind} unread={!!unreadBySession[session.id]} running={!!sendingBySession[session.id]} />
@@ -543,8 +531,8 @@ export default function Sidebar() {
                         tabStore.openChatTab(session.id, session.title);
                       }}
                       className={cn(
-                        'group flex w-full items-center gap-2 rounded-xl px-3 py-1.5 text-left text-sm text-ink-muted hover:bg-paper-inset hover:text-ink',
-                        active && 'bg-paper-inset text-ink',
+                        'group flex w-full items-center gap-2 rounded-[10px] px-3 py-2 text-left text-[13px] leading-5 text-ink/75 outline-none transition-colors focus-visible:inset-ring-2 focus-visible:inset-ring-ink/30 hover:bg-[var(--sidebar-hover)] hover:text-ink',
+                        active && 'bg-[var(--sidebar-selected)] font-medium text-ink hover:bg-[var(--sidebar-selected)]',
                       )}
                     >
                       <SessionStatus pending={!!pendingKind} unread={!!unreadBySession[session.id]} running={!!sendingBySession[session.id]} />
@@ -615,22 +603,8 @@ export default function Sidebar() {
         </div>
       </div>
 
-      <div className="mt-auto p-1 pb-1">
-        <div className="flex items-center gap-2 rounded-full bg-paper-raised px-2 py-1.5">
-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-paper-inset text-ink-muted">
-            <UserRound size={14} />
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              uiStore.setMode('settings');
-            }}
-            className="min-w-0 flex-1 text-left"
-          >
-            <div className="truncate text-xs font-medium text-ink">未登录</div>
-            <div className="truncate text-[11px] text-ink-muted">本地 · {APP_VERSION}</div>
-          </button>
-        </div>
+      <div className="mt-3 shrink-0 border-t border-[var(--sidebar-line)] pt-3">
+        <AccountControl />
       </div>
       </div>
 

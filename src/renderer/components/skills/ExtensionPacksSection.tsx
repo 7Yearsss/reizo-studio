@@ -82,7 +82,7 @@ export default function ExtensionPacksSection() {
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    try { setPacks(await window.reizo.listPlugins()); } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    try { setPacks((await window.reizo?.listPlugins?.()) ?? []); } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
   // The Discover section installs packs too; it announces that here.
@@ -113,7 +113,7 @@ export default function ExtensionPacksSection() {
         <button
           type="button"
           disabled={busyId !== null}
-          onClick={() => void act(null, () => window.reizo.installPlugin())}
+          onClick={() => void act(null, () => (window.reizo?.installPlugin ? window.reizo.installPlugin() : Promise.resolve(null)))}
           className="ml-auto inline-flex items-center gap-1 rounded-full border border-line px-3 py-1 text-xs text-ink-muted transition-colors hover:border-ink-muted hover:text-ink disabled:opacity-50"
         >
           <Plus size={12} />
@@ -137,10 +137,12 @@ export default function ExtensionPacksSection() {
                   const text = enableConfirmText(pack);
                   if (text && !window.confirm(text)) return;
                 }
-                void act(pack.id, () => window.reizo.setPluginEnabled(pack.id, !pack.enabled));
+                void act(pack.id, () => (window.reizo?.setPluginEnabled ? window.reizo.setPluginEnabled(pack.id, !pack.enabled) : Promise.resolve()));
               }}
               onRemove={() => {
-                if (window.confirm(`卸载「${pack.name}」？它的文件会被删除。`)) void act(pack.id, () => window.reizo.uninstallPlugin(pack.id));
+                if (window.confirm(`卸载「${pack.name}」？它的文件会被删除。`)) {
+                  void act(pack.id, () => (window.reizo?.uninstallPlugin ? window.reizo.uninstallPlugin(pack.id) : Promise.resolve()));
+                }
               }}
             />
           ))}

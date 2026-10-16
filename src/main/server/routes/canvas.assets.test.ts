@@ -41,6 +41,14 @@ async function fixture() {
 }
 
 describe('canvas asset publication', () => {
+  it('rejects a legacy asset index when it no longer points to the selected immutable path', async () => {
+    const f = await fixture();
+    const source = f.store.addNode(f.canvasId, { type: 'image', x: 0, y: 0, w: 100, h: 100, params: {} }).node;
+    f.store.updateNode(f.canvasId, source.id, { output: { assets: [`${f.canvasId}/new.png`] } });
+    const response = await f.post(`/api/canvas/${f.canvasId}/assets/reuse`, { sourceNodeId: source.id, assetIndex: 0, expectedPath: `${f.canvasId}/old.png` }, 'stale-version');
+    expect(response.status).toBe(409);
+    expect(f.store.getNodes(f.canvasId)).toHaveLength(1);
+  });
   it('keeps committed upload files when a commit observer aborts the HTTP request', async () => {
     const f = await fixture();
     const abort = new AbortController();

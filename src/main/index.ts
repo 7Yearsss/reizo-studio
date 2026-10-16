@@ -19,6 +19,7 @@ import { startScheduler } from './schedulerHost';
 import { drainMemoryJobs } from './memoryJobs';
 import { registerSkillIpc } from './skillsIpc';
 import { registerPluginIpc } from './pluginsIpc';
+import { registerAccountIpc } from './account/ipc';
 
 if (started) {
   app.quit();
@@ -52,6 +53,7 @@ let dbHandle: DbHandle | null = null;
 let freezeTurnMarkers: (() => void) | null = null;
 let stopScheduler: (() => Promise<void>) | null = null;
 let shuttingDown = false;
+let stopAccount: (() => void) | null = null;
 // Recovery assumes exclusive ownership of this data directory.
 const primaryInstance = !started && app.requestSingleInstanceLock();
 if (!primaryInstance) app.quit();
@@ -65,6 +67,7 @@ function devServerOrigin(): string | undefined {
 }
 
 async function bootstrap(): Promise<void> {
+  if (app.isPackaged) process.env.REIZO_VIDEO_EDITOR_RUNTIME = path.join(process.resourcesPath, 'video-editor', 'runtime.json');
   const dataRoot = path.join(app.getPath('userData'), 'data');
   mkdirSync(dataRoot, { recursive: true });
   const settingsStore = createSettingsStore(dataRoot);
@@ -101,6 +104,7 @@ async function bootstrap(): Promise<void> {
   registerWorkspaceIpc(settingsStore);
   registerSkillIpc(path.join(dataRoot, 'skills'));
   registerPluginIpc(dataRoot, skillsDirs);
+  stopAccount = registerAccountIpc(dataRoot);
 
   createMainWindow();
   createTray();
@@ -112,6 +116,7 @@ async function bootstrap(): Promise<void> {
 async function shutdown(): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
+  stopAccount?.();
   // Synchronously, before any awaits: stop the server's shutdown path from
   // stamping a normal `last_turn_ended_at` over a turn that was really
   // interrupted by this quit.

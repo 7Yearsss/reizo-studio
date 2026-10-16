@@ -4,6 +4,7 @@ import { ImageGeneration } from '../agents/image-generation';
 import { getResolvedApiOrigin } from '../../api';
 import DiffView from './LazyDiffView';
 import DeliverableCard, { deliverableOf } from './DeliverableCard';
+import ReviewProposalCard, { reviewProposalOf } from './ReviewProposalCard';
 import { toolDetail, toolDiffPreview, toolLabel, toolTarget } from './toolDisplay';
 
 export default function ToolCard({ part, collapsed = false }: { part: ToolCallPart; collapsed?: boolean }) {
@@ -107,6 +108,9 @@ export default function ToolCard({ part, collapsed = false }: { part: ToolCallPa
       </ToolResult>
     );
   }
+
+  const proposal = reviewProposalOf(part);
+  if (proposal) return <ReviewProposalCard proposal={proposal} />;
 
   const deliverable = deliverableOf(part);
   if (deliverable) return <DeliverableCard part={part} file={deliverable} />;

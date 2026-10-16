@@ -13,7 +13,7 @@ const TYPE_LABEL: Record<string, string> = {
 
 function label(ev: MemoryEventRecord): string {
   const n = ev.items.length;
-  if (ev.action === 'recalled') return `想起了 ${n} 条记忆`;
+  if (ev.action === 'recalled') return n === 1 && ev.items[0].name ? `想起了 · ${ev.items[0].name}` : `想起了 ${n} 条记忆`;
   if (ev.action === 'wrote') return n === 1 ? `已记住 · ${ev.items[0].name}` : `已记住 ${n} 条`;
   return n === 1 ? `已删除记忆 · ${ev.items[0].name}` : `已删除 ${n} 条记忆`;
 }

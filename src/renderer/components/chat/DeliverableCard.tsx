@@ -5,7 +5,6 @@ import { useTabStore } from '../../state/useTabStore';
 import { useUiStore } from '../../state/useUiStore';
 import * as uiStore from '../../state/uiStore';
 import { selectDocument } from '../../state/documentWorkspace';
-import { selectHtml } from '../../state/htmlWorkspace';
 import { selectPresentation } from '../../state/presentationWorkspace';
 import { selectWorkbook } from '../../state/sheetWorkspace';
 
@@ -20,7 +19,6 @@ const KINDS: Record<string, Kind> = {
   generate_document: { label: '文档', Icon: FileText, tab: 'documents', select: selectDocument },
   generate_presentation: { label: '演示文稿', Icon: Presentation, tab: 'presentations', select: selectPresentation },
   generate_sheet: { label: '表格', Icon: Sheet, tab: 'sheets', select: selectWorkbook },
-  generate_html: { label: '网页', Icon: FileCode2, tab: 'html', select: selectHtml },
 };
 
 export interface Deliverable {

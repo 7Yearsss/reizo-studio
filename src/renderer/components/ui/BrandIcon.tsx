@@ -265,7 +265,7 @@ function TencentLogo({ className }: { className?: string }) {
   );
 }
 
-export const BUILTIN_BRAND_COLORS: Partial<Record<BuiltinBrandId, string>> = {
+const BUILTIN_BRAND_COLORS: Partial<Record<BuiltinBrandId, string>> = {
   gitee: '#C71D23',
   yuque: '#00C472',
   dingtalk: '#0089FF',

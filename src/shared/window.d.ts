@@ -26,6 +26,11 @@ import type {
 } from './skillhub';
 
 export interface ReizoBridge {
+  accountStatus(): Promise<import('./account').AccountState>;
+  accountLogin(): Promise<import('./account').AccountState>;
+  accountLogout(): Promise<import('./account').AccountState>;
+  accountReopen(): Promise<import('./account').AccountState>;
+  accountRefresh(): Promise<import('./account').AccountState>;
   platform: NodeJS.Platform;
   getApiOrigin(): Promise<string>;
   windowMinimize(): Promise<void>;

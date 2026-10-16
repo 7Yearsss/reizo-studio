@@ -1,5 +1,4 @@
 import { splitDocumentContext } from './documentReferences';
-import { splitHtmlContext } from './htmlReferences';
 import { splitPresentationContext } from './presentationReferences';
 import { splitSheetContext } from './sheetReferences';
 
@@ -17,14 +16,12 @@ const clip = (text: string | undefined) => (text && text.length > PREVIEW ? `${t
 export function compactReferenceContext(content: string): string {
   if (!content.includes('-context>') && !content.includes('Referenced spreadsheets')) return content;
   const presentation = splitPresentationContext(content);
-  const html = splitHtmlContext(presentation.text);
-  const doc = splitDocumentContext(html.text);
+  const doc = splitDocumentContext(presentation.text);
   const sheet = splitSheetContext(doc.text);
   const notes = [
     ...doc.refs.map((r) => `Doc ${JSON.stringify(r.name)} id=${r.artifactId}${r.selection ? ` selected${r.label ? ` [${r.label}]` : ''} ${JSON.stringify(clip(r.selection.text))}` : ''}`),
     ...sheet.refs.map((r) => `Excel ${JSON.stringify(r.name)} id=${r.artifactId}${r.sheetName ? ` sheet=${JSON.stringify(r.sheetName)}` : ''}${r.range ? ` range=${r.range}` : ''}`),
     ...presentation.refs.map((r) => `PPT ${JSON.stringify(r.name)} id=${r.artifactId}${r.slideId ? ` slide=${r.slideId}` : ''}${r.elementIds?.length ? ` elements=${r.elementIds.length}` : ''}`),
-    ...html.refs.map((r) => `HTML ${JSON.stringify(r.name)} id=${r.artifactId}${r.selection ? ` selected${r.label ? ` [${r.label}]` : ''} ${JSON.stringify(clip(r.selection.text))}` : ''}`),
   ];
   if (!notes.length) return sheet.text;
   return `${sheet.text}\n\n[Files referenced in this earlier message (content omitted, may have changed — re-read with read_* before relying on it): ${notes.join('; ')}]`;

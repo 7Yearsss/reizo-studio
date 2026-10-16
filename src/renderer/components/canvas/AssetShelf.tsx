@@ -20,6 +20,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Field, FieldGroup, FieldLabel } from '../ui/field';
 import { Separator } from '../ui/separator';
 import { Tooltip } from '../ui/Tooltip';
+import { sendAssetToVideoEditor } from '../../lib/sendToVideoEditor';
 
 const KIND_LABELS: Record<ReusableMediaKind, string> = { image: '图片', video: '视频', audio: '音频' };
 
@@ -41,16 +42,17 @@ function Thumb({ rel, kind = 'image' }: { rel: string | undefined; kind?: Reusab
 interface ReuseAction { input: ReuseCanvasAssetInput; key: string }
 type ReuseHandler = (action: ReuseAction, asReference: boolean) => void;
 
-function AssetActions({ action, image, busy, onReuse }: { action: ReuseAction; image: boolean; busy: boolean; onReuse: ReuseHandler }) {
+function AssetActions({ sessionId, action, image, busy, onReuse }: { sessionId: string; action: ReuseAction; image: boolean; busy: boolean; onReuse: ReuseHandler }) {
   return <div className="flex items-center justify-between gap-1">
     <Button type="button" variant="ghost" size="xs" disabled={busy} onClick={() => onReuse(action, false)} aria-label={`将${action.input.title || '素材'}加入画布`}>
       {busy ? <LoaderCircle data-icon="inline-start" className="animate-spin motion-reduce:animate-none" /> : <Plus data-icon="inline-start" />}{busy ? '正在加入' : '加入画布'}
     </Button>
+    <Button type="button" variant="ghost" size="xs" disabled={busy} onClick={() => void sendAssetToVideoEditor(sessionId, action.input)}><Film data-icon="inline-start" />送到剪辑</Button>
     {image ? <div className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none"><Tooltip content="将此版本固定为参考图钉"><Button type="button" variant="ghost" size="xs" disabled={busy} onClick={() => onReuse(action, true)} aria-label={`引用${action.input.title || '图片'}的此版本`}><Pin data-icon="inline-start" />引用</Button></Tooltip></div> : null}
   </div>;
 }
 
-function CurrentMedia({ node, busy, onReuse, onFocus }: { node: CanvasNode; busy: boolean; onReuse: ReuseHandler; onFocus: () => void }) {
+function CurrentMedia({ sessionId, node, busy, onReuse, onFocus }: { sessionId: string; node: CanvasNode; busy: boolean; onReuse: ReuseHandler; onFocus: () => void }) {
   const assets = node.output?.assets ?? [];
   const [picked, setPicked] = useState<string | null>(null);
   const active = assets[node.output?.activeAssetIndex ?? 0] ?? assets[0];
@@ -59,7 +61,7 @@ function CurrentMedia({ node, busy, onReuse, onFocus }: { node: CanvasNode; busy
   const version = node.output?.resultSet?.find((item) => item.asset === selected);
   const kind = node.type === 'frameExtractor' ? 'image' : node.type as ReusableMediaKind;
   const action: ReuseAction = { key: node.id, input: { ...(version?.assetId ? { assetId: version.assetId }
-    : { sourceNodeId: node.id, sourceCanvasId: node.canvasId, assetIndex }), title: node.title || `${KIND_LABELS[kind]}素材` } };
+    : { sourceNodeId: node.id, sourceCanvasId: node.canvasId, assetIndex, expectedPath: selected }), title: node.title || `${KIND_LABELS[kind]}素材` } };
   return <article aria-busy={busy} className="group flex flex-col gap-2 rounded-xl p-2.5 transition-colors hover:bg-paper-inset/25 focus-within:bg-paper-inset/25 motion-reduce:transition-none">
     <div className="flex items-start gap-3">
       <button type="button" onClick={onFocus} aria-label={`定位到${node.title || KIND_LABELS[kind]}`} className="size-12 shrink-0 overflow-hidden rounded-lg outline-none ring-offset-2 ring-offset-paper-raised focus-visible:ring-2 focus-visible:ring-ring"><Thumb rel={selected} kind={kind} /></button>
@@ -72,11 +74,11 @@ function CurrentMedia({ node, busy, onReuse, onFocus }: { node: CanvasNode; busy
       <SelectTrigger size="sm" aria-label={`${node.title || '素材'}的版本`} className="w-full"><SelectValue /></SelectTrigger>
       <SelectContent><SelectGroup>{assets.map((asset, index) => <SelectItem key={`${asset}:${index}`} value={String(index)}>版本 {index + 1}{asset === active ? '（当前）' : ''}</SelectItem>)}</SelectGroup></SelectContent>
     </Select> : null}
-    <AssetActions action={action} image={kind === 'image'} busy={busy} onReuse={onReuse} />
+    <AssetActions sessionId={sessionId} action={action} image={kind === 'image'} busy={busy} onReuse={onReuse} />
   </article>;
 }
 
-function LibraryMedia({ asset, busy, onReuse, onSaved }: { asset: CanvasAssetSummary; busy: boolean; onReuse: ReuseHandler; onSaved: () => void }) {
+function LibraryMedia({ sessionId, asset, busy, onReuse, onSaved }: { sessionId: string; asset: CanvasAssetSummary; busy: boolean; onReuse: ReuseHandler; onSaved: () => void }) {
   const kind = asset.kind as ReusableMediaKind;
   const date = new Date(asset.createdAt);
   const created = Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
@@ -94,7 +96,7 @@ function LibraryMedia({ asset, busy, onReuse, onSaved }: { asset: CanvasAssetSum
     </div>
     {asset.folder || asset.tags?.length ? <div className="flex min-w-0 items-center gap-2 text-[10px] text-ink-muted">{asset.folder ? <span className="flex min-w-0 items-center gap-1" title={asset.folder}><FolderOpen size={11} className="shrink-0" /><span className="max-w-28 truncate">{asset.folder}</span></span> : null}{asset.tags?.slice(0, 2).map((tag) => <span key={tag} className="max-w-20 truncate" title={tag}>#{tag}</span>)}{asset.tags?.length > 2 ? <span className="shrink-0" title={asset.tags.join('，')}>+{asset.tags.length - 2}</span> : null}</div> : null}
     <AssetMetadataEditor asset={asset} onSaved={onSaved} />
-    <AssetActions action={{ key: asset.id, input: { assetId: asset.id, title: asset.label } }} image={kind === 'image'} busy={busy} onReuse={onReuse} />
+    <AssetActions sessionId={sessionId} action={{ key: asset.id, input: { assetId: asset.id, title: asset.label } }} image={kind === 'image'} busy={busy} onReuse={onReuse} />
   </article>;
 }
 
@@ -251,7 +253,7 @@ function AssetShelf({ sessionId, selectedTargetIds, flash, open, onOpenChange, h
             })}
             {anchors.length && media.length ? <Separator className="my-2" /> : null}
             {media.length ? <div className="flex items-center justify-between px-2 pb-1 pt-2 text-[11px] text-ink-muted"><span>画布产物</span><span>{media.length}</span></div> : null}
-            {media.map((node) => <CurrentMedia key={`${sessionId}:${node.id}`} node={node} busy={Boolean(busy[keyFor(node.id)])} onReuse={onReuse} onFocus={() => canvasStore.focusNode(sessionId, node.id)} />)}
+            {media.map((node) => <CurrentMedia sessionId={sessionId} key={`${sessionId}:${node.id}`} node={node} busy={Boolean(busy[keyFor(node.id)])} onReuse={onReuse} onFocus={() => canvasStore.focusNode(sessionId, node.id)} />)}
             {!anchors.length && !media.length ? <Empty className="py-8"><EmptyHeader><EmptyMedia variant="icon"><ImagePlus /></EmptyMedia><EmptyTitle>把灵感放进画布</EmptyTitle><EmptyDescription>上传参考图片，或从素材库加入已有作品。生成结果也会保留在这里。</EmptyDescription></EmptyHeader><EmptyContent><Button type="button" variant="outline" size="sm" disabled={busy[keyFor('upload')]} onClick={() => fileRef.current?.click()}><ImagePlus data-icon="inline-start" />上传参考图片</Button><Button type="button" variant="ghost" size="xs" onClick={() => setMode('library')}>浏览素材库</Button></EmptyContent></Empty> : null}
           </div>
         </TabsContent>
@@ -276,7 +278,7 @@ function AssetShelf({ sessionId, selectedTargetIds, flash, open, onOpenChange, h
           <div className="px-2 py-2" aria-busy={scopedLibrary.loading || moreLoading}>
             {scopedLibrary.loading && !scopedLibrary.assets.length ? <div className="flex flex-col gap-3 p-2" role="status" aria-label="正在加载素材库">{[0, 1, 2].map((item) => <div key={item} className="flex items-start gap-3"><Skeleton className="size-12 shrink-0" /><div className="flex flex-1 flex-col gap-2"><Skeleton className="h-3 w-4/5" /><Skeleton className="h-3 w-3/5" /><Skeleton className="h-5 w-20" /></div></div>)}</div>
               : scopedLibrary.error && !scopedLibrary.assets.length ? <Alert variant="destructive"><AlertTitle>素材库暂时无法加载</AlertTitle><AlertDescription className="min-w-0 [overflow-wrap:anywhere]">{scopedLibrary.error}<Button type="button" variant="outline" size="xs" onClick={() => setRefresh((value) => value + 1)}>重新加载</Button></AlertDescription></Alert>
-                : scopedLibrary.assets.length ? <div className="flex flex-col gap-1">{scopedLibrary.assets.map((asset) => <LibraryMedia key={asset.id} asset={asset} busy={Boolean(busy[keyFor(asset.id)])} onReuse={onReuse} onSaved={() => setRefresh((value) => value + 1)} />)}{scopedLibrary.error ? <Alert variant="destructive"><AlertTitle>素材更新未完成</AlertTitle><AlertDescription className="min-w-0 [overflow-wrap:anywhere]">{scopedLibrary.error}<Button type="button" variant="ghost" size="xs" onClick={() => setRefresh((value) => value + 1)}>重新加载</Button></AlertDescription></Alert> : null}</div>
+                : scopedLibrary.assets.length ? <div className="flex flex-col gap-1">{scopedLibrary.assets.map((asset) => <LibraryMedia sessionId={sessionId} key={asset.id} asset={asset} busy={Boolean(busy[keyFor(asset.id)])} onReuse={onReuse} onSaved={() => setRefresh((value) => value + 1)} />)}{scopedLibrary.error ? <Alert variant="destructive"><AlertTitle>素材更新未完成</AlertTitle><AlertDescription className="min-w-0 [overflow-wrap:anywhere]">{scopedLibrary.error}<Button type="button" variant="ghost" size="xs" onClick={() => setRefresh((value) => value + 1)}>重新加载</Button></AlertDescription></Alert> : null}</div>
                   : <Empty className="py-8"><EmptyHeader><EmptyMedia variant="icon"><Library /></EmptyMedia><EmptyTitle>{hasQuery ? '没有找到这些素材' : '素材库等着你的作品'}</EmptyTitle><EmptyDescription>{hasQuery ? '试试其它名称、目录或标签。' : '已保存的图片、视频和音频会保留在这里，可以复用到其它画布。'}</EmptyDescription></EmptyHeader>{hasQuery ? <EmptyContent><Button type="button" variant="outline" size="sm" onClick={resetFilters}>清除筛选</Button></EmptyContent> : null}</Empty>}
           </div>
           </div>

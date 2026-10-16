@@ -1,5 +1,4 @@
 import { presentationReviewAdapter } from './agent/presentationTools';
-import { htmlReviewAdapter } from './agent/htmlTools';
 import { createArtifactReviewStore } from './storage/artifactReviewStore';
 import { documentReviewAdapter } from './agent/documentReviewAdapter';
 import { sheetReviewAdapter } from './agent/sheetReviewAdapter';
@@ -48,6 +47,10 @@ import { resumeVideoJobs, stopVideoJobsForStore } from './canvas/asyncJobManager
 import { createCanvasMaintenanceRouter } from './routes/canvasMaintenance';
 import { createUsageRouter } from './routes/usage';
 import { closeAllMcpSessions, closeSessionMcp } from './agent/mcpTools';
+import { createVideoEditorRouter } from './routes/videoEditor';
+import { stopEditorMedia } from './videoEditor/mediaExchange';
+import { stopVideoEditor } from './videoEditor/service';
+import { videoExportTasksFor, stopVideoExportTasks } from './videoEditor/exportTaskService';
 
 export interface CreateAppOptions {
   /** Directory the local session/settings JSON files live under. */
@@ -164,7 +167,7 @@ export function createApp(options: CreateAppOptions) {
   // features work under `test:api` too.
   const db = options.db ?? openDb(':memory:');
   const artifactStore = createArtifactStore(db, options.dataRoot);
-  const artifactReviews = createArtifactReviewStore(db, artifactStore, options.dataRoot, { doc: documentReviewAdapter, html: htmlReviewAdapter, presentation: presentationReviewAdapter, sheet: sheetReviewAdapter });
+  const artifactReviews = createArtifactReviewStore(db, artifactStore, options.dataRoot, { doc: documentReviewAdapter, presentation: presentationReviewAdapter, sheet: sheetReviewAdapter });
   const canvasStore = createCanvasStore(db);
   recoverCanvasJobs(canvasStore);
   let canvasJobsStopped = false;
@@ -173,9 +176,13 @@ export function createApp(options: CreateAppOptions) {
   const startCanvasJobs = () => {
     if (canvasJobsStarted || canvasJobsStopped) return;
     canvasJobsStarted = true;
+    void videoExportTasksFor(options.dataRoot, canvasStore).start().catch((error) => console.error('导出任务恢复失败', error));
     resumeVideoJobs({ canvasStore, settingsStore, providerStore, dataRoot: options.dataRoot });
   };
   const stopCanvasJobs = () => {
+    stopVideoExportTasks(options.dataRoot);
+    stopVideoEditor(options.dataRoot);
+    stopEditorMedia(options.dataRoot);
     if (canvasJobsStopped) return;
     canvasJobsStopped = true;
     stopVideoJobsForStore(canvasStore);
@@ -197,6 +204,7 @@ export function createApp(options: CreateAppOptions) {
   });
 
   app.get('/api/health', (c) => c.json({ ok: true }));
+  app.route('/api/video-editor', createVideoEditorRouter(options.dataRoot, sessionStore, canvasStore, artifactStore));
   const skillsDirs = options.skillsDirs ?? [];
   const memoryEventsStore = createMemoryEventsStore(options.dataRoot);
   const scheduleStore = options.scheduleStore ?? createScheduleStore(options.dataRoot);

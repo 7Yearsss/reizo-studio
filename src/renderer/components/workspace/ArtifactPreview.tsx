@@ -11,16 +11,15 @@ import ArtifactVersionRail from './ArtifactVersionRail';
 import HandoffMenu from './HandoffMenu';
 import { parseSheetContent } from '../../../shared/sheetContent';
 import SheetDocument from './SheetDocument';
+import { sendArtifactToVideoEditor } from '../../lib/sendToVideoEditor';
 
 const DocumentEditor = createDeferredView<{ artifact: Artifact }>(() => import('./DocumentEditor'), { label: 'Doc', minHeight: 420 });
 
-const HtmlEditor = createDeferredView<{ artifact: Artifact }>(() => import('./HtmlEditor'), { label: 'HTML', minHeight: 420 });
 
 const PresentationEditor = createDeferredView<{ artifact: Artifact }>(() => import('./PresentationEditor'), { label: 'PPT', minHeight: 420 });
 
 export default function ArtifactPreview(props: { artifact: Artifact; onClose: () => void }) {
   if (props.artifact.kind === 'presentation') return <PresentationEditor key={props.artifact.id} artifact={props.artifact} />;
-  if (props.artifact.kind === 'html') return <HtmlEditor key={props.artifact.id} artifact={props.artifact} />;
   if (props.artifact.kind === 'doc') return <DocumentEditor key={props.artifact.id} artifact={props.artifact} />;
   return props.artifact.kind === 'sheet' ? <SheetDocument key={props.artifact.id} {...props} /> : <GeneralArtifactPreview {...props} />;
 }
@@ -141,6 +140,7 @@ function GeneralArtifactPreview({
         {artifact.status === 'streaming' && (
           <span className="rounded bg-accent/10 px-1.5 text-[11px] text-accent">生成中…</span>
         )}
+        {['image', 'video', 'audio'].includes(artifact.kind) && artifact.status === 'complete' && <button type="button" disabled={loading} className="shrink-0 rounded border border-line px-2 py-1 text-xs disabled:opacity-50" onClick={() => void sendArtifactToVideoEditor(artifact.sessionId, artifact.id, version)} title={`发送当前预览版本 v${version} 到该作品所属对话的剪辑工程`}>送到剪辑</button>}
         {artifact.status === 'error' && (
           <span className="rounded bg-red-500/10 px-1.5 text-[11px] text-red-500">中断</span>
         )}

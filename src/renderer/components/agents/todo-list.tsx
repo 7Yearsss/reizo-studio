@@ -48,7 +48,7 @@ export interface TodoListProps {
 
 function statusLabel(status: TodoItemStatus) {
   if (status === "in-progress") return "In progress";
-  if (status === "completed") return "Completed";
+  if (status === "completed") return "已完成";
   if (status === "cancelled") return "Cancelled";
   return "Pending";
 }

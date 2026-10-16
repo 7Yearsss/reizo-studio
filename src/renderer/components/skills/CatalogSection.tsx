@@ -95,7 +95,12 @@ function McpDiscover() {
     setLoading(true);
     setError(null);
     try {
-      const page = await window.reizo.searchMcpCatalog({ search: query || undefined, cursor: after });
+      const page = await window.reizo?.searchMcpCatalog?.({ search: query || undefined, cursor: after });
+      if (!page) {
+        setItems([]);
+        setLoading(false);
+        return;
+      }
       setItems((prev) => (after ? [...prev, ...page.items] : page.items));
       setCursor(page.nextCursor);
     } catch (cause) { setError(message(cause)); }
@@ -104,15 +109,15 @@ function McpDiscover() {
   useEffect(() => { void load(debounced); }, [debounced, load]);
 
   async function openAdd(item: McpCatalogItem) {
-    try { setExisting(await window.reizo.listMcpServers()); } catch { setExisting([]); }
+    try { setExisting((await window.reizo?.listMcpServers?.()) ?? []); } catch { setExisting([]); }
     setAdding(item);
   }
 
   async function save(entry: McpServerEntry) {
     try {
-      const current = await window.reizo.listMcpServers();
+      const current = (await window.reizo?.listMcpServers?.()) ?? [];
       const name = freeServerName(entry.name, new Set(current.map((e) => e.name)));
-      await window.reizo.saveMcpServers([...current, { ...entry, name }]);
+      await window.reizo?.saveMcpServers?.([...current, { ...entry, name }]);
       setAdding(null);
       toast.success(`已添加 ${name}`, '在 设置 → 扩展 里可以测试连接、停用或修改。');
     } catch (cause) { toast.error('添加失败', message(cause)); }
@@ -214,10 +219,20 @@ function PluginDiscover() {
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const refreshInstalled = useCallback(async () => {
-    try { setInstalledIds(new Set((await window.reizo.listPlugins()).map((p) => p.id))); } catch { /* the list just stays empty */ }
+    try {
+      const plugins = (await window.reizo?.listPlugins?.()) ?? [];
+      setInstalledIds(new Set(plugins.map((p) => p.id)));
+    } catch { /* the list just stays empty */ }
   }, []);
   useEffect(() => {
-    window.reizo.listPluginCatalog().then((catalog) => setItems(catalog.items), (cause) => { setError(message(cause)); setItems([]); });
+    if (!window.reizo?.listPluginCatalog) {
+      setItems([]);
+      return;
+    }
+    window.reizo.listPluginCatalog().then(
+      (catalog) => setItems(catalog?.items ?? []),
+      (cause) => { setError(message(cause)); setItems([]); },
+    );
     void refreshInstalled();
     window.addEventListener(PACKS_CHANGED, refreshInstalled);
     return () => window.removeEventListener(PACKS_CHANGED, refreshInstalled);
@@ -231,6 +246,10 @@ function PluginDiscover() {
   useEffect(() => { setShown(PAGE); }, [search, category]);
 
   async function install(item: PluginCatalogItem) {
+    if (!window.reizo?.installCatalogPlugin) {
+      toast.error('安装失败', '当前运行环境不支持安装扩展包');
+      return;
+    }
     setBusyId(item.id);
     try {
       const pack = await window.reizo.installCatalogPlugin(item.id);
