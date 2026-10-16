@@ -194,7 +194,7 @@ export default function RightPanel({
         'relative flex h-full flex-col overflow-hidden bg-paper-raised',
         maximized
           ? 'w-full'
-          : 'shrink-0 self-stretch my-2 mr-2 !h-auto rounded-3xl shadow-[var(--shadow-outline)]',
+          : 'shrink-0 self-stretch my-2 mr-2 !h-auto rounded-3xl shadow-[var(--shadow-panel)]',
         isDragging && 'select-none',
       )}
     >

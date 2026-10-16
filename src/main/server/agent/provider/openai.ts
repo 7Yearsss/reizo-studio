@@ -1,5 +1,6 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import { extractReasoningMiddleware, wrapLanguageModel, type LanguageModel } from 'ai';
 
 /**
  * Provider factory — mirrors the shape of winlume's
@@ -145,6 +146,15 @@ export function createOpenAiProvider(options: { apiKey: string; baseUrl?: string
   });
 }
 
+/**
+ * Some gateways stream a model's reasoning inline as `<think>…</think>` in the text channel (often leaving
+ * earlier blocks unclosed). Left alone it shows up in the reply, and a line starting with `</think>` makes
+ * Markdown treat the rest as an HTML block. Move it to the reasoning channel where it belongs.
+ */
+export function withThinkTagExtraction(model: Exclude<LanguageModel, string>): LanguageModel {
+  return wrapLanguageModel({ model, middleware: extractReasoningMiddleware({ tagName: 'think' }) });
+}
+
 export function createOpenAiModel(options: { apiKey: string; modelId: string; baseUrl?: string; fetch?: typeof globalThis.fetch }) {
   // Default `openai(model)` is the Responses API (`/v1/responses`). new-api
   // gateways (v2api.top) stream that poorly with tools: each step resends
@@ -157,10 +167,12 @@ export function createOpenAiModel(options: { apiKey: string; modelId: string; ba
   // `@ai-sdk/openai`'s chat-completions parser drops `delta.reasoning_content`,
   // so reasoning models on third-party gateways (grok/deepseek/kimi on
   // new-api) never produce thinking events. `openai-compatible` parses it.
-  return createOpenAICompatible({
-    name: 'openai-compatible',
-    apiKey: options.apiKey,
-    baseURL: options.baseUrl || 'https://api.openai.com/v1',
-    fetch: createLoggedFetch(true, options.fetch),
-  }).chatModel(options.modelId);
+  return withThinkTagExtraction(
+    createOpenAICompatible({
+      name: 'openai-compatible',
+      apiKey: options.apiKey,
+      baseURL: options.baseUrl || 'https://api.openai.com/v1',
+      fetch: createLoggedFetch(true, options.fetch),
+    }).chatModel(options.modelId),
+  );
 }

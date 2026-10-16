@@ -43,6 +43,7 @@ export default function PermissionPrompt({
 
   const isComputer = permission.name === 'computer';
   const isCanvasBudget = permission.name === CANVAS_BUDGET_TOOL;
+  const mcp = /^mcp__([A-Za-z0-9-]+)__(.+)$/.exec(permission.name);
   const executed = typeof permission.args.executed === 'number' ? permission.args.executed : null;
   const planned = typeof permission.args.planned === 'number' ? permission.args.planned : null;
   const title = preview
@@ -53,8 +54,12 @@ export default function PermissionPrompt({
         ? planned != null
           ? `计划运行 ${planned} 个画布节点，超出本轮配额——继续吗？`
           : `已生成 ${executed ?? ''} 个画布任务，继续生成更多吗？`
-        : '允许运行这个工具？';
-  const description = isComputer
+        : mcp
+          ? `允许调用外部 MCP 工具 ${mcp[1]} / ${mcp[2]}？`
+          : '允许运行这个工具？';
+  const description = mcp
+    ? '这是你配置的第三方 MCP 服务，它返回的内容不受信任。选“本会话都允许”后，这个工具在本会话内不再询问。'
+    : isComputer
     ? '同意后，本次会话中 Agent 可以截屏并控制鼠标、键盘，直到会话结束。不要让它输入密码等敏感信息。'
     : isCanvasBudget
       ? '画布生成有每轮配额。允许一次会再放行一批；本会话都允许则本轮内不再询问。'

@@ -1,4 +1,4 @@
-import { FolderOpen, Settings2, Sparkles, ChartNoAxesCombined, Shield, Database, Info } from 'lucide-react';
+import { FolderOpen, Settings2, Sparkles, ChartNoAxesCombined, Shield, Database, Info, Blocks } from 'lucide-react';
 import { motion } from 'motion/react';
 import { cn } from '../lib/cn';
 import { APP_NAME, APP_VERSION } from '../../shared/constants';
@@ -13,12 +13,14 @@ import ProvidersSection from './settings/ProvidersSection';
 import { AdminProvidersSection } from './settings/AdminProvidersSection';
 import StorageMaintenanceSection from './settings/StorageMaintenanceSection';
 import UsageCostsSection from './settings/UsageCostsSection';
+import ExtensionsSection from './settings/ExtensionsSection';
 
 type SectionId = uiStore.SettingsSection;
 
 const SECTIONS: { id: SectionId; label: string; icon: typeof Settings2 }[] = [
   { id: 'general', label: '通用', icon: Settings2 },
   { id: 'providers', label: '模型', icon: Sparkles },
+  { id: 'extensions', label: '扩展', icon: Blocks },
   { id: 'usage', label: '用量与费用', icon: ChartNoAxesCombined },
   { id: 'admin', label: '平台管理', icon: Shield },
   { id: 'storage', label: '存储', icon: Database },
@@ -66,6 +68,7 @@ export default function SettingsPage() {
       <div className={cn("min-h-0 min-w-0 flex-1 px-6 pb-5 pt-7 max-sm:px-4 max-sm:pt-4", section === 'providers' ? 'overflow-hidden' : 'overflow-y-auto')}>
         {section === 'general' && <GeneralSection />}
         {section === 'providers' && <ProvidersSection />}
+        {section === 'extensions' && <ExtensionsSection />}
         {section === 'usage' && <UsageCostsSection onOpenProviders={() => setSection('providers')} />}
         {section === 'admin' && <AdminProvidersSection onOpenSystemProviders={() => setSection('providers')} />}
         {section === 'storage' && <StorageMaintenanceSection />}

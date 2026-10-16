@@ -37,6 +37,6 @@ export default function SheetPanel({ sessionId }: { sessionId: string }) {
     flush={() => flushSheetEdits(sessionId)} select={(id) => selectWorkbook(sessionId, id)} create={create} importFiles={upload} multiple
     accept=".xlsx" importHint=".xlsx · 8 MB 以内" importLabel="导入 Excel"
     description="新建或导入 .xlsx 工作簿。选中单元格后，可在对话中让 Agent 分析数据或补充公式。">
-    {selected && <SheetDocument key={selected.id} artifact={selected} onClose={() => void flushSheetEdits(sessionId).then(() => selectWorkbook(sessionId, ''), () => { /* Unsaved edits keep the workbook open. */ })} />}
+    {selected && <SheetDocument key={selected.id} artifact={selected} />}
   </WorkspaceShell>;
 }

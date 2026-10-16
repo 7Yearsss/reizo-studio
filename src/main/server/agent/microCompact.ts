@@ -16,6 +16,7 @@ export const TOOL_OUTPUT_BUDGETS: Record<string, number> = {
   // Office readers self-paginate under READ_PAGE_BUDGET; this is only a safety net above it.
   read_document: READ_TOOL_CLIP,
   read_sheet: READ_TOOL_CLIP,
+  check_sheet: READ_TOOL_CLIP,
   read_presentation: READ_TOOL_CLIP,
   check_document: READ_TOOL_CLIP,
 };

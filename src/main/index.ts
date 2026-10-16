@@ -18,6 +18,7 @@ import { createTray } from './tray';
 import { startScheduler } from './schedulerHost';
 import { drainMemoryJobs } from './memoryJobs';
 import { registerSkillIpc } from './skillsIpc';
+import { registerPluginIpc } from './pluginsIpc';
 import { registerAccountIpc } from './account/ipc';
 
 if (started) {
@@ -102,6 +103,7 @@ async function bootstrap(): Promise<void> {
   registerWindowIpc();
   registerWorkspaceIpc(settingsStore);
   registerSkillIpc(path.join(dataRoot, 'skills'));
+  registerPluginIpc(dataRoot, skillsDirs);
   stopAccount = registerAccountIpc(dataRoot);
 
   createMainWindow();

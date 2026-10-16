@@ -46,3 +46,11 @@ describe('MarkdownContent', () => {
     expect(codeBody).not.toContain('我看了未提交文件');
   });
 });
+
+describe('sheet cell links in replies', () => {
+  it('renders a sheet-qualified address as a link the chat can intercept', () => {
+    const html = renderToString(<MarkdownContent content={'问题在 Sheet1!C5，其余没问题'} />);
+    expect(html).toContain('href="#sheetcell:Sheet1!C5"');
+    expect(html).toContain('Sheet1!C5</a>');
+  });
+});

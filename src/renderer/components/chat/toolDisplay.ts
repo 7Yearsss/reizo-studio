@@ -49,6 +49,7 @@ export function toolLabel(name: string): string {
     case 'generate_diagram': return '生成流程图';
     case 'generate_sheet': return '生成表格';
     case 'read_sheet': return '读取表格';
+    case 'check_sheet': return '检查表格';
     case 'read_document': return '读取文档';
     case 'check_document': return '检查文档一致性';
     case 'generate_document': return '创建文档';
@@ -105,11 +106,12 @@ export function toolDetail(part: ToolCallPart): string {
       if (Array.isArray(result.documents)) return result.documents.map((doc: { name: string }) => doc.name).join('\n') || '当前会话没有文档';
     } catch { /* Partial tool output. */ }
   }
-  if ((part.name === 'read_sheet' || part.name === 'generate_sheet' || part.name === 'propose_sheet_edits') && part.result) {
+  if ((part.name === 'read_sheet' || part.name === 'generate_sheet' || part.name === 'propose_sheet_edits' || part.name === 'check_sheet') && part.result) {
     try {
       const result = JSON.parse(part.result);
       if (result.error) return String(result.error);
-      if (Array.isArray(result.changes)) return `${result.changes.length} 项修改待审核\n${result.changes.join('\n')}`;
+      if (part.name === 'check_sheet' && typeof result.total === 'number') return result.total ? `发现 ${result.total} 处问题\n${(result.findings as Array<{ sheet: string; range: string; message: string }>).slice(0, 12).map((f) => `${f.sheet}!${f.range} ${f.message}`).join('\n')}` : '没有发现问题';
+      if (Array.isArray(result.changes)) return `${result.changes.length} 项修改待审核\n${result.changes.join('\n')}${Array.isArray(result.warnings) && result.warnings.length ? `\n注意：${result.warnings.join('；')}` : ''}`;
       if (result.name) return `${part.name === 'read_sheet' ? '已读取' : '已更新'}「${result.name}」${result.version ? ` · v${result.version}` : ''}`;
       if (Array.isArray(result.workbooks)) return result.workbooks.map((book: { name: string }) => book.name).join('\n') || '当前会话没有表格';
     } catch { /* streamed output is not complete yet */ }

@@ -388,13 +388,24 @@ export default function Composer({
     editorRef.current?.focus();
   }, []);
   const citeNext = useRef(false);
+  const liveSheetRef = useRef(activeSheet); liveSheetRef.current = activeSheet;
+  const sheetRefsRef = useRef(sheetRefs); sheetRefsRef.current = sheetRefs;
   const rangeKeys = useRef<string[]>([]);
   // Workspace editors ask for focus right after attaching a reference ("问 AI" / Ctrl+L).
   useEffect(() => {
     const onFocus = (event: Event) => {
       const detail = (event as CustomEvent<{ sessionId?: string; cite?: boolean }>).detail;
       if (detail?.sessionId !== sessionId) return;
-      if (detail.cite) { citeNext.current = true; window.setTimeout(() => { citeNext.current = false; }, 1500); }
+      if (detail.cite) {
+        citeNext.current = true;
+        // A range that is already quoted adds nothing new, so cite its existing number instead of ignoring the request.
+        window.setTimeout(() => {
+          const live = liveSheetRef.current;
+          const existing = live && sheetRefsRef.current.find((ref) => sameSheetPlace(ref, live));
+          if (citeNext.current && existing?.label) editorRef.current?.insertReference(existing.label);
+          citeNext.current = false;
+        }, 120);
+      }
       window.setTimeout(focusComposer, 0);
     };
     window.addEventListener('reizo:focus-composer', onFocus);

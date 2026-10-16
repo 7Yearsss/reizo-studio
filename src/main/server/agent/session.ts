@@ -100,6 +100,8 @@ export interface StartTurnOptions {
    * hook for post-turn jobs (memory extraction) — exceptions are swallowed.
    */
   onTurnTerminal?: (info: { outcome: TurnOutcome; text: string }) => void;
+  /** Observes every event the turn broadcasts (tracing). Exceptions are swallowed. */
+  onEvent?: (event: ChatStreamEvent) => void;
 }
 
 export type StartTurnOutcome = 'accepted' | 'rejected-before-dispatch';
@@ -229,7 +231,10 @@ class AgentSession {
     });
 
     const isStale = () => abortController.signal.aborted || this.turnGeneration !== generation;
-    const emit = (event: ChatStreamEvent) => this.broadcast(event);
+    const emit = (event: ChatStreamEvent) => {
+      try { options.onEvent?.(event); } catch { /* observers never fail the turn */ }
+      return this.broadcast(event);
+    };
 
     let toolsInFlight = 0;
     let idleTimer: NodeJS.Timeout | null = null;

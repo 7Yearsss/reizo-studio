@@ -8,14 +8,17 @@ interface State {
   activeBySession: Record<string, SheetSelection | undefined>;
   pinnedBySession: Record<string, SheetSelection[] | undefined>;
   reviewRevisions: Record<string, number>;
+  /** A cell a reply pointed at, waiting for the open workbook to scroll to it. */
+  focusBySession: Record<string, { sheetName: string; range: string; nonce: number } | undefined>;
 }
-let state: State = { selectedBySession: {}, activeBySession: {}, pinnedBySession: {}, reviewRevisions: {} };
+let state: State = { selectedBySession: {}, activeBySession: {}, pinnedBySession: {}, reviewRevisions: {}, focusBySession: {} };
 const listeners = new Set<() => void>();
 function update(patch: Partial<State>) { state = { ...state, ...patch }; listeners.forEach((l) => l()); }
 export function useSheetWorkspace<T>(select: (s: State) => T): T {
   return useSyncExternalStore((listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; }, () => select(state));
 }
 export function refreshSheetReviews(artifactId: string) { update({ reviewRevisions: { ...state.reviewRevisions, [artifactId]: (state.reviewRevisions[artifactId] ?? 0) + 1 } }); }
+export function requestSheetFocus(sessionId: string, target: { sheetName: string; range: string }) { update({ focusBySession: { ...state.focusBySession, [sessionId]: { ...target, nonce: Date.now() } } }); }
 export function selectWorkbook(sessionId: string, artifactId: string) {
   update({ selectedBySession: { ...state.selectedBySession, [sessionId]: artifactId } });
 }

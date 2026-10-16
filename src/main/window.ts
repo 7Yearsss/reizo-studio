@@ -61,6 +61,9 @@ export function createMainWindow(): BrowserWindow {
 
   if (iconPath && process.platform === 'win32') {
     mainWindow.setIcon(iconPath);
+    // The taskbar button takes its icon from the process (electron.exe in dev) unless the window group says
+    // otherwise, which also shows through on a pinned shortcut. Point it at the app icon explicitly.
+    if (iconPath.toLowerCase().endsWith('.ico')) mainWindow.setAppDetails({ appId: 'com.reizo.studio', appIconPath: path.resolve(iconPath), appIconIndex: 0 });
   }
 
   mainWindow.webContents.on('did-fail-load', (_event, code, desc, url) => {

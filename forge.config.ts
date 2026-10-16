@@ -13,7 +13,8 @@ import path from 'node:path';
 const config: ForgeConfig = {
   hooks: {
     generateAssets: async (_config, platform, arch) => {
-      if (platform !== 'win32' || arch !== 'x64') throw new Error('The integrated video editor package currently targets Windows x64.');
+      // The bundled editor runtime is Windows x64 only; other targets ship without the video editor panel.
+      if (platform !== 'win32' || arch !== 'x64') return;
       execFileSync(process.execPath, ['scripts/build-openchatcut-runtime.mjs'], { stdio: 'inherit', windowsHide: true });
       const packaged = JSON.parse(readFileSync('.cache/openchatcut-package.json', 'utf8')) as { directory: string };
       const relative = path.relative(path.resolve('.cache/package-resources'), packaged.directory);
@@ -58,8 +59,8 @@ const config: ForgeConfig = {
   makers: [
     new OfflineSquirrelMaker({}),
     new MakerZIP({}, ['darwin']),
-    new MakerRpm({}),
-    new MakerDeb({}),
+    new MakerRpm({ options: { icon: 'resources/icon.png' } }),
+    new MakerDeb({ options: { icon: 'resources/icon.png' } }),
   ],
   plugins: [
     new VitePlugin({

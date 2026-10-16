@@ -57,6 +57,7 @@
     "vitest": "^4.1.11"
   },
   "dependencies": {
+    "@ai-sdk/mcp": "^2.0.73",
     "@ai-sdk/openai": "^4.0.47",
     "@ai-sdk/openai-compatible": "^3.0.40",
     "@excalidraw/excalidraw": "^0.18.1",

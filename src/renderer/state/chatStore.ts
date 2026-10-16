@@ -2,6 +2,7 @@ import { selectPresentation, refreshPresentationReviews, referencePresentation }
 import { splitPresentationContext } from '../../shared/presentationReferences';
 import { selectDocument, refreshDocumentReviews, restoreDocumentReferences } from './documentWorkspace';
 import { splitDocumentContext } from '../../shared/documentReferences';
+import logoUrl from '../assets/logo.png';
 import * as api from '../api';
 import type { ChatMessage, ReplyActivity, SessionSummary, ToolCallPart } from '../../shared/chat';
 import type {
@@ -27,6 +28,7 @@ import { splitSheetContext } from '../../shared/sheetReferences';
 import { recordRecentSkill } from './skillStore';
 import { appendTerminalLine } from './terminalStore';
 import { notifyNeedsInput } from '../lib/notify';
+import { toast } from '../lib/toast';
 
 export interface PendingPermission {
   id: string;
@@ -783,7 +785,7 @@ function notifyIfHidden(title: string): void {
   if (typeof document === 'undefined' || !document.hidden) return;
   if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
   try {
-    new Notification('Reizo', { body: title });
+    new Notification('Reizo', { body: title, icon: logoUrl });
   } catch {
     /* ignore */
   }
@@ -1037,6 +1039,10 @@ function makeEventFolder(
             [sessionId]: event.tier === 'halt' ? `已停止：${event.reason}` : `这一轮可能卡住了：${event.reason}`,
           },
         });
+        break;
+      case 'notice':
+        if (event.tone === 'warn') toast.error(event.text);
+        else toast.info(event.text);
         break;
       case 'error':
         setState({

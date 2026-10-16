@@ -1,4 +1,5 @@
 import { Notification } from 'electron';
+import { getAppIcon } from './window';
 import { nanoid } from 'nanoid';
 import type { SessionStore } from '../shared/chat';
 import { loadSkills } from './skills';
@@ -75,7 +76,7 @@ export function startScheduler(options: {
       const accepted = await options.scheduleStore.finishExecution(schedule.id, executionId, 'succeeded', null);
       if (!accepted) return;
       try {
-        new Notification({ title: 'Reizo 自动化', body: schedule.name }).show();
+        new Notification({ title: 'Reizo 自动化', body: schedule.name, icon: getAppIcon() }).show();
       } catch {
         /* ignore */
       }

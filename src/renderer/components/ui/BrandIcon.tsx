@@ -1,0 +1,439 @@
+import { useState } from 'react';
+import { cn } from '../../lib/cn';
+import { letterTile, letterTileStyle } from '../skills/tileColor';
+
+export type BuiltinBrandId =
+  | 'feishu'
+  | 'wecom'
+  | 'dingtalk'
+  | 'yuque'
+  | 'gitee'
+  | 'notion'
+  | 'gmail'
+  | 'github'
+  | 'bilibili'
+  | 'deepseek'
+  | 'claude'
+  | 'openai'
+  | 'bytedance'
+  | 'alibabacloud'
+  | 'tencent';
+
+export type BrandIconSize = 'sm' | 'md' | 'lg';
+
+const SIZE_CONFIG: Record<BrandIconSize, { container: string; icon: string }> = {
+  sm: { container: 'h-8 w-8 rounded-[9px]', icon: 'h-5 w-5' },
+  md: { container: 'h-10 w-10 rounded-[12px]', icon: 'h-6 w-6' },
+  lg: { container: 'h-12 w-12 rounded-[14px]', icon: 'h-7.5 w-7.5' },
+};
+
+/**
+ * Authentic brand squircle container styling inspired by macOS Dock and LobeHub App Avatars
+ */
+const BRAND_CONTAINER_BG: Record<BuiltinBrandId, string> = {
+  feishu: 'bg-white border-white/20 shadow-md shadow-black/25',
+  wecom: 'bg-gradient-to-b from-[#1C7CF2] to-[#0D62D4] border-[#1875F0]/30 shadow-md shadow-black/25',
+  dingtalk: 'bg-gradient-to-b from-[#0A8FFF] to-[#0070E0] border-[#0089FF]/30 shadow-md shadow-black/25',
+  yuque: 'bg-gradient-to-b from-[#00C472] to-[#009E5A] border-[#00B96B]/30 shadow-md shadow-black/25',
+  gitee: 'bg-[#C71D23] bg-gradient-to-b from-[#E0262B] to-[#B8161B] border-[#C71D23]/30 shadow-md shadow-black/25',
+  notion: 'bg-white border-white/20 shadow-md shadow-black/25',
+  gmail: 'bg-white border-white/20 shadow-md shadow-black/25',
+  github: 'bg-gradient-to-b from-[#24292F] to-[#12161A] border-white/20 shadow-md shadow-black/25',
+  bilibili: 'bg-gradient-to-b from-[#00AEE0] to-[#008EC4] border-[#00A1D6]/30 shadow-md shadow-black/25',
+  deepseek: 'bg-gradient-to-b from-[#4D6BFE] to-[#344ED4] border-[#4D6BFE]/30 shadow-md shadow-black/25',
+  claude: 'bg-gradient-to-b from-[#D97757] to-[#B8573A] border-[#D97757]/30 shadow-md shadow-black/25',
+  openai: 'bg-gradient-to-b from-[#10A37F] to-[#0B7D61] border-[#10A37F]/30 shadow-md shadow-black/25',
+  bytedance: 'bg-white border-white/20 shadow-md shadow-black/25',
+  alibabacloud: 'bg-gradient-to-b from-[#FF7A1A] to-[#E65500] border-[#FF6A00]/30 shadow-md shadow-black/25',
+  tencent: 'bg-gradient-to-b from-[#005FE8] to-[#0047BA] border-[#0052D9]/30 shadow-md shadow-black/25',
+};
+
+interface BuiltinLogoProps {
+  className?: string;
+  fill?: string;
+}
+
+/**
+ * 飞书 (Feishu / Lark) Official ByteDance Origami Bird
+ */
+function FeishuLogo({ className }: BuiltinLogoProps) {
+  return (
+    <svg viewBox="0 0 256 256" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* Top Cyan Wing */}
+      <path
+        d="M135.837 130.957L136.315 130.48C136.625 130.17 136.959 129.835 137.293 129.525L137.962 128.88L139.943 126.923L142.665 124.273L144.981 121.981L147.153 119.832L149.421 117.588L151.498 115.535L154.411 112.67C154.96 112.121 155.533 111.596 156.106 111.071C157.156 110.116 158.255 109.184 159.353 108.277C160.379 107.466 161.43 106.678 162.504 105.914C164.008 104.839 165.56 103.861 167.136 102.906C168.688 101.998 170.287 101.139 171.91 100.327C173.438 99.5872 175.014 98.8948 176.614 98.2741C177.497 97.916 178.404 97.6056 179.311 97.2953C179.765 97.152 180.219 96.9849 180.696 96.8417C176.661 80.9656 169.284 66.1638 159.042 53.3912C157.061 50.9322 154.053 49.4998 150.901 49.4998H67.2235C66.3641 49.4998 65.6479 50.1921 65.6479 51.0755C65.6479 51.5768 65.8866 52.0304 66.2925 52.3408C94.8456 73.2782 118.528 100.184 135.646 131.172L135.837 130.957Z"
+        fill="#00D6B9"
+      />
+      {/* Primary Blue Soaring Wing */}
+      <path
+        d="M102.581 204.609C145.793 204.609 183.442 180.759 203.066 145.521C203.759 144.279 204.427 143.038 205.072 141.773C204.093 143.659 202.995 145.473 201.777 147.192C201.347 147.789 200.918 148.386 200.464 148.983C199.891 149.723 199.318 150.415 198.721 151.107C198.244 151.656 197.766 152.182 197.265 152.707C196.262 153.757 195.212 154.76 194.114 155.691C193.493 156.216 192.896 156.718 192.252 157.195C191.511 157.768 190.747 158.317 189.983 158.819C189.506 159.153 189.005 159.463 188.503 159.774C188.002 160.084 187.477 160.394 186.928 160.705C185.853 161.302 184.731 161.874 183.609 162.376C182.63 162.806 181.628 163.211 180.625 163.593C179.527 163.999 178.428 164.357 177.283 164.668C175.587 165.145 173.892 165.503 172.15 165.766C170.908 165.957 169.619 166.1 168.354 166.196C167.017 166.291 165.656 166.315 164.295 166.315C162.791 166.291 161.287 166.196 159.759 166.029C158.637 165.909 157.515 165.742 156.393 165.551C155.414 165.384 154.435 165.169 153.456 164.93C152.931 164.811 152.43 164.668 151.905 164.525C150.472 164.143 149.04 163.737 147.607 163.331C146.891 163.116 146.175 162.925 145.482 162.71C144.408 162.4 143.358 162.065 142.307 161.731C141.448 161.469 140.588 161.182 139.729 160.896C138.917 160.633 138.082 160.37 137.27 160.084L135.599 159.511C134.93 159.272 134.238 159.033 133.569 158.795L132.137 158.27C131.182 157.935 130.227 157.577 129.296 157.219C128.747 157.004 128.198 156.813 127.649 156.598C126.909 156.312 126.192 156.025 125.452 155.739C124.688 155.429 123.9 155.118 123.136 154.808L121.632 154.187L119.77 153.423L118.338 152.826L116.858 152.182L115.568 151.609L114.399 151.083L113.205 150.534L111.987 149.961L110.435 149.245L108.812 148.481C108.239 148.195 107.666 147.932 107.093 147.646L105.637 146.929C79.9484 134.109 56.7668 116.824 37.1425 95.863C36.5456 95.2423 35.5668 95.1945 34.9222 95.7914C34.6118 96.0779 34.4208 96.5076 34.4208 96.9373L34.4686 170.779V176.772C34.4686 180.257 36.1875 183.504 39.0762 185.438C57.865 197.996 79.9723 204.657 102.581 204.609Z"
+        fill="#3370FF"
+      />
+      {/* Deep Indigo Wing Fold */}
+      <path
+        d="M229.566 100.517C214.98 93.379 198.292 91.8511 182.654 96.2439C181.986 96.4348 181.341 96.6258 180.697 96.8168C180.243 96.9601 179.789 97.1033 179.312 97.2704C178.405 97.5808 177.498 97.915 176.614 98.2493C175.015 98.87 173.463 99.5623 171.911 100.302C170.288 101.09 168.688 101.95 167.136 102.857C165.537 103.788 164.009 104.791 162.505 105.865C161.43 106.629 160.38 107.417 159.353 108.229C158.231 109.136 157.157 110.043 156.107 111.022C155.534 111.547 154.985 112.072 154.412 112.621L151.499 115.486L149.422 117.539L147.154 119.783L144.981 121.932L142.666 124.224L139.968 126.898L137.986 128.856L137.318 129.5C137.007 129.811 136.673 130.145 136.339 130.455L135.862 130.933L135.121 131.625C134.835 131.888 134.572 132.126 134.286 132.389C127.1 139.002 119.078 144.66 110.46 149.268L112.012 149.984L113.229 150.557L114.423 151.106L115.593 151.631L116.882 152.204L118.362 152.849L119.794 153.446L121.657 154.21L123.161 154.83C123.925 155.141 124.712 155.451 125.476 155.761C126.193 156.048 126.933 156.334 127.673 156.621C128.222 156.836 128.771 157.027 129.32 157.242C130.275 157.6 131.23 157.934 132.161 158.292L133.594 158.817C134.262 159.056 134.93 159.295 135.623 159.533L137.294 160.106C138.106 160.369 138.917 160.656 139.753 160.918C140.612 161.205 141.472 161.467 142.331 161.754C143.382 162.088 144.456 162.398 145.507 162.733C146.223 162.947 146.939 163.162 147.631 163.353C149.064 163.759 150.496 164.165 151.929 164.547C152.454 164.69 152.955 164.81 153.48 164.953C154.459 165.192 155.438 165.383 156.417 165.574C157.539 165.765 158.661 165.932 159.783 166.051C161.311 166.218 162.815 166.314 164.319 166.338C165.68 166.361 167.041 166.314 168.378 166.218C169.667 166.123 170.932 165.979 172.174 165.788C173.893 165.526 175.612 165.144 177.307 164.69C178.429 164.38 179.551 164.022 180.649 163.616C181.652 163.258 182.654 162.852 183.633 162.398C184.755 161.897 185.877 161.324 186.952 160.727C187.477 160.441 188.002 160.13 188.527 159.796C189.053 159.486 189.53 159.152 190.007 158.841C190.771 158.316 191.535 157.791 192.275 157.218C192.92 156.74 193.541 156.239 194.138 155.714C195.212 154.783 196.262 153.78 197.265 152.729C197.766 152.204 198.244 151.679 198.721 151.13C199.318 150.438 199.915 149.721 200.464 149.005C200.918 148.432 201.348 147.835 201.777 147.215C202.971 145.496 204.069 143.705 205.048 141.843L206.17 139.623L216.149 119.736L216.269 119.497C219.563 112.383 224.052 105.984 229.566 100.517Z"
+        fill="#133C9A"
+      />
+    </svg>
+  );
+}
+
+/**
+ * 企业微信 (WeCom) Dual Chat Bubbles in Crisp White & Cyan
+ */
+function WeComLogo({ className }: BuiltinLogoProps) {
+  return (
+    <svg viewBox="0 0 32 32" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* Primary speech bubble */}
+      <path
+        d="M17 6C10.373 6 5 10.701 5 16.5c0 2.215.77 4.272 2.093 5.992L6 26l4.02-1.34C11.523 25.178 13.208 25.5 15 25.5c-.32-.87-.5-1.815-.5-2.8 0-4.529 3.806-8.2 8.5-8.2.34 0 .673.02 1 .059C23.633 9.771 18.373 6 17 6z"
+        fill="#FFFFFF"
+      />
+      {/* Secondary accent speech bubble */}
+      <path
+        d="M23 15c-3.866 0-7 2.686-7 6s3.134 6 7 6c1.077 0 2.094-.207 3-.578L29 28l-1.042-2.344C29.215 24.438 30 22.81 30 21c0-3.314-3.134-6-7-6z"
+        fill="#30E39F"
+      />
+    </svg>
+  );
+}
+
+/**
+ * 钉钉 (DingTalk) Official Flying Wing
+ */
+function DingTalkLogo({ className, fill = '#FFFFFF' }: BuiltinLogoProps) {
+  return (
+    <svg viewBox="64 64 896 896" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path
+        d="M573.7 252.5C422.5 197.4 201.3 96.7 201.3 96.7c-15.7-4.1-17.9 11.1-17.9 11.1-5 61.1 33.6 160.5 53.6 182.8 19.9 22.3 319.1 113.7 319.1 113.7S326 357.9 270.5 341.9c-55.6-16-37.9 17.8-37.9 17.8 11.4 61.7 64.9 131.8 107.2 138.4 42.2 6.6 220.1 4 220.1 4s-35.5 4.1-93.2 11.9c-42.7 5.8-97 12.5-111.1 17.8-33.1 12.5 24 62.6 24 62.6 84.7 76.8 129.7 50.5 129.7 50.5 33.3-10.7 61.4-18.5 85.2-24.2L565 743.1h84.6L603 928l205.3-271.9H700.8l22.3-38.7c.3.5.4.8.4.8S799.8 496.1 829 433.8l.6-1h-.1c5-10.8 8.6-19.7 10-25.8 17-71.3-114.5-99.4-265.8-154.5z"
+        fill={fill}
+      />
+    </svg>
+  );
+}
+
+/**
+ * 语雀 (Yuque) Official Emerald Sparrow Perfectly Scaled & Centered (No truncation!)
+ */
+function YuqueLogo({ className, fill = '#FFFFFF' }: BuiltinLogoProps) {
+  return (
+    <svg viewBox="0 0 1024 1024" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path
+        transform="translate(512 512) scale(0.68) translate(-512 -500)"
+        d="M854.6 370.6c-9.9-39.4 9.9-102.2 73.4-124.4l-67.9-3.6s-25.7-90-143.6-98c-117.9-8.1-195-3-195-3s87.4 55.6 52.4 154.7c-25.6 52.5-65.8 95.6-108.8 144.7-1.3 1.3-2.5 2.6-3.5 3.7C319.4 605 96 860 96 860c245.9 64.4 410.7-6.3 508.2-91.1 20.5-.2 35.9-.3 46.3-.3 135.8 0 250.6-117.6 245.9-248.4-3.2-89.9-31.9-110.2-41.8-149.6z"
+        fill={fill}
+      />
+    </svg>
+  );
+}
+
+/**
+ * Gitee (码云) Official Crimson Crest with Pure White G (#C71D23)
+ */
+function GiteeLogo({ className, fill = '#FFFFFF' }: BuiltinLogoProps) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path
+        d="M17.984 5.333c.328 0 .593.266.592.593v1.482a.594.594 0 0 1-.593.592H9.777c-.982 0-1.778.796-1.778 1.778v5.63c0 .327.266.592.593.592h5.63c.982 0 1.777-.796 1.777-1.778v-2.074a.593.593 0 0 0-.592-.593h-4.445a.593.593 0 0 1-.592-.592V9.48c0-.327.266-.593.592-.593h6.815c.328 0 .593.266.593.593v4.444c0 2.292-1.858 4.149-4.148 4.149H8.593C6.303 18.074 4.445 16.216 4.445 13.926V7.407C4.445 5.118 6.303 3.26 8.593 3.26h8.889c.328 0 .592.266.592.593v1.48z"
+        fill={fill}
+      />
+    </svg>
+  );
+}
+
+/**
+ * Notion Official 3D Monolith from SVGL
+ */
+function NotionLogo({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 256 268" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path
+        fill="#18181B"
+        d="M164.09.608 16.092 11.538C4.155 12.573 0 20.374 0 29.726v162.245c0 7.284 2.585 13.516 8.826 21.843l34.789 45.237c5.715 7.284 10.912 8.844 21.825 8.327l171.864-10.404c14.532-1.035 18.696-7.801 18.696-19.24V55.207c0-5.911-2.336-7.614-9.21-12.66l-1.185-.856L198.37 8.409C186.94.1 182.27-.952 164.09.608ZM69.327 52.22c-14.033.945-17.216 1.159-25.186-5.323L23.876 30.778c-2.06-2.086-1.026-4.69 4.163-5.207l142.274-10.395c11.947-1.043 18.17 3.12 22.842 6.758l24.401 17.68c1.043.525 3.638 3.637.517 3.637L71.146 52.095l-1.819.125Zm-16.36 183.954V81.222c0-6.767 2.077-9.887 8.3-10.413L230.02 60.93c5.724-.517 8.31 3.12 8.31 9.879v153.917c0 6.767-1.044 12.49-10.387 13.008l-161.487 9.361c-9.343.517-13.489-2.594-13.489-10.921ZM212.377 89.53c1.034 4.681 0 9.362-4.681 9.897l-7.783 1.542v114.404c-6.758 3.637-12.981 5.715-18.18 5.715-8.308 0-10.386-2.604-16.609-10.396l-50.898-80.079v77.476l16.1 3.646s0 9.362-12.989 9.362l-35.814 2.077c-1.043-2.086 0-7.284 3.63-8.318l9.351-2.595V109.823l-12.98-1.052c-1.044-4.68 1.55-11.439 8.826-11.965l38.426-2.585 52.958 81.113v-71.76l-13.498-1.552c-1.043-5.733 3.111-9.896 8.3-10.404l35.84-2.087Z"
+      />
+    </svg>
+  );
+}
+
+/**
+ * Google Mail (Gmail) Official 5-Polygon Color Envelope
+ */
+function GmailLogo({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 49.4 512 399.42" className={className} xmlns="http://www.w3.org/2000/svg">
+      <g fill="none" fillRule="evenodd">
+        <g fillRule="nonzero">
+          <path fill="#4285F4" d="M34.91 448.818h81.454V251L0 163.727V413.91c0 19.287 15.622 34.91 34.91 34.91z" />
+          <path fill="#34A853" d="M395.636 448.818h81.455c19.287 0 34.909-15.622 34.909-34.909V163.727L395.636 251z" />
+          <path fill="#FBBC04" d="M395.636 99.727V251L512 163.727v-46.545c0-43.142-49.25-67.782-83.782-41.891z" />
+        </g>
+        <path fill="#EA4335" d="M116.364 251V99.727L256 204.455 395.636 99.727V251L256 355.727z" />
+        <path fill="#C5221F" fillRule="nonzero" d="M0 117.182v46.545L116.364 251V99.727L83.782 75.291C49.25 49.4 0 74.04 0 117.18z" />
+      </g>
+    </svg>
+  );
+}
+
+/**
+ * GitHub Official Invertocat in Pure White
+ */
+function GitHubLogo({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="#FFFFFF" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" />
+    </svg>
+  );
+}
+
+/**
+ * Bilibili (哔哩哔哩) Official TV
+ */
+function BilibiliLogo({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="#FFFFFF" xmlns="http://www.w3.org/2000/svg">
+      <path d="M17.813 4.653h.854c1.51.054 2.769.578 3.774 1.574 1.004.995 1.524 2.249 1.56 3.76v7.36c-.036 1.51-.556 2.769-1.56 3.773s-2.264 1.52-3.774 1.56H5.333c-1.51-.04-2.769-.56-3.773-1.56S.036 18.857 0 17.347v-7.36c.036-1.511.556-2.765 1.56-3.76 1.004-.996 2.264-1.52 3.773-1.574h.774l-1.174-1.12a1.234 1.234 0 0 1-.373-.906c0-.356.124-.658.373-.907l.08-.08c.27-.267.59-.4.96-.4.356 0 .676.133.96.4l3.28 3.12h7.04l3.28-3.12c.284-.267.604-.4.96-.4.37 0 .69.133.96.4l.08.08c.25.249.374.551.374.907 0 .355-.125.657-.374.906zm-10.747 8.32c.57 0 1.04-.2 1.414-.6.373-.4.56-.88.56-1.44 0-.56-.187-1.04-.56-1.44-.373-.4-.844-.6-1.414-.6-.57 0-1.04.2-1.413.6-.373.4-.56.88-.56 1.44 0 .56.187 1.04.56 1.44.373.4.844.6 1.413.6zm9.867 0c.57 0 1.04-.2 1.413-.6.374-.4.56-.88.56-1.44 0-.56-.186-1.04-.56-1.44-.373-.4-.843-.6-1.413-.6-.57 0-1.04.2-1.414.6-.373.4-.56.88-.56 1.44 0 .56.187 1.04.56 1.44.373.4.844.6 1.414.6z" />
+    </svg>
+  );
+}
+
+/**
+ * DeepSeek Official LobeHub Whale Icon
+ */
+function DeepSeekLogo({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="#FFFFFF" xmlns="http://www.w3.org/2000/svg">
+      <path d="M23.748 4.482c-.254-.124-.364.113-.512.234-.051.039-.094.09-.137.136-.372.397-.806.657-1.373.626-.829-.046-1.537.214-2.163.848-.133-.782-.575-1.248-1.247-1.548-.352-.156-.708-.311-.955-.65-.172-.241-.219-.51-.305-.774-.055-.16-.11-.323-.293-.35-.2-.031-.278.136-.356.276-.313.572-.434 1.202-.422 1.84.027 1.436.633 2.58 1.838 3.393.137.093.172.187.129.323-.082.28-.18.552-.266.833-.055.179-.137.217-.329.14a5.526 5.526 0 01-1.736-1.18c-.857-.828-1.631-1.742-2.597-2.458a11.365 11.365 0 00-.689-.471c-.985-.957.13-1.743.388-1.836.27-.098.093-.432-.779-.428-.872.004-1.67.295-2.687.684a3.055 3.055 0 01-.465.137 9.597 9.597 0 00-2.883-.102c-1.885.21-3.39 1.102-4.497 2.623C.082 8.606-.231 10.684.152 12.85c.403 2.284 1.569 4.175 3.36 5.653 1.858 1.533 3.997 2.284 6.438 2.14 1.482-.085 3.133-.284 4.994-1.86.47.234.962.327 1.78.397.63.059 1.236-.03 1.705-.128.735-.156.684-.837.419-.961-2.155-1.004-1.682-.595-2.113-.926 1.096-1.296 2.746-2.642 3.392-7.003.05-.347.007-.565 0-.845-.004-.17.035-.237.23-.256a4.173 4.173 0 001.545-.475c1.396-.763 1.96-2.015 2.093-3.517.02-.23-.004-.467-.247-.588zM11.581 18c-2.089-1.642-3.102-2.183-3.52-2.16-.392.024-.321.471-.235.763.09.288.207.486.371.739.114.167.192.416-.113.603-.673.416-1.842-.14-1.897-.167-1.361-.802-2.5-1.86-3.301-3.307-.774-1.393-1.224-2.887-1.298-4.482-.02-.386.093-.522.477-.592a4.696 4.696 0 011.529-.039c2.132.312 3.946 1.265 5.468 2.774.868.86 1.525 1.887 2.202 2.891.72 1.066 1.494 2.082 2.48 2.914.348.292.625.514.891.677-.802.09-2.14.11-3.054-.614zm1-6.44a.306.306 0 01.415-.287.302.302 0 01.2.288.306.306 0 01-.31.307.303.303 0 01-.304-.308zm3.11 1.596c-.2.081-.399.151-.59.16a1.245 1.245 0 01-.798-.254c-.274-.23-.47-.358-.552-.758a1.73 1.73 0 01.016-.588c.07-.327-.008-.537-.239-.727-.187-.156-.426-.199-.688-.199a.559.559 0 01-.254-.078c-.11-.054-.2-.19-.114-.358.028-.054.16-.186.192-.21.356-.202.767-.136 1.146.016.352.144.618.408 1.001.782.391.451.462.576.685.914.176.265.336.537.445.848.067.195-.019.354-.25.452z" />
+    </svg>
+  );
+}
+
+/**
+ * Claude Official Sunburst Icon
+ */
+function ClaudeLogo({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="#FFFFFF" xmlns="http://www.w3.org/2000/svg">
+      <path d="M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z" />
+    </svg>
+  );
+}
+
+/**
+ * OpenAI Official Rosette Logo
+ */
+function OpenAILogo({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="#FFFFFF" xmlns="http://www.w3.org/2000/svg">
+      <path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 8.487a4.47 4.47 0 0 1 2.33-1.98v5.676a.79.79 0 0 0 .392.68l5.813 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 8.487zm16.597 3.855l-5.833-3.387L15.124 7.78a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667zm2.01-3.023l-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.821V7.49a.076.076 0 0 1 .033-.061l4.838-2.791a4.5 4.5 0 0 1 6.67 4.436zM8.847 13.914l-2.02-1.168a.076.076 0 0 1-.038-.052V7.11a4.504 4.504 0 0 1 7.37-3.453l-.142.08-4.778 2.758a.795.795 0 0 0-.393.681zm1.097-2.365l2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5z" />
+    </svg>
+  );
+}
+
+/**
+ * ByteDance Official 4-Pillar Logo from LobeHub
+ */
+function ByteDanceLogo({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} xmlns="http://www.w3.org/2000/svg">
+      <path d="M14.944 18.587l-1.704-.445V10.01l1.824-.462c1-.254 1.84-.461 1.88-.453.032 0 .056 2.235.056 4.972v4.973l-.176-.008c-.104 0-.952-.207-1.88-.446z" fill="#00C8D2" />
+      <path d="M7 16.542c0-2.736.024-4.98.064-4.98.032-.008.872.2 1.88.454l1.816.461-.016 4.05-.024 4.049-1.632.422c-.896.23-1.736.445-1.856.469L7 21.523v-4.98z" fill="#3C8CFF" />
+      <path d="M19.24 12.477c0-9.03.008-9.515.144-9.475.072.024.784.207 1.576.406.792.207 1.576.405 1.744.445l.296.08-.016 8.56-.024 8.568-1.624.414c-.888.23-1.728.437-1.856.47l-.24.055v-9.523z" fill="#78E6DC" />
+      <path d="M1 12.509c0-4.678.024-8.505.064-8.505.032 0 .872.207 1.872.454l1.824.461v7.582c0 4.16-.016 7.574-.032 7.574-.024 0-.872.215-1.88.47L1 21.013v-8.505z" fill="#325AB4" />
+    </svg>
+  );
+}
+
+/**
+ * Alibaba Cloud Official Logo
+ */
+function AlibabaCloudLogo({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="#FFFFFF" xmlns="http://www.w3.org/2000/svg">
+      <path d="M14.752 4.64h5.274C22.242 4.64 24 6.475 24 8.691V15.8a3.947 3.947 0 01-3.974 3.975h-5.274l1.299-1.835 3.822-1.222c.688-.23 1.146-.918 1.146-1.605v-5.426c0-.918-.764-1.683-1.681-1.683H9.708l5.044-3.365zM9.248 19.36H3.974C1.758 19.36 0 17.525 0 15.309V8.2A3.947 3.947 0 013.974 4.225h5.274L7.949 6.06 4.127 7.282c-.688.23-1.146.918-1.146 1.605v5.426c0 .918.764 1.683 1.681 1.683h9.626l-5.04 3.364z" />
+    </svg>
+  );
+}
+
+/**
+ * Tencent Official Logo
+ */
+function TencentLogo({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="#FFFFFF" xmlns="http://www.w3.org/2000/svg">
+      <path d="M9.976 1L24 9.8l-10.587.015L10.723 23H5.489L8.18 9.8H3.244L1 5.4h8.077L9.976 1z" />
+    </svg>
+  );
+}
+
+const BUILTIN_BRAND_COLORS: Partial<Record<BuiltinBrandId, string>> = {
+  gitee: '#C71D23',
+  yuque: '#00C472',
+  dingtalk: '#0089FF',
+  wecom: '#1875F0',
+  bilibili: '#00A1D6',
+  deepseek: '#4D6BFE',
+  claude: '#D97757',
+  openai: '#10A37F',
+  alibabacloud: '#FF6A00',
+  tencent: '#0052D9',
+  github: '#24292F',
+};
+
+const BUILTIN_LOGOS: Record<BuiltinBrandId, React.FC<BuiltinLogoProps>> = {
+  feishu: FeishuLogo,
+  wecom: WeComLogo,
+  dingtalk: DingTalkLogo,
+  yuque: YuqueLogo,
+  gitee: GiteeLogo,
+  notion: NotionLogo,
+  gmail: GmailLogo,
+  github: GitHubLogo,
+  bilibili: BilibiliLogo,
+  deepseek: DeepSeekLogo,
+  claude: ClaudeLogo,
+  openai: OpenAILogo,
+  bytedance: ByteDanceLogo,
+  alibabacloud: AlibabaCloudLogo,
+  tencent: TencentLogo,
+};
+
+// --- Dynamic Simple Icons Component -----------------------------------------------------------------
+
+export interface SimpleIconProps {
+  /** Simple Icons slug (e.g. 'gitee', 'slack', 'discord', 'gitlab', 'linear') */
+  slug: string;
+  /** Name used for fallback letter tile */
+  name?: string;
+  /** Optional hex color without # (defaults to brand's official color on Simple Icons CDN) */
+  colorHex?: string;
+  className?: string;
+}
+
+/**
+ * Loads and renders an official colored SVG from simple-icons CDN with deterministic letter tile fallback
+ */
+export function SimpleIcon({ slug, name, colorHex, className }: SimpleIconProps) {
+  const [errored, setErrored] = useState(false);
+  const normalizedSlug = slug.toLowerCase().trim();
+
+  // If slug matches a built-in vector, use the zero-latency embedded SVG!
+  if (normalizedSlug in BUILTIN_LOGOS) {
+    const Component = BUILTIN_LOGOS[normalizedSlug as BuiltinBrandId];
+    const brandColor = colorHex
+      ? (colorHex.startsWith('#') ? colorHex : `#${colorHex}`)
+      : BUILTIN_BRAND_COLORS[normalizedSlug as BuiltinBrandId];
+    return <Component className={className} fill={brandColor} />;
+  }
+
+  const displayName = name || slug;
+  const { letter, hue } = letterTile(displayName);
+  const tileStyle = letterTileStyle(hue);
+
+  if (errored) {
+    return (
+      <div
+        className={cn('flex items-center justify-center font-semibold select-none', className)}
+        style={tileStyle}
+      >
+        {letter}
+      </div>
+    );
+  }
+
+  const cdnUrl = colorHex
+    ? `https://cdn.simpleicons.org/${normalizedSlug}/${colorHex.replace('#', '')}`
+    : `https://cdn.simpleicons.org/${normalizedSlug}`;
+
+  return (
+    <img
+      src={cdnUrl}
+      alt={displayName}
+      onError={() => setErrored(true)}
+      className={cn('object-contain select-none', className)}
+      loading="lazy"
+    />
+  );
+}
+
+// --- BrandIcon Main Component -----------------------------------------------------------------------
+
+export interface BrandIconProps {
+  /** Builtin brand ID or simple-icons slug */
+  brand?: BuiltinBrandId | string;
+  /** Optional display name (used if fallback needed) */
+  name?: string;
+  /** Size preset (default: 'md' = 40x40) */
+  size?: BrandIconSize;
+  /** Container custom classes */
+  className?: string;
+  /** Override icon inner sizing/styles */
+  iconClassName?: string;
+  /** Whether to hide the squircle background container and render only the raw SVG */
+  bare?: boolean;
+}
+
+/**
+ * LobeHub / macOS inspired authentic brand avatar component.
+ * Provides pixel-perfect multi-color vector SVGs wrapped in a premium squircle container.
+ */
+export function BrandIcon({
+  brand,
+  name,
+  size = 'md',
+  className,
+  iconClassName,
+  bare = false,
+}: BrandIconProps) {
+  const sizeConfig = SIZE_CONFIG[size] || SIZE_CONFIG.md;
+  const brandKey = (brand || '').toLowerCase().trim();
+
+  const isBuiltin = brandKey in BUILTIN_LOGOS;
+  const builtinId = isBuiltin ? (brandKey as BuiltinBrandId) : null;
+
+  const containerBg = builtinId
+    ? BRAND_CONTAINER_BG[builtinId]
+    : 'bg-gradient-to-b from-[#24292F] to-[#141517] border-white/20 text-white';
+  const innerClass = cn(sizeConfig.icon, 'shrink-0', iconClassName);
+
+  const renderIcon = () => {
+    if (builtinId) {
+      const LogoComponent = BUILTIN_LOGOS[builtinId];
+      const defaultFill = bare ? BUILTIN_BRAND_COLORS[builtinId] : '#FFFFFF';
+      return <LogoComponent className={innerClass} fill={defaultFill} />;
+    }
+    if (brandKey) {
+      return <SimpleIcon slug={brandKey} name={name} className={innerClass} />;
+    }
+    const displayName = name || '?';
+    const { letter, hue } = letterTile(displayName);
+    return (
+      <div
+        className={cn('flex items-center justify-center font-semibold select-none', innerClass)}
+        style={letterTileStyle(hue)}
+      >
+        {letter}
+      </div>
+    );
+  };
+
+  if (bare) {
+    return <div className={cn('inline-flex items-center justify-center shrink-0', className)}>{renderIcon()}</div>;
+  }
+
+  return (
+    <div
+      className={cn(
+        'flex shrink-0 items-center justify-center border shadow-md select-none',
+        'shadow-[inset_0_1px_0_rgba(255,255,255,0.22)] transition-all duration-200 overflow-hidden',
+        sizeConfig.container,
+        containerBg,
+        className,
+      )}
+      aria-hidden="true"
+    >
+      {renderIcon()}
+    </div>
+  );
+}
+
+export default BrandIcon;
