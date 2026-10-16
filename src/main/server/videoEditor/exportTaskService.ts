@@ -14,6 +14,8 @@ export function videoExportTasksFor(root: string, store: CanvasStore) {
       output: (file, signal) => engine.renderOutput(file, signal),
       save: (sessionId, projectId, name, bytes) => media.saveExport(sessionId, projectId, name, bytes),
     });
+    const tasks = manager;
+    engine.addBusyProbe(() => tasks.hasActive());
     managers.set(root, manager);
   }
   return manager;

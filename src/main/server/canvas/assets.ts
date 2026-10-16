@@ -63,6 +63,16 @@ export async function readCanvasAsset(dataRoot: string, relative: string): Promi
   } finally { await handle.close(); }
 }
 
+/** Absolute path of a registered canvas asset for read-only tools (e.g. ffmpeg analysis); same containment checks as readCanvasAsset. */
+export async function resolveCanvasAssetFile(dataRoot: string, relative: string): Promise<string> {
+  const parts = relativePath(relative);
+  const root = await existingRoot(dataRoot);
+  const target = await realpath(path.resolve(dataRoot, 'canvas', ...parts));
+  if (!within(root, target)) throw new Error('Canvas asset path escapes its root');
+  if (!(await lstat(target)).isFile()) throw new Error('Canvas asset is not a regular file');
+  return target;
+}
+
 interface OwnedFile { absolute: string; dev: bigint; ino: bigint }
 
 /**
