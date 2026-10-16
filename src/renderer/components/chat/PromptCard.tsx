@@ -3,6 +3,7 @@ import { FileText, Send, Square, X } from 'lucide-react';
 import { cn } from '../../lib/cn';
 import { isImeComposingEvent } from '../../lib/ime';
 import VoiceInputButton from './VoiceInputButton';
+import { appendVoiceText } from '../../../shared/voiceInput';
 
 export default function PromptCard({
   value,
@@ -129,7 +130,7 @@ export default function PromptCard({
       {selection && <div className="mt-2 flex flex-wrap gap-2">{selection}</div>}
       <div className="mt-3 flex items-center gap-2">
         <div className="flex min-w-0 flex-1 items-center gap-2">{toolbar}</div>
-        <VoiceInputButton />
+        <VoiceInputButton active={autoFocus} disabled={disabled} onTranscript={text => { onChange(appendVoiceText(value, text)); textareaRef.current?.focus(); }} />
         {sending ? (
           <>
             {canSend && (

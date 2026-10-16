@@ -107,7 +107,7 @@ export default function AccountControl() {
           <ChevronsUpDown size={14} aria-hidden className="shrink-0 text-ink-muted opacity-60 group-hover:opacity-100" />
         </button>
       </Menu.Trigger>
-      <Menu.Portal><Menu.Content side="top" align="start" sideOffset={8} collisionPadding={12} className={`${panel} w-[260px] max-w-[calc(100vw-24px)] max-h-[var(--radix-dropdown-menu-content-available-height)]`} onCloseAutoFocus={(event) => { if (dialog) event.preventDefault(); }}>
+      <Menu.Portal><Menu.Content side="top" align="start" sideOffset={8} collisionPadding={12} className={`${panel} w-[var(--radix-dropdown-menu-trigger-width)] max-w-[calc(100vw-24px)] max-h-[var(--radix-dropdown-menu-content-available-height)]`} onCloseAutoFocus={(event) => { if (dialog) event.preventDefault(); }}>
         <Menu.Label className="flex items-center gap-2.5 px-2.5 py-3 font-normal">{avatar}<span className="min-w-0"><span className="block truncate text-sm font-medium">{name}</span><span className="block truncate text-xs text-ink-muted">{subtitle}</span></span></Menu.Label>
         <Menu.Separator className="mx-1 my-1 h-px bg-line/70" />
         {user ? <Menu.Item className={item} onSelect={() => showDialog('account')}><UserRound />账号信息{state?.status === 'offline' && <span className="ml-auto text-xs text-ink-muted">离线</span>}</Menu.Item> :

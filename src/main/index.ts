@@ -67,6 +67,7 @@ function devServerOrigin(): string | undefined {
 }
 
 async function bootstrap(): Promise<void> {
+  if (app.isPackaged) process.env.REIZO_VOICE_RUNTIME = path.join(process.resourcesPath, 'voice-runtime');
   if (app.isPackaged) process.env.REIZO_VIDEO_EDITOR_RUNTIME = path.join(process.resourcesPath, 'video-editor', 'runtime.json');
   const dataRoot = path.join(app.getPath('userData'), 'data');
   mkdirSync(dataRoot, { recursive: true });
