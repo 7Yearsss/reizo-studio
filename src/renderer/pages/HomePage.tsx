@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTitleBarSlot } from '../components/layout/titleBarSlots';
-import { FolderOpen, FolderPlus } from 'lucide-react';
-import ReizoWordmark from '../components/home/ReizoWordmark';
+import { FolderOpen, FolderPlus, Sparkles, X } from 'lucide-react';
+import HomeWelcome from '../components/home/HomeWelcome';
+import ConversationGuide from '../components/home/ConversationGuide';
+import { insertGuidePrompt, type GuideTool } from '../components/home/conversationGuideData';
 import PromptCard from '../components/chat/PromptCard';
 import ModelPicker from '../components/chat/ModelPicker';
 import MentionMenu, { extractMentionQuery } from '../components/chat/MentionMenu';
@@ -16,12 +18,12 @@ import * as uiStore from '../state/uiStore';
 import * as api from '../api';
 import { useSettingsStore } from '../state/useSettingsStore';
 import { useSkillStore } from '../state/useSkillStore';
-import { getRecentSkillIds } from '../state/skillStore';
-import type { SkillSummary } from '../state/skillStore';
 
 export default function HomePage({ active = true }: { active?: boolean }) {
   const titleBarSlot = useTitleBarSlot('center');
   const [draft, setDraft] = useState('');
+  const [selectedGuideTool, setSelectedGuideTool] = useState<GuideTool | null>(null);
+  const composerContainer = useRef<HTMLDivElement>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mentions, setMentions] = useState<string[]>([]);
@@ -29,8 +31,6 @@ export default function HomePage({ active = true }: { active?: boolean }) {
   const [draggingFiles, setDraggingFiles] = useState(false);
   const dragDepth = useRef(0);
   const fileThumbs = useRef(new Map<File, string>());
-  const [composerReady, setComposerReady] = useState(false);
-  const handleWordmarkSettled = useCallback(() => setComposerReady(true), []);
   const workspacePath = useSettingsStore((s) => s.settings.workspacePath);
   const mentionQuery = extractMentionQuery(draft);
   const folderName = workspacePath?.split(/[/\\]/).filter(Boolean).pop();
@@ -78,6 +78,8 @@ export default function HomePage({ active = true }: { active?: boolean }) {
     const files = [...droppedFiles];
     try {
       const session = await chatStore.createSession(text.slice(0, 60) || '新会话');
+      const guideSkillId = selectedGuideTool?.skillId;
+      if (guideSkillId) chatStore.setSessionSkill(session.id, guideSkillId);
       uiStore.setMode('chat');
       tabStore.openChatTab(session.id, session.title, true);
       // Mirror the session composer's drop semantics: images land on this
@@ -118,10 +120,12 @@ export default function HomePage({ active = true }: { active?: boolean }) {
       }
       const message = text.trim() || (files.length ? '看下这些素材' : text);
       void chatStore.sendMessage(session.id, message, mentions, {
+        ...(guideSkillId ? { skillId: guideSkillId } : {}),
         ...extra,
         attachments: attachments.length ? attachments : undefined,
       });
       setDraft('');
+      setSelectedGuideTool(null);
       setMentions([]);
       setDroppedFiles([]);
       for (const url of fileThumbs.current.values()) URL.revokeObjectURL(url);
@@ -134,33 +138,6 @@ export default function HomePage({ active = true }: { active?: boolean }) {
   }
 
   const skills = useSkillStore().skills;
-  const pills: SkillSummary[] = (() => {
-    const recent = getRecentSkillIds();
-    const byId = new Map(skills.map((s) => [s.id, s]));
-    const ordered = [
-      ...recent.map((id) => byId.get(id)).filter((s): s is SkillSummary => Boolean(s)),
-      ...skills.filter((s) => !recent.includes(s.id)),
-    ];
-    return ordered.slice(0, 6);
-  })();
-
-  async function handlePickSkill(skill: SkillSummary) {
-    if (creating) return;
-    setCreating(true);
-    setError(null);
-    try {
-      const session = await chatStore.createSession(`/${skill.id}`);
-      uiStore.setMode('chat');
-      tabStore.openChatTab(session.id, session.title, true);
-      chatStore.setSessionSkill(session.id, skill.id);
-      chatStore.seedComposer(session.id, skill.prompt ?? '');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setCreating(false);
-    }
-  }
-
   async function handlePickWorkspace() {
     const path = await api.pickFolder();
     if (path) await settingsStore.patchSettings({ workspacePath: path });
@@ -213,12 +190,11 @@ export default function HomePage({ active = true }: { active?: boolean }) {
           </div>,
           titleBarSlot,
         )}
-      <div className="flex flex-1 flex-col items-center justify-center px-6 pb-12">
-        <div className="relative">
-          <ReizoWordmark active={active} onSettled={handleWordmarkSettled} />
-        </div>
+      <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-6 py-10 max-sm:px-4">
+        <div className="my-auto flex w-full max-w-[760px] shrink-0 flex-col items-center">
+        <HomeWelcome active={active} />
 
-        <div className="relative mt-10 w-full max-w-2xl">
+        <div ref={composerContainer} className="relative mt-7 w-full">
           {mentionQuery !== null && workspacePath && (
             <MentionMenu
               query={mentionQuery}
@@ -261,15 +237,24 @@ export default function HomePage({ active = true }: { active?: boolean }) {
               imageUrl: fileThumb(file),
               onRemove: () => removeDroppedFile(file),
             }))}
-            placeholder="输入消息，/ 调用技能，@ 引用文件…"
+            placeholder="说说你的想法，或选择下方工具开始…"
+            rows={4}
+            className="rounded-[22px] px-6 py-5 shadow-[0_4px_24px_rgba(28,29,30,0.04)] max-sm:px-4"
             disabled={creating}
-            autoFocus={composerReady}
+            autoFocus={active}
+            selection={selectedGuideTool && (
+              <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-paper-inset px-2.5 py-1 text-xs text-ink">
+                <Sparkles size={12} className="shrink-0" />
+                <span className="truncate">{selectedGuideTool.label}</span>
+                <button type="button" disabled={creating} aria-label="移除已选工具" title="取消工具选择，保留输入内容" onClick={() => setSelectedGuideTool(null)} className="rounded-full p-0.5 hover:bg-line focus-visible:outline-2 focus-visible:outline-accent"><X size={12} /></button>
+              </span>
+            )}
             toolbar={
               <>
                 <button
                   type="button"
                   onClick={() => void handlePickWorkspace()}
-                  className="flex max-w-[220px] items-center gap-1.5 rounded-full bg-paper px-3 py-1 text-xs text-ink hover:bg-paper-inset"
+                  className="flex max-w-[220px] items-center gap-1.5 rounded-full bg-paper px-3 py-1.5 text-[13px] text-ink hover:bg-paper-inset"
                 >
                   {folderName ? <FolderOpen size={13} /> : <FolderPlus size={13} />}
                   <span className="truncate">{folderName ?? '选择工作区'}</span>
@@ -279,20 +264,21 @@ export default function HomePage({ active = true }: { active?: boolean }) {
             }
           />
           </div>
-          <div className="mt-4 flex flex-wrap justify-center gap-2">
-            {pills.map((pill) => (
-              <button
-                key={pill.id}
-                type="button"
-                disabled={creating}
-                title={pill.description || `/${pill.id}`}
-                onClick={() => void handlePickSkill(pill)}
-                className="rounded-full bg-paper-inset px-3 py-1 text-xs text-ink hover:bg-paper-inset/80"
-              >
-                /{pill.name}
-              </button>
-            ))}
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-1 text-xs leading-5 text-ink-muted">
+            <span>可拖入图片或文件，补充创作素材</span>
+            <span><kbd className="font-sans">Enter</kbd> 发送<span className="mx-2 text-line">/</span><kbd className="font-sans">Shift + Enter</kbd> 换行</span>
           </div>
+          <ConversationGuide
+            disabled={creating}
+            skills={skills}
+            selectedToolId={selectedGuideTool?.id}
+            onChoose={(tool) => {
+              setDraft((current) => insertGuidePrompt(current, selectedGuideTool, tool));
+              setSelectedGuideTool(tool);
+              requestAnimationFrame(() => composerContainer.current?.querySelector('textarea')?.focus());
+            }}
+            onManageSkills={() => uiStore.setMode('skills')}
+          />
           {error && (
             <p className="mt-4 text-center text-xs text-danger">
               发送失败：{error}
@@ -310,6 +296,7 @@ export default function HomePage({ active = true }: { active?: boolean }) {
               </button>
             </p>
           )}
+        </div>
         </div>
       </div>
     </div>

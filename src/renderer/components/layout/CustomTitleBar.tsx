@@ -89,12 +89,12 @@ export default function CustomTitleBar() {
   }, []);
 
   return (
-    <header className="titlebar flex h-10 shrink-0 items-center bg-sidebar select-none">
+    <header className="titlebar flex h-10 shrink-0 items-center bg-paper select-none">
       {/* Claude-style top-left toolbar: Logo, Sidebar toggle, Quick search, Back/Forward */}
       <div
         className={cn(
-          'titlebar-sidebar-head flex h-full shrink-0 items-center px-3 bg-sidebar transition-[width] duration-[var(--duration-base)] ease-[var(--ease-drawer)] motion-reduce:transition-none',
-          sidebarCollapsed && 'w-auto',
+          'titlebar-sidebar-head flex h-full shrink-0 items-center border-r border-[var(--sidebar-line)] px-3 bg-sidebar transition-[width] duration-[var(--duration-base)] ease-[var(--ease-drawer)] motion-reduce:transition-none',
+          sidebarCollapsed && 'w-auto border-r-0 bg-paper',
         )}
         // Width rides the `--sidebar-width` var so it tracks the sidebar's
         // direct-DOM drag updates live, not just the store commit on release.
@@ -125,7 +125,7 @@ export default function CustomTitleBar() {
               type="button"
               onClick={() => uiStore.toggleSidebar()}
               className={cn(
-                'flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-paper-inset hover:text-ink',
+                'flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-[var(--sidebar-hover)] hover:text-ink',
                 sidebarCollapsed ? 'text-ink-muted' : 'text-ink',
               )}
               aria-label="切换侧栏"
@@ -138,7 +138,7 @@ export default function CustomTitleBar() {
             <button
               type="button"
               onClick={() => openGlobalCommandPalette()}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-paper-inset hover:text-ink"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-[var(--sidebar-hover)] hover:text-ink"
               aria-label="快速搜索"
             >
               <Search size={15} strokeWidth={1.8} />
@@ -152,7 +152,7 @@ export default function CustomTitleBar() {
               type="button"
               disabled={!canGoBack}
               onClick={() => goBack()}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-paper-inset hover:text-ink disabled:opacity-30 disabled:pointer-events-none"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-[var(--sidebar-hover)] hover:text-ink disabled:opacity-30 disabled:pointer-events-none"
               aria-label="后退"
             >
               <ArrowLeft size={15} strokeWidth={1.8} />
@@ -164,7 +164,7 @@ export default function CustomTitleBar() {
               type="button"
               disabled={!canGoForward}
               onClick={() => goForward()}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-paper-inset hover:text-ink disabled:opacity-30 disabled:pointer-events-none"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-[var(--sidebar-hover)] hover:text-ink disabled:opacity-30 disabled:pointer-events-none"
               aria-label="前进"
             >
               <ArrowRight size={15} strokeWidth={1.8} />

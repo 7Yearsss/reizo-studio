@@ -2,6 +2,7 @@
 // beui.dev/components/agents/prompt-input
 
 import { ArrowUp, Plus, Square } from "lucide-react";
+import VoiceInputButton from '../chat/VoiceInputButton';
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   type FormEvent,
@@ -59,6 +60,7 @@ export interface PromptInputProps extends Omit<
   onAction?: (action: string) => void;
   onSubmit?: (value: string, model?: string) => void | Promise<void>;
   loading?: boolean;
+  /** Pass only while a turn is live; keeps stop available even with a draft or pending interaction. */
   onStop?: () => void;
   /** Ctrl/Cmd+Enter while `loading` — the alternate busy-lane (queue vs steer, per settings). */
   onSendNow?: (value: string, model?: string) => void;
@@ -123,9 +125,8 @@ export function PromptInput({
   );
   const hasDraft = Boolean(currentValue.trim());
   const canSubmit = hasDraft && !disabled;
-  // While a run is live the button is a stop control only when the box is
-  // empty; with text it becomes the queue/send button so Enter keeps working.
-  const showStop = loading && !hasDraft;
+  // Keep one persistent stop control in the footer; a draft gets its own send button.
+  const showStop = loading || Boolean(onStop);
 
   const setValue = (next: string) => {
     if (value === undefined) setInternalValue(next);
@@ -287,6 +288,21 @@ export function PromptInput({
           </Select>
         ) : null}
 
+        <div className="ml-auto flex shrink-0 items-center">
+          <VoiceInputButton className="size-8" />
+        </div>
+        {showStop && hasDraft && (
+          <Button
+            type="submit"
+            size="icon"
+            disabled={!canSubmit}
+            aria-label={loading ? "Queue message" : "Send prompt"}
+            title={loading ? (busySendTitle ?? "Enter 排队发送") : "发送"}
+            className="size-8 shrink-0 rounded-full"
+          >
+            <ArrowUp className="size-4" />
+          </Button>
+        )}
         <Button
           type={showStop ? "button" : "submit"}
           size="icon"
@@ -300,7 +316,7 @@ export function PromptInput({
                 : "发送"
           }
           onClick={showStop ? onStop : undefined}
-          className="ml-auto size-8 rounded-full"
+          className="size-8 shrink-0 rounded-full"
         >
           <AnimatePresence initial={false} mode="popLayout">
             <motion.span

@@ -4,6 +4,11 @@ import type { DirEntry } from '../shared/workspace';
 import type { SkillHubInstallRequest, SkillHubSearchQuery } from '../shared/skillhub';
 
 contextBridge.exposeInMainWorld('reizo', {
+  accountStatus: () => ipcRenderer.invoke(IPC.ACCOUNT_STATUS),
+  accountLogin: () => ipcRenderer.invoke(IPC.ACCOUNT_LOGIN),
+  accountLogout: () => ipcRenderer.invoke(IPC.ACCOUNT_LOGOUT),
+  accountReopen: () => ipcRenderer.invoke(IPC.ACCOUNT_REOPEN),
+  accountRefresh: () => ipcRenderer.invoke(IPC.ACCOUNT_REFRESH),
   platform: process.platform,
   getApiOrigin: (): Promise<string> => ipcRenderer.invoke(IPC.GET_API_ORIGIN),
   windowMinimize: (): Promise<void> => ipcRenderer.invoke(IPC.WINDOW_MINIMIZE),

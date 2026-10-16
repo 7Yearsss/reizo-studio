@@ -416,9 +416,6 @@ export default function Composer({
       interaction={interaction}
       interruptRequested={interruptRequested}
       recovering={Boolean(turnError?.includes('正在恢复'))}
-      // Always offer stop while a turn is live — the composer button switches to
-      // queue/send once the user has typed, so this stays the persistent interrupt.
-      onStop={onStop}
       onRetryStalled={onRetryStalled}
       skillName={activeSkill?.name}
     />
@@ -726,7 +723,7 @@ export default function Composer({
                 onValueChange={setDraft}
                 onSubmit={() => submit()}
                 loading={Boolean(sending && !interaction)}
-                onStop={onStop}
+                onStop={sending ? onStop : undefined}
                 onSendNow={() => submitNow()}
                 onEmptySendNow={queue.length > 0 ? steerAllQueued : undefined}
                 busySendTitle={
@@ -855,7 +852,6 @@ function LiveStatusBar({
   interaction,
   interruptRequested,
   recovering,
-  onStop,
   onRetryStalled,
   skillName,
 }: {
@@ -864,7 +860,6 @@ function LiveStatusBar({
   interaction: ComponentProps<typeof ReplyStatusBar>['interaction'];
   interruptRequested: boolean;
   recovering: boolean;
-  onStop?: () => void;
   onRetryStalled?: () => void;
   skillName?: string;
 }) {
@@ -885,7 +880,6 @@ function LiveStatusBar({
       recovering={recovering}
       lastTextAt={lastTextAt}
       lastProgressAt={lastProgressAt}
-      onStop={onStop}
       onRetry={onRetryStalled}
       skillName={skillName}
     />

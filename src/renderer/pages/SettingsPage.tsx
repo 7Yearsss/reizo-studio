@@ -1,45 +1,46 @@
-import { useState } from 'react';
-import { Check, FolderOpen, KeyRound } from 'lucide-react';
+import { FolderOpen, Settings2, Sparkles, ChartNoAxesCombined, Shield, Database, Info } from 'lucide-react';
 import { motion } from 'motion/react';
 import { cn } from '../lib/cn';
 import { APP_NAME, APP_VERSION } from '../../shared/constants';
-import type { Appearance, BusyEnterBehavior, PermissionMode, PublicProvider, ReasoningEffort } from '../../shared/settings';
+import type { Appearance, BusyEnterBehavior, PermissionMode, ReasoningEffort } from '../../shared/settings';
 import { useSettingsStore } from '../state/useSettingsStore';
 import * as settingsStore from '../state/settingsStore';
 import * as api from '../api';
-import * as tabStore from '../state/tabStore';
 import * as uiStore from '../state/uiStore';
+import { useUiStore } from '../state/useUiStore';
 import { toast } from '../lib/toast';
-import { StatefulButton, type ButtonState } from '../components/motion/button/stateful';
-import { Input } from '../components/motion/input';
+import ProvidersSection from './settings/ProvidersSection';
 import { AdminProvidersSection } from './settings/AdminProvidersSection';
 import StorageMaintenanceSection from './settings/StorageMaintenanceSection';
 import UsageCostsSection from './settings/UsageCostsSection';
 
-type SectionId = 'general' | 'providers' | 'usage' | 'admin' | 'storage' | 'about';
+type SectionId = uiStore.SettingsSection;
 
-const SECTIONS: { id: SectionId; label: string }[] = [
-  { id: 'general', label: '通用' },
-  { id: 'providers', label: '模型供应商' },
-  { id: 'usage', label: '用量与费用' },
-  { id: 'admin', label: '平台管理 (Admin)' },
-  { id: 'storage', label: '存储' },
-  { id: 'about', label: '关于' },
+const SECTIONS: { id: SectionId; label: string; icon: typeof Settings2 }[] = [
+  { id: 'general', label: '通用', icon: Settings2 },
+  { id: 'providers', label: '模型', icon: Sparkles },
+  { id: 'usage', label: '用量与费用', icon: ChartNoAxesCombined },
+  { id: 'admin', label: '平台管理', icon: Shield },
+  { id: 'storage', label: '存储', icon: Database },
+  { id: 'about', label: '关于', icon: Info },
 ];
 
 export default function SettingsPage() {
-  const [section, setSection] = useState<SectionId>('providers');
+  const section = useUiStore((state) => state.settingsSection);
+  const setSection = (next: SectionId) => uiStore.openSettings(next);
 
   return (
-    <div className="flex h-full min-w-0">
-      <nav className="w-56 shrink-0 bg-sidebar px-3 py-6">
-        <h2 className="mb-4 px-3 text-xl font-semibold tracking-tight">设置</h2>
-        {SECTIONS.map(({ id, label }) => (
+    <div className="flex h-full min-w-0 max-sm:flex-col">
+      <nav aria-label="设置分类" className="w-44 shrink-0 overflow-y-auto border-r border-line bg-sidebar px-3 py-6 max-sm:w-full max-sm:border-b max-sm:border-r-0 max-sm:py-3">
+        <h2 className="mb-5 px-3 text-sm font-semibold text-ink-muted max-sm:mb-2">设置</h2>
+        <div className="space-y-1 max-sm:flex max-sm:gap-1 max-sm:space-y-0 max-sm:overflow-x-auto">
+        {SECTIONS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             onClick={() => setSection(id)}
+            aria-current={section === id ? 'page' : undefined}
             className={cn(
-              'relative w-full rounded-lg px-3 py-2 text-left text-sm transition-colors duration-150',
+              'relative w-full shrink-0 rounded-xl px-3 py-2.5 text-left text-sm transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-accent max-sm:w-auto',
               section === id ? 'font-medium text-ink' : 'text-ink-muted hover:bg-paper-inset/70 hover:text-ink',
             )}
           >
@@ -57,11 +58,12 @@ export default function SettingsPage() {
                 transition={{ type: 'spring', stiffness: 450, damping: 35 }}
               />
             )}
-            <span className="relative z-10">{label}</span>
+            <span className="relative z-10 flex items-center gap-3 whitespace-nowrap"><Icon size={16} />{label}</span>
           </button>
         ))}
+        </div>
       </nav>
-      <div className="min-w-0 flex-1 overflow-y-auto px-10 py-8">
+      <div className={cn("min-h-0 min-w-0 flex-1 px-6 pb-5 pt-7 max-sm:px-4 max-sm:pt-4", section === 'providers' ? 'overflow-hidden' : 'overflow-y-auto')}>
         {section === 'general' && <GeneralSection />}
         {section === 'providers' && <ProvidersSection />}
         {section === 'usage' && <UsageCostsSection onOpenProviders={() => setSection('providers')} />}
@@ -277,157 +279,6 @@ function GeneralSection() {
   );
 }
 
-function ProvidersSection() {
-  const settings = useSettingsStore((s) => s.settings);
-
-  return (
-    <div>
-      <h1 className="mb-1 text-xl font-semibold tracking-tight">模型供应商</h1>
-      <p className="mb-8 text-sm text-ink-muted">
-        配置 API 密钥以使用不同的模型供应商。密钥经系统级加密后仅保存在本机。
-      </p>
-      <div className="grid max-w-4xl grid-cols-1 gap-4 md:grid-cols-2">
-        {settings.providers.map((provider) => (
-          <ProviderCard key={provider.id} provider={provider} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ProviderCard({ provider }: { provider: PublicProvider }) {
-  const [keyInput, setKeyInput] = useState('');
-  const [editing, setEditing] = useState(!provider.hasKey);
-  const [baseUrl, setBaseUrl] = useState(provider.baseUrl);
-  const [customModel, setCustomModel] = useState(provider.model);
-  const [saveState, setSaveState] = useState<ButtonState>('idle');
-
-  async function handleSave() {
-    setSaveState('loading');
-    try {
-      if (provider.allowCustomBaseUrl) {
-        await settingsStore.patchSettings({
-          provider: {
-            id: provider.id,
-            apiKey: keyInput.trim() || undefined,
-            baseUrl,
-            model: customModel,
-          },
-          activeProviderId: provider.id,
-        });
-        setKeyInput('');
-        setEditing(false);
-        setSaveState('success');
-        toast.success(`${provider.name} 配置已保存`);
-        setTimeout(() => setSaveState('idle'), 2000);
-        return;
-      }
-      if (!keyInput.trim()) {
-        setSaveState('idle');
-        return;
-      }
-      await settingsStore.patchSettings({
-        provider: { id: provider.id, apiKey: keyInput.trim() },
-        activeProviderId: provider.id,
-      });
-      setKeyInput('');
-      setEditing(false);
-      setSaveState('success');
-      toast.success(`${provider.name} 密钥已保存`);
-      setTimeout(() => setSaveState('idle'), 2000);
-    } catch {
-      setSaveState('error');
-      toast.error('保存失败，请检查配置');
-      setTimeout(() => setSaveState('idle'), 2500);
-    }
-  }
-
-  async function handleClear() {
-    await settingsStore.patchSettings({ provider: { id: provider.id, apiKey: '' } });
-    setEditing(true);
-    toast.info(`${provider.name} 密钥已移除`);
-  }
-
-  return (
-    <div className="rounded-2xl border border-line bg-paper-raised p-5">
-      <div className="mb-1 flex items-center gap-2">
-        <h3 className="font-semibold">{provider.name}</h3>
-        <span className="rounded bg-paper-inset px-1.5 py-0.5 text-[11px] font-medium text-ink-muted">
-          {provider.tag}
-        </span>
-      </div>
-      <p className="mb-4 text-xs text-ink-muted">
-        {provider.description || provider.models[0]?.name || provider.model || '自定义模型'}
-      </p>
-
-      {provider.allowCustomBaseUrl && (
-        <div className="mb-3 space-y-2">
-          <Input
-            value={baseUrl}
-            onChange={(val) => setBaseUrl(val)}
-            placeholder="Base URL，例如 https://api.example.com/v1"
-            className="w-full text-xs"
-          />
-          <Input
-            value={customModel}
-            onChange={(val) => setCustomModel(val)}
-            placeholder="模型 ID，例如 deepseek-chat"
-            className="w-full text-xs"
-          />
-        </div>
-      )}
-
-      {provider.hasKey && !editing ? (
-        <div className="flex items-center gap-2">
-          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-full bg-paper px-3 py-2.5">
-            <KeyRound size={14} className="shrink-0 text-ink-muted" />
-            <span className="flex-1 truncate text-sm tracking-[0.18em] text-ink">••••••••••••••••••••••••</span>
-          </div>
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-success-bg text-success">
-            <Check size={15} strokeWidth={2.5} />
-          </span>
-        </div>
-      ) : (
-        <div className="flex items-center gap-2">
-          <div className="min-w-0 flex-1">
-            <Input
-              type="password"
-              value={keyInput}
-              onChange={(val) => setKeyInput(val)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void handleSave();
-              }}
-              placeholder={provider.id === 'reizo' ? '粘贴虚拟 sk-... 密钥' : '输入 API Key'}
-              leftIcon={<KeyRound size={14} className="text-ink-muted" />}
-              className="w-full text-sm"
-            />
-          </div>
-          <StatefulButton
-            state={saveState}
-            onClick={() => void handleSave()}
-            disabled={!provider.allowCustomBaseUrl && !keyInput.trim()}
-            size="sm"
-            className="shrink-0"
-          >
-            保存
-          </StatefulButton>
-        </div>
-      )}
-
-      {provider.hasKey && !editing && (
-        <div className="mt-3 flex justify-end gap-3">
-          <button onClick={() => setEditing(true)} className="text-xs text-ink-muted hover:text-ink">
-            更换
-          </button>
-          <button onClick={() => void handleClear()} className="text-xs text-danger hover:opacity-80">
-            移除
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function AboutSection() {
   return (
     <div className="max-w-xl">
@@ -440,12 +291,11 @@ function AboutSection() {
       </p>
       <button
         onClick={() => {
-          uiStore.setMode('chat');
-          tabStore.newLauncherTab();
+          uiStore.closeSettings();
         }}
         className="mt-6 text-sm text-accent hover:opacity-80"
       >
-        返回对话
+        返回工作区
       </button>
     </div>
   );
