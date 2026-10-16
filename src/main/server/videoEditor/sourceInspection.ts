@@ -49,7 +49,10 @@ export class SourceInspections {
       const fromFrame = Math.round((source.fromSeconds ?? 0) * fps);
       const toFrame = source.toSeconds === undefined ? asset.durationInFrames : Math.round(source.toSeconds * fps);
       if (fromFrame < 0 || toFrame <= fromFrame || toFrame > asset.durationInFrames || asset.kind === 'image' && (fromFrame !== 0 || source.toSeconds !== undefined)) throw new Error('抽样范围越界；图片请省略时间范围');
-      const frames = asset.kind === 'image' ? [0] : [...new Set(Array.from({ length: source.count }, (_, i) => Math.min(toFrame - 1, Math.floor(fromFrame + (i + 0.5) * (toFrame - fromFrame) / source.count))))];
+      if (source.atSeconds && asset.kind === 'image') throw new Error('图片没有时间轴，不能指定抽样时间');
+      const explicit = source.atSeconds?.map(t => Math.round(t * fps));
+      if (explicit?.some(f => f < fromFrame || f >= toFrame)) throw new Error(`「${asset.name}」的指定抽样时间超出查看范围`);
+      const frames = asset.kind === 'image' ? [0] : explicit ? [...new Set(explicit)].sort((a, b) => a - b) : [...new Set(Array.from({ length: source.count }, (_, i) => Math.min(toFrame - 1, Math.floor(fromFrame + (i + 0.5) * (toFrame - fromFrame) / source.count))))];
       return { asset, fromFrame, toFrame, frames };
     });
     const content: VideoToolResult['content'] = [{ type: 'text', text: warning }];
