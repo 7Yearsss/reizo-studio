@@ -21,7 +21,7 @@ export const compositionRequest = z.object({ nodeIds: z.array(z.string().min(1))
 export type CompositionRequest = z.input<typeof compositionRequest>;
 interface Clip { nodeId: string; video: string; audio: string[] }
 
-async function executable(name: 'ffmpeg' | 'ffprobe'): Promise<string> {
+export async function executable(name: 'ffmpeg' | 'ffprobe'): Promise<string> {
   const configured = name === 'ffmpeg' ? process.env.REIZO_FFMPEG_PATH : process.env.REIZO_FFPROBE_PATH;
   if (configured) return configured;
   const bundled = path.join(process.resourcesPath ?? '', name + (process.platform === 'win32' ? '.exe' : ''));
