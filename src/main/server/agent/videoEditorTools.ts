@@ -14,6 +14,9 @@ import { prepareVideoDraft } from '../videoEditor/prepare';
 import { SourceInspections } from '../videoEditor/sourceInspection';
 import { sourceInspectionSchema, shotSelectionsSchema } from '../../../shared/videoSelection';
 import { createVideoSpeechTools } from './videoSpeechTools';
+import { analyzeMediaFile } from '../videoEditor/mediaAnalysis';
+import { resolveCanvasAssetFile } from '../canvas/assets';
+import { assetAvailableInCanvas } from '../canvas/assetScope';
 
 async function mediaToolOutput({ output }: { output: VideoToolResult }) {
   const value: Array<{ type: 'text'; text: string } | { type: 'file'; mediaType: string; data: { type: 'data'; data: string } }> = output.content.map((part) => {
@@ -117,6 +120,33 @@ export function createVideoEditorTools(sessionId: string, dataRoot: string, canv
       inputSchema: z.object({}),
       execute: async () => ({ ...observations.read(sessionId), approvalMode: await videoApprovalFor(dataRoot).read(sessionId), approvalNote: 'manual: 用户可在编辑器应用，或单独发送“应用这一版”。auto: 修改后先查看实际预览，review_edit_session 将应用整份提案，仍可撤销；导出确认独立。' }),
     }),
+    ...(canvasStore ? { video_editor_analyze: tool({
+      description: 'Objectively analyze ONE exact workbench video/audio asset version (an assetId from video_editor_media list) with local FFmpeg, no model or upload: silent intervals, the complement "soundSegments" (where sound is present, NOT proof of speech; use video_editor_speech for words), and visual scene-cut timestamps. Use it to plan rough cuts: drop dead air and pauses, split long takes at scene cuts, then pass exact source windows to video_editor_compose or video_editor_rough_cut. Scene cuts are a heuristic (raise sceneThreshold if too many, lower if cuts are missed); silence depends on silenceDb. Files imported only inside the editor media pool are not available here; reuse them through the workbench first.',
+      inputSchema: z.object({
+        assetId: z.string().min(1),
+        silence: z.boolean().default(true),
+        scenes: z.boolean().default(true),
+        silenceDb: z.number().min(-70).max(-10).default(-35),
+        minSilenceSeconds: z.number().min(0.2).max(5).default(0.6),
+        sceneThreshold: z.number().min(0.1).max(0.9).default(0.3),
+      }).strict(),
+      execute: async (input, { abortSignal }) => {
+        const canvas = canvasStore.findCanvasBySession(sessionId);
+        const asset = canvas ? canvasStore.assets.get(input.assetId) : undefined;
+        if (!canvas || !asset || !['video', 'audio'].includes(asset.kind) || !assetAvailableInCanvas(canvasStore, canvas.id, asset)) throw new Error('素材不在当前对话中或不是视频/音频，请使用 video_editor_media list 返回的 assetId');
+        if (!input.silence && !input.scenes) throw new Error('请至少开启静音检测或镜头切换检测之一');
+        observations.record(sessionId, 'working', `正在分析素材「${asset.name ?? asset.id}」的静音与镜头切换`);
+        try {
+          const file = await resolveCanvasAssetFile(dataRoot, asset.path);
+          const result = await analyzeMediaFile(file, input, AbortSignal.any([...(abortSignal ? [abortSignal] : []), AbortSignal.timeout(300_000)]));
+          observations.record(sessionId, 'tool_returned', '素材分析完成');
+          return { assetId: asset.id, name: asset.name, ...result, note: '静音与镜头切换为本地 FFmpeg 的客观检测结果；声音段不代表有人声，镜头切换是启发式结果，剪辑前请结合源画面核对。' };
+        } catch (error) {
+          observations.record(sessionId, abortSignal?.aborted ? 'cancelled' : 'failed', `素材分析未完成：${error instanceof Error ? error.message : '未知错误'}`);
+          throw error;
+        }
+      },
+    }) } : {}),
     ...(canvasStore ? { video_editor_media: tool({
       description: 'List immutable image/video/audio asset versions in this conversation’s WORKBENCH CANVAS, or import one exact workbench assetId into its open video editor media pool. This list does NOT enumerate files imported directly through the editor file picker. An empty list means only the workbench canvas is empty; inspect the editor media pool via begin_edit_session then read_project(view:"assets", editSessionId) before reporting missing files. Already-imported editor assets need no transfer. Choose the user-selected version; never assume the newest output. Cross-conversation assets must first be reused in this canvas. Import preserves the source and does not change the timeline. Returns editorAssetId for subsequent draft editing. Keep the video panel open. Completed UI video/audio exports are automatically saved back to the canvas and asset library (剪辑成片).',
       inputSchema: z.discriminatedUnion('action', [z.object({ action: z.literal('list') }), z.object({ action: z.literal('import'), assetId: z.string().min(1) })]),
