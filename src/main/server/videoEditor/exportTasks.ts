@@ -86,6 +86,8 @@ export class VideoExportTasks {
     for (const job of this.jobs.values()) if (!terminal.has(job.phase)) this.run(job);
   }
   stop() { this.controller.abort(); }
+  /** True while any accepted export has not reached a terminal phase. */
+  hasActive(): boolean { return [...this.jobs.values()].some((job) => !terminal.has(job.phase)); }
   async settled() { await Promise.allSettled([...this.workers.values(), ...this.writes.values()]); }
   async list(sessionId: string) {
     await this.loaded;
