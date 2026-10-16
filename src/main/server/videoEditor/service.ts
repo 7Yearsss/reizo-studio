@@ -12,6 +12,13 @@ export interface VideoEditorEngine { origin: string; token: string; kill(): void
 interface Binding { projectId: string; name: string }
 const services = new Map<string, VideoEditorService>();
 
+/** Milliseconds of inactivity before the engine process is stopped (default 15 min); REIZO_VIDEO_EDITOR_IDLE_MS=0 disables it. */
+function defaultIdleMs(): number {
+  const raw = process.env.REIZO_VIDEO_EDITOR_IDLE_MS;
+  const configured = raw === undefined || raw === '' ? NaN : Number(raw);
+  return Number.isFinite(configured) && configured >= 0 ? configured : 15 * 60_000;
+}
+
 export function videoEditorFor(dataRoot: string): VideoEditorService {
   let service = services.get(dataRoot);
   if (!service) { service = new VideoEditorService(dataRoot); services.set(dataRoot, service); }
@@ -30,11 +37,63 @@ export class VideoEditorService {
   private opens = new Map<string, Promise<VideoEditorWorkspace>>();
   private bindings = new Map<string, Binding>();
   private previewed = new Set<string>();
-  constructor(private dataRoot: string, private launchEngine?: () => Promise<VideoEditorEngine>) {}
+  private inflight = 0;
+  private idleTimer?: ReturnType<typeof setTimeout>;
+  private busyProbes = new Set<() => boolean>();
+  constructor(private dataRoot: string, private launchEngine?: () => Promise<VideoEditorEngine>, private idleMs = defaultIdleMs()) {}
+
+  /** Work the service cannot see (e.g. host-owned export tasks) that must keep the engine alive. */
+  addBusyProbe(probe: () => boolean): () => void {
+    this.busyProbes.add(probe);
+    return () => { this.busyProbes.delete(probe); };
+  }
+  /** (Re)starts the idle countdown; every engine use pushes shutdown back. */
+  private armIdle(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = undefined;
+    if (!this.idleMs || this.stopped || !this.engine) return;
+    this.idleTimer = setTimeout(() => { void this.shutdownIfIdle(); }, this.idleMs);
+    this.idleTimer.unref?.();
+  }
+  private async track<T>(work: () => Promise<T>): Promise<T> {
+    this.inflight++;
+    if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = undefined; }
+    try { return await work(); } finally { this.inflight--; this.armIdle(); }
+  }
+  private busy(): boolean { return this.inflight > 0 || [...this.busyProbes].some((probe) => { try { return probe(); } catch { return true; } }); }
+  /**
+   * Stops the engine process when nothing needs it: no calls in flight, no active export, and no
+   * editor panel connected (a connected panel holds the open draft in its browser). If the engine
+   * cannot say whether a panel is connected, it stays alive. The next use relaunches it.
+   */
+  async shutdownIfIdle(): Promise<boolean> {
+    if (this.stopped || !this.engine) return false;
+    if (this.busy()) { this.armIdle(); return false; }
+    const pending = this.engine;
+    const engine = await pending.catch((): undefined => undefined);
+    if (!engine) return false;
+    let probe: EditorMcpClient | undefined;
+    try {
+      const client = this.clients.values().next().value ?? (probe = new EditorMcpClient(engine.origin, engine.token));
+      const status = editorResult(await client.call('openchatcut_status'));
+      if (!Array.isArray(status.connectedProjectIds) || status.connectedProjectIds.length > 0) { this.armIdle(); return false; }
+    } catch { this.armIdle(); return false; }
+    finally { void probe?.close(); }
+    // The status read awaited: re-check that nothing started or replaced the engine meanwhile.
+    if (this.stopped || this.engine !== pending || this.busy()) { this.armIdle(); return false; }
+    this.engine = undefined; this.child = undefined;
+    if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = undefined; }
+    for (const client of this.clients.values()) void client.close();
+    // Cached workspaces carry the old loopback origin; the relaunched engine has a new one.
+    this.clients.clear(); this.opens.clear(); this.previewed.clear();
+    engine.kill();
+    return true;
+  }
 
   private start(): Promise<VideoEditorEngine> {
     if (this.stopped) return Promise.reject(new Error('剪辑引擎已关闭'));
     if (!this.engine) this.engine = (this.launchEngine ? this.launchEngine() : this.launch()).catch((e) => { this.engine = undefined; throw e; });
+    this.armIdle();
     return this.engine;
   }
   private async launch(): Promise<VideoEditorEngine> {
@@ -111,15 +170,20 @@ export class VideoEditorService {
   /** Internal HTTP access to the render engine; does not depend on an attached editor. */
   async renderRequest(method: 'GET' | 'POST' | 'DELETE', id?: string, body?: Record<string, unknown>, signal?: AbortSignal): Promise<Response> {
     if (id !== undefined && !/^[a-f0-9-]{36}$/i.test(id)) throw new Error('导出任务编号无效');
+    return this.track(async () => {
     const engine = await this.start();
     return fetch(`${engine.origin}/export/job${id ? `/${id}` : ''}`, {
       method, headers: { Origin: engine.origin, 'Sec-Fetch-Site': 'none', 'Content-Type': 'application/json' },
       ...(body ? { body: JSON.stringify(body) } : {}),
       signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(180_000)]),
     });
+    });
   }
   async renderOutput(file: string, signal: AbortSignal): Promise<Buffer> {
     if (!/^\/media\/uploads\/[a-zA-Z0-9_.-]+\.(mp4|webm|mp3|wav)$/i.test(file)) throw new Error('成片路径无效');
+    return this.track(() => this.readRenderOutput(file, signal));
+  }
+  private async readRenderOutput(file: string, signal: AbortSignal): Promise<Buffer> {
     const engine = await this.start();
     const response = await fetch(engine.origin + file, { signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]), redirect: 'error' });
     if (response.status === 404) throw Object.assign(new Error('渲染成片已不存在，请重新导出'), { code: 'OUTPUT_MISSING' });
@@ -153,7 +217,7 @@ export class VideoEditorService {
   open(sessionId: string, title: string): Promise<VideoEditorWorkspace> {
     const existing = this.opens.get(sessionId);
     if (existing) return existing;
-    const pending = this.openProject(sessionId, title).catch((e) => { this.opens.delete(sessionId); throw e; });
+    const pending = this.track(() => this.openProject(sessionId, title)).catch((e) => { this.opens.delete(sessionId); throw e; });
     this.opens.set(sessionId, pending);
     return pending;
   }
@@ -193,8 +257,10 @@ export class VideoEditorService {
     return { client, binding };
   }
   async catalog(sessionId: string) {
-    const { client } = await this.ready(sessionId);
-    return (await client.list()).filter((t) => VIDEO_EDITOR_TOOLS.has(t.name));
+    return this.track(async () => {
+      const { client } = await this.ready(sessionId);
+      return (await client.list()).filter((t) => VIDEO_EDITOR_TOOLS.has(t.name));
+    });
   }
   async pendingReview(sessionId: string, signal?: AbortSignal): Promise<ReviewedVideoDraft | null> {
     const result = editorResult(await this.call(sessionId, 'list_edit_sessions', {}, signal));
@@ -216,7 +282,10 @@ export class VideoEditorService {
     // This lifecycle tool is deliberately absent from the model-call allowlist.
     return client.call('apply_reviewed_edit_session', { ...expected, editorProjectId: binding.projectId }, signal);
   }
-  async call(sessionId: string, name: string, args: Record<string, unknown>, signal?: AbortSignal) {
+  call(sessionId: string, name: string, args: Record<string, unknown>, signal?: AbortSignal) {
+    return this.track(() => this.callTool(sessionId, name, args, signal));
+  }
+  private async callTool(sessionId: string, name: string, args: Record<string, unknown>, signal?: AbortSignal) {
     if (!VIDEO_EDITOR_TOOLS.has(name)) throw new Error('当前剪辑模块未开放这个工具。');
     const { client, binding } = await this.ready(sessionId, name === 'get_edit_session');
     if (args.editorProjectId && args.editorProjectId !== binding.projectId) throw new Error('不能操作其他对话的剪辑工程。');
@@ -275,6 +344,7 @@ export class VideoEditorService {
   }
   stop(): void {
     this.stopped = true;
+    if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = undefined; }
     for (const client of this.clients.values()) void client.close();
     this.clients.clear(); this.opens.clear();
     this.child?.kill();

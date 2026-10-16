@@ -426,3 +426,11 @@ checks stable replay, preserved display edits and isolation of a new transcripti
 This phase does not implement translation, speaker diarization, automatic semantic
 content deletion or video-generation APIs. The Agent can read/search attached real
 transcripts through `read_transcript` / `find_transcript`.
+
+## Idle shutdown (2026-10-16)
+
+The engine process stops after 15 minutes without use (`REIZO_VIDEO_EDITOR_IDLE_MS`, `0` disables).
+It is kept alive while any host call is in flight, any export task is non-terminal, or the
+engine reports a connected editor panel (the panel holds the open draft). If connection
+status cannot be read, the engine stays running. The next use relaunches it with a new
+loopback origin; cached workspace URLs are dropped. Coverage: `videoEditor/idleShutdown.test.ts`.
