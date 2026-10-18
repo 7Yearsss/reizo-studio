@@ -35,6 +35,7 @@ import * as artifactStore from '../../state/artifactStore';
 import * as uiStore from '../../state/uiStore';
 import { Button } from '../ui/button';
 import { toast } from '../../lib/toast';
+import { CHAT_DROP_FILES_EVENT } from '../../lib/chatDrop';
 
 const MODE_LABEL: Record<PermissionMode, string> = {
   ask: '每次询问',
@@ -61,6 +62,7 @@ export default function Composer({
   onDismissInterrupt,
   compact = false,
   onOverlayHeight,
+  draggingFiles = false,
 }: {
   sessionId?: string;
   disabled: boolean;
@@ -86,6 +88,8 @@ export default function Composer({
   compact?: boolean;
   /** Reports the floating overlay's rendered height so the message list can keep enough bottom padding for content to scroll fully clear of the docked cards. */
   onOverlayHeight?: (height: number) => void;
+  /** A file drag is hovering anywhere over the chat page (ChatPage owns the drop zone). */
+  draggingFiles?: boolean;
 }) {
   const [draft, setDraft] = useState('');
   const presentationRef = usePresentationWorkspace((s) => sessionId ? s.references[sessionId] : undefined);
@@ -253,9 +257,6 @@ export default function Composer({
     if (!draft.includes('@')) setMentions([]);
   }, [draft]);
 
-  const [draggingFiles, setDraggingFiles] = useState(false);
-  const dragDepth = useRef(0);
-
   async function addDroppedFiles(files: FileList | File[]) {
     const next = [...attachments];
     for (const file of Array.from(files)) {
@@ -327,6 +328,20 @@ export default function Composer({
     }
     setAttachments(next);
   }
+
+  // ChatPage owns the drop zone (the whole conversation, not just this box) and
+  // hands the dropped files over; the ref keeps the latest closure (attachments).
+  const addDroppedFilesRef = useRef(addDroppedFiles);
+  addDroppedFilesRef.current = addDroppedFiles;
+  useEffect(() => {
+    const onDrop = (event: Event) => {
+      const detail = (event as CustomEvent<{ sessionId?: string; files?: File[] }>).detail;
+      if (detail?.sessionId !== sessionId || !detail.files?.length) return;
+      void addDroppedFilesRef.current(detail.files);
+    };
+    window.addEventListener(CHAT_DROP_FILES_EVENT, onDrop);
+    return () => window.removeEventListener(CHAT_DROP_FILES_EVENT, onDrop);
+  }, [sessionId]);
 
   const composerBodyRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -446,28 +461,7 @@ export default function Composer({
         {slash !== null && (
           <SlashPalette query={slash.query} args={slash.args} commands={slashCommands} onPick={pickSlash} />
         )}
-        <div
-          className="relative"
-          onDragOver={(e) => {
-            e.preventDefault();
-          }}
-          onDragEnter={(e) => {
-            if (e.dataTransfer.types.includes('Files')) {
-              dragDepth.current += 1;
-              setDraggingFiles(true);
-            }
-          }}
-          onDragLeave={() => {
-            dragDepth.current = Math.max(0, dragDepth.current - 1);
-            if (dragDepth.current === 0) setDraggingFiles(false);
-          }}
-          onDrop={(e) => {
-            e.preventDefault();
-            dragDepth.current = 0;
-            setDraggingFiles(false);
-            if (e.dataTransfer.files.length) void addDroppedFiles(e.dataTransfer.files);
-          }}
-        >
+        <div className="relative">
             {sessionId && <ComposerDock todos={todos} />}
             {syncingSheet && <p role="status" className="mb-2 text-xs text-ink-muted">正在保存工作区内容…</p>}
             {(attachments.length > 0 || nodeRefs.length > 0 || mentions.length > 0 || unpinnedSelectionNodes.length > 0) && (
