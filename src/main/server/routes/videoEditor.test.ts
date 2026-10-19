@@ -15,6 +15,7 @@ import { CompositionPreviews } from '../videoEditor/composition';
 import { videoExportTasksFor, stopVideoExportTasks } from '../videoEditor/exportTaskService';
 
 vi.mock('../videoEditor/service', () => ({ videoEditorFor: () => ({
+  addBusyProbe: () => () => {},
   open: async (sessionId: string) => ({ projectId: `project-${sessionId}`, name: 'test', url: 'http://127.0.0.1:1/' }),
   renderRequest: async (method: string, id?: string, body?: Record<string, unknown>) => method === 'POST' ? Response.json({ renderId: body?.operationId }) : method === 'DELETE' ? new Response(null, { status: 204 }) : Response.json({ id, status: 'running', progress: 25 }),
 }) }));
