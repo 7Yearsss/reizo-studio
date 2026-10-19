@@ -123,3 +123,10 @@ it('checks evidence before timeline mutation and persists selection reasons with
   expect(preview?.imageCount).toBe(1);
   expect(call.mock.calls.map(c => c[0])).not.toContain('review_edit_session');
 });
+
+it('samples explicit times (e.g. scene cuts) instead of the uniform grid and rejects times outside the range', async () => {
+  const f = await fixture();
+  await f.store.inspect('chat', { editSessionId: 'draft', sources: [{ assetId: 'old-selected', fromSeconds: 0, toSeconds: 6, atSeconds: [3.5, 0.5, 3.5] }] }, f.call);
+  expect(f.call.mock.calls[1]).toEqual(['view_asset_frames', { editSessionId: 'draft', assetId: 'old-selected', frames: [15, 105] }, undefined]);
+  await expect(f.store.inspect('chat', { editSessionId: 'draft', sources: [{ assetId: 'old-selected', fromSeconds: 0, toSeconds: 6, atSeconds: [6.5] }] }, f.call)).rejects.toThrow('超出查看范围');
+});

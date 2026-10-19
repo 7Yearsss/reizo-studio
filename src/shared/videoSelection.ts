@@ -4,7 +4,11 @@ const id = z.string().min(1).max(200);
 const seconds = z.number().finite().min(0).max(86400);
 export const sourceInspectionSchema = z.object({
   editSessionId: id,
-  sources: z.array(z.object({ assetId: id, fromSeconds: seconds.optional(), toSeconds: seconds.optional(), count: z.number().int().min(2).max(8).default(6) }).strict()).min(1).max(4),
+  sources: z.array(z.object({
+    assetId: id, fromSeconds: seconds.optional(), toSeconds: seconds.optional(), count: z.number().int().min(2).max(8).default(6),
+    // Explicit sample times (e.g. one per scene cut from video_editor_analyze) replace the uniform sampling.
+    atSeconds: z.array(seconds).min(1).max(8).optional(),
+  }).strict()).min(1).max(4),
 }).strict();
 export const shotSelectionsSchema = z.array(z.object({
   evidenceId: z.string().uuid(),

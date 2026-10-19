@@ -1,3 +1,5 @@
+import * as tabStore from './tabStore';
+
 export type SidebarMode = 'chat' | 'projects' | 'skills' | 'artifacts' | 'automation' | 'settings';
 export type SettingsSection = 'general' | 'providers' | 'extensions' | 'usage' | 'admin' | 'storage' | 'about';
 export type RightPanelTab = 'canvas' | 'video' | 'sheets' | 'documents' | 'presentations' | 'artifacts' | 'files' | 'git' | 'terminal';
@@ -161,6 +163,32 @@ export function setRightPanelTab(tab: RightPanelTab | null): void {
     canvasOpen: tab === 'canvas',
     artifactsOpen: tab === 'artifacts',
   });
+}
+
+// The right panel (canvas / video / sheets …) belongs to the conversation tab it
+// was opened in: remember it per tab and restore it when switching back.
+const panelByTab = new Map<string, RightPanelTab | null>();
+let lastActiveTabId = tabStore.getSnapshot().activeTabId;
+tabStore.subscribe(() => {
+  const { activeTabId, tabs } = tabStore.getSnapshot();
+  if (activeTabId === lastActiveTabId) return;
+  panelByTab.set(lastActiveTabId, state.rightPanelTab);
+  lastActiveTabId = activeTabId;
+  for (const id of panelByTab.keys()) if (!tabs.some((t) => t.id === id)) panelByTab.delete(id);
+  setRightPanelTab(panelByTab.get(activeTabId) ?? null);
+});
+
+/** Open a panel on behalf of a session (e.g. an agent tool result). If that
+ * session isn't the visible tab, queue it on its own tab instead of hijacking
+ * whichever conversation the user is looking at. */
+export function setRightPanelTabForSession(sessionId: string, tab: RightPanelTab | null): void {
+  const { tabs, activeTabId } = tabStore.getSnapshot();
+  const owners = tabs.filter((t) => t.kind === 'chat' && t.sessionId === sessionId);
+  if (owners.length === 0 || owners.some((t) => t.id === activeTabId)) {
+    setRightPanelTab(tab);
+    return;
+  }
+  for (const t of owners) panelByTab.set(t.id, tab);
 }
 
 export function toggleRightPanelTab(tab: RightPanelTab): void {

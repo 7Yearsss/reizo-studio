@@ -15,6 +15,7 @@ import { SourceInspections } from '../videoEditor/sourceInspection';
 import { sourceInspectionSchema, shotSelectionsSchema } from '../../../shared/videoSelection';
 import { createVideoSpeechTools } from './videoSpeechTools';
 import { analyzeMediaFile } from '../videoEditor/mediaAnalysis';
+import { snapShot } from '../videoEditor/cutSnapping';
 import { resolveCanvasAssetFile } from '../canvas/assets';
 import { assetAvailableInCanvas } from '../canvas/assetScope';
 
@@ -32,7 +33,7 @@ export function createVideoEditorTools(sessionId: string, dataRoot: string, canv
   return {
     ...createVideoSpeechTools(sessionId, dataRoot),
     video_editor_inspect_sources: tool({
-      description: 'For theme-based source selection / highlights / automatic rough cuts, call video_editor_prepare, then this tool with exact selected video/image asset IDs from its editor pool. Returns actual labeled source contact sheets and durable evidence IDs, WITHOUT changing the timeline. Inspect visual content, not filenames. Up to 4 sources per batch; cover ALL user-requested candidates in batches before ranking. Default 6 samples per source; long clips need narrower candidate-range inspection before choosing trims. Preserve user-selected versions. Source frames use the project fps, not timeline positions. Does not listen, transcribe, detect all scene boundaries or guarantee motion quality. Never claim a full-video analysis from sparse stills. Then video_editor_rough_cut cites evidence, times and specific visual reasons. No tool discovery is needed.',
+      description: 'For theme-based source selection / highlights / automatic rough cuts, call video_editor_prepare, then this tool with exact selected video/image asset IDs from its editor pool. Returns actual labeled source contact sheets and durable evidence IDs, WITHOUT changing the timeline. Inspect visual content, not filenames. Up to 4 sources per batch; cover ALL user-requested candidates in batches before ranking. Default 6 uniform samples per source (or pass atSeconds, e.g. scene cuts from video_editor_analyze, to sample exactly those times); long clips need narrower candidate-range inspection before choosing trims. Preserve user-selected versions. Source frames use the project fps, not timeline positions. Does not listen, transcribe, detect all scene boundaries or guarantee motion quality. Never claim a full-video analysis from sparse stills. Then video_editor_rough_cut cites evidence, times and specific visual reasons. No tool discovery is needed.',
       inputSchema: sourceInspectionSchema,
       execute: async (input, { abortSignal }) => {
         observations.record(sessionId, 'working', `正在抽样查看 ${input.sources.length} 项素材的源画面`);
@@ -143,6 +144,45 @@ export function createVideoEditorTools(sessionId: string, dataRoot: string, canv
           return { assetId: asset.id, name: asset.name, ...result, note: '静音与镜头切换为本地 FFmpeg 的客观检测结果；声音段不代表有人声，镜头切换是启发式结果，剪辑前请结合源画面核对。' };
         } catch (error) {
           observations.record(sessionId, abortSignal?.aborted ? 'cancelled' : 'failed', `素材分析未完成：${error instanceof Error ? error.message : '未知错误'}`);
+          throw error;
+        }
+      },
+    }) } : {}),
+    ...(canvasStore ? { video_editor_snap_cuts: tool({
+      description: 'Before video_editor_compose / video_editor_rough_cut, move the proposed source windows of workbench video/audio assets so cuts do not clip speech: each edge snaps to the nearest detected silence (local FFmpeg) or, when you pass word timestamps from video_editor_subtitles read / the transcript, to the middle of a gap between words. It never moves an edge further than maxShiftSeconds and flags edges it could not make safe ("mid-word-no-boundary" / "no-safe-boundary-nearby"). It does NOT change the plan: copy the returned sourceStartSeconds and durationSeconds into your shots yourself and make the total durationSeconds match (durationDeltaSeconds shows each change). Only workbench assets can be analyzed.',
+      inputSchema: z.object({
+        shots: z.array(z.object({ assetId: z.string().min(1), sourceStartSeconds: z.number().finite().min(0).max(86400), durationSeconds: z.number().finite().positive().max(3600) }).strict()).min(1).max(100),
+        words: z.record(z.string(), z.array(z.object({ start: z.number().finite().min(0), end: z.number().finite().min(0) }).strict()).max(20000)).optional(),
+        fps: z.number().min(1).max(240).default(30),
+        maxShiftSeconds: z.number().min(0.05).max(1).default(0.35),
+        silenceDb: z.number().min(-70).max(-10).default(-35),
+        minSilenceSeconds: z.number().min(0.1).max(2).default(0.25),
+      }).strict(),
+      execute: async (input, { abortSignal }) => {
+        const canvas = canvasStore.findCanvasBySession(sessionId);
+        if (!canvas) throw new Error('当前对话没有工作台画布');
+        observations.record(sessionId, 'working', `正在检测 ${new Set(input.shots.map(s => s.assetId)).size} 项素材的静音并对齐剪点`);
+        try {
+          const signal = AbortSignal.any([...(abortSignal ? [abortSignal] : []), AbortSignal.timeout(300_000)]);
+          const analyses = new Map<string, Awaited<ReturnType<typeof analyzeMediaFile>>>();
+          for (const assetId of new Set(input.shots.map(s => s.assetId))) {
+            const asset = canvasStore.assets.get(assetId);
+            if (!asset || !['video', 'audio'].includes(asset.kind) || !assetAvailableInCanvas(canvasStore, canvas.id, asset)) throw new Error(`素材 ${assetId} 不在当前对话中或不是视频/音频，请使用 video_editor_media list 返回的 assetId`);
+            analyses.set(assetId, await analyzeMediaFile(await resolveCanvasAssetFile(dataRoot, asset.path), { silence: true, scenes: false, silenceDb: input.silenceDb, minSilenceSeconds: input.minSilenceSeconds, sceneThreshold: 0.3 }, signal));
+          }
+          const shots = input.shots.map((shot) => {
+            const analysis = analyses.get(shot.assetId)!;
+            const snapped = snapShot(shot, { silences: analysis.silences ?? [], words: input.words?.[shot.assetId] }, input.fps, analysis.durationSeconds, input.maxShiftSeconds);
+            return { assetId: shot.assetId, requested: shot, ...snapped, needsReview: snapped.start.reason.includes('no-') || snapped.start.reason.startsWith('mid') || snapped.end.reason.includes('no-') || snapped.end.reason.startsWith('mid') };
+          });
+          observations.record(sessionId, 'tool_returned', '剪点对齐完成');
+          return {
+            shots,
+            totalDurationDeltaSeconds: Math.round(shots.reduce((sum, s) => sum + s.durationDeltaSeconds, 0) * 1000) / 1000,
+            note: '仅依据静音检测和你提供的词时间戳；未改动任何草稿。把新的 sourceStartSeconds/durationSeconds 抄进计划并保持总时长一致。needsReview 的剪点没有找到安全位置，请结合画面和转写再确认。',
+          };
+        } catch (error) {
+          observations.record(sessionId, abortSignal?.aborted ? 'cancelled' : 'failed', `剪点对齐未完成：${error instanceof Error ? error.message : '未知错误'}`);
           throw error;
         }
       },
