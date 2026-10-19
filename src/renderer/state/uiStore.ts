@@ -1,3 +1,5 @@
+import * as tabStore from './tabStore';
+
 export type SidebarMode = 'chat' | 'projects' | 'skills' | 'artifacts' | 'automation' | 'settings';
 export type SettingsSection = 'general' | 'providers' | 'extensions' | 'usage' | 'admin' | 'storage' | 'about';
 export type RightPanelTab = 'canvas' | 'video' | 'sheets' | 'documents' | 'presentations' | 'artifacts' | 'files' | 'git' | 'terminal';
@@ -162,6 +164,19 @@ export function setRightPanelTab(tab: RightPanelTab | null): void {
     artifactsOpen: tab === 'artifacts',
   });
 }
+
+// The right panel (canvas / video / sheets …) belongs to the conversation tab it
+// was opened in: remember it per tab and restore it when switching back.
+const panelByTab = new Map<string, RightPanelTab | null>();
+let lastActiveTabId = tabStore.getSnapshot().activeTabId;
+tabStore.subscribe(() => {
+  const { activeTabId, tabs } = tabStore.getSnapshot();
+  if (activeTabId === lastActiveTabId) return;
+  panelByTab.set(lastActiveTabId, state.rightPanelTab);
+  lastActiveTabId = activeTabId;
+  for (const id of panelByTab.keys()) if (!tabs.some((t) => t.id === id)) panelByTab.delete(id);
+  setRightPanelTab(panelByTab.get(activeTabId) ?? null);
+});
 
 export function toggleRightPanelTab(tab: RightPanelTab): void {
   if (state.rightPanelTab === tab) {
