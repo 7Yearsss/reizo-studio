@@ -16,7 +16,12 @@ function copyTree(from, to, excluded = [], excludedFiles = []) {
   if (result.status === null || result.status >= 8) throw new Error(`Resource copy failed: ${from} (${result.status})`);
 }
 if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('The bundled editor currently targets Windows x64.');
-const dev = JSON.parse(readFileSync(path.join(root, '.cache/openchatcut-runtime.json'), 'utf8'));
+const runtimeJsonPath = path.join(root, '.cache/openchatcut-runtime.json');
+if (!existsSync(runtimeJsonPath)) {
+  console.log('[build-openchatcut-runtime] skipping: .cache/openchatcut-runtime.json not found');
+  process.exit(0);
+}
+const dev = JSON.parse(readFileSync(runtimeJsonPath, 'utf8'));
 const source = dev.source;
 patchDraftRefinement(source);
 patchDraftApproval(source);
