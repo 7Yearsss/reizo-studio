@@ -930,12 +930,12 @@ function makeEventFolder(
       case 'tool': {
         if ((event.name === 'generate_presentation' || event.name === 'propose_presentation_edits') && event.result) {
           try { const result = JSON.parse(event.result) as { ok?: boolean; artifactId?: string };
-            if (result.ok && result.artifactId) { selectPresentation(sessionId, result.artifactId); refreshPresentationReviews(result.artifactId); uiStore.setRightPanelTab('presentations'); void artifactStore.loadSessionArtifacts(sessionId); }
+            if (result.ok && result.artifactId) { selectPresentation(sessionId, result.artifactId); refreshPresentationReviews(result.artifactId); uiStore.setRightPanelTabForSession(sessionId, 'presentations'); void artifactStore.loadSessionArtifacts(sessionId); }
           } catch { /* Incomplete tool output. */ }
         }
         if ((event.name === 'generate_document' || event.name === 'propose_document_edits') && event.result) {
           try { const result = JSON.parse(event.result) as { ok?: boolean; artifactId?: string };
-            if (result.ok && result.artifactId) { selectDocument(sessionId, result.artifactId); refreshDocumentReviews(result.artifactId); uiStore.setRightPanelTab('documents'); void artifactStore.loadSessionArtifacts(sessionId); }
+            if (result.ok && result.artifactId) { selectDocument(sessionId, result.artifactId); refreshDocumentReviews(result.artifactId); uiStore.setRightPanelTabForSession(sessionId, 'documents'); void artifactStore.loadSessionArtifacts(sessionId); }
           } catch { /* Incomplete tool output. */ }
         }
         if ((event.name === 'generate_sheet' || event.name === 'propose_sheet_edits') && event.result) {
@@ -944,7 +944,7 @@ function makeEventFolder(
             if (result.ok && result.artifactId) {
               selectWorkbook(sessionId, result.artifactId);
               refreshSheetReviews(result.artifactId);
-              uiStore.setRightPanelTab('sheets');
+              uiStore.setRightPanelTabForSession(sessionId, 'sheets');
               void artifactStore.loadSessionArtifacts(sessionId);
             }
           } catch { /* Incomplete streamed tool output. */ }
@@ -960,7 +960,7 @@ function makeEventFolder(
             event.name === 'open_canvas' ||
             (isCanvasTool(event.name) && event.name !== 'read_canvas' && event.name !== 'read_node')
           ) {
-            uiStore.setRightPanelTab('canvas');
+            uiStore.setRightPanelTabForSession(sessionId, 'canvas');
           }
           const trail = trailEntryFromTool(event);
           if (trail) {
