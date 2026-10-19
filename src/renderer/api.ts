@@ -132,7 +132,7 @@ let originPromise: Promise<string> | null = null;
 let resolvedOrigin: string | null = null;
 const originListeners = new Set<() => void>();
 
-function apiOrigin(): Promise<string> {
+export function apiOrigin(): Promise<string> {
   if (!originPromise) {
     if (typeof window !== 'undefined' && window.reizo?.getApiOrigin) {
       originPromise = window.reizo.getApiOrigin();

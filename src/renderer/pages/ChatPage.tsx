@@ -10,6 +10,7 @@ import ChatSearchPanel from '../components/chat/ChatSearchPanel';
 import TopRightToolbar from '../components/chat/TopRightToolbar';
 import { collectMessageMatches } from '../lib/highlightText';
 import { useTitleBarSlot } from '../components/layout/titleBarSlots';
+import { dispatchChatDrop } from '../lib/chatDrop';
 
 // Memoized so MainLayout re-renders (e.g. the right panel opening) don't
 // re-render the whole message list synchronously.
@@ -121,8 +122,45 @@ function ChatPage({
     else setTitleDraft(session?.title ?? '');
   }
 
+  // The whole conversation is the drop zone, not just the input box.
+  const [draggingFiles, setDraggingFiles] = useState(false);
+  const dragDepth = useRef(0);
+  const hasFiles = (e: React.DragEvent) => e.dataTransfer.types.includes('Files');
+
   return (
-    <div ref={containerRef} className="relative flex h-full min-w-0 flex-col">
+    <div
+      ref={containerRef}
+      className="relative flex h-full min-w-0 flex-col"
+      onDragEnter={(e) => {
+        if (!hasFiles(e)) return;
+        dragDepth.current += 1;
+        setDraggingFiles(true);
+      }}
+      onDragOver={(e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }}
+      onDragLeave={(e) => {
+        if (!hasFiles(e)) return;
+        dragDepth.current = Math.max(0, dragDepth.current - 1);
+        if (dragDepth.current === 0) setDraggingFiles(false);
+      }}
+      onDrop={(e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        dragDepth.current = 0;
+        setDraggingFiles(false);
+        if (e.dataTransfer.files.length) dispatchChatDrop(sessionId, Array.from(e.dataTransfer.files));
+      }}
+    >
+      {draggingFiles && (
+        <div className="pointer-events-none absolute inset-2 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-accent bg-accent/10 backdrop-blur-[1px]">
+          <span className="rounded-full bg-paper-raised px-4 py-2 text-sm font-medium text-ink shadow-sm">
+            松开以添加到对话
+          </span>
+        </div>
+      )}
       {active &&
         titleBarSlot &&
         createPortal(
@@ -230,6 +268,7 @@ function ChatPage({
         onRetryStalled={() => void chatStore.retryStalledTurn(sessionId)}
         onDismissInterrupt={() => chatStore.dismissInterrupt(sessionId)}
         onOverlayHeight={setComposerH}
+        draggingFiles={draggingFiles}
       />
     </div>
   );

@@ -3,6 +3,7 @@
 
 import { ArrowUp, Plus, Square } from "lucide-react";
 import VoiceInputButton from '../chat/VoiceInputButton';
+import { appendVoiceText } from '../../../shared/voiceInput';
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   type FormEvent,
@@ -289,7 +290,7 @@ export function PromptInput({
         ) : null}
 
         <div className="ml-auto flex shrink-0 items-center">
-          <VoiceInputButton className="size-8" />
+          <VoiceInputButton className="size-8" active={textareaProps.autoFocus !== false} disabled={disabled} onTranscript={text => { setValue(appendVoiceText(currentValue, text)); localEditorRef.current?.focus(); }} />
         </div>
         {showStop && hasDraft && (
           <Button
