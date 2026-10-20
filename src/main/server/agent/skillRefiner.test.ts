@@ -1,10 +1,10 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage } from '../../../shared/chat';
 import type { Skill } from '../../skills';
-import { applySkillRefinement, proposeSkillRefinement } from './skillRefiner';
+import { applySkillRefinement, proposeSkillRefinement, recordSkillExperience } from './skillRefiner';
 
 describe('skillRefiner (Skill self-optimization + Cross-task experience library + E-commerce/Canvas guardrails)', () => {
   const ecommerceSkill: Skill = {
@@ -85,6 +85,55 @@ describe('skillRefiner (Skill self-optimization + Cross-task experience library 
         ],
       });
       expect(proposal.keptBase).toBe(true);
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('does not treat an ordinary edit request as a skill correction', async () => {
+    const dataRoot = await mkdtemp(path.join(os.tmpdir(), 'reizo-skill-edit-'));
+    try {
+      const proposal = await proposeSkillRefinement({
+        dataRoot,
+        skill: ecommerceSkill,
+        messages: [
+          { id: '1', role: 'user', content: '生成一张主图', createdAt: '2026-10-20T00:00:00Z' },
+          { id: '2', role: 'assistant', content: '已完成。', createdAt: '2026-10-20T00:00:01Z' },
+          { id: '3', role: 'user', content: '修改一下标题', createdAt: '2026-10-20T00:00:02Z' },
+        ],
+      });
+      expect(proposal.keptBase).toBe(true);
+      expect(proposal.after).not.toContain('修改一下标题');
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('records a tool warning in EXPERIENCE.md without rewriting SKILL.md', async () => {
+    const dataRoot = await mkdtemp(path.join(os.tmpdir(), 'reizo-skill-exp-'));
+    try {
+      const messages: ChatMessage[] = [
+        {
+          id: '2',
+          role: 'assistant',
+          content: '已生成。',
+          createdAt: '2026-10-20T00:00:01Z',
+          parts: [
+            {
+              type: 'tool',
+              id: 't1',
+              name: 'generate_sheet',
+              args: {},
+              result: JSON.stringify({ ok: true, warnings: ['Sheet1!C5：#REF!'] }),
+            },
+          ],
+        },
+      ];
+      expect(await recordSkillExperience({ dataRoot, skill: ecommerceSkill, messages })).toBe(true);
+      expect(await recordSkillExperience({ dataRoot, skill: ecommerceSkill, messages })).toBe(false);
+      const experience = await readFile(path.join(dataRoot, 'skills', ecommerceSkill.id, 'EXPERIENCE.md'), 'utf8');
+      expect(experience.match(/#REF!/g)).toHaveLength(1);
+      await expect(access(path.join(dataRoot, 'skills', ecommerceSkill.id, 'SKILL.md'))).rejects.toThrow();
     } finally {
       await rm(dataRoot, { recursive: true, force: true });
     }

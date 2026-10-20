@@ -43,7 +43,7 @@ export function extractSessionTrajectoryForSkill(messages: ChatMessage[]): {
   messages.forEach((m, idx) => {
     if (m.role === 'user') {
       lines.push(`[USER ${idx + 1}] ${m.content.slice(0, 500)}`);
-      if (idx > 0 && /不对|重做|漏了|不清楚|卖点|主体|报错|修改|不对劲|重新/i.test(m.content)) {
+      if (idx > 0 && /不对|重做|漏了|报错|不对劲/.test(m.content)) {
         userCorrections.push(m.content.trim().slice(0, 240));
       }
       return;
@@ -158,14 +158,14 @@ export async function proposeSkillRefinement(opts: {
   if (addedGuardrails.length === 0 && (observedIssues.length > 0 || userCorrections.length > 0)) {
     const joined = [...observedIssues, ...userCorrections].join(' ');
     if (/主体|商品|电商|套图|海报|白底|卖点|listing/i.test(joined + ' ' + opts.skill.name + ' ' + opts.skill.body)) {
-      addedGuardrails.push('出图前必须先确认产品主体清晰、比例与参考素材一致，避免主体变形或缺失。');
-      addedGuardrails.push('生成电商套图或 Listing 文案时，必须明确包含核心卖点并在 check_delivery 前核验尺寸画幅。');
+      pushGuardrail(addedGuardrails, '出图前必须先确认产品主体清晰、比例与参考素材一致，避免主体变形或缺失。', opts.skill.body);
+      pushGuardrail(addedGuardrails, '生成电商套图或 Listing 文案时，必须明确包含核心卖点并在 check_delivery 前核验尺寸画幅。', opts.skill.body);
     }
-    for (const corr of userCorrections.slice(0, 2)) {
-      addedGuardrails.push(`执行规程补充（源自用户反馈）：${corr}`);
+    if (userCorrections.length > 0) {
+      pushGuardrail(addedGuardrails, '用户中途纠正过输出时，先对照纠正点改结果，再继续往下做。', opts.skill.body);
     }
     for (const iss of observedIssues.slice(0, 2)) {
-      addedGuardrails.push(`交付前自检（源自工具告警）：避免 ${iss}`);
+      pushGuardrail(addedGuardrails, `交付前自检（源自工具告警）：避免 ${iss}`, opts.skill.body);
     }
     rationale = `基于本次会话中的 ${observedIssues.length} 处工具/交付告警与 ${userCorrections.length} 处用户修正提炼。`;
     cue = `当运行技能「${opts.skill.name}」处理同类任务时`;
@@ -231,11 +231,13 @@ export async function applySkillRefinement(opts: {
   const targetDir = path.join(opts.dataRoot, 'skills', opts.skill.id);
   await mkdir(targetDir, { recursive: true });
 
+  // Validate the skill body against the original directory so referenced assets/scripts
+  // still resolve. Writing the overlay must not require those files to be copied first.
   const candidateSkill: Skill = {
     ...opts.skill,
-    body: opts.afterMarkdown,
+    body: markdownBody(opts.afterMarkdown),
     source: 'user',
-    dir: targetDir,
+    dir: opts.skill.dir,
   };
   const issues = await validateSkill(candidateSkill);
   if (issues.length > 0) {
@@ -267,4 +269,57 @@ export async function applySkillRefinement(opts: {
   }
 
   return { skillPath, ...(experiencePath ? { experiencePath } : {}) };
+}
+
+/**
+ * Automatic path: append one deduped lesson to `EXPERIENCE.md` when the latest
+ * assistant message contains tool errors or delivery warnings. Never rewrites
+ * `SKILL.md` — that overlay replaces the bundled skill and drops its assets.
+ */
+export async function recordSkillExperience(opts: {
+  dataRoot: string;
+  skill: Skill;
+  messages: ChatMessage[];
+}): Promise<boolean> {
+  if (!/^[a-z0-9][a-z0-9-_]{0,63}$/i.test(opts.skill.id)) return false;
+  const last = [...opts.messages].reverse().find((message) => message.role === 'assistant');
+  if (!last) return false;
+  const { observedIssues } = extractSessionTrajectoryForSkill([last]);
+  if (observedIssues.length === 0) return false;
+  const evidence = observedIssues.slice(0, 2).join('；').slice(0, 300);
+  const targetDir = path.join(opts.dataRoot, 'skills', opts.skill.id);
+  const experiencePath = path.join(targetDir, 'EXPERIENCE.md');
+  let existing = '';
+  try {
+    existing = await readFile(experiencePath, 'utf8');
+  } catch {
+    existing = `# ${opts.skill.name} — 跨任务经验库 (Harness² Experience Library)\n`;
+  }
+  if (existing.includes(evidence) || existing.length > 8_000) return false;
+  const block = [
+    `## ${new Date().toISOString().slice(0, 10)}`,
+    `- **Cue**: 技能「${opts.skill.name}」执行时工具返回告警`,
+    '- **Lesson**: 结束前先处理这些告警，不要把告警当成已完成。',
+    `- **Evidence**: ${evidence}`,
+    '- **Confidence**: medium',
+    '',
+  ].join('\n');
+  assertMemorySafe(`${existing}\n${block}`);
+  await mkdir(targetDir, { recursive: true });
+  await writeFile(experiencePath, `${existing.trimEnd()}\n\n${block}`, 'utf8');
+  return true;
+}
+
+function markdownBody(markdown: string): string {
+  const trimmed = markdown.replace(/^\uFEFF/, '').trim();
+  if (!trimmed.startsWith('---')) return trimmed;
+  const end = trimmed.indexOf('\n---', 3);
+  if (end < 0) return trimmed;
+  return trimmed.slice(end + 4).trim();
+}
+
+function pushGuardrail(list: string[], line: string, body: string): void {
+  const text = line.trim();
+  if (!text || list.includes(text) || body.includes(text)) return;
+  list.push(text);
 }

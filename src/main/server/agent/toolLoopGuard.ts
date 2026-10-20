@@ -59,7 +59,7 @@ export function classifyToolError(
 ): { kind: ToolErrorKind; hint: string } {
   const msg = (error ?? '').toLowerCase();
   if (!msg) return { kind: 'unknown', hint: '请检查工具参数或换一种方式完成任务。' };
-  if (/binary|utf-8|not a text file|cannot read binary|\.png|\.jpg|\.mp4|\.pdf/i.test(msg)) {
+  if (/binary|utf-8|not a text file|cannot read binary/i.test(msg)) {
     return {
       kind: 'unreadable_binary',
       hint: `${toolName ?? '该工具'} 仅支持 UTF-8 文本，不能直接读取二进制媒体/Office 文件；请改用对应的专用工具（如 read_sheet / read_document / read_presentation）或直接结束检查。`,

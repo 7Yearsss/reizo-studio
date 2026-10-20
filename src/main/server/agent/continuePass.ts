@@ -45,6 +45,7 @@ export function shouldContinueAgentPass(input: {
 export function looksLikeDeliverableRequest(userText: string): boolean {
   const trimmed = userText.trim();
   if (!trimmed) return false;
+  if (/(?:怎么|如何|怎样)|how\s+(?:do|to|can)\s+i\b/i.test(trimmed) && /[?？]|吗/.test(trimmed)) return false;
   const zh =
     /(?:生成|制作|创建|新建|导出|写一(?:份|个|篇)|做一(?:份|个|张))[\s\S]{0,30}?(?:表格|工作簿|预算表|Excel|xlsx|文档|报告|Word|docx|PPT|演示稿|幻灯片|流程图|架构图|时序图)/i;
   const en =

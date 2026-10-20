@@ -44,9 +44,14 @@ export async function loadActiveHarnessRules(dataRoot?: string): Promise<ActiveH
     readSafe('systemprompt.md'),
     readSafe('guardrails.md'),
   ]);
+  const guardrails = !customGuardrails
+    ? defaultGuardrails
+    : customGuardrails.includes('Evidence Boundary Rules:') && customGuardrails.includes('Deliverable Conformance Rules:')
+      ? customGuardrails
+      : `${defaultGuardrails}\n\n${customGuardrails}`;
   return {
     systemPromptAddon: customSystem,
-    guardrails: customGuardrails || defaultGuardrails,
+    guardrails,
   };
 }
 

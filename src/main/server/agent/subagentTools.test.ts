@@ -81,6 +81,7 @@ describe('delegate_research tool', () => {
   it('loads custom sub_agents/AGENT.md roles and applies specialist instructions', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'subagent-role-'));
     try {
+      await mkdir(path.join(root, 'agents'), { recursive: true });
       await mkdir(path.join(root, 'sub_agents', 'xlsx-auditor'), { recursive: true });
       await writeFile(
         path.join(root, 'sub_agents', 'xlsx-auditor', 'AGENT.md'),
@@ -99,6 +100,8 @@ describe('delegate_research tool', () => {
         roles,
       })[SUBAGENT_TOOL_NAME] as unknown as Exec;
       await delegate.execute({ task: 'audit sheet', role: 'xlsx-auditor' }, { toolCallId: 'c', messages: [] });
+      await writeFile(path.join(root, 'agents', 'README.md'), 'This is a notes file, not a role.', 'utf8');
+      expect(await loadSubagentRoles([root])).toHaveLength(1);
       expect(seen.prompts[0]).toContain('Focus on #REF! and #VALUE! formula errors.');
     } finally {
       await rm(root, { recursive: true, force: true });

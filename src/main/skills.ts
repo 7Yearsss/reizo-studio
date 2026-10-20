@@ -149,7 +149,17 @@ async function loadDir(dir: string, source: Skill['source']): Promise<Skill[]> {
           const skill = await loadSkillFile(nested, source);
           if (skill) skills.push(skill);
         } catch {
-          /* skip */
+          const experience = await readExperienceFile(path.join(dir, entry.name, 'EXPERIENCE.md'));
+          if (!experience) continue;
+          skills.push({
+            id: entry.name,
+            name: entry.name,
+            description: '',
+            body: '',
+            source,
+            dir: path.join(dir, entry.name),
+            experience,
+          });
         }
       }
     }
@@ -159,13 +169,56 @@ async function loadDir(dir: string, source: Skill['source']): Promise<Skill[]> {
   }
 }
 
+async function readExperienceFile(file: string): Promise<string | undefined> {
+  try {
+    const text = (await readFile(file, 'utf8')).trim();
+    return text || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function directoryHasAssets(dir: string): Promise<boolean> {
+  try {
+    return (await stat(path.join(dir, 'assets'))).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 export async function loadSkills(dirs: string[]): Promise<Skill[]> {
   const byId = new Map<string, Skill>();
   for (const dir of dirs) {
     const normalized = dir.replace(/\\/g, '/');
     const source: Skill['source'] = normalized.includes('/data/skills') || normalized.includes('/data/plugins/') ? 'user' : 'bundled';
     const loaded = await loadDir(dir, source);
-    for (const skill of loaded) byId.set(skill.id, skill);
+    for (const skill of loaded) {
+      const prev = byId.get(skill.id);
+      if (!prev) {
+        if (skill.body) byId.set(skill.id, skill);
+        continue;
+      }
+      // An experience-only overlay must not replace the bundled skill file or its asset directory.
+      if (!skill.body) {
+        if (skill.experience) byId.set(skill.id, { ...prev, experience: skill.experience });
+        continue;
+      }
+      const keepPrevDir = prev.dir !== skill.dir && !(await directoryHasAssets(skill.dir));
+      byId.set(skill.id, {
+        ...prev,
+        name: skill.name || prev.name,
+        description: skill.description || prev.description,
+        body: skill.body,
+        prompt: skill.prompt ?? prev.prompt,
+        cover: skill.cover ?? prev.cover,
+        category: skill.category ?? prev.category,
+        contract: skill.contract ?? prev.contract,
+        contractError: skill.contractError ?? prev.contractError,
+        experience: skill.experience ?? prev.experience,
+        source: skill.source,
+        dir: keepPrevDir ? prev.dir : skill.dir,
+      });
+    }
   }
   return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
 }

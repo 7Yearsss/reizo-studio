@@ -148,6 +148,7 @@ describe('inspectToolStream', () => {
 
   it('classifies tool errors and attaches recovery hints to loop verdicts', () => {
     expect(classifyToolError('Cannot read binary file a.png', 'read_file').kind).toBe('unreadable_binary');
+    expect(classifyToolError('ENOENT: a.png not found').kind).toBe('not_found');
     expect(classifyToolError('ENOENT: no such file or directory').kind).toBe('not_found');
     expect(classifyToolError('Command timed out after 30000ms').kind).toBe('timeout');
     expect(classifyToolError('User denied this tool call').kind).toBe('permission');

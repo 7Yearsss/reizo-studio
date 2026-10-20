@@ -47,7 +47,7 @@ import { connectMcpTools, MCP_TOOL_PREFIX } from './mcpTools';
 import { hasReasoningLeak } from './reasoningLeak';
 import { createSubagentTool, loadSubagentRoles, pickReadOnlyTools } from './subagentTools';
 import { loadActiveHarnessRules } from './harnessRules';
-import { applySkillRefinement, proposeSkillRefinement } from './skillRefiner';
+import { recordSkillExperience } from './skillRefiner';
 import { loadPluginContributions } from '../plugins/pluginStore';
 import { createTurnTraceCollector, writeTurnTrace } from './turnTrace';
 import { readWorkspaceMemory } from '../../workspaceMemory';
@@ -734,21 +734,9 @@ export async function runChatTurn(options: {
           try {
             const latest = await sessionStore.get(sessionId);
             if (!latest) return;
-            const proposal = await proposeSkillRefinement({
-              dataRoot,
-              skill,
-              messages: latest.messages,
-            });
-            if (!proposal.keptBase) {
-              await applySkillRefinement({
-                dataRoot,
-                skill,
-                afterMarkdown: proposal.after,
-                experienceEntry: proposal.experienceEntry,
-              });
-            }
+            await recordSkillExperience({ dataRoot, skill, messages: latest.messages });
           } catch (err) {
-            console.warn(`[skillRefiner] auto-refine failed skill=${skill.id}: ${(err as Error).message}`);
+            console.warn(`[skillRefiner] experience record failed skill=${skill.id}: ${(err as Error).message}`);
           }
         })();
       }

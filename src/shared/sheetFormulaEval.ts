@@ -168,6 +168,20 @@ function asNumber(val: SheetCellValue | undefined): number | null {
   return null;
 }
 
+/** Blank cells count as 0 in arithmetic. They stay blank for string comparisons. */
+function asArithmetic(val: SheetCellValue | undefined): number | null {
+  if (val === null || val === undefined || val === '') return 0;
+  return asNumber(val);
+}
+
+function isBlank(val: SheetCellValue | undefined): boolean {
+  return val === null || val === undefined || val === '';
+}
+
+function textEqual(left: SheetCellValue | undefined, right: SheetCellValue | undefined): boolean {
+  return String(left ?? '').trim().toLowerCase() === String(right ?? '').trim().toLowerCase();
+}
+
 function matchesCriterion(cellVal: SheetCellValue, criterionRaw: SheetCellValue): boolean {
   if (criterionRaw === null || criterionRaw === undefined) {
     return cellVal === null || cellVal === undefined || cellVal === '';
@@ -390,13 +404,17 @@ export function evaluateFormulaExpression(
     );
     const nL = asNumber(left);
     const nR = asNumber(right);
-    if (cmp.op === '=') return nL !== null && nR !== null ? nL === nR : String(left ?? '') === String(right ?? '');
-    if (cmp.op === '<>') return nL !== null && nR !== null ? nL !== nR : String(left ?? '') !== String(right ?? '');
-    if (nL === null || nR === null) return false;
-    if (cmp.op === '<') return nL < nR;
-    if (cmp.op === '<=') return nL <= nR;
-    if (cmp.op === '>') return nL > nR;
-    if (cmp.op === '>=') return nL >= nR;
+    if (cmp.op === '=' || cmp.op === '<>') {
+      const equal = compareEqual(left, right, nL, nR);
+      return cmp.op === '=' ? equal : !equal;
+    }
+    const leftNum = isBlank(left) ? 0 : nL;
+    const rightNum = isBlank(right) ? 0 : nR;
+    if (leftNum === null || rightNum === null) return false;
+    if (cmp.op === '<') return leftNum < rightNum;
+    if (cmp.op === '<=') return leftNum <= rightNum;
+    if (cmp.op === '>') return leftNum > rightNum;
+    if (cmp.op === '>=') return leftNum >= rightNum;
   }
 
   // Addition / subtraction at top level (right-to-left scan for left associativity).
@@ -405,8 +423,8 @@ export function evaluateFormulaExpression(
     const left =
       addSub.index === 0
         ? 0
-        : asNumber(evaluateFormulaExpression(trimmed.slice(0, addSub.index), content, currentSheet, getVal));
-    const right = asNumber(
+        : asArithmetic(evaluateFormulaExpression(trimmed.slice(0, addSub.index), content, currentSheet, getVal));
+    const right = asArithmetic(
       evaluateFormulaExpression(trimmed.slice(addSub.index + 1), content, currentSheet, getVal),
     );
     if (left === null || right === null) return '#VALUE!';
@@ -416,10 +434,10 @@ export function evaluateFormulaExpression(
   // Multiplication / division at top level.
   const mulDiv = findTopLevelMulDiv(trimmed);
   if (mulDiv) {
-    const left = asNumber(
+    const left = asArithmetic(
       evaluateFormulaExpression(trimmed.slice(0, mulDiv.index), content, currentSheet, getVal),
     );
-    const right = asNumber(
+    const right = asArithmetic(
       evaluateFormulaExpression(trimmed.slice(mulDiv.index + 1), content, currentSheet, getVal),
     );
     if (left === null || right === null) return '#VALUE!';
@@ -441,9 +459,27 @@ export function evaluateFormulaExpression(
 
   // Single cell reference (with optional sheet prefix).
   const refVal = resolveSingleRef(trimmed, content, currentSheet, getVal);
-  if (refVal !== undefined) return refVal ?? 0;
+  if (refVal !== undefined) return refVal;
 
   return null;
+}
+
+function compareEqual(
+  left: SheetCellValue | undefined,
+  right: SheetCellValue | undefined,
+  nL: number | null,
+  nR: number | null,
+): boolean {
+  if ((isBlank(left) && right === '') || (isBlank(right) && left === '') || (isBlank(left) && isBlank(right))) {
+    return true;
+  }
+  const leftText = typeof left === 'string' && left.trim() !== '' && asNumber(left) === null;
+  const rightText = typeof right === 'string' && right.trim() !== '' && asNumber(right) === null;
+  if (leftText || rightText) return textEqual(left, right);
+  const leftNum = isBlank(left) ? 0 : nL;
+  const rightNum = isBlank(right) ? 0 : nR;
+  if (leftNum !== null && rightNum !== null) return leftNum === rightNum;
+  return textEqual(left, right);
 }
 
 function isWrappedInSingleParens(s: string): boolean {

@@ -52,6 +52,7 @@ describe('shouldContinueAgentPass', () => {
         delivered: true,
       }),
     ).toBeNull();
+    expect(looksLikeDeliverableRequest('怎么生成一个 Excel 公式？')).toBe(false);
   });
 
   it('does not continue a finished answer', () => {

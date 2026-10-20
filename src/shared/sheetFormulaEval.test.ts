@@ -67,4 +67,27 @@ describe('evaluateWorkbookFormulas (A4)', () => {
     expect(evaluated.get(`${pivotId}!B3`)).toBe(500);
     expect(evaluated.get(`${pivotId}!B4`)).toBe(600);
   });
+
+  it('treats a blank cell as empty text and as zero in arithmetic', () => {
+    const res = workbookFromCreateSheets([
+      {
+        name: 'Check',
+        values: [
+          ['Label', 'Yes'],
+          ['', ''],
+        ],
+        formulas: [
+          { cell: 'C1', formula: '=IF(A2="","empty","full")' },
+          { cell: 'C2', formula: '=B1="yes"' },
+          { cell: 'C3', formula: '=A2+1' },
+        ],
+      },
+    ]);
+    if ('error' in res) throw new Error(res.error);
+    const evaluated = evaluateWorkbookFormulas(res.content);
+    const id = res.content.sheets[0]!.id;
+    expect(evaluated.get(`${id}!C1`)).toBe('empty');
+    expect(evaluated.get(`${id}!C2`)).toBe(true);
+    expect(evaluated.get(`${id}!C3`)).toBe(1);
+  });
 });

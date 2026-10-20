@@ -7,7 +7,7 @@ import { VitePlugin } from '@electron-forge/plugin-vite';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 const config: ForgeConfig = {
@@ -19,6 +19,11 @@ const config: ForgeConfig = {
       _config.packagerConfig = { ..._config.packagerConfig, extraResource };
       // The bundled editor runtime is Windows x64 only; other targets ship without the video editor panel.
       if (platform !== 'win32' || arch !== 'x64') return;
+      const editorManifest = path.resolve('.cache/openchatcut-runtime.json');
+      if (!existsSync(editorManifest)) {
+        console.warn('[forge] Skipping video editor resources (.cache/openchatcut-runtime.json missing). Run npm run setup:video-editor to enable the editor.');
+        return;
+      }
       execFileSync(process.execPath, ['scripts/build-openchatcut-runtime.mjs'], { stdio: 'inherit', windowsHide: true });
       const packaged = JSON.parse(readFileSync('.cache/openchatcut-package.json', 'utf8')) as { directory: string };
       const relative = path.relative(path.resolve('.cache/package-resources'), packaged.directory);

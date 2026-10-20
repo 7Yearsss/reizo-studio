@@ -11,8 +11,9 @@ import { z } from 'zod';
  * bypass the approval and review flows, and it cannot delegate further. Several delegate calls in
  * one step run in parallel (the SDK executes a step's tool calls concurrently), capped per session.
  *
- * Harness² A8: also supports custom read-only specialist roles loaded from `<dir>/sub_agents/<name>/AGENT.md`
- * or `<dir>/agents/<name>.md` (plugin packs or user data root) with progressive disclosure.
+ * Harness² A8: also supports custom read-only specialist roles loaded from
+ * `<dir>/sub_agents/<name>/AGENT.md` or `<dir>/agents/<name>/AGENT.md`.
+ * Loose markdown in those folders is ignored so a workspace notes directory is not treated as a role.
  */
 
 export const SUBAGENT_TOOL_NAME = 'delegate_research';
@@ -73,7 +74,7 @@ export function parseSubagentFile(raw: string, fallbackName: string): SubagentRo
 
 /**
  * Harness² A8: Load custom sub-agent role definitions from `<dir>/sub_agents/<name>/AGENT.md`
- * or `<dir>/agents/<name>.md`.
+ * or `<dir>/agents/<name>/AGENT.md`.
  */
 export async function loadSubagentRoles(dirs: string[]): Promise<SubagentRole[]> {
   const byName = new Map<string, SubagentRole>();
@@ -83,23 +84,14 @@ export async function loadSubagentRoles(dirs: string[]): Promise<SubagentRole[]>
       try {
         const entries = await readdir(target, { withFileTypes: true });
         for (const entry of entries) {
-          if (entry.isDirectory()) {
-            const agentMd = path.join(target, entry.name, 'AGENT.md');
-            try {
-              const raw = await readFile(agentMd, 'utf8');
-              const parsed = parseSubagentFile(raw, entry.name);
-              if (parsed) byName.set(parsed.name, parsed);
-            } catch {
-              /* skip */
-            }
-          } else if (entry.isFile() && entry.name.endsWith('.md')) {
-            try {
-              const raw = await readFile(path.join(target, entry.name), 'utf8');
-              const parsed = parseSubagentFile(raw, entry.name.replace(/\.md$/i, ''));
-              if (parsed) byName.set(parsed.name, parsed);
-            } catch {
-              /* skip */
-            }
+          if (!entry.isDirectory()) continue;
+          const agentMd = path.join(target, entry.name, 'AGENT.md');
+          try {
+            const raw = await readFile(agentMd, 'utf8');
+            const parsed = parseSubagentFile(raw, entry.name);
+            if (parsed) byName.set(parsed.name, parsed);
+          } catch {
+            /* skip */
           }
         }
       } catch {
