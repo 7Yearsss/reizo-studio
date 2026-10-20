@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EditorContent, useEditor, useEditorState, type Editor as TiptapEditor } from '@tiptap/react';
-import { Bold, Italic, Underline, Strikethrough, List, ListOrdered, Table, Undo2, Redo2, Download, Quote, History, Sparkles, Info } from 'lucide-react';
+import { Bold, Italic, Underline, Strikethrough, List, ListOrdered, Table, Undo2, Redo2, Quote, History, Sparkles, Info, PenLine, ListChecks, Search, ListTree } from 'lucide-react';
 import type { Artifact, ArtifactWithContent } from '../../../shared/artifact';
 import type { ArtifactReview } from '../../../shared/artifactReview';
-import { documentExtensions, documentSelectionIntact, normalizeDocumentContent, parseDocumentContent, typographyCss, type DocumentContent, type DocumentSelection } from '../../../shared/documentContent';
+import { documentExtensions, documentSelectionIntact, documentSelectionBetween, normalizeDocumentContent, parseDocumentContent, typographyCss, type DocumentContent, type DocumentSelection } from '../../../shared/documentContent';
 import * as api from '../../api';
+import * as chatStore from '../../state/chatStore';
+import { useChatStore } from '../../state/useChatStore';
+import { serializeDocumentReference } from '../../../shared/documentReferences';
 import * as artifacts from '../../state/artifactStore';
 import { clearEditorRecovery, getEditorRecovery, registerEditorFlusher, setEditorRecovery, trackEditorWrite } from '../../state/editorPersistence';
 import { addDocumentReference, dropDocumentSelection, reconcileDocumentSelection, syncDocumentReferenceVersion, useDocumentWorkspace } from '../../state/documentWorkspace';
@@ -18,6 +21,16 @@ import DocumentReview from './DocumentReview';
 import { focusComposer, ReferenceStrip, ReviewLog, SaveStatus } from './workspaceChrome';
 import ArtifactHistoryDialog from './ArtifactHistoryDialog';
 import DocumentReadOnly from './DocumentReadOnly';
+import ExportMenu from './ExportMenu';
+import FormatMenu, { FormatPreviewBar } from './FormatMenu';
+import FormatControls from './FormatControls';
+import FindBar from './FindBar';
+import OutlinePanel from './OutlinePanel';
+import { docSearchKey, docSearchPlugin } from './docSearch';
+import { applyFormat, type FormatResult, type FormatSpec } from '../../../shared/documentFormat';
+import { toast } from '../../lib/toast';
+import InlineEditCard, { type InlineEditPhase } from './InlineEditCard';
+import { inlineEditDecorations, inlineEditMarksKey, inlineEditMarksPlugin } from './inlineEditMarks';
 
 function download(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob); const anchor = document.createElement('a');
@@ -58,6 +71,7 @@ function FormatTools({ editor, disabled }: { editor: TiptapEditor | null; disabl
     <ToolButton label="斜体" shortcut="Ctrl+I" active={state?.italic} disabled={off} onClick={() => run((c) => c.toggleItalic())}><Italic /></ToolButton>
     <ToolButton label="下划线" shortcut="Ctrl+U" active={state?.underline} disabled={off} onClick={() => run((c) => c.toggleUnderline())}><Underline /></ToolButton>
     <ToolButton label="删除线" active={state?.strike} disabled={off} onClick={() => run((c) => c.toggleStrike())}><Strikethrough /></ToolButton>
+    <FormatControls editor={editor} disabled={off} />
     {sep}
     <ToolButton label="项目列表" active={state?.bullet} disabled={off} onClick={() => run((c) => c.toggleBulletList())}><List /></ToolButton>
     <ToolButton label="编号列表" active={state?.ordered} disabled={off} onClick={() => run((c) => c.toggleOrderedList())}><ListOrdered /></ToolButton>
@@ -69,19 +83,30 @@ function FormatTools({ editor, disabled }: { editor: TiptapEditor | null; disabl
   </>;
 }
 
-/** Where to float the selection toolbar, in the scroller's content coordinates; null when it cannot be measured. */
+/** Where to float the ask-AI pill, in the scroller's content coordinates: above the end the selection was dragged to. */
 function bubbleAt(editor: TiptapEditor, box: HTMLElement | null): { top: number; left: number } | null {
   if (!box) return null;
   try {
-    const { from, to } = editor.state.selection;
-    const start = editor.view.coordsAtPos(from); const end = editor.view.coordsAtPos(to);
+    const { head } = editor.state.selection;
+    const at = editor.view.coordsAtPos(head);
     const rect = box.getBoundingClientRect();
-    const above = Math.min(start.top, end.top) - rect.top + box.scrollTop - 38;
-    const top = above < box.scrollTop + 4 ? Math.max(start.bottom, end.bottom) - rect.top + box.scrollTop + 6 : above;
-    const mid = (start.top === end.top ? (start.left + end.left) / 2 : start.left) - rect.left + box.scrollLeft;
-    return { top, left: Math.min(Math.max(mid, 90), box.clientWidth - 90) };
+    const above = at.top - rect.top + box.scrollTop - 40;
+    const top = above < box.scrollTop + 4 ? at.bottom - rect.top + box.scrollTop + 8 : above;
+    return { top, left: Math.min(Math.max(at.left - rect.left + box.scrollLeft, 70), box.clientWidth - 70) };
   } catch { return null; }
 }
+
+/** Where the instruction card sits: just under the line the selection ends on. */
+function cardAt(editor: TiptapEditor, box: HTMLElement | null): { top: number; left: number } | null {
+  if (!box) return null;
+  try {
+    const at = editor.view.coordsAtPos(editor.state.selection.to);
+    const rect = box.getBoundingClientRect();
+    return { top: at.bottom - rect.top + box.scrollTop + 8, left: Math.min(Math.max(at.left - rect.left + box.scrollLeft - 24, 8), Math.max(8, box.clientWidth - 348)) };
+  } catch { return null; }
+}
+
+const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || navigator.userAgent);
 
 export default function DocumentEditor({ artifact }: { artifact: Artifact }) {
   const [full, setFull] = useState<ArtifactWithContent | null>(null);
@@ -114,6 +139,19 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
   const [selection, setSelection] = useState<DocumentSelection | undefined>();
   const [reviews, setReviews] = useState<ArtifactReview[]>([]);
   const [bubble, setBubble] = useState<{ top: number; left: number } | null>(null);
+  const [edit, setEdit] = useState<{ selection: DocumentSelection; from: number; to: number; at: { top: number; left: number }; phase: InlineEditPhase; notice?: string } | null>(null);
+  const stopped = useRef(false);
+  const [outlineOpen, setOutlineOpen] = useState(() => { try { return localStorage.getItem('reizo:doc-outline') === '1'; } catch { return false; } });
+  const toggleOutline = () => setOutlineOpen((open) => { try { localStorage.setItem('reizo:doc-outline', open ? '0' : '1'); } catch { /* the choice just is not remembered */ } return !open; });
+  const [find, setFind] = useState<{ replace: boolean; initial: string; nonce: number } | null>(null);
+  const openFindRef = useRef<(replace: boolean) => void>(() => { /* Assigned on every render below. */ });
+  const saveLabel = useRef<'排版' | undefined>(undefined);
+  const [formatPreview, setFormatPreview] = useState<{ name: string; original: DocumentContent; result: FormatResult; view: 'after' | 'before' } | null>(null);
+  const openEditRef = useRef<() => void>(() => { /* Assigned on every render below. */ });
+  const aiBusy = useChatStore((state) => Boolean(state.sendingBySession[artifact.sessionId]));
+  const aiWaiting = useChatStore((state) => Boolean(state.interactionBySession[artifact.sessionId]));
+  const pointerDown = useRef(false);
+  const settleTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const scroller = useRef<HTMLDivElement>(null);
   const askRef = useRef<() => void>(() => { /* Assigned on every render below. */ });
   const references = useDocumentWorkspace((s) => s.references[artifact.sessionId]);
@@ -133,7 +171,8 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
         const normalized = normalizeDocumentContent(value.current);
         const raw = JSON.stringify(normalized);
         if (mounted.current) setStatus('正在保存…');
-        const saved = await api.addArtifactVersion(artifact.id, raw, version.current);
+        const label = saveLabel.current; saveLabel.current = undefined;
+        const saved = await api.addArtifactVersion(artifact.id, raw, version.current, label);
         version.current = saved.version;
         syncDocumentReferenceVersion(artifact.sessionId, artifact.id, saved.version);
         dirty.current = JSON.stringify(value.current) !== snapshot;
@@ -157,6 +196,9 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
     editorProps: { attributes: { class: 'document-prose min-h-[60vh] px-8 py-7 outline-none', style: typographyCss(initial.content), 'aria-label': '文档正文', role: 'textbox', 'aria-multiline': 'true' },
       handleKeyDown: (_view, event) => {
         if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'l') { event.preventDefault(); askRef.current(); return true; }
+        if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'j') { event.preventDefault(); openEditRef.current(); return true; }
+        // Find stays in the document: the chat's own Ctrl+F must not also fire.
+        if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && ['f', 'h'].includes(event.key.toLowerCase())) { event.preventDefault(); event.stopPropagation(); openFindRef.current(event.key.toLowerCase() === 'h'); return true; }
         return false;
       } },
     onBlur: () => setBubble(null),
@@ -170,11 +212,25 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
     },
     onSelectionUpdate: ({ editor: current }) => {
       const { $from, $to, empty } = current.state.selection;
-      setSelection(!empty && $from.sameParent($to) && $from.parent.isTextblock && typeof $from.parent.attrs.id === 'string'
-        ? { blockId: $from.parent.attrs.id, start: $from.parentOffset, end: $to.parentOffset, text: current.state.doc.textBetween($from.pos, $to.pos).slice(0, 2000) } : undefined);
-      setBubble(empty ? null : bubbleAt(current, scroller.current));
+      setSelection(empty ? undefined : documentSelectionBetween(current.state.doc, $from.pos, $to.pos));
+      // The pill only appears once the selection has settled: after the mouse is released, or a
+      // short pause for keyboard selection. While dragging it would sit in the way.
+      setBubble(null);
+      clearTimeout(settleTimer.current);
+      if (empty || pointerDown.current) return;
+      settleTimer.current = setTimeout(() => { if (!current.isDestroyed && !current.state.selection.empty) setBubble(bubbleAt(current, scroller.current)); }, 260);
     },
   });
+  useEffect(() => {
+    const release = () => {
+      if (!pointerDown.current) return;
+      pointerDown.current = false;
+      clearTimeout(settleTimer.current);
+      settleTimer.current = setTimeout(() => { if (editor && !editor.isDestroyed && !editor.state.selection.empty) setBubble(bubbleAt(editor, scroller.current)); }, 0);
+    };
+    window.addEventListener('pointerup', release);
+    return () => { window.removeEventListener('pointerup', release); clearTimeout(settleTimer.current); };
+  }, [editor]);
   useEffect(() => {
     mounted.current = true;
     const unregister = registerEditorFlusher(artifact.sessionId, artifact.id, flush);
@@ -184,8 +240,14 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
     editor.registerPlugin(referenceMarksPlugin());
-    return () => { if (!editor.isDestroyed) editor.unregisterPlugin(referenceMarksKey); };
+    editor.registerPlugin(inlineEditMarksPlugin());
+    editor.registerPlugin(docSearchPlugin());
+    return () => { if (!editor.isDestroyed) { editor.unregisterPlugin(referenceMarksKey); editor.unregisterPlugin(inlineEditMarksKey); editor.unregisterPlugin(docSearchKey); } };
   }, [editor]);
+  useEffect(() => {
+    if (!editor || editor.isDestroyed || !inlineEditMarksKey.getState(editor.state)) return;
+    editor.view.dispatch(editor.state.tr.setMeta(inlineEditMarksKey, inlineEditDecorations(editor.state.doc, edit ? { from: edit.from, to: edit.to } : null)).setMeta('addToHistory', false));
+  }, [editor, edit?.from, edit?.to]);
   useEffect(() => {
     if (!editor || editor.isDestroyed || !referenceMarksKey.getState(editor.state)) return;
     editor.view.dispatch(editor.state.tr.setMeta(referenceMarksKey, referenceDecorations(editor.state.doc, pickedRanges)).setMeta('addToHistory', false));
@@ -208,9 +270,109 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
     setBubble(null);
     void act(async () => {
       addDocumentReference(artifact.sessionId, { artifactId: artifact.id, name: artifact.name, version: version.current, ...(selected ? { selection: selected } : {}) });
+      focusComposer(artifact.sessionId, { cite: Boolean(selected) });
+    });
+  }
+  /** Rewrite the selection, or, with only a caret, the paragraph it is in. */
+  function openEdit() {
+    if (!editor || editor.isDestroyed || busy || activeReview || edit || formatPreview) return;
+    let target = selection; let { from, to } = editor.state.selection;
+    if (editor.state.selection.empty || !target) {
+      const { $from } = editor.state.selection;
+      if (!$from.parent.isTextblock || typeof $from.parent.attrs.id !== 'string' || !$from.parent.content.size) return;
+      from = $from.start(); to = $from.end();
+      target = documentSelectionBetween(editor.state.doc, from, to);
+    }
+    if (!target) return;
+    setBubble(null);
+    setEdit({ selection: target, from, to, at: cardAt(editor, scroller.current) ?? { top: 8, left: 8 }, phase: 'input' });
+  }
+  function openFind(replace: boolean) {
+    if (!editor || editor.isDestroyed) return;
+    const { from, to, empty } = editor.state.selection;
+    const picked = empty ? '' : editor.state.doc.textBetween(from, to, ' ');
+    setFind({ replace, initial: picked.length <= 60 && !picked.includes('\n') ? picked : '', nonce: Date.now() });
+  }
+  function closeFind() {
+    setFind(null);
+    if (editor && !editor.isDestroyed) editor.commands.focus(undefined, { scrollIntoView: false });
+  }
+  openFindRef.current = openFind;
+  function closeEdit(refocus = true) {
+    setEdit(null);
+    if (refocus && editor && !editor.isDestroyed) editor.commands.focus(undefined, { scrollIntoView: false });
+  }
+  /** Send the typed instruction about the picked range as a normal chat turn; the answer arrives as a reviewable suggestion in the page. */
+  async function submitEdit(instruction: string) {
+    const target = edit;
+    if (!target || !editor || editor.isDestroyed) return;
+    stopped.current = false;
+    setEdit({ ...target, phase: 'working' });
+    editor.setEditable(false, false);
+    let failure = '';
+    try {
+      await flush();
+      const ref = { artifactId: artifact.id, name: artifact.name, version: version.current, selection: target.selection, label: 1 };
+      await chatStore.sendMessage(artifact.sessionId, `修改 [1]：${instruction}`, [serializeDocumentReference(ref)]);
+      // The turn can outlive the send call while it waits on an approval; the card stays until it is really over.
+      while (mounted.current && chatStore.getSnapshot().sendingBySession[artifact.sessionId]) await new Promise((resolve) => setTimeout(resolve, 300));
+    } catch (cause) { failure = cause instanceof Error ? cause.message : '发送失败'; }
+    if (!mounted.current) return;
+    if (!editor.isDestroyed) editor.setEditable(true, false);
+    const next = await api.listArtifactReviews(artifact.id).catch(() => reviews);
+    if (!mounted.current) return;
+    setReviews(next);
+    if (next.some((review) => review.changes.some((change) => change.status === 'pending'))) { setEdit(null); return; }
+    setEdit((current) => current && { ...current, phase: 'notice', notice: failure || (stopped.current ? '已停止' : 'AI 在对话里回复了，没有生成修改建议') });
+  }
+  /** Hand the whole document to the agent for a consistency audit; the fixes arrive as reviewable suggestions. */
+  async function audit() {
+    await act(async () => {
+      await flush();
+      const ref = { artifactId: artifact.id, name: artifact.name, version: version.current };
+      void chatStore.sendMessage(artifact.sessionId, '检查全文一致性（序号、标点、日期和数字格式、空格、重复内容），并给出可逐条审核的修改建议', [serializeDocumentReference(ref)]);
       focusComposer(artifact.sessionId);
     });
   }
+  /** Typeset by a spec: shown on the page as a preview first; saved only when applied, as its own history entry. */
+  async function previewFormat(spec: FormatSpec) {
+    if (!editor || editor.isDestroyed || formatPreview) return;
+    let original: DocumentContent | undefined;
+    // `act` re-enables editing when it finishes, so the preview is set up after it.
+    await act(async () => { await flush(); original = value.current; });
+    if (!original || editor.isDestroyed) return;
+    const result = applyFormat(original, spec);
+    if (!result.changed) { toast.info('已经符合这个格式'); return; }
+    editor.setEditable(false, false);
+    editor.commands.setContent(result.content.doc, { emitUpdate: false });
+    setBubble(null); setSelection(undefined);
+    setFormatPreview({ name: spec.name, original, result, view: 'after' });
+  }
+  async function previewReferenceFormat(file: File) {
+    try { await previewFormat(await api.referenceFormat(file)); }
+    catch (cause) { toast.error(cause instanceof Error ? cause.message : '范文读取失败'); }
+  }
+  function showFormatView(view: 'after' | 'before') {
+    if (!editor || editor.isDestroyed || !formatPreview) return;
+    editor.commands.setContent((view === 'after' ? formatPreview.result.content : formatPreview.original).doc, { emitUpdate: false });
+    setFormatPreview({ ...formatPreview, view });
+  }
+  function cancelFormat() {
+    if (!editor || editor.isDestroyed || !formatPreview) return;
+    editor.commands.setContent(formatPreview.original.doc, { emitUpdate: false });
+    editor.setEditable(true, false);
+    setFormatPreview(null);
+  }
+  function applyFormatPreview() {
+    if (!editor || editor.isDestroyed || !formatPreview) return;
+    value.current = { ...formatPreview.result.content };
+    editor.commands.setContent(formatPreview.result.content.doc, { emitUpdate: false });
+    editor.setEditable(true, false);
+    dirty.current = true; saveLabel.current = '排版'; setStatus('尚未保存');
+    setFormatPreview(null);
+    void flush().then(() => toast.success('已应用格式，可在版本历史中还原'), (cause) => setError(cause instanceof Error ? cause.message : '保存失败'));
+  }
+  openEditRef.current = openEdit;
   askRef.current = () => { if (!busy && !activeReview) askAI(selection); };
   async function decide(review: ArtifactReview, ids: string[], decision: 'accept' | 'reject') {
     await act(async () => {
@@ -222,6 +384,24 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
         dropDocumentSelection(artifact.sessionId); setSelection(undefined);
       }
       artifacts.upsertArtifact(result.artifact); await refreshReviews();
+    });
+  }
+  /** A long task is proposed in batches; accept them all in order (each follows the document as the one before lands). */
+  async function acceptEverything() {
+    await act(async () => {
+      const pending = [...reviews].reverse().filter((review) => review.changes.some((change) => change.status === 'pending'));
+      for (const review of pending) {
+        const ids = review.changes.filter((change) => change.status === 'pending').map((change) => change.id);
+        const result = await api.decideArtifactReview(artifact.id, review.id, review.reviewVersion, ids, 'accept');
+        const next = parseDocumentContent(result.artifact.content);
+        if (next && result.artifact.version > version.current) {
+          value.current = next; version.current = result.artifact.version;
+          editor?.commands.setContent(next.doc, { emitUpdate: false });
+          dropDocumentSelection(artifact.sessionId); setSelection(undefined);
+        }
+        artifacts.upsertArtifact(result.artifact);
+      }
+      await refreshReviews();
     });
   }
   async function recover() {
@@ -240,16 +420,31 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
       <div className="ml-auto flex items-center gap-1 pl-2">
         <SaveStatus status={status} version={version.current} failed={Boolean(error)} />
         <Button size="icon-sm" variant="ghost" className="size-7" aria-label="文档版本历史" title="版本历史" disabled={busy} onClick={() => void act(async () => { setHistory(true); })}><History /></Button>
-        <Button size="xs" variant="outline" title="导出为 Word（保留原文件样式）" disabled={busy} onClick={() => void act(async () => { download(await api.exportDocument(artifact.id), `${artifact.name.replace(/\.docx$/i, '')}.docx`); })}><Download data-icon="inline-start" />导出</Button>
+        <Button size="icon-sm" variant="ghost" className={cn('size-7', outlineOpen && 'bg-paper-inset text-ink')} aria-label="大纲" aria-pressed={outlineOpen} title="大纲" onClick={toggleOutline}><ListTree /></Button>
+        <Button size="icon-sm" variant="ghost" className="size-7" aria-label="查找" title="查找和替换（Ctrl+F）" onClick={() => openFind(false)}><Search /></Button>
+        <Button size="xs" variant="ghost" title="改写所选内容或光标所在段落（Ctrl+J）" disabled={busy || aiBusy || Boolean(activeReview) || Boolean(formatPreview)} onClick={openEdit}><PenLine data-icon="inline-start" />改写</Button>
+        <Button size="xs" variant="ghost" title="检查全文一致性" disabled={busy || aiBusy || Boolean(activeReview)} onClick={() => void audit()}><ListChecks data-icon="inline-start" />检查</Button>
+        <FormatMenu disabled={busy || aiBusy || Boolean(activeReview) || Boolean(formatPreview)} onPick={(spec) => void previewFormat(spec)} onPickReference={(file) => void previewReferenceFormat(file)} />
+        <ExportMenu disabled={busy || Boolean(formatPreview)} canTrackChanges={Boolean(value.current.docx?.groups?.length)} onExport={(revisions) => void act(async () => { download(await api.exportDocument(artifact.id, { revisions }), `${artifact.name.replace(/\.docx$/i, '')}${revisions ? '（修订）' : ''}.docx`); })} />
       </div>
     </div>
-    {!activeReview && <ReferenceStrip attached={referenced.length ? (pickedRanges.length ? `${pickedRanges.length} 段选区${pickedRanges.length === 1 ? `「${pickedRanges[0].selection.text ?? ''}」` : '，可在对话里用 [编号] 分别说明'}` : '全文') : undefined}
-      hint={selection ? `已选 ${selection.end - selection.start} 个字符 · Ctrl+L 加入对话，可连续添加多段` : '选中文字交给 AI 修改（可添加多段），或把全文作为上下文'}>
+    {formatPreview && <FormatPreviewBar name={formatPreview.name} result={formatPreview.result} view={formatPreview.view} onView={showFormatView} onApply={applyFormatPreview} onCancel={cancelFormat} />}
+    {!activeReview && !formatPreview && <ReferenceStrip attached={referenced.length ? (pickedRanges.length ? `${pickedRanges.length} 段选区${pickedRanges.length === 1 ? `「${pickedRanges[0].selection.text ?? ''}」` : '，可在对话里用 [编号] 分别说明'}` : '全文') : undefined}
+      hint={selection ? `已选 ${selection.text?.replace(/\n/g, '').length ?? 0} 字` : undefined}>
       <Button size="xs" variant="ghost" disabled={busy || !selection} title="把选中的文字加入对话，可多次添加（Ctrl+L）" onClick={() => askAI(selection)}><Quote data-icon="inline-start" />{pickedRanges.length ? '再加一段' : '引用选段'}</Button>
       <Button size="xs" variant="ghost" disabled={busy} onClick={() => askAI(undefined)}>引用全文</Button>
     </ReferenceStrip>}
     {error && <Alert variant="destructive" className="rounded-none border-x-0 border-t-0"><AlertDescription>{error}<div className="mt-2 flex gap-2"><Button size="xs" variant="outline" onClick={() => void flush().catch((): void => { /* Error is shown by the save/review handler. */ })}>重试保存</Button><Button size="xs" variant="outline" onClick={() => void recover().catch((cause) => setError(String(cause)))}>下载恢复副本并重新载入</Button></div></AlertDescription></Alert>}
-    <div ref={scroller} onScroll={() => setBubble(null)} className={cn('relative min-h-0 flex-1 overflow-auto bg-paper-inset', activeReview && 'hidden')}>
+    <div className={cn('flex min-h-0 flex-1', activeReview && 'hidden')}>
+    {outlineOpen && !activeReview && editor && <OutlinePanel editor={editor} scroller={scroller.current} />}
+    <div ref={scroller} onPointerDown={() => { pointerDown.current = true; if (edit?.phase === 'input') closeEdit(false); }} onScroll={() => setBubble(null)} className={cn('relative min-h-0 min-w-0 flex-1 overflow-auto bg-paper-inset', activeReview && 'hidden')}>
+      {find && editor && (
+        <div className="sticky top-0 z-20 h-0">
+          <FindBar key={find.nonce} editor={editor} scroller={scroller.current} replaceOpen={find.replace} initialQuery={find.initial}
+            canReplace={!busy && !activeReview && !edit && !formatPreview && editor.isEditable}
+            onToggleReplace={() => setFind({ ...find, replace: !find.replace })} onClose={closeFind} />
+        </div>
+      )}
       {warnings.length ? <details className="mx-auto mt-3 w-[calc(100%-1.5rem)] max-w-[816px] rounded-md border border-line bg-paper px-3 py-2 text-xs text-ink-muted">
         <summary className="cursor-pointer"><Info className="mr-1.5 inline size-3.5 align-[-2px]" />导入说明：{warnings.length} 处内容未完整保留</summary>
         {warnings.map((warning, i) => <p key={i} className="mt-1">{warning}</p>)}
@@ -259,14 +454,38 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
       <div className="mx-auto my-3 w-[calc(100%-1.5rem)] max-w-[816px] rounded-sm border border-line bg-paper shadow-sm" onClick={(event) => { if (event.target === event.currentTarget) editor?.commands.focus('end'); }}>
         <EditorContent editor={editor} />
       </div>
-      {bubble && selection && !busy && <div className="absolute z-20 flex -translate-x-1/2 items-center gap-0.5 rounded-md border border-line bg-paper p-0.5 shadow-md" style={{ top: bubble.top, left: bubble.left }} onMouseDown={(event) => event.preventDefault()}>
-        <Button size="xs" title="把选中的文字加入对话，可多次添加（Ctrl+L）" onClick={() => askAI(selection)}><Sparkles data-icon="inline-start" />{pickedRanges.length ? '再加一段' : '问 AI'}</Button>
-        <Button size="icon-xs" variant="ghost" aria-label="加粗所选" onClick={() => editor?.chain().focus().toggleBold().run()}><Bold /></Button>
-        <Button size="icon-xs" variant="ghost" aria-label="斜体所选" onClick={() => editor?.chain().focus().toggleItalic().run()}><Italic /></Button>
-      </div>}
+      {bubble && selection && !busy && !edit && !formatPreview && (
+        <div className="absolute z-20 -translate-x-1/2" style={{ top: bubble.top, left: bubble.left }} onMouseDown={(event) => event.preventDefault()}>
+          <div className="pop-in flex h-8 items-stretch whitespace-nowrap rounded-[10px] bg-ink text-[12px] font-medium text-paper-raised shadow-[0_6px_20px_rgba(25,47,80,0.22)]">
+            <button type="button" title="让 AI 直接改写所选内容" onClick={openEdit} className="flex items-center gap-1.5 rounded-l-[10px] pl-2.5 pr-2 transition-colors hover:bg-paper-raised/10">
+              <PenLine className="size-3.5" />改写
+              <kbd className="rounded-md bg-paper-raised/15 px-1.5 py-0.5 font-sans text-[11px] leading-none">{isMac ? '⌘J' : 'Ctrl J'}</kbd>
+            </button>
+            <span aria-hidden className="my-1.5 w-px bg-paper-raised/20" />
+            <button type="button" title="把选中的内容加入对话，可多次添加" onClick={() => askAI(selection)} className="flex items-center gap-1.5 rounded-r-[10px] pl-2 pr-2.5 transition-colors hover:bg-paper-raised/10">
+              <Sparkles className="size-3.5" />问 AI
+              <kbd className="rounded-md bg-paper-raised/15 px-1.5 py-0.5 font-sans text-[11px] leading-none">{isMac ? '⌘L' : 'Ctrl L'}</kbd>
+            </button>
+          </div>
+        </div>
+      )}
+      {edit && (
+        <div className="absolute z-20" style={{ top: edit.at.top, left: edit.at.left }}>
+          <InlineEditCard
+            phase={edit.phase}
+            notice={edit.notice}
+            blocked={aiBusy && edit?.phase === 'input'}
+            waiting={aiWaiting}
+            onSubmit={(instruction) => void submitEdit(instruction)}
+            onCancel={() => closeEdit()}
+            onStop={() => { stopped.current = true; void chatStore.stopMessage(artifact.sessionId); }}
+          />
+        </div>
+      )}
       <ReviewLog reviews={reviews} className="mx-auto mb-4 w-[calc(100%-1.5rem)] max-w-[816px]" />
     </div>
-    {activeReview && <DocumentReview key={activeReview.id} review={activeReview} otherBatches={pendingBatches - 1} busy={busy} decide={(review, ids, decision) => void decide(review, ids, decision)} revise={(review, change, text) => act(async () => {
+    </div>
+    {activeReview && <DocumentReview key={activeReview.id} review={activeReview} regenerate={(review, change, feedback) => act(async () => { await api.regenerateReviewChange(artifact.id, review.id, change.id, review.reviewVersion, feedback); await refreshReviews(); })} otherBatches={pendingBatches - 1} acceptEverything={() => void acceptEverything()} busy={busy} decide={(review, ids, decision) => void decide(review, ids, decision)} revise={(review, change, text) => act(async () => {
       await api.reviseArtifactReview(artifact.id, review.id, change.id, review.reviewVersion, { ...(change.operation as object), text }); await refreshReviews();
     })} />}
     {history && <ArtifactHistoryDialog artifact={{ ...artifact, version: version.current }} close={() => setHistory(false)} flush={flush} getVersion={() => version.current} render={(content) => <DocumentReadOnly content={content} />} restored={async () => {

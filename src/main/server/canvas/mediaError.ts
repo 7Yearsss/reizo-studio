@@ -83,6 +83,8 @@ export function classifyMediaError(err: unknown): MediaError {
   } else if (status === 401 || status === 403 || /api key|unauthorized|invalid authentication|incorrect api key/.test(lower)) {
     code = 'auth';
     subject = 'account';
+  } else if (/invalid json response/.test(lower)) {
+    code = 'unknown';
   } else if (status === 400 || /invalid|bad request|unsupported|must be one of|too large|dimensions/.test(lower)) {
     code = 'bad_request';
   } else if (/timeout|timed out|etimedout|deadline/.test(lower)) {
@@ -93,11 +95,14 @@ export function classifyMediaError(err: unknown): MediaError {
     code = 'server';
   }
 
+  const message = /invalid json response/.test(lower)
+    ? '生成失败：图像服务返回的内容无法解析。'
+    : MESSAGES[code](subject);
   return {
     code,
     subject,
     retryable: RETRYABLE[code],
-    message: MESSAGES[code](subject),
+    message,
     raw,
   };
 }

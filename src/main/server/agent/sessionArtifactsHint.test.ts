@@ -14,7 +14,7 @@ afterEach(() => handles.splice(0).forEach((db) => db.close()));
 function fixture() {
   const db = openDb(':memory:'); handles.push(db);
   const artifacts = createArtifactStore(db, mkdtempSync(path.join(tmpdir(), 'artifact-hint-')));
-  // The store validates doc/presentation/html content on create, so give each kind a valid empty body.
+  // The store validates doc/presentation content on create, so give each kind a valid empty body.
   const body = { doc: JSON.stringify(createDocumentContent()), presentation: JSON.stringify(createPresentation()), html: '<!doctype html><title>t</title><p>x</p>', sheet: '{}', markdown: '# x' };
   const add = (sessionId: string, name: string, kind: keyof typeof body) =>
     artifacts.create({ sessionId, name, kind, source: 'manual', content: body[kind] });
@@ -41,12 +41,11 @@ it('stays bounded: per-kind and total caps, truncated names, hard ceiling', asyn
   const oldestDoc = await add('s1', 'oldest.docx', 'doc'); // oldest of everything: must still be listed as the only Doc
   for (let i = 0; i < 5; i++) await add('s1', `book-${i}.xlsx`, 'sheet');
   for (let i = 0; i < 5; i++) await add('s1', `deck-${i}.pptx`, 'presentation');
-  for (let i = 0; i < 5; i++) await add('s1', `page-${i}.html`, 'html');
   for (let i = 0; i < 20; i++) await add('s1', `${'很长的文件名'.repeat(30)}-${i}.docx`, 'doc');
   const hint = await describeSessionArtifacts(artifacts, 's1');
   const entries = hint.split('\n').filter((l) => l.startsWith('- '));
   expect(entries.length).toBeLessThanOrEqual(8);
-  for (const label of ['Doc', 'Excel', 'PPT', 'HTML']) {
+  for (const label of ['Doc', 'Excel', 'PPT']) {
     const n = entries.filter((l) => l.startsWith(`- ${label} `)).length;
     expect(n).toBeGreaterThanOrEqual(1);
     expect(n).toBeLessThanOrEqual(3);
@@ -62,7 +61,6 @@ it('never starves a kind: an old Doc is still listed when 8+ newer files of othe
   const doc = await add('s1', 'imported.docx', 'doc');
   for (let i = 0; i < 4; i++) await add('s1', `book-${i}.xlsx`, 'sheet');
   for (let i = 0; i < 4; i++) await add('s1', `deck-${i}.pptx`, 'presentation');
-  for (let i = 0; i < 4; i++) await add('s1', `page-${i}.html`, 'html');
   expect(await describeSessionArtifacts(artifacts, 's1')).toContain(`id=${doc.id}`);
 });
 

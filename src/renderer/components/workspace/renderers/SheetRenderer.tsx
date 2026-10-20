@@ -1,10 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Download, LoaderCircle } from 'lucide-react';
 import { CalculationMode, UniverSheetsCorePreset } from '@univerjs/preset-sheets-core';
 // eslint-disable-next-line import/no-unresolved
 import sheetsZhCN from '@univerjs/preset-sheets-core/locales/zh-CN';
 import { CommandType, createUniver, defaultTheme, LocaleType } from '@univerjs/presets';
+
+// Univer 0.25 asks for `sheets-ui.info.*` when a typed number is stored as text, but ships those strings under
+// `sheets-numfmt-ui`, so the hint over such cells showed raw keys. Mirror them where they are looked up.
+const sheetsUi = (sheetsZhCN as Record<string, { info?: Record<string, string> } | undefined>)['sheets-ui'];
+const zhCNLocale = { ...sheetsZhCN, 'sheets-ui': { ...sheetsUi, info: { ...sheetsUi?.info, error: '提示', forceStringInfo: '以文本形式存储的数字' } } };
 import type { ArtifactRenderProps } from './types';
+import { useShellSlot } from '../workspaceChrome';
 import { compactToUniverSnapshot, parseSheetContent, replaceUniverSnapshot, serializeSheetContent, type SheetArtifactContent } from '../../../../shared/sheetContent';
 import { clearActiveSheet, publishSheetSelection, registerSheetFlusher } from '../../../state/sheetWorkspace';
 import { useChatStore } from '../../../state/useChatStore';
@@ -33,11 +40,13 @@ export interface SheetRendererProps extends ArtifactRenderProps {
   readOnlyLabel?: string;
   onSelectCell?(cell: { sheetId: string; row: number; col: number }): void;
   focus?: SheetCellFocus;
+  /** Actions shown in the editor's own bar, so the workbook has one header row instead of two. */
+  toolbar?: ReactNode;
   /** Workbook content with current formula results, emitted after load and after edits settle (for charts). */
   onLiveContent?(content: SheetArtifactContent): void;
 }
 
-export default function SheetRenderer({ artifact, text, onCommitDraft, initialDirty = false, initialError, readOnlyLabel, onSelectCell, focus, onLiveContent }: SheetRendererProps) {
+export default function SheetRenderer({ artifact, text, onCommitDraft, initialDirty = false, initialError, readOnlyLabel, onSelectCell, focus, onLiveContent, toolbar }: SheetRendererProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const workbookRef = useRef<Workbook | null>(null);
   const formulaRef = useRef<ReturnType<UniverAPI['getFormula']> | null>(null);
@@ -48,6 +57,7 @@ export default function SheetRenderer({ artifact, text, onCommitDraft, initialDi
   selectCallback.current = onSelectCell;
   const liveCallback = useRef(onLiveContent);
   liveCallback.current = onLiveContent;
+  const shellSlot = useShellSlot();
   const liveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const emitLive = useCallback(() => {
     if (!liveCallback.current) return;
@@ -151,7 +161,7 @@ export default function SheetRenderer({ artifact, text, onCommitDraft, initialDi
       if (started) { window.dispatchEvent(new Event('resize')); return; }
       started = true;
       try {
-        const created = createUniver({ locale: LocaleType.ZH_CN, locales: { [LocaleType.ZH_CN]: sheetsZhCN }, theme: defaultTheme, darkMode: document.documentElement.classList.contains('dark'),
+        const created = createUniver({ locale: LocaleType.ZH_CN, locales: { [LocaleType.ZH_CN]: zhCNLocale }, theme: defaultTheme, darkMode: document.documentElement.classList.contains('dark'),
           presets: [UniverSheetsCorePreset({ container: engineHost, header: true, toolbar: true, formulaBar: true, formula: { initialFormulaComputing: CalculationMode.FORCED }, footer: { sheetBar: true, statisticBar: true, menus: true, zoomSlider: true } })] });
         univer = created.univer;
         api = created.univerAPI as unknown as UniverAPI;
@@ -234,12 +244,15 @@ export default function SheetRenderer({ artifact, text, onCommitDraft, initialDi
     finally { setExporting(false); }
   }
 
+  const status = saving ? '正在保存…' : busy ? 'Agent 正在处理，暂时只读' : onCommitDraft ? '' : readOnlyLabel ?? '历史版本 · 只读';
+  const actions = <>
+    {status && <span role="status" className="mr-1 max-w-[9rem] truncate text-xs text-ink-muted" title={status}>{status}</span>}
+    {toolbar}
+    <Button variant="ghost" size="icon-sm" aria-label="导出 Excel" title={exporting ? '正在导出…' : '导出 Excel'} onClick={() => void download()} disabled={!ready || saving || exporting}>{exporting ? <LoaderCircle className="animate-spin" /> : <Download />}</Button>
+  </>;
   if (initError) return <Alert variant="destructive"><AlertDescription>{initError}</AlertDescription></Alert>;
   return <div className="relative flex min-h-[420px] min-w-0 flex-1 flex-col overflow-hidden bg-paper-raised">
-    <div className="flex shrink-0 items-center justify-end gap-2 px-3 py-1">
-      <span role="status" className="text-xs text-ink-muted">{saving ? '正在保存…' : busy ? 'Agent 正在处理，暂时只读' : onCommitDraft ? '自动保存 · 选中单元格可在对话中引用' : readOnlyLabel ?? '历史版本 · 只读'}</span>
-      <Button variant="ghost" size="sm" onClick={() => void download()} disabled={!ready || saving || exporting}><Download data-icon="inline-start" />{exporting ? '正在导出…' : '导出 Excel'}</Button>
-    </div>
+    {shellSlot ? createPortal(actions, shellSlot) : <div className="flex shrink-0 items-center gap-1 border-b border-line px-3 py-1">{actions}</div>}
     {error && <Alert variant="destructive"><AlertDescription>{error}<Button variant="outline" size="sm" onClick={() => void flushRef.current().catch((): void => undefined)}>重试保存</Button></AlertDescription></Alert>}
     {!ready && <div role="status" className="absolute inset-0 flex items-center justify-center gap-2 bg-paper/90"><LoaderCircle className="size-4 animate-spin" />正在打开表格…</div>}
     <div ref={hostRef} inert={blocked} aria-readonly={blocked} className="min-h-[420px] w-full flex-1" />

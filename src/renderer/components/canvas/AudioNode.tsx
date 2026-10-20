@@ -25,6 +25,7 @@ import { useProvidersByCategory, loadProviderCatalog } from '../../state/provide
 import FloatingNodeHeader from './FloatingNodeHeader';
 import { NodeTitle, type CanvasNodeData } from './ImageNode';
 import { useHoverIntent } from './NodeActionBar';
+import SendToVideoEditorButton from './SendToVideoEditorButton';
 import { useIsSoloSelected } from './useSelectionCount';
 import MagneticHandle from './MagneticHandle';
 import AgentMark from './AgentMark';
@@ -512,6 +513,7 @@ function AudioNode({ id, data, selected }: NodeProps) {
                 <Download size={11} />
               </a>
               </Tooltip>
+              <SendToVideoEditorButton sessionId={sessionId} node={node} assetIndex={Math.min(assetIdx, assets.length - 1)} />
               <Tooltip content="替换当前音频文件" side="top" wrapperClassName="inline-flex">
               <button
                 type="button"

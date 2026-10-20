@@ -1,44 +1,49 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { History, Pin, Sparkles, Table2, X } from 'lucide-react';
+import { History, ListChecks, Table2 } from 'lucide-react';
 import type { Artifact, ArtifactWithContent } from '../../../shared/artifact';
 import type { ArtifactReview } from '../../../shared/artifactReview';
 import { parseSheetContent, serializeSheetContent, type SheetArtifactContent } from '../../../shared/sheetContent';
-import { buildSheetDiffPreview, diffSheetContent } from '../../../shared/sheetReview';
+import { buildSheetDiffPreview, diffSheetContent, sheetImpacts } from '../../../shared/sheetReview';
 import * as api from '../../api';
 import * as artifactStore from '../../state/artifactStore';
+import * as chatStore from '../../state/chatStore';
+import { serializeSheetReference } from '../../../shared/sheetReferences';
 import { clearSheetRecovery, discardWorkbookEdits, flushWorkbookEdits, getSheetRecovery, setSheetRecovery, trackSheetWrite, useSheetWorkspace, pinSheetSelection } from '../../state/sheetWorkspace';
 import { createDeferredView } from '../DeferredView';
 import type { SheetCellFocus, SheetRendererProps } from './renderers/SheetRenderer';
 import { Button } from '../ui/button';
 import { Alert, AlertDescription } from '../ui/alert';
+import { toast } from '../../lib/toast';
 import ArtifactVersionRail from './ArtifactVersionRail';
-import { focusComposer, ReferenceStrip } from './workspaceChrome';
+import { focusComposer } from './workspaceChrome';
 import SheetReview, { type SheetSelectedCell } from './SheetReview';
 import SheetPivotPanel from './SheetPivotPanel';
+import SheetAuditPanel from './SheetAuditPanel';
 import SheetChartDock from './SheetChartView';
 import { applySheetChart, removeSheetChart, sheetCharts } from '../../../shared/sheetChart';
 
 const Editor = createDeferredView<SheetRendererProps>(() => import('./renderers/SheetRenderer'), { label: 'Excel 编辑器', minHeight: 420 });
 interface Frame { doc: ArtifactWithContent; generation: number; recovered: boolean; error?: string }
 
-export default function SheetDocument({ artifact, onClose }: { artifact: Artifact; onClose(): void }) {
+export default function SheetDocument({ artifact }: { artifact: Artifact; onClose?(): void }) {
   const [frame, setFrame] = useState<Frame | null>(null);
   const current = useRef<ArtifactWithContent | null>(null);
   const sequence = useRef(0);
   const [viewVersion, setViewVersion] = useState<number | undefined>();
   const [showHistory, setShowHistory] = useState(false);
   const [showPivots, setShowPivots] = useState(false);
+  const [showAudit, setShowAudit] = useState(false);
   const [liveContent, setLiveContent] = useState<SheetArtifactContent | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
   const activeSelection = useSheetWorkspace((s) => s.activeBySession[artifact.sessionId]);
   const ownSelection = activeSelection?.artifactId === artifact.id ? activeSelection : undefined;
-  const pinnedCount = useSheetWorkspace((s) => (s.pinnedBySession[artifact.sessionId] ?? []).filter((ref) => ref.artifactId === artifact.id).length);
   const [reviews, setReviews] = useState<ArtifactReview[]>([]);
   const [reviewBusy, setReviewBusy] = useState(false);
   const [showOriginal, setShowOriginal] = useState(false);
   const [selectedCell, setSelectedCell] = useState<SheetSelectedCell>();
   const [focus, setFocus] = useState<SheetCellFocus>();
+  const focusRequest = useSheetWorkspace((s) => s.focusBySession[artifact.sessionId]);
   const reviewRevision = useSheetWorkspace((s) => s.reviewRevisions[artifact.id] ?? 0);
 
   useEffect(() => {
@@ -57,6 +62,11 @@ export default function SheetDocument({ artifact, onClose }: { artifact: Artifac
     return { diff, candidate, text: serializeSheetContent({ ...candidate, univerSnapshot: buildSheetDiffPreview(base, candidate, diff, artifact.name) }) };
   }, [activeReview?.id, activeReview?.reviewVersion, artifact.name]);
   const previewing = Boolean(reviewPreview && !showOriginal && !viewVersion);
+  // The preview editor calculates the candidate; compare it with what the saved workbook showed.
+  const impacts = useMemo(() => {
+    const base = activeReview ? parseSheetContent(activeReview.baseContent) : null;
+    return previewing && reviewPreview && base && liveContent ? sheetImpacts(base, liveContent, reviewPreview.diff) : [];
+  }, [previewing, reviewPreview, activeReview?.baseContent, liveContent]);
   useEffect(() => { setLiveContent(null); }, [frame?.generation, previewing, viewVersion]);
 
   async function decide(review: ArtifactReview, ids: string[], decision: 'accept' | 'reject') {
@@ -133,38 +143,54 @@ export default function SheetDocument({ artifact, onClose }: { artifact: Artifac
     try { await flushWorkbookEdits(artifact.id); setViewVersion(version); }
     catch (cause) { setError(cause instanceof Error ? cause.message : '请先保存表格'); }
   }
+  /** Quote the selected range: it is numbered in the composer and a [n] chip lands at the caret. */
+  function quoteSelection() {
+    if (!ownSelection?.range || !pinSheetSelection(artifact.sessionId)) return;
+    focusComposer(artifact.sessionId, { cite: true });
+  }
+  /** Hand the audit to the agent: it runs check_sheet and proposes the fixes for review. */
+  async function askFix() {
+    try {
+      await flushWorkbookEdits(artifact.id);
+      void chatStore.sendMessage(artifact.sessionId, '检查这份表格（错误值、与同列不一致的公式、公式列里混入的手写数值、汇总范围漏掉的数据、文本型数字、多余空格），并给出可逐条审核的修改建议', [serializeSheetReference({ artifactId: artifact.id })]);
+      focusComposer(artifact.sessionId);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '请先保存表格'); }
+  }
   const content = frame ? parseSheetContent(frame.doc.content) : null;
+  // A reply pointed at a cell ("Sheet1!C5"): scroll the open workbook there.
+  useEffect(() => {
+    if (!focusRequest || !content) return;
+    const sheet = content.sheets.find((s) => s.name === focusRequest.sheetName) ?? content.sheets.find((s) => s.name.toLowerCase() === focusRequest.sheetName.toLowerCase());
+    if (!sheet) { toast.info(`当前打开的表格里没有工作表「${focusRequest.sheetName}」`); return; }
+    setFocus({ sheetId: sheet.id, range: focusRequest.range, nonce: focusRequest.nonce });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusRequest?.nonce, Boolean(content)]);
   // Charts read formula results from the live workbook; stored content may predate the last calculation.
   const chartContent = liveContent ?? (previewing ? reviewPreview?.candidate : content) ?? null;
   const charts = previewing && reviewPreview ? [...sheetCharts(reviewPreview.candidate), ...(content ? sheetCharts(content).filter((c) => reviewPreview.diff.charts.some((d) => d.id === c.id && d.status === 'removed')) : [])] : content ? sheetCharts(content) : [];
   const chartStatuses = previewing && reviewPreview ? Object.fromEntries(reviewPreview.diff.charts.map((c) => [c.id, c.status])) : undefined;
   const truncated = content?.importMeta && (content.importMeta.truncatedRows || content.importMeta.truncatedCols || content.importMeta.truncatedSheets);
-  return <div className="flex min-h-0 flex-1 flex-col">
-    <div className="flex items-center gap-2 border-b border-line px-3 py-1.5">
-      <span className="min-w-0 flex-1 truncate text-xs font-medium">{artifact.name} · v{frame?.doc.version ?? artifact.version}{viewVersion ? ' · 历史版本' : ''}</span>
-      {viewVersion && <Button variant="ghost" size="sm" onClick={() => { current.current = null; setViewVersion(undefined); }}>返回最新</Button>}
-      {!viewVersion && <Button variant={showPivots ? 'secondary' : 'ghost'} size="sm" disabled={previewing} title={previewing ? '请先处理或切到原表' : '新建或调整透视表'} onClick={() => setShowPivots((v) => !v)}><Table2 data-icon="inline-start" />透视表</Button>}
-      <Button variant="ghost" size="icon-sm" aria-label="表格版本历史" onClick={() => setShowHistory((v) => !v)}><History /></Button>
-      <Button variant="ghost" size="icon-sm" aria-label="关闭表格" onClick={onClose}><X /></Button>
-    </div>
-    {!viewVersion && <ReferenceStrip attached={ownSelection?.range ? `${ownSelection.sheetName ?? ''}!${ownSelection.range}${pinnedCount ? ` · 另有 ${pinnedCount} 个固定选区` : ''}` : pinnedCount ? `${pinnedCount} 个固定选区` : undefined}
-      hint="选中单元格后，发送消息时会自动带上选区">
-      <Button size="xs" variant="ghost" disabled={!ownSelection?.range} title="固定这个选区，切换选择后仍会引用" onClick={() => pinSheetSelection(artifact.sessionId)}><Pin data-icon="inline-start" />固定选区</Button>
-      <Button size="xs" variant="ghost" title="跳到对话输入框" onClick={() => focusComposer(artifact.sessionId)}><Sparkles data-icon="inline-start" />问 AI</Button>
-    </ReferenceStrip>}
+  const toolbar = <>
+    {viewVersion && <Button variant="ghost" size="sm" onClick={() => { current.current = null; setViewVersion(undefined); }}>返回最新</Button>}
+    {!viewVersion && <Button variant={showAudit ? 'secondary' : 'ghost'} size="icon-sm" aria-label="检查" disabled={previewing} title={previewing ? '请先处理或切到原表' : '检查错误值、不一致的公式、文本型数字等'} onClick={() => { setShowAudit((v) => !v); setShowPivots(false); }}><ListChecks /></Button>}
+    {!viewVersion && <Button variant={showPivots ? 'secondary' : 'ghost'} size="icon-sm" aria-label="透视表" disabled={previewing} title={previewing ? '请先处理或切到原表' : '新建或调整透视表'} onClick={() => { setShowPivots((v) => !v); setShowAudit(false); }}><Table2 /></Button>}
+    <Button variant="ghost" size="icon-sm" aria-label="表格版本历史" title={`版本历史 · 当前 v${frame?.doc.version ?? artifact.version}`} onClick={() => setShowHistory((v) => !v)}><History /></Button>
+  </>;
+  return <div className="flex min-h-0 flex-1 flex-col" onKeyDownCapture={(event) => { if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'l') { event.preventDefault(); quoteSelection(); } }}>
     {error && <Alert variant="destructive"><AlertDescription>{error}<Button variant="outline" size="sm" onClick={() => void discardAndReload()}>丢弃未保存编辑并重新加载</Button></AlertDescription></Alert>}
     {truncated && <Alert><AlertDescription>文件超过当前表格容量，已导入部分内容；原文件未被修改。最多 8 张工作表、2000 行、50 列和 40000 个单元格。</AlertDescription></Alert>}
     <div className="flex min-h-0 flex-1">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto">
-        {frame && previewing && reviewPreview && activeReview ? <Editor key={`preview:${activeReview.id}:${activeReview.reviewVersion}`} artifact={frame.doc} version={frame.doc.version} text={reviewPreview.text} rawUrl="" readOnlyLabel="修改预览 · 只读，接受后写入" onSelectCell={setSelectedCell} focus={focus} onLiveContent={setLiveContent} />
-          : frame ? <Editor key={`${artifact.id}:${frame.generation}`} artifact={frame.doc} version={frame.doc.version} text={frame.doc.content} rawUrl="" onCommitDraft={!viewVersion ? save : undefined} initialDirty={frame.recovered} initialError={frame.error} onLiveContent={setLiveContent} /> : <p role="status" className="p-4 text-xs text-ink-muted">正在加载表格…</p>}
+        {frame && previewing && reviewPreview && activeReview ? <Editor key={`preview:${activeReview.id}:${activeReview.reviewVersion}`} artifact={frame.doc} version={frame.doc.version} text={reviewPreview.text} rawUrl="" readOnlyLabel="修改预览 · 只读，接受后写入" onSelectCell={setSelectedCell} focus={focus} onLiveContent={setLiveContent} toolbar={toolbar} />
+          : frame ? <Editor key={`${artifact.id}:${frame.generation}`} artifact={frame.doc} version={frame.doc.version} text={frame.doc.content} rawUrl="" onCommitDraft={!viewVersion ? save : undefined} initialDirty={frame.recovered} initialError={frame.error} focus={focus} onLiveContent={setLiveContent} toolbar={toolbar} /> : <p role="status" className="p-4 text-xs text-ink-muted">正在加载表格…</p>}
         {chartContent && <SheetChartDock content={chartContent} charts={charts} statuses={chartStatuses} busy={reviewBusy}
           selection={!previewing && !viewVersion ? ownSelection : undefined}
           onChangeType={!previewing && !viewVersion ? (chart, type) => void commitContent((latest) => applySheetChart(latest, { id: chart.id, type }).content) : undefined}
           onDelete={!previewing && !viewVersion ? (chart) => void commitContent((latest) => removeSheetChart(latest, chart.id)) : undefined}
           onCreateFromSelection={!previewing && !viewVersion && ownSelection?.range ? () => void commitContent((latest) => applySheetChart(latest, { source: { sheet: ownSelection.sheetId, range: ownSelection.range! } }).content) : undefined} />}
       </div>
-      {activeReview && !viewVersion && <SheetReview reviews={reviews} totalDiff={reviewPreview?.diff ?? null} busy={reviewBusy} previewing={previewing} selected={selectedCell} onTogglePreview={() => setShowOriginal((v) => !v)} onFocus={(target) => { setShowOriginal(false); setFocus({ ...target, nonce: Date.now() }); }} decide={(review, ids, decision) => void decide(review, ids, decision)} />}
+      {activeReview && !viewVersion && <SheetReview reviews={reviews} totalDiff={reviewPreview?.diff ?? null} impacts={impacts} busy={reviewBusy} previewing={previewing} selected={selectedCell} onTogglePreview={() => setShowOriginal((v) => !v)} onFocus={(target) => { setShowOriginal(false); setFocus({ ...target, nonce: Date.now() }); }} decide={(review, ids, decision) => void decide(review, ids, decision)} />}
+      {showAudit && !viewVersion && !previewing && (liveContent ?? content) && <SheetAuditPanel content={(liveContent ?? content)!} busy={reviewBusy} onFocus={(target) => setFocus({ ...target, nonce: Date.now() })} onFix={() => void askFix()} onClose={() => setShowAudit(false)} />}
       {showPivots && !viewVersion && !previewing && content && <SheetPivotPanel content={content} selection={ownSelection} busy={reviewBusy} commit={commitContent} onClose={() => setShowPivots(false)} />}
       {showHistory && <ArtifactVersionRail artifactId={artifact.id} activeVersion={frame?.doc.version ?? artifact.version} onPick={(n) => void pickVersion(n)} onBeforeRestore={() => flushWorkbookEdits(artifact.id)} onRestored={() => { current.current = null; setViewVersion(undefined); setReload((n) => n + 1); void artifactStore.loadSessionArtifacts(artifact.sessionId); }} />}
     </div>

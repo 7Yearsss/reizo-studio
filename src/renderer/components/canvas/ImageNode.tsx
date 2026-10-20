@@ -11,6 +11,7 @@ import { useCanvasStore } from '../../state/useCanvasStore';
 import { cn } from '../../lib/cn';
 import Lightbox from './Lightbox';
 import { useHoverIntent } from './NodeActionBar';
+import SendToVideoEditorButton from './SendToVideoEditorButton';
 import MagneticHandle from './MagneticHandle';
 import NodeFloatingPanel from './NodeFloatingPanel';
 import { useIsSoloSelected } from './useSelectionCount';
@@ -524,6 +525,7 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
         selected={selected}
         hovered={hovered}
         running={running}
+        actions={current ? <SendToVideoEditorButton sessionId={sessionId} node={node} assetIndex={Math.min(assetIdx, assets.length - 1)} /> : null}
         badge={
           assets.length > 1 ? (
             <span

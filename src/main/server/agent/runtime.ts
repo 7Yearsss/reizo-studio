@@ -1,7 +1,7 @@
 import { createPresentationTools } from './presentationTools';
+import { createVideoEditorTools } from './videoEditorTools';
+import { tryVideoApplyTurn } from './videoApplyTurn';
 import { parsePresentationReferences, splitPresentationContext, wrapPresentationContext } from '../../../shared/presentationReferences';
-import { createHtmlTools } from './htmlTools';
-import { parseHtmlReferences, splitHtmlContext, wrapHtmlContext } from '../../../shared/htmlReferences';
 import type { ArtifactReviewStore } from '../storage/artifactReviewStore';
 import { createDocumentTools } from './documentTools';
 import { describeSessionArtifacts } from './sessionArtifactsHint';
@@ -23,6 +23,8 @@ import { createScheduleTools } from './scheduleTools';
 import { createCanvasTools } from './canvasTools';
 import { createArtifactTools } from './artifactTools';
 import { buildSheetContext } from './sheetContext';
+import { buildDocumentContext } from './documentContext';
+import { buildPresentationContext } from './presentationContext';
 import { parseSheetReferences, wrapSheetContext } from '../../../shared/sheetReferences';
 import { createImageTools } from './imageTools';
 import { createComputerTools, isComputerUseSupported } from './computerTools';
@@ -40,6 +42,15 @@ import { consumeInteractions, waitForInteractions } from './permissions';
 import { translateOpenAiChunk } from './translators/openai';
 import { compactAssistantParts, compactModelMessages } from './modelHistory';
 import { CONTINUE_USER_MESSAGE, MAX_CONTINUE_PASSES, shouldContinueAgentPass } from './continuePass';
+import { appendHookNote, createHookRunner, loadHooks, wrapToolsWithHooks } from './hooks';
+import { connectMcpTools, MCP_TOOL_PREFIX } from './mcpTools';
+import { hasReasoningLeak } from './reasoningLeak';
+import { createSubagentTool, loadSubagentRoles, pickReadOnlyTools } from './subagentTools';
+import { applyAllHarnessProposals } from './harnessEvolution';
+import { loadActiveHarnessRules } from './harnessRules';
+import { recordSkillExperience } from './skillRefiner';
+import { loadPluginContributions } from '../plugins/pluginStore';
+import { createTurnTraceCollector, writeTurnTrace } from './turnTrace';
 import { readWorkspaceMemory } from '../../workspaceMemory';
 import type { MemoryEntry } from '../../workspaceMemoryDir';
 import {
@@ -157,15 +168,13 @@ export function buildSteerContent(
   mentions: string[],
 ): string {
   const presentationRefs = parsePresentationReferences(mentions);
-  const htmlRefs = parseHtmlReferences(presentationRefs.rest);
-  const documentRefs = parseDocumentReferences(htmlRefs.rest);
+  const documentRefs = parseDocumentReferences(presentationRefs.rest);
   const sheetRefs = parseSheetReferences(documentRefs.rest);
   const { refs, paths } = parseCanvasRefs(sheetRefs.rest);
   const blocks = [
     paths.length > 0 ? `Referenced workspace paths:\n${paths.map((m) => `- ${m}`).join('\n')}` : '',
     buildCanvasRefBlock(canvasStore, sessionId, refs),
     documentRefs.refs.length ? wrapDocumentContext(documentRefs.refs) : '',
-    htmlRefs.refs.length ? wrapHtmlContext(htmlRefs.refs) : '',
     presentationRefs.refs.length ? wrapPresentationContext(presentationRefs.refs) : '',
     sheetRefs.refs.length ? wrapSheetContext(sheetRefs.refs.map((ref) => ({ ...ref, name: 'Excel 工作簿' })), 'Use read_sheet with the referenced artifactId before editing. Preserve the referenced sheet and range.') : '',
   ].filter(Boolean);
@@ -220,6 +229,9 @@ export async function runChatTurn(options: {
     return Response.json({ error: 'Session not found' }, { status: 404 });
   }
 
+  const localVideoTurn = await tryVideoApplyTurn(options);
+  if (localVideoTurn) return localVideoTurn;
+
   const settings = await settingsStore.get();
   let resolved: ReturnType<typeof resolveSettingsModel>;
   try { resolved = resolveSettingsModel(settings, { category: 'llm', providerId: options.providerId, model: options.model }); }
@@ -235,20 +247,20 @@ export async function runChatTurn(options: {
   }
 
   const presentationRefs = parsePresentationReferences(mentions);
-  const htmlRefs = parseHtmlReferences(presentationRefs.rest);
-  const documentRefs = parseDocumentReferences(htmlRefs.rest);
+  const documentRefs = parseDocumentReferences(presentationRefs.rest);
   const sheetRefs = parseSheetReferences(documentRefs.rest);
   const { refs: canvasRefs, paths: pathMentions } = parseCanvasRefs(sheetRefs.rest);
   const canvasRefBlock = buildCanvasRefBlock(canvasStore, sessionId, canvasRefs);
   const sheetRefBlock = await buildSheetContext(artifactStore, sessionId, sheetRefs.refs);
+  const documentContext = await buildDocumentContext(artifactStore, sessionId, documentRefs.refs);
+  const presentationContext = await buildPresentationContext(artifactStore, sessionId, presentationRefs.refs);
 
   const extraBlocks = [
     pathMentions.length > 0 ? `Referenced workspace paths:\n${pathMentions.map((m) => `- ${m}`).join('\n')}` : '',
     canvasRefBlock,
     sheetRefBlock,
-    documentRefs.refs.length ? wrapDocumentContext(documentRefs.refs) : '',
-    htmlRefs.refs.length ? wrapHtmlContext(htmlRefs.refs) : '',
-    presentationRefs.refs.length ? wrapPresentationContext(presentationRefs.refs) : '',
+    documentRefs.refs.length ? wrapDocumentContext(documentRefs.refs, documentContext) : '',
+    presentationRefs.refs.length ? wrapPresentationContext(presentationRefs.refs, presentationContext) : '',
     attachments.length > 0
       ? attachments
           .map(
@@ -334,11 +346,14 @@ export async function runChatTurn(options: {
     Boolean(dataRoot) && settings.computerUse === true && isComputerUseSupported();
 
   const sessionArtifactsHint = artifactStore && options.artifactReviews ? await describeSessionArtifacts(artifactStore, sessionId) : '';
+  const activeHarnessRules = await loadActiveHarnessRules(dataRoot);
 
   const systemParts = [
     workspacePath
       ? `You are Reizo Studio, a local desktop agent that finishes real work in the user's files. The workspace is at: ${workspacePath}. For workspace tasks prefer tools over guessing: use list_dir/read_file/find_files/grep to inspect, edit_file/write_file to change files, run_command for tests and git, ask_user when you need a choice, todo_write for a visible plan, and memory_read/memory_write/memory_delete for durable memory files (indexed in MEMORY.md). Greetings, small talk, and questions you can answer from this prompt get a direct reply with no tool calls; the memory index below is already loaded, so only memory_read a file whose description matters for the current task.`
       : 'You are Reizo Studio, a helpful creative assistant running locally on the user\'s desktop. Use ask_user if you need the user to choose.',
+    activeHarnessRules.systemPromptAddon,
+    activeHarnessRules.guardrails,
     'Image Generation Rules:\n' +
     '- When the user asks to generate, draw, or paint an image (e.g., "生图", "画一张...", "生成图片", "设计海报", "绘制插画"), ALWAYS call the `generate_image` tool directly within this chat conversation. The image will be generated and rendered inline for the user.\n' +
     '- The `generate_image` tool automatically uses the configured provider (such as Reizo key with gpt-image-2). Never refuse or tell the user that OpenAI API Key is missing. Just invoke `generate_image` directly.\n' +
@@ -352,10 +367,9 @@ export async function runChatTurn(options: {
     '- Keep reply text concise — never narrate polling, retries, waiting, or tool mechanics ("我会再检查一次", "继续等待结果", "重新提交"). Live status is already shown by the UI; your reply carries only the outcome and facts the user needs.\n' +
     '- ask_user cards already render the question and every option to the user — never restate the question or enumerate the options in your reply, before or after they answer. Respond directly to what they picked (e.g. "好的，扩展画布边缘 —— 我来处理"). When a card collected several answers at once, a single short recap clause is enough.',
     'When a request needs a visual direction (mood, palette, typography) before you generate or design something, call ask_user with kind:"direction" and 2-4 `directions` cards (title, palette hex list, displayFont/bodyFont stacks, one-line mood, real-world references) so the user picks by looking. If a direction maps to a node already on the canvas (e.g. a draft image the user can inspect), set the card\'s `nodeId` so the card shows that node\'s real thumbnail. To show real draft images on the cards: add the draft nodes directly (never asProposal — proposals need manual acceptance and stay idle), call run_node on each, and wait until their outputs land before sending the direction question. When a skill mentions preset sample images, set the card\'s `imageUrl` to the given `skill-asset:` URL instead.',
-    options.artifactReviews ? 'For editable PPT decks use generate_presentation. Read existing slide and element IDs with read_presentation, then propose_presentation_edits. Keep edits within referenced pages/elements and wait for user review. Never bypass review through shell, files, or HTTP.' : '',
-    options.artifactReviews ? 'For Excel workbooks use generate_sheet only to create new ones. To change an existing workbook call read_sheet, then propose_sheet_edits with the current version; the original stays unchanged until the user accepts in the Excel panel. Keep each operation to its own non-overlapping range. For pivot tables, group-by summaries, or cross-tabs use an upsertPivot operation (live formulas, refreshable) instead of computing totals yourself. For charts use upsertChart, preferably bound to a pivot via pivotId (propose the chart after the pivot is accepted). Never bypass review through shell, files, or HTTP.' : '',
-    options.artifactReviews ? 'Use generate_html for new editable HTML pages. For changes read_html then propose_html_edits. Do not bypass review with file writes, shell commands, or HTTP requests.' : '',
-    options.artifactReviews ? 'For editable documents use generate_document. Before modifying an existing Doc call read_document, then propose_document_edits with the current version and stable block IDs. Proposals do not change the original. Only the user may accept or reject in the Doc panel. Never use file writes, shell commands, or HTTP calls to bypass document review. Respect referenced selected ranges.' : '',
+    options.artifactReviews ? 'For editable PPT decks use generate_presentation. When the message carries <presentation-context> with `current` content, propose_presentation_edits straight from its version and slide/element IDs without read_presentation first; otherwise read existing slide and element IDs with read_presentation, then propose_presentation_edits. Keep edits within referenced pages/elements and wait for user review. Never bypass review through shell, files, or HTTP.' : '',
+    options.artifactReviews ? 'For Excel workbooks use generate_sheet only to create new ones. To change an existing workbook call read_sheet, then propose_sheet_edits with the current version; the original stays unchanged until the user accepts in the Excel panel. Keep each operation to its own non-overlapping range. Keep formulas live: never replace a formula with its computed value unless the user asks, and write new calculations as formulas. If the tool result carries warnings, tell the user plainly and, unless they are intended, re-propose with formulas. To audit a workbook (errors, formulas that differ from their column, hand-typed numbers inside formula columns, SUM ranges that stop short, numbers stored as text, stray spaces, hard-coded constants) call check_sheet, then propose_sheet_edits for the findings that have a fix; do not invent problems it did not report. For pivot tables, group-by summaries, or cross-tabs use an upsertPivot operation (live formulas, refreshable) instead of computing totals yourself. For charts use upsertChart, preferably bound to a pivot via pivotId (propose the chart after the pivot is accepted). Never bypass review through shell, files, or HTTP.' : '',
+    options.artifactReviews ? 'For editable documents use generate_document. When the message carries <document-context> with `current` content, edit straight from it: call propose_document_edits with that version and those block IDs, without read_document first. Otherwise call read_document before modifying an existing Doc, then propose_document_edits with the current version and stable block IDs. Proposals do not change the original. Only the user may accept or reject, on the suggestion card in chat or in the Doc panel. After proposing, reply with one short sentence at most: the card already shows the before/after, so never repeat, quote or re-explain the new text. Never use file writes, shell commands, or HTTP calls to bypass document review. Respect referenced selected ranges. To audit a Doc for consistency (numbering, punctuation, date and number formats, stray spaces, repeated words or paragraphs, terminology) call check_document, then propose_document_edits for the findings that have a replacement; do not invent problems it did not report. For a whole-document task on a long Doc (translate, unify tone, fix every occurrence) go through it in order: read a page with read_document, propose its edits (up to 40 operations per call, one call per page), then continue with nextOffset until the last block; every batch becomes its own review and the user can accept them all at once, so never stop early or skip sections.' : '',
     artifactStore
       ? 'When the user asks for a flowchart, sequence diagram, system architecture diagram, or mind map, call generate_diagram with Mermaid syntax to produce an interactive Excalidraw canvas artifact in the right panel. When the user asks for a spreadsheet, budget, financial report, or table calculation, call generate_sheet with rows, columns, and formulas to render a full-featured Excel sheet artifact in the right panel.'
       : '',
@@ -377,6 +391,7 @@ export async function runChatTurn(options: {
       : '',
     skill
       ? `The user invoked skill "${skill.name}". Follow this skill:\n${skill.body}\n\n` +
+        (skill.experience ? `Accumulated experience for "${skill.name}" (EXPERIENCE.md):\n${skill.experience}\n\n` : '') +
         'If this skill declares a "提问"/"Questions" section, collect each missing input through `ask_user` question cards (concrete options + free text) before producing output — never ask those questions as plain chat text. Ask each question at most once; an input the user already answered is never re-asked.'
       : '',
     projectInstructions ? `Project "${projectName}" working rules:\n${projectInstructions}` : '',
@@ -420,6 +435,24 @@ export async function runChatTurn(options: {
   let emit: (event: ChatStreamEvent) => void = () => undefined;
   const todos: TodoItem[] = [];
   const loopGuard = createToolLoopGuard();
+  const trace = createTurnTraceCollector({ sessionId, model: modelId });
+  let turnDelivered = false;
+  const DELIVERABLE_TOOLS = new Set([
+    'write_file',
+    'edit_file',
+    'generate_sheet',
+    'propose_sheet_edits',
+    'generate_document',
+    'propose_document_edits',
+    'generate_presentation',
+    'propose_presentation_edits',
+    'generate_diagram',
+    'generate_image',
+    'add_node',
+    'run_node',
+    'run_graph',
+    'create_storyboard_pipeline',
+  ]);
 
   const toolset = workspacePath
     ? createWorkspaceTools({
@@ -488,17 +521,19 @@ export async function runChatTurn(options: {
   const scheduleTools = scheduleStore ? createScheduleTools({ scheduleStore, sessionId }) : undefined;
 
   let currentPresentationRefs = regenerate ? splitPresentationContext(userMessage?.content ?? '').refs : presentationRefs.refs;
-  let currentHtmlRefs = regenerate ? splitHtmlContext(userMessage?.content ?? '').refs : htmlRefs.refs;
   let currentDocumentRefs = regenerate ? splitDocumentContext(userMessage?.content ?? '').refs : documentRefs.refs;
-  const tools =
+  // Enabled extension packs add hooks and MCP servers (their skills reach the shared skills-dir list separately).
+  const pluginPack = await loadPluginContributions(dataRoot);
+  const hookRunner = createHookRunner({ hooks: [...(await loadHooks(dataRoot)), ...pluginPack.hooks], sessionId, cwd: workspacePath ?? dataRoot ?? process.cwd() });
+  const rawTools =
     toolset?.tools || canvasTools || artifactTools || imageTools || computerTools || scheduleTools || askTool
       ? {
           ask_user: askTool,
           ...(toolset?.tools ?? {}),
           ...(canvasTools?.tools ?? {}),
           ...(artifactTools ?? {}),
+          ...(dataRoot ? createVideoEditorTools(sessionId, dataRoot, canvasStore) : {}),
           ...(artifactStore && options.artifactReviews ? createPresentationTools({ sessionId, projectId: session.projectId, artifacts: artifactStore, reviews: options.artifactReviews, getReferences: () => currentPresentationRefs }) : {}),
-          ...(artifactStore && options.artifactReviews ? createHtmlTools({ sessionId, projectId: session.projectId, artifacts: artifactStore, reviews: options.artifactReviews, getReferences: () => currentHtmlRefs }) : {}),
           ...(artifactStore && options.artifactReviews ? createDocumentTools({ sessionId, projectId: session.projectId, artifacts: artifactStore, reviews: options.artifactReviews, getReferences: () => currentDocumentRefs }) : {}),
           ...(imageTools ?? {}),
           ...(computerTools?.tools ?? {}),
@@ -506,6 +541,23 @@ export async function runChatTurn(options: {
           ...(skill?.contract && canvasStore && dataRoot ? createDeliveryTools({ skill, canvasStore, sessionId, dataRoot, artifactStore }) : {}),
         }
       : undefined;
+  // MCP servers (user-level mcp.json): their tools join the set behind approval; clients are pooled per-session.
+  const mcp = dataRoot ? await connectMcpTools({ dataRoot, sessionId, permissionMode: settings.permissionMode, extraServers: pluginPack.mcpServers }) : undefined;
+  const hasMcpTools = mcp !== undefined && Object.keys(mcp.tools).length > 0;
+  // Read-only research sub-agent: only the read tools, hook-wrapped like the main agent's. `model` is built below, hence the getters.
+  const subagentRoleDirs = [workspacePath, dataRoot].filter((d): d is string => Boolean(d));
+  const subagentRoles = subagentRoleDirs.length ? await loadSubagentRoles(subagentRoleDirs) : [];
+  const subagentTools = toolset
+    ? createSubagentTool({
+        getModel: () => model,
+        tools: wrapToolsWithHooks(pickReadOnlyTools(toolset.tools), hookRunner),
+        getProviderOptions: () => providerOptions,
+        roles: subagentRoles,
+      })
+    : undefined;
+  const tools = rawTools || hasMcpTools
+    ? wrapToolsWithHooks({ ...(rawTools ?? {}), ...(subagentTools ?? {}), ...(mcp?.tools ?? {}) } as NonNullable<typeof rawTools>, hookRunner)
+    : undefined;
 
   const accounting = options.usageStore ?? canvasStore?.usage;
   const model = createOpenAiModel({ apiKey, modelId, baseUrl,
@@ -545,7 +597,7 @@ export async function runChatTurn(options: {
   const buildStream = (messages: ModelMessage[], signal: AbortSignal) =>
     streamText({
       model,
-      instructions,
+      instructions: mcp?.warnings?.length ? `${instructions}\n\n[MCP Notice]\n${mcp.warnings.map((w) => `- ${w}`).join('\n')}` : instructions,
       messages: compactModelMessages(messages),
       tools,
       stopWhen: tools ? isStepCount(64) : undefined,
@@ -554,6 +606,16 @@ export async function runChatTurn(options: {
       providerOptions,
       abortSignal: signal,
       prepareStep: async ({ messages: stepMessages, stepNumber }) => {
+        if (stepNumber === 0 && mcp && mcp.warnings.length > 0) {
+          const withheld = mcp.warnings.filter((w) => w.includes('withheld'));
+          if (withheld.length > 0) {
+            emit({
+              type: 'notice',
+              tone: 'warn',
+              text: '已拦截发生变更的 MCP 工具：检测到工具定义自首次信任后被修改。可在「设置 → 扩展」中重新信任。',
+            });
+          }
+        }
         const compacted = compactModelMessages(stepMessages as ModelMessage[]);
         // Recall never holds the first token hostage: the first step waits a
         // short grace, later steps pick it up once it has settled.
@@ -588,8 +650,6 @@ export async function runChatTurn(options: {
         for (const steer of steers) {
           const steeredPresentation = splitPresentationContext(steer.content).refs;
           if (steeredPresentation.length) currentPresentationRefs = steeredPresentation;
-          const steeredHtml = splitHtmlContext(steer.content).refs;
-          if (steeredHtml.length) currentHtmlRefs = steeredHtml;
           const steeredDocs = splitDocumentContext(steer.content).refs;
           if (steeredDocs.length) currentDocumentRefs = steeredDocs;
           const message: ChatMessage = {
@@ -645,10 +705,14 @@ export async function runChatTurn(options: {
           event.type === 'tool' &&
           (event.result !== undefined || event.error !== undefined)
         ) {
+          if (event.error === undefined && DELIVERABLE_TOOLS.has(event.name)) {
+            turnDelivered = true;
+          }
           const verdict = loopGuard.record({
             name: event.name,
             args: event.args,
             ok: event.error === undefined,
+            error: event.error !== undefined ? String(event.error) : undefined,
           });
           if (verdict && verdict.tier !== 'ok') {
             send({ type: 'tool_loop', tier: verdict.tier, reason: verdict.reason });
@@ -659,13 +723,35 @@ export async function runChatTurn(options: {
       };
     },
     createStream: (signal) => buildStream(history, signal),
+    onEvent: (event) => trace.onEvent(event),
     onTurnTerminal: ({ outcome, text }) => {
-      if (outcome !== 'completed' || !workspacePath) return;
+      const reasoningLeak = hasReasoningLeak({ userText, reply: text });
+      if (reasoningLeak) console.warn(`[chat] reasoning leaked into the reply session=${sessionId} model=${modelId}`);
+      const turnTrajectory = trace.toTrajectoryMarkdown();
+      if (dataRoot) {
+        void writeTurnTrace(dataRoot, trace.finish({ outcome, text, reasoningLeak })).then(() => {
+          if (settings.autoApplyHarnessLessons) void applyAllHarnessProposals(dataRoot);
+        });
+      }
+      if (outcome !== 'completed') return;
+      if (skill && dataRoot) {
+        void (async () => {
+          try {
+            const latest = await sessionStore.get(sessionId);
+            if (!latest) return;
+            await recordSkillExperience({ dataRoot, skill, messages: latest.messages });
+          } catch (err) {
+            console.warn(`[skillRefiner] experience record failed skill=${skill.id}: ${(err as Error).message}`);
+          }
+        })();
+      }
+      if (!workspacePath) return;
       scheduleMemoryExtraction({
         workspaceRoot: workspacePath,
         model,
         userText,
         assistantText: text,
+        turnTrajectory,
         onChanged: (wrote, deleted) => {
           if (wrote.length > 0) {
             emit({ type: 'memory', action: 'wrote', items: wrote });
@@ -716,18 +802,26 @@ export async function runChatTurn(options: {
             ? ((await computerTools?.executeApproved(item.args)) ?? {
                 error: 'Computer control is not enabled for this turn',
               })
-            : item.name === CANVAS_BUDGET_TOOL
-              ? ((await canvasTools?.executeApproved(item.args, item.toolCallId)) ?? {
-                  error: 'This turn has no canvas tools',
+            : item.name.startsWith(MCP_TOOL_PREFIX)
+              ? ((await mcp?.executeApproved(item.name, item.args, item.toolCallId)) ?? {
+                  error: 'This turn has no MCP tools',
                 })
-              : ((await toolset?.executeApproved(item.name, item.args)) ?? {
-                  error: 'This turn has no workspace tools',
-                });
+              : item.name === CANVAS_BUDGET_TOOL
+                ? ((await canvasTools?.executeApproved(item.args, item.toolCallId)) ?? {
+                    error: 'This turn has no canvas tools',
+                  })
+                : ((await toolset?.executeApproved(item.name, item.args)) ?? {
+                    error: 'This turn has no workspace tools',
+                  });
+        // PreToolUse already ran when the model made the call; PostToolUse fires once the approved run finished.
+        const hookNote = hookRunner && !outcome.error && resultName !== CANVAS_BUDGET_TOOL
+          ? await hookRunner.post(resultName, item.args, outcome.result, signal)
+          : undefined;
         emitToolResult({
           toolCallId: item.toolCallId,
           name: resultName,
           args: item.args,
-          result: outcome.result,
+          result: hookNote && outcome.result !== undefined ? (appendHookNote(outcome.result, hookNote) as string) : outcome.result,
           error: outcome.error,
         });
       }
@@ -753,9 +847,16 @@ export async function runChatTurn(options: {
     onContinuePass: async ({ getAssistant, finishReason, passIndex, signal }) => {
       if (passIndex >= MAX_CONTINUE_PASSES) return null;
       const snap = getAssistant();
-      const reason = shouldContinueAgentPass({ text: snap.text, todos, finishReason });
+      const reason = shouldContinueAgentPass({
+        text: snap.text,
+        todos,
+        finishReason,
+        userText,
+        delivered: turnDelivered,
+      });
       if (!reason) return null;
       console.info(`[chat] continue pass reason=${reason} pass=${passIndex + 1}`);
+      trace.onContinue(reason);
       return buildStream(
         [
           ...history,

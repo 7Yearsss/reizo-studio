@@ -5,7 +5,7 @@ import { createDocumentContent, safeFont, safeHex, type DocumentContent, type Do
 import { attr, child, childrenNamed, elements, onOff, parseXml, textOf, type XmlNode } from './xml';
 
 export interface RunProps { bold?: boolean; italic?: boolean; underline?: boolean; strike?: boolean; color?: string; size?: number; font?: string; highlight?: string; vert?: 'superscript' | 'subscript' }
-export interface ParaProps { align?: string; left?: number; firstLine?: number; before?: number; after?: number; line?: number; numId?: string; ilvl?: number }
+export interface ParaProps { align?: string; left?: number; firstLine?: number; before?: number; after?: number; line?: number; lineExact?: number; numId?: string; ilvl?: number }
 interface StyleDef { id: string; name: string; basedOn?: string; type: string; run: RunProps; para: ParaProps }
 export interface DocxPackage {
   zip: JSZip;
@@ -63,7 +63,9 @@ export function readParaProps(base: ParaProps, pPr: XmlNode | undefined): ParaPr
     const before = Number(attr(spacing, 'w:before')); if (Number.isFinite(before)) out.before = before;
     const after = Number(attr(spacing, 'w:after')); if (Number.isFinite(after)) out.after = after;
     const line = Number(attr(spacing, 'w:line'));
-    if (Number.isFinite(line) && (attr(spacing, 'w:lineRule') ?? 'auto') === 'auto') out.line = Math.round((line / 240) * 100) / 100;
+    const rule = attr(spacing, 'w:lineRule') ?? 'auto';
+    if (Number.isFinite(line) && rule === 'auto') { out.line = Math.round((line / 240) * 100) / 100; out.lineExact = undefined; }
+    else if (Number.isFinite(line) && rule === 'exact') { out.lineExact = Math.round((line / 20) * 10) / 10; out.line = undefined; }
   }
   const numPr = child(pPr, 'w:numPr');
   if (numPr) {
@@ -246,6 +248,7 @@ function paragraphAttrs(ctx: Context, pPr: XmlNode | undefined, styleId: string 
     spaceBefore: para.before !== undefined && para.before !== base.before ? para.before : null,
     spaceAfter: para.after !== undefined && para.after !== base.after ? para.after : null,
     lineSpacing: para.line !== undefined && para.line !== base.line ? para.line : null,
+    lineExact: para.lineExact !== undefined && para.lineExact !== base.lineExact ? para.lineExact : null,
     pStyle: styleId && styleId !== ctx.pkg.defaultParagraphStyle ? styleId : null,
     pPrExtra: extra || null,
   } };

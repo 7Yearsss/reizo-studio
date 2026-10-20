@@ -59,12 +59,14 @@ describe('artifact review publication', () => {
   });
   it('rejects stale accepts and allows rejecting the stale suggestions', async () => {
     const { artifacts, artifact, reviews, proposal } = await fixture();
-    await artifacts.addVersion(artifact.id, { expectedVersion: 1, content: artifact.content, origin: { surface: 'manual_edit' } });
+    const edited = JSON.parse(artifact.content); edited.doc.content[0].content[0].text = '用户手动修改';
+    const manual = JSON.stringify(edited);
+    await artifacts.addVersion(artifact.id, { expectedVersion: 1, content: manual, origin: { surface: 'manual_edit' } });
     expect(reviews.get(proposal.id)?.stale).toBe(true);
     await expect(reviews.decide({ id: proposal.id, sessionId: 'session', expectedReviewVersion: 1, changeIds: proposal.changes.map((c) => c.id), decision: 'accept' })).rejects.toThrow('原文已更新');
     const result = await reviews.decide({ id: proposal.id, sessionId: 'session', expectedReviewVersion: 1, changeIds: proposal.changes.map((c) => c.id), decision: 'reject' });
     expect(result.status).toBe('rejected');
-    expect((await artifacts.get(artifact.id))?.content).toBe(artifact.content);
+    expect((await artifacts.get(artifact.id))?.content).toBe(JSON.stringify(JSON.parse(manual)));
   });
   it('rolls back both the content and review decision if publication fails', async () => {
     const { db, artifacts, dataRoot, artifact, proposal } = await fixture();
@@ -74,5 +76,47 @@ describe('artifact review publication', () => {
     expect((await artifacts.get(artifact.id))?.version).toBe(1);
     expect(reviews.get(proposal.id)?.reviewVersion).toBe(1);
     expect(reviews.get(proposal.id)?.changes[0].status).toBe('pending');
+  });
+});
+
+describe('reviews proposed in batches against one version', () => {
+  async function longFixture(count = 120) {
+    const db = openDb(':memory:'); handles.push(db);
+    const dataRoot = mkdtempSync(path.join(os.tmpdir(), 'reizo-review-batch-'));
+    const artifacts = createArtifactStore(db, dataRoot);
+    const reviews = createArtifactReviewStore(db, artifacts, dataRoot, { doc: documentReviewAdapter });
+    const content = createDocumentContent({ type: 'doc', content: Array.from({ length: count }, (_, i) => ({ type: 'paragraph', content: [{ type: 'text', text: `第${i}段原文内容` }] })) });
+    const artifact = await artifacts.create({ sessionId: 'session', kind: 'doc', name: '长文', source: 'generated', content: JSON.stringify(content) });
+    const blocks = documentBlocks(content);
+    const batch = (from: number, to: number) => blocks.slice(from, to).map((b) => ({ op: 'replaceText', blockId: b.id, start: 0, end: b.inlineSize, text: `译文${b.text}` }));
+    const propose = (from: number, to: number) => reviews.create({ artifactId: artifact.id, sessionId: 'session', expectedVersion: 1, origin: { surface: 'chat' }, operations: batch(from, to) });
+    const acceptAll = (id: string) => { const r = reviews.get(id)!; return reviews.decide({ id, sessionId: 'session', expectedReviewVersion: r.reviewVersion, changeIds: r.changes.map((c) => c.id), decision: 'accept' }); };
+    const translated = async () => documentBlocks(parseDocumentContent((await artifacts.get(artifact.id))!.content)!).filter((b) => b.text.startsWith('译文')).length;
+    return { artifacts, artifact, reviews, blocks, propose, acceptAll, translated };
+  }
+
+  it('lets every batch be accepted in turn, so a long document can be processed in pieces', async () => {
+    const f = await longFixture();
+    const batches = [await f.propose(0, 40), await f.propose(40, 80), await f.propose(80, 120)];
+    await f.acceptAll(batches[0].id);
+    expect(f.reviews.get(batches[1].id)!.stale).toBe(true); // until the page asks for the list...
+    await f.reviews.rebaseStale(f.artifact.id);
+    expect(f.reviews.get(batches[1].id)!.stale).toBe(false);
+    expect(f.reviews.get(batches[1].id)!.changes.length).toBe(40);
+    await f.acceptAll(batches[1].id);
+    await f.acceptAll(batches[2].id); // accepted straight away, without waiting for a refresh
+    expect(await f.translated()).toBe(120);
+  });
+
+  it('does not rebase a batch when something it targets was edited meanwhile', async () => {
+    const f = await longFixture(60);
+    const first = await f.propose(0, 30);
+    const second = await f.propose(20, 50); // overlaps blocks 20-29 with the first batch
+    await f.acceptAll(first.id);
+    await f.reviews.rebaseStale(f.artifact.id);
+    const after = f.reviews.get(second.id)!;
+    expect(after.stale).toBe(true);
+    await expect(f.acceptAll(second.id)).rejects.toThrow('原文已更新');
+    expect(await f.translated()).toBe(30);
   });
 });

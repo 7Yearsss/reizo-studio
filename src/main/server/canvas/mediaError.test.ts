@@ -40,6 +40,13 @@ describe('classifyMediaError', () => {
     expect(e.retryable).toBe(true);
   });
 
+  it('does not describe an unparseable image body as an invalid parameter', () => {
+    const e = classifyMediaError(new Error('Invalid JSON response'));
+    expect(e.code).toBe('unknown');
+    expect(e.message).toContain('无法解析');
+    expect(e.message).not.toContain('请求参数无效');
+  });
+
   it('an unknown error is retryable-undefined, not retryable-false', () => {
     const e = classifyMediaError(new Error('weird provider hiccup'));
     expect(e.code).toBe('unknown');

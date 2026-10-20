@@ -1,7 +1,7 @@
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
-import type { DocumentSelection } from '../../../shared/documentContent';
+import { documentSelectionSpans, type DocumentSelection } from '../../../shared/documentContent';
 
 export interface LabelledRange { selection: DocumentSelection; label: number }
 
@@ -28,14 +28,17 @@ function badge(label: number): HTMLElement {
 }
 
 export function referenceDecorations(doc: ProseMirrorNode, ranges: LabelledRange[]): DecorationSet {
-  const blocks = new Map<string, { pos: number; size: number }>();
-  doc.descendants((node, pos) => { if (node.isTextblock && typeof node.attrs.id === 'string') blocks.set(node.attrs.id, { pos, size: node.content.size }); });
   const decorations: Decoration[] = [];
   for (const { selection, label } of ranges) {
-    const block = blocks.get(selection.blockId);
-    if (!block || selection.end > block.size) continue;
-    const from = block.pos + 1 + selection.start; const to = block.pos + 1 + selection.end;
-    decorations.push(Decoration.inline(from, to, { class: 'doc-ref-range' }), Decoration.widget(from, () => badge(label), { side: -1, key: `ref-${label}`, ignoreSelection: true }));
+    const spans = documentSelectionSpans(doc, selection);
+    if (!spans) continue;
+    // One range, one badge: the number sits at the start; every covered block's stretch is tinted.
+    spans.forEach((span, index) => {
+      const from = span.pos + 1 + span.start;
+      const to = span.pos + 1 + span.end;
+      if (to > from) decorations.push(Decoration.inline(from, to, { class: 'doc-ref-range' }));
+      if (index === 0) decorations.push(Decoration.widget(from, () => badge(label), { side: -1, key: `ref-${label}`, ignoreSelection: true }));
+    });
   }
   return DecorationSet.create(doc, decorations);
 }

@@ -1,4 +1,7 @@
 import type { Session, SessionSummary } from '../shared/chat';
+import type { EditorImportJob, EditorImportResult, VideoEditorWorkspace } from '../shared/videoEditor';
+import type { EditorActivity, EditorContext, EditorObservation } from '../shared/videoEditorContext';
+
 import type { Project } from '../shared/project';
 import type { Artifact, ArtifactVersion, ArtifactWithContent } from '../shared/artifact';
 import type { DirEntry } from '../shared/workspace';
@@ -16,6 +19,57 @@ import type {
   ProviderCategory,
   ManagedProviderConfig,
 } from '../shared/providerRegistry';
+
+export async function openVideoEditor(sessionId: string, reconnect = false): Promise<VideoEditorWorkspace> {
+  const response = await api(`/api/video-editor/${encodeURIComponent(sessionId)}/open`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reconnect }) });
+  return response.json();
+}
+
+export async function editorApprovalMode(sessionId: string, mode?: 'manual' | 'auto'): Promise<{ mode: 'manual' | 'auto' }> {
+  return (await api(`/api/video-editor/${encodeURIComponent(sessionId)}/approval`, mode === undefined ? undefined : {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }),
+  })).json();
+}
+
+function editorMediaPath(sessionId: string) { return `/api/video-editor/${encodeURIComponent(sessionId)}/media`; }
+export async function listEditorMedia(sessionId: string): Promise<{ assets: CanvasAsset[] }> {
+  return (await api(editorMediaPath(sessionId))).json();
+}
+export async function importEditorMedia(sessionId: string, assetId: string): Promise<EditorImportResult> {
+  return (await api(`${editorMediaPath(sessionId)}/import`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assetId }) })).json();
+}
+export async function editorMediaJobs(sessionId: string): Promise<{ jobs: EditorImportJob[] }> {
+  return (await api(`${editorMediaPath(sessionId)}/jobs`)).json();
+}
+export async function editorMediaFile(sessionId: string, jobId: string): Promise<Blob> {
+  return (await api(`${editorMediaPath(sessionId)}/jobs/${encodeURIComponent(jobId)}/file`)).blob();
+}
+export async function completeEditorMedia(sessionId: string, jobId: string, result: { asset?: EditorImportResult; error?: string }): Promise<void> {
+  await api(`${editorMediaPath(sessionId)}/jobs/${encodeURIComponent(jobId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(result) });
+}
+export async function saveEditorExport(sessionId: string, projectId: string, name: string, blob: Blob, purpose: 'export' | 'source' = 'export'): Promise<{ asset: CanvasAsset }> {
+  return (await api(`${editorMediaPath(sessionId)}/exports?${new URLSearchParams({ projectId, name, purpose })}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: blob })).json();
+}
+export async function prepareEditorArtifact(sessionId: string, artifactId: string, version: number): Promise<{ asset: CanvasAsset }> {
+  return (await api(`${editorMediaPath(sessionId)}/artifact`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ artifactId, version }) })).json();
+}
+export async function readEditorContext(sessionId: string): Promise<EditorObservation> {
+  return (await api(`/api/video-editor/${encodeURIComponent(sessionId)}/context`)).json();
+}
+export async function editorRenderRequest(sessionId: string, method: 'GET' | 'POST' | 'DELETE', id?: string, payload?: unknown): Promise<unknown> {
+  return (await api(`/api/video-editor/${encodeURIComponent(sessionId)}/render-jobs${id ? `/${encodeURIComponent(id)}` : ''}`, {
+    method, ...(payload === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
+  })).json();
+}
+export async function retryEditorExport(sessionId: string, id: string): Promise<void> {
+  await api(`/api/video-editor/${encodeURIComponent(sessionId)}/render-jobs/${encodeURIComponent(id)}/retry`, { method: 'POST' });
+}
+export async function readCompositionImage(sessionId: string, id: string, index: number): Promise<Blob> {
+  return (await api(`/api/video-editor/${encodeURIComponent(sessionId)}/previews/${encodeURIComponent(id)}/${index}`)).blob();
+}
+export async function updateEditorContext(sessionId: string, context: EditorContext, activities: EditorActivity[]): Promise<void> {
+  await api(`/api/video-editor/${encodeURIComponent(sessionId)}/context`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ context, activities }) });
+}
 
 export interface StreamMeta {
   rev: number;
@@ -78,7 +132,7 @@ let originPromise: Promise<string> | null = null;
 let resolvedOrigin: string | null = null;
 const originListeners = new Set<() => void>();
 
-function apiOrigin(): Promise<string> {
+export function apiOrigin(): Promise<string> {
   if (!originPromise) {
     if (typeof window !== 'undefined' && window.reizo?.getApiOrigin) {
       originPromise = window.reizo.getApiOrigin();
@@ -344,6 +398,18 @@ export async function deleteMemoryFile(file: string, sessionId?: string): Promis
   await api(`/api/memory/${encodeURIComponent(file)}${q}`, { method: 'DELETE' });
 }
 
+export interface HarnessProposalDto { id: string; title: string; rationale: string; content: string; applied: boolean }
+
+export async function listHarnessProposals(): Promise<HarnessProposalDto[]> {
+  const res = await api('/api/harness/proposals');
+  const body = await res.json();
+  return body.proposals ?? [];
+}
+
+export async function applyHarnessProposal(id: string): Promise<void> {
+  await api(`/api/harness/proposals/${encodeURIComponent(id)}/apply`, { method: 'POST' });
+}
+
 export async function listSkills(): Promise<{ id: string; name: string; description: string; prompt?: string; source: 'bundled' | 'user'; coverUrl?: string }[]> {
   const res = await api('/api/skills');
   const body = await res.json();
@@ -546,11 +612,11 @@ export async function getArtifactVersions(id: string): Promise<ArtifactVersion[]
   return versions;
 }
 
-export async function addArtifactVersion(id: string, content: string, expectedVersion?: number): Promise<ArtifactWithContent> {
+export async function addArtifactVersion(id: string, content: string, expectedVersion?: number, label?: '排版'): Promise<ArtifactWithContent> {
   const res = await api(`/api/artifacts/${id}/versions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ content, expectedVersion }),
+    body: JSON.stringify({ content, expectedVersion, ...(label ? { label } : {}) }),
   });
   const { artifact } = await res.json();
   return artifact;
@@ -592,15 +658,23 @@ export async function createDocument(sessionId: string, name: string): Promise<A
 export async function importDocument(sessionId: string, file: File): Promise<ArtifactWithContent> {
   return (await (await api(`/api/sessions/${sessionId}/documents/import?name=${encodeURIComponent(file.name)}`, { method: 'POST', body: file })).json()).artifact;
 }
+/** The layout a reference .docx already has, as a spec to typeset another document by. */
+export async function referenceFormat(file: File): Promise<import('../shared/documentFormat').FormatSpec> {
+  return (await (await api(`/api/documents/reference-format?name=${encodeURIComponent(file.name)}`, { method: 'POST', body: file })).json()).spec;
+}
 export async function importPresentation(sessionId: string, file: File): Promise<ArtifactWithContent> {
   return (await (await api(`/api/sessions/${sessionId}/presentations/import?name=${encodeURIComponent(file.name)}`, { method: 'POST', body: file })).json()).artifact;
 }
-export async function exportDocument(id: string): Promise<Blob> { return (await api(`/api/artifacts/${id}/document.docx`)).blob(); }
+export async function exportDocument(id: string, options: { revisions?: boolean } = {}): Promise<Blob> { return (await api(`/api/artifacts/${id}/document.docx${options.revisions ? '?revisions=1' : ''}`)).blob(); }
 export async function listArtifactReviews(id: string): Promise<import('../shared/artifactReview').ArtifactReview[]> {
   return (await (await api(`/api/artifacts/${id}/reviews`)).json()).reviews;
 }
 export async function reviseArtifactReview(id: string, reviewId: string, changeId: string, expectedReviewVersion: number, operation: unknown): Promise<import('../shared/artifactReview').ArtifactReview> {
   return (await (await api(`/api/artifacts/${id}/reviews/${reviewId}/changes/${changeId}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedReviewVersion, operation }) })).json()).review;
+}
+/** Rewrite one suggestion again from the user's feedback; the suggestion's paragraph gets a fresh rewrite. */
+export async function regenerateReviewChange(id: string, reviewId: string, changeId: string, expectedReviewVersion: number, feedback: string): Promise<import('../shared/artifactReview').ArtifactReview> {
+  return (await (await api(`/api/artifacts/${id}/reviews/${reviewId}/changes/${changeId}/regenerate`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedReviewVersion, feedback }) })).json()).review;
 }
 export async function decideArtifactReview(id: string, reviewId: string, expectedReviewVersion: number, changeIds: string[], decision: 'accept' | 'reject'): Promise<{ review: import('../shared/artifactReview').ArtifactReview; artifact: ArtifactWithContent }> {
   return (await api(`/api/artifacts/${id}/reviews/${reviewId}/decide`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedReviewVersion, changeIds, decision }) })).json();

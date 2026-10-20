@@ -1,8 +1,13 @@
+import * as tabStore from './tabStore';
+
 export type SidebarMode = 'chat' | 'projects' | 'skills' | 'artifacts' | 'automation' | 'settings';
-export type RightPanelTab = 'canvas' | 'sheets' | 'documents' | 'html' | 'presentations' | 'artifacts' | 'files' | 'git' | 'terminal';
+export type SettingsSection = 'general' | 'providers' | 'extensions' | 'usage' | 'admin' | 'storage' | 'about';
+export type RightPanelTab = 'canvas' | 'video' | 'sheets' | 'documents' | 'presentations' | 'artifacts' | 'files' | 'git' | 'terminal';
 
 export interface UiState {
   mode: SidebarMode;
+  settingsSection: SettingsSection;
+  settingsOpen: boolean;
   selectedProjectId: string | null;
   artifactsOpen: boolean;
   canvasOpen: boolean;
@@ -44,8 +49,7 @@ function readMode(): SidebarMode {
     raw === 'projects' ||
     raw === 'skills' ||
     raw === 'artifacts' ||
-    raw === 'automation' ||
-    raw === 'settings'
+    raw === 'automation'
   ) return raw;
   return 'chat';
 }
@@ -67,7 +71,7 @@ function readSidebarWidth(): number {
 function readRightTab(): RightPanelTab | null {
   if (typeof localStorage === 'undefined') return null;
   const raw = localStorage.getItem(RIGHT_TAB_KEY);
-  if (raw === 'canvas' || raw === 'sheets' || raw === 'documents' || raw === 'html' || raw === 'presentations' || raw === 'artifacts' || raw === 'files' || raw === 'git' || raw === 'terminal') {
+  if (raw === 'canvas' || raw === 'video' || raw === 'sheets' || raw === 'documents' || raw === 'presentations' || raw === 'artifacts' || raw === 'files' || raw === 'git' || raw === 'terminal') {
     return raw;
   }
   if (localStorage.getItem(CANVAS_KEY) === '1') return 'canvas';
@@ -84,6 +88,8 @@ const initialTab = readRightTab();
 
 let state: UiState = {
   mode: readMode(),
+  settingsSection: 'providers',
+  settingsOpen: false,
   selectedProjectId: typeof localStorage !== 'undefined' ? localStorage.getItem(PROJECT_KEY) : null,
   artifactsOpen: initialTab === 'artifacts',
   canvasOpen: initialTab === 'canvas',
@@ -133,7 +139,16 @@ export function getSnapshot(): UiState {
   return state;
 }
 
+export function openSettings(section: SettingsSection = 'providers'): void {
+  setState({ settingsOpen: true, settingsSection: section });
+}
+
+export function closeSettings(): void {
+  setState({ settingsOpen: false });
+}
+
 export function setMode(mode: SidebarMode): void {
+  if (mode === 'settings') { openSettings(); return; }
   setState({ mode });
 }
 
@@ -148,6 +163,32 @@ export function setRightPanelTab(tab: RightPanelTab | null): void {
     canvasOpen: tab === 'canvas',
     artifactsOpen: tab === 'artifacts',
   });
+}
+
+// The right panel (canvas / video / sheets …) belongs to the conversation tab it
+// was opened in: remember it per tab and restore it when switching back.
+const panelByTab = new Map<string, RightPanelTab | null>();
+let lastActiveTabId = tabStore.getSnapshot().activeTabId;
+tabStore.subscribe(() => {
+  const { activeTabId, tabs } = tabStore.getSnapshot();
+  if (activeTabId === lastActiveTabId) return;
+  panelByTab.set(lastActiveTabId, state.rightPanelTab);
+  lastActiveTabId = activeTabId;
+  for (const id of panelByTab.keys()) if (!tabs.some((t) => t.id === id)) panelByTab.delete(id);
+  setRightPanelTab(panelByTab.get(activeTabId) ?? null);
+});
+
+/** Open a panel on behalf of a session (e.g. an agent tool result). If that
+ * session isn't the visible tab, queue it on its own tab instead of hijacking
+ * whichever conversation the user is looking at. */
+export function setRightPanelTabForSession(sessionId: string, tab: RightPanelTab | null): void {
+  const { tabs, activeTabId } = tabStore.getSnapshot();
+  const owners = tabs.filter((t) => t.kind === 'chat' && t.sessionId === sessionId);
+  if (owners.length === 0 || owners.some((t) => t.id === activeTabId)) {
+    setRightPanelTab(tab);
+    return;
+  }
+  for (const t of owners) panelByTab.set(t.id, tab);
 }
 
 export function toggleRightPanelTab(tab: RightPanelTab): void {

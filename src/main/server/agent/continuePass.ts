@@ -6,18 +6,23 @@ export const MAX_CONTINUE_PASSES = 2;
 export const CONTINUE_USER_MESSAGE =
   'Continue. The previous assistant message did not finish the user request. Use tools as needed and deliver the remaining findings now. Do not only restate the plan.';
 
-export type ContinueReason = 'truncated' | 'todos' | 'deferred';
+export type ContinueReason = 'truncated' | 'todos' | 'deferred' | 'undelivered';
 
 /**
  * Harness-side stop check. Other agents (Claude Code, Cline, Cindy) do not
  * treat "the model returned text" as "the product turn is done" when the
- * work is still open — truncated output, open todos, or a plan that defers
- * the rest of the job. That decision lives in code, not in the system prompt.
+ * work is still open — truncated output, open todos, a plan that defers
+ * the rest of the job, or an explicit deliverable request where no artifact/file
+ * was produced yet (Harness² A6). That decision lives in code, not in the system prompt.
  */
 export function shouldContinueAgentPass(input: {
   text: string;
   todos?: Pick<TodoItem, 'status'>[];
   finishReason?: string;
+  /** User request text — checked when `delivered === false` to catch undelivered artifacts. */
+  userText?: string;
+  /** Did this turn produce any deliverable (file write, sheet/doc/ppt/diagram/image/canvas generation)? */
+  delivered?: boolean;
 }): ContinueReason | null {
   const reason = (input.finishReason ?? '').toLowerCase();
   if (reason === 'length' || reason === 'max_tokens') return 'truncated';
@@ -25,7 +30,32 @@ export function shouldContinueAgentPass(input: {
     return 'todos';
   }
   if (looksLikeDeferredWork(input.text)) return 'deferred';
+  if (
+    input.delivered === false &&
+    input.userText &&
+    looksLikeDeliverableRequest(input.userText) &&
+    !asksClarificationQuestion(input.text)
+  ) {
+    return 'undelivered';
+  }
   return null;
+}
+
+/** The user explicitly asked to create/generate/export a concrete artifact or file. */
+export function looksLikeDeliverableRequest(userText: string): boolean {
+  const trimmed = userText.trim();
+  if (!trimmed) return false;
+  if (/(?:怎么|如何|怎样)|how\s+(?:do|to|can)\s+i\b/i.test(trimmed) && /[?？]|吗/.test(trimmed)) return false;
+  const zh =
+    /(?:生成|制作|创建|新建|导出|写一(?:份|个|篇)|做一(?:份|个|张))[\s\S]{0,30}?(?:表格|工作簿|预算表|Excel|xlsx|文档|报告|Word|docx|PPT|演示稿|幻灯片|流程图|架构图|时序图)/i;
+  const en =
+    /\b(?:create|generate|build|write|export)\b[\s\S]{0,40}\b(?:spreadsheet|workbook|xlsx|document|docx|report|presentation|slides|pptx|diagram)\b/i;
+  return zh.test(trimmed) || en.test(trimmed);
+}
+
+function asksClarificationQuestion(reply: string): boolean {
+  const trimmed = reply.trim();
+  return /[?？]\s*$/.test(trimmed) || /请(?:问|确认|提供|告诉我)|could you (?:clarify|confirm|specify)/i.test(trimmed);
 }
 
 /** The model announced more work instead of doing it. */

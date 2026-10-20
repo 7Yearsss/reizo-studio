@@ -13,6 +13,7 @@ import {
   type SheetOperation,
 } from './sheetContent';
 import { applySheetChart, diffSheetCharts, removeChartsForPivot, removeSheetChart, sheetCharts, SHEET_CHART_TYPE_LABELS, type SheetChartChange, type SheetChartInput } from './sheetChart';
+import { newSheetFindings, type SheetCheckFinding } from './sheetChecks';
 import { applySheetPivot, describePivot, removeSheetPivot, sheetPivots, type SheetPivotInput } from './sheetPivot';
 
 /**
@@ -142,6 +143,54 @@ export function isDestructiveSheetChange(operation: SheetReviewOperation, diff: 
   if (operation.op === 'upsertChart') return false;
   if (operation.op === 'upsertPivot') return false;
   return diff.sheets.some((sheet) => sheet.cells.some((cell) => cell.kind === 'cleared' || (cell.before?.f && !cell.after?.f)));
+}
+
+/** Why an edit needs a deliberate click: what exactly it destroys, in the user's terms. */
+export function sheetChangeRisks(operation: SheetReviewOperation, diff: SheetDiff): string[] {
+  const risks: string[] = [];
+  const list = (cells: string[]) => `${cells.slice(0, 4).join('、')}${cells.length > 4 ? ` 等 ${cells.length} 处` : ''}`;
+  const overwritten = diff.sheets.flatMap((sheet) => sheet.cells.filter((cell) => cell.before?.f && !cell.after?.f).map((cell) => cell.a1));
+  const cleared = diff.sheets.flatMap((sheet) => sheet.cells.filter((cell) => cell.kind === 'cleared' && !cell.before?.f).map((cell) => cell.a1));
+  if (operation.op === 'deleteSheet') risks.push('删除整张工作表');
+  if (operation.op === 'deletePivot') risks.push('删除透视表');
+  if (operation.op === 'deleteChart') risks.push('删除图表');
+  if (overwritten.length) risks.push(`把公式改成了固定值：${list(overwritten)}`);
+  if (cleared.length) risks.push(`清空 ${cleared.length} 个有内容的单元格：${list(cleared)}`);
+  return risks;
+}
+
+/** Problems this edit introduces (not ones the workbook already had), for the review card. */
+export function sheetChangeFindings(base: SheetArtifactContent, candidate: SheetArtifactContent): SheetCheckFinding[] {
+  return newSheetFindings(base, candidate);
+}
+
+export interface SheetImpact { sheetId: string; sheetName: string; row: number; col: number; a1: string; before: SheetCellValue; after: SheetCellValue }
+
+const sameValue = (a: SheetCellValue | undefined, b: SheetCellValue | undefined): boolean => {
+  if (typeof a === 'number' && typeof b === 'number') return Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
+  return (a ?? null) === (b ?? null);
+};
+
+/**
+ * Formula cells nobody edited whose result changes because something they depend on did.
+ * `computed` is the candidate workbook after the formula engine ran; a base without a cached result says nothing.
+ */
+export function sheetImpacts(base: SheetArtifactContent, computed: SheetArtifactContent, diff: SheetDiff, limit = 200): SheetImpact[] {
+  const edited = new Set(diff.sheets.flatMap((sheet) => sheet.cells.map((cell) => `${sheet.sheetId}:${cell.row}:${cell.col}`)));
+  const after = new Map(computed.sheets.map((sheet) => [sheet.id, sheet]));
+  const out: SheetImpact[] = [];
+  for (const sheet of base.sheets) {
+    const next = after.get(sheet.id);
+    if (!next) continue;
+    for (const [rowKey, cols] of Object.entries(sheet.cells)) for (const [colKey, cell] of Object.entries(cols)) {
+      if (!cell.f || cell.v === undefined || edited.has(`${sheet.id}:${rowKey}:${colKey}`)) continue;
+      const now = next.cells[rowKey]?.[colKey];
+      if (!now || now.f !== cell.f || now.v === undefined || sameValue(cell.v, now.v)) continue;
+      out.push({ sheetId: sheet.id, sheetName: sheet.name, row: Number(rowKey), col: Number(colKey), a1: a1Of(Number(rowKey), Number(colKey)), before: cell.v, after: now.v });
+    }
+  }
+  out.sort((a, b) => a.sheetId.localeCompare(b.sheetId) || a.row - b.row || a.col - b.col);
+  return out.slice(0, limit);
 }
 
 type Rect = { r1: number; c1: number; r2: number; c2: number };

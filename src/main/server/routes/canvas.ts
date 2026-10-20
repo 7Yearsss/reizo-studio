@@ -62,7 +62,7 @@ const mimeForExtension = (extension: string) => MEDIA_MIMES[extension] || 'appli
 const kindForMime = (mime: string): Exclude<CanvasAssetKind, 'mask'> => mime.startsWith('audio/') ? 'audio' : mime.startsWith('video/') ? 'video' : 'image';
 const reuseRequest = z.object({
   assetId: z.string().min(1).optional(), sourceNodeId: z.string().min(1).optional(), sourceCanvasId: z.string().min(1).optional(),
-  assetIndex: z.number().int().nonnegative().optional(), x: z.number().finite().optional(), y: z.number().finite().optional(),
+  assetIndex: z.number().int().nonnegative().optional(), expectedPath: z.string().max(1000).optional(), x: z.number().finite().optional(), y: z.number().finite().optional(),
   title: z.string().optional(), asReference: z.boolean().optional(),
 }).refine((input) => Boolean(input.assetId) !== Boolean(input.sourceNodeId));
 
@@ -333,6 +333,7 @@ export function createCanvasRouter(
       const index = input.assetIndex ?? source.output?.activeAssetIndex ?? 0;
       const selectedPath = source.output?.assets?.[index];
       if (!selectedPath) return c.json({ error: '所选版本不可用' }, 400);
+      if (input.expectedPath && input.expectedPath !== selectedPath) return c.json({ error: '素材版本已变化，请重新选择' }, 409);
       asset = canvasStore.assets.findByPath(selectedPath);
       legacy = { path: selectedPath, canvasId: sourceCanvasId, nodeId: source.id };
     }

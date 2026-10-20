@@ -2,6 +2,7 @@ import type { JSONContent } from '@tiptap/core';
 import { documentSchema, safeFont, safeHex, type DocumentContent } from '../../../../shared/documentContent';
 import { loadDocxPackage, sourceHash, type DocxPackage } from './import';
 import { child, elements, escapeXml, parseXml } from './xml';
+import { deleteParagraphs, diffText, insertRuns, originalParagraphs, revisionAttrs, type OriginalParagraph, type RevisionStamp } from './revisions';
 
 const PPR_ORDER = ['w:pStyle', 'w:keepNext', 'w:keepLines', 'w:pageBreakBefore', 'w:framePr', 'w:widowControl', 'w:numPr', 'w:suppressLineNumbers', 'w:pBdr', 'w:shd', 'w:tabs', 'w:suppressAutoHyphens', 'w:kinsoku', 'w:wordWrap', 'w:overflowPunct', 'w:topLinePunct', 'w:autoSpaceDE', 'w:autoSpaceDN', 'w:bidi', 'w:adjustRightInd', 'w:snapToGrid', 'w:spacing', 'w:ind', 'w:contextualSpacing', 'w:mirrorIndents', 'w:suppressOverlap', 'w:jc', 'w:textDirection', 'w:textAlignment', 'w:textboxTightWrap', 'w:outlineLvl', 'w:divId', 'w:cnfStyle', 'w:rPr', 'w:sectPr', 'w:pPrChange'];
 const REL_IMAGE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image';
@@ -10,7 +11,9 @@ const DATA_IMAGE = /^data:image\/(png|jpeg|gif|webp);base64,([A-Za-z0-9+/=\s]+)$
 const EXT: Record<string, string> = { png: 'png', jpeg: 'jpeg', gif: 'gif', webp: 'webp' };
 const MIME: Record<string, string> = { png: 'image/png', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
 
-interface Writer { pkg: DocxPackage; rels: string[]; links: Map<string, string>; media: Map<string, Buffer>; exts: Set<string>; counter: number; docPr: number }
+/** Tracked-changes export: which new paragraphs are insertions, and which edited ones to diff against their original text. */
+interface Revise { stamp: RevisionStamp; modes: Map<JSONContent, OriginalParagraph | 'inserted'> }
+interface Writer { pkg: DocxPackage; rels: string[]; links: Map<string, string>; media: Map<string, Buffer>; exts: Set<string>; counter: number; docPr: number; revise?: Revise }
 type Attrs = Record<string, unknown>;
 const attrsOf = (node: JSONContent): Attrs => node.attrs ?? {};
 const num = (value: unknown): number | undefined => { const n = Number(value); return value !== null && value !== undefined && Number.isFinite(n) ? n : undefined; };
@@ -79,6 +82,37 @@ function inlineXml(nodes: JSONContent[] | undefined, w: Writer): string {
   return out;
 }
 
+/** The paragraph's runs as a diff against its original text: unchanged runs as-is, `<w:del>` for removed text, `<w:ins>` for added. Null when it cannot be expressed (links, images). */
+function revisedInline(node: JSONContent, original: OriginalParagraph, stamp: RevisionStamp): string | null {
+  const segs: { text: string; marks: JSONContent['marks'] }[] = [];
+  for (const n of node.content ?? []) {
+    if (n.type === 'hardBreak') segs.push({ text: '\n', marks: undefined });
+    else if (n.type === 'text' && n.text) { if (n.marks?.some((m) => m.type === 'link')) return null; segs.push({ text: n.text, marks: n.marks }); }
+    else return null;
+  }
+  const next = segs.map((seg) => seg.text).join('');
+  if (next === original.text) return null;
+  const runs = (from: number, to: number): string => {
+    let out = ''; let offset = 0;
+    for (const seg of segs) {
+      const a = Math.max(from, offset); const b = Math.min(to, offset + seg.text.length);
+      if (b > a) out += seg.text.slice(a - offset, b - offset).split('\n').map((part, i) => (i ? '<w:r><w:br/></w:r>' : '') + textRuns(part, runProps(seg.marks, false))).join('');
+      offset += seg.text.length;
+    }
+    return out;
+  };
+  let pos = 0; let out = '';
+  for (const op of diffText(original.text, next)) {
+    if (op.op === 'eq') { out += runs(pos, pos + op.text.length); pos += op.text.length; }
+    else if (op.op === 'ins') { out += insertRuns(runs(pos, pos + op.text.length), stamp); pos += op.text.length; }
+    else {
+      const body = op.text.split(/(\t|\n)/).map((part) => (part === '\t' ? '<w:tab/>' : part === '\n' ? '<w:br/>' : part ? `<w:delText xml:space="preserve">${escapeXml(part)}</w:delText>` : '')).join('');
+      out += `<w:del ${revisionAttrs(stamp)}><w:r>${original.rPr}${body}</w:r></w:del>`;
+    }
+  }
+  return out;
+}
+
 function sortPPr(parts: { name: string; xml: string }[]): string {
   const rank = (name: string) => { const i = PPR_ORDER.indexOf(name); return i < 0 ? PPR_ORDER.length : i; };
   return parts.sort((a, b) => rank(a.name) - rank(b.name)).map((p) => p.xml).join('');
@@ -104,15 +138,20 @@ function paragraphXml(node: JSONContent, w: Writer, opts: ParaOptions = {}): str
   if (typeof a.pPrExtra === 'string' && a.pPrExtra) {
     try { const holder = parseXml(`<x>${a.pPrExtra}</x>`).children[0]; for (const el of elements(holder)) parts.push({ name: el.name, xml: a.pPrExtra.slice(el.start - 3, el.end - 3) }); } catch { /* ignore malformed extras */ }
   }
-  const before = num(a.spaceBefore); const after = num(a.spaceAfter); const line = num(a.lineSpacing);
-  if (before !== undefined || after !== undefined || line !== undefined) parts.push({ name: 'w:spacing', xml: `<w:spacing${before !== undefined ? ` w:before="${Math.round(before)}"` : ''}${after !== undefined ? ` w:after="${Math.round(after)}"` : ''}${line !== undefined ? ` w:line="${Math.round(line * 240)}" w:lineRule="auto"` : ''}/>` });
+  const before = num(a.spaceBefore); const after = num(a.spaceAfter); const exact = num(a.lineExact); const line = exact === undefined ? num(a.lineSpacing) : undefined;
+  if (before !== undefined || after !== undefined || line !== undefined || exact !== undefined) parts.push({ name: 'w:spacing', xml: `<w:spacing${before !== undefined ? ` w:before="${Math.round(before)}"` : ''}${after !== undefined ? ` w:after="${Math.round(after)}"` : ''}${exact !== undefined ? ` w:line="${Math.round(exact * 20)}" w:lineRule="exact"` : line !== undefined ? ` w:line="${Math.round(line * 240)}" w:lineRule="auto"` : ''}/>` });
   const left = (num(a.indentLeft) ?? 0) + (opts.indentExtra ?? 0); const first = num(a.indentFirst);
   if (left || first) parts.push({ name: 'w:ind', xml: `<w:ind${left ? ` w:left="${Math.round(left)}"` : ''}${first ? (first < 0 ? ` w:hanging="${Math.round(-first)}"` : ` w:firstLine="${Math.round(first)}"`) : ''}/>` });
   const jc = { left: 'left', center: 'center', right: 'right', justify: 'both' }[String(a.textAlign) as 'left'];
   if (jc) parts.push({ name: 'w:jc', xml: `<w:jc w:val="${jc}"/>` });
-  const pPr = parts.length ? `<w:pPr>${sortPPr(parts)}</w:pPr>` : '';
-  let body = inlineXml(node.content, w);
+  const mode = w.revise?.modes.get(node);
+  let body: string;
+  if (mode === 'inserted' && w.revise) {
+    body = insertRuns(inlineXml(node.content, w), w.revise.stamp);
+    if (!parts.some((p) => p.name === 'w:rPr')) parts.push({ name: 'w:rPr', xml: `<w:rPr><w:ins ${revisionAttrs(w.revise.stamp)}/></w:rPr>` });
+  } else body = (typeof mode === 'object' && w.revise ? revisedInline(node, mode, w.revise.stamp) : null) ?? inlineXml(node.content, w);
   if (opts.prefix) body = `<w:r><w:t xml:space="preserve">${escapeXml(opts.prefix)}</w:t></w:r>${body}`;
+  const pPr = parts.length ? `<w:pPr>${sortPPr(parts)}</w:pPr>` : '';
   if (headingRun) body = body.replace(/<w:rPr>/g, '<w:rPr><w:b/>').replace(/<w:r>(?!<w:rPr>)/g, '<w:r><w:rPr><w:b/></w:rPr>');
   return `<w:p>${pPr}${body}</w:p>`;
 }
@@ -222,7 +261,19 @@ function ensureNamespace(xml: string, prefix: string, uri: string): string {
  * Patch the original DOCX: every body element whose editor representation is untouched is copied byte-for-byte,
  * only edited or new blocks are regenerated. Headers, footers, styles, numbering and page setup are never rewritten.
  */
-export async function exportDocxFromOriginal(content: DocumentContent, original: Buffer | Uint8Array): Promise<Uint8Array> {
+export interface ExportOptions {
+  /** Write what changed since the original as Word tracked changes (insertions, deletions) instead of silently rewriting it. */
+  revisions?: { author?: string; date?: string };
+}
+
+function paragraphNodes(nodes: JSONContent[]): JSONContent[] {
+  const out: JSONContent[] = [];
+  const walk = (n: JSONContent): void => { if (n.type === 'paragraph' || n.type === 'heading') out.push(n); else for (const c of n.content ?? []) walk(c); };
+  nodes.forEach(walk);
+  return out;
+}
+
+export async function exportDocxFromOriginal(content: DocumentContent, original: Buffer | Uint8Array, options: ExportOptions = {}): Promise<Uint8Array> {
   const pkg = await loadDocxPackage(original);
   const xml = pkg.documentXml;
   const root = parseXml(xml);
@@ -243,21 +294,42 @@ export async function exportDocxFromOriginal(content: DocumentContent, original:
   const nodes = (documentSchema.nodeFromJSON(content.doc).toJSON().content ?? []) as JSONContent[];
   const byKey = new Map<string, JSONContent[]>();
   for (const node of nodes) { const key = attrsOf(node).srcKey as string | undefined; if (key && known.has(key)) byKey.set(key, [...(byKey.get(key) ?? []), node]); }
-  const w: Writer = { pkg, rels: [], links: new Map(), media: new Map(), exts: new Set(), counter: 0, docPr: 100000 };
+  let revisionId = 900000;
+  const stamp: RevisionStamp | undefined = options.revisions ? { author: options.revisions.author ?? 'Reizo', date: options.revisions.date ?? new Date().toISOString().replace(/\.\d+Z$/, 'Z'), next: () => ++revisionId } : undefined;
+  const w: Writer = { pkg, rels: [], links: new Map(), media: new Map(), exts: new Set(), counter: 0, docPr: 100000, ...(stamp ? { revise: { stamp, modes: new Map() } } : {}) };
+  // Source groups the editor no longer has were deleted: with tracked changes they stay in place, struck through.
+  const removed = [...known].filter((key) => !byKey.has(key)).map((key) => ({ key, from: Number(key.split('-')[0]), to: Number(key.split('-')[1]) })).sort((x, y) => x.from - y.from);
+  const flushRemoved = (before: number) => {
+    while (stamp && removed.length && removed[0].from < before) { const r = removed.shift()!; out.push(deleteParagraphs(xml.slice(children[r.from].start, children[r.to].end), stamp)); flushOrphans(r.to); }
+  };
   const out: string[] = []; const emitted = new Set<string>();
   const flushOrphans = (index: number) => { const list = orphansAfter.get(index); if (list) { out.push(...list); orphansAfter.delete(index); } };
   flushOrphans(-1);
   for (const node of nodes) {
     const key = attrsOf(node).srcKey as string | undefined;
-    if (!key || !known.has(key)) { out.push(blockXml(node, w)); continue; }
+    if (!key || !known.has(key)) {
+      if (w.revise) for (const p of paragraphNodes([node])) w.revise.modes.set(p, 'inserted');
+      out.push(blockXml(node, w)); continue;
+    }
     if (emitted.has(key)) continue;
     emitted.add(key);
     const group = byKey.get(key) ?? [];
     const [from, to] = key.split('-').map(Number);
+    flushRemoved(from);
     const untouched = sourceHash(group) === attrsOf(group[0]).srcHash && group.every((n) => attrsOf(n).srcHash === attrsOf(group[0]).srcHash);
-    out.push(untouched ? xml.slice(children[from].start, children[to].end) : group.map((n) => blockXml(n, w)).join(''));
+    if (untouched) { out.push(xml.slice(children[from].start, children[to].end)); flushOrphans(to); continue; }
+    let prefix = '';
+    if (w.revise) {
+      const before = originalParagraphs(xml, children.slice(from, to + 1));
+      const after = paragraphNodes(group);
+      const hasTable = children.slice(from, to + 1).some((c) => c.name === 'w:tbl') || group.some((n) => n.type === 'table');
+      if (before.length === after.length) after.forEach((p, i) => { if (before[i].text !== (p.content ?? []).map((n) => n.type === 'hardBreak' ? '\n' : n.text ?? '').join('')) w.revise!.modes.set(p, before[i]); });
+      else if (!hasTable) { prefix = deleteParagraphs(xml.slice(children[from].start, children[to].end), w.revise.stamp); for (const p of after) w.revise.modes.set(p, 'inserted'); }
+    }
+    out.push(prefix + group.map((n) => blockXml(n, w)).join(''));
     flushOrphans(to);
   }
+  flushRemoved(Infinity);
   for (const list of orphansAfter.values()) out.push(...list);
   const originalBody = children.filter((c) => c !== sectPr).map((c) => xml.slice(c.start, c.end));
   const noRelChanges = !w.rels.length && !w.media.size;

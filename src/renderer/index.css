@@ -15,6 +15,10 @@
   --accent: #1c1d1e; --accent-ink: #ffffff; --destructive: #c43128; --success: #1a7f4b;
   background: #ffffff; color: var(--ink); color-scheme: light;
   line-height: 1.8; overflow-wrap: anywhere;
+  /* Imported .docx tables carry absolute column widths (twips → px) that can exceed the
+     panel; a fixed-layout table grows to their sum, so scroll the sheet instead of
+     letting the table spill past the panel edge. */
+  max-width: 100%; overflow-x: auto;
 }
 .document-prose p { margin: .6em 0; }
 .document-prose h1 { font-size: 2em; font-weight: 700; margin: .8em 0; }
@@ -33,6 +37,11 @@
 .document-review ins { background: color-mix(in srgb, #16a34a 18%, transparent); text-decoration: none; border-bottom: 1.5px solid #16a34a; cursor: pointer; }
 .document-review del { background: color-mix(in srgb, var(--destructive) 14%, transparent); text-decoration: line-through; text-decoration-color: var(--destructive); cursor: pointer; }
 /* Ranges handed to the chat, numbered like their composer chips. */
+/* The range an instruction is being typed for stays visibly selected while focus is in the card. */
+/* Find-in-document matches; the current one is stronger. */
+.document-prose .doc-find-match { background: rgba(255, 213, 0, 0.45); border-radius: 2px; }
+.document-prose .doc-find-current { background: rgba(255, 150, 0, 0.7); border-radius: 2px; box-shadow: 0 0 0 1px rgba(255, 150, 0, 0.9); }
+.document-prose .doc-edit-target { background: color-mix(in srgb, var(--ink) 16%, transparent); border-radius: 2px; }
 .document-prose .doc-ref-range { background: color-mix(in srgb, var(--accent) 16%, transparent); border-bottom: 1.5px solid var(--accent); }
 .document-prose .doc-ref-label { display: inline-flex; align-items: center; justify-content: center; min-width: 1.1rem; height: 1.1rem; margin-right: 2px; padding: 0 3px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font: 600 10px/1 ui-sans-serif, system-ui, sans-serif; vertical-align: .15em; user-select: none; }
 .document-review [data-type="modification"] { outline: 1px dashed var(--accent); outline-offset: 1px; cursor: pointer; }
@@ -53,10 +62,14 @@
   /* Layers, not lines: gray app ground (`paper`), white cards on it
      (`paper-raised`), gray modules inside cards (`paper-inset`). Tokens follow
      v2-design so desktop and web Studio share one language. */
-  --paper: #f6f6f7;
+  --paper: #fafafb;
   --paper-raised: #ffffff;
   --paper-inset: #eeeff1;
-  --sidebar: #f6f6f7;
+  --sidebar: #eeeff1;
+  --sidebar-line: rgb(28 29 30 / 6%);
+  --sidebar-hover: rgb(255 255 255 / 48%);
+  --sidebar-selected: rgb(255 255 255 / 88%);
+  --sidebar-account: rgb(255 255 255 / 36%);
   --ink: #1c1d1e;
   --ink-muted: #62656d;
   --line: #e6e7e9;
@@ -70,7 +83,7 @@
 
   /* Zero-alpha `--paper` for gradient masks. `transparent` interpolates
      through black in WebKit and leaves a dirty edge. */
-  --paper-a0: rgb(246 246 247 / 0);
+  --paper-a0: rgb(250 250 251 / 0);
 
   /* shadcn / beUI semantic aliases — keep Reizo paper/ink as the source. */
   --background: var(--paper);
@@ -97,6 +110,8 @@
   --duration-base: 200ms;
   /* Hairline around floating cards in place of a border. */
   --shadow-outline: 0 0 0 1px rgba(23, 35, 58, 0.05);
+  /* A floating panel: the hairline plus a soft, even glow on every side (no offset, so nothing looks lifted from one edge). */
+  --shadow-panel: 0 0 0 1px rgba(23, 35, 58, 0.05), 0 0 8px rgba(23, 35, 58, 0.09);
   /* The one warm color: "waiting on you". Never for buttons or links. */
   --peach: #fde7d6;
   --peach-ink: #653619;
@@ -110,7 +125,11 @@
   --paper: #0f1011;
   --paper-raised: #17181a;
   --paper-inset: #1f2023;
-  --sidebar: #0f1011;
+  --sidebar: #17181b;
+  --sidebar-line: rgb(255 255 255 / 7%);
+  --sidebar-hover: rgb(255 255 255 / 4%);
+  --sidebar-selected: rgb(255 255 255 / 8%);
+  --sidebar-account: rgb(255 255 255 / 3%);
   --ink: #f2f2f3;
   --ink-muted: #9a9da5;
   --line: #2a2b2f;
@@ -123,6 +142,7 @@
 
   --paper-a0: rgb(15 16 17 / 0);
   --shadow-outline: 0 0 0 1px rgba(255, 255, 255, 0.08);
+  --shadow-panel: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 0 8px rgba(0, 0, 0, 0.35);
   --peach: #3a2a1c;
   --peach-ink: #fde7d6;
   --peach-bar: #e8a06a;
@@ -188,8 +208,8 @@ body,
 body {
   font-family:
     'Segoe UI',
-    'Microsoft YaHei',
     'Microsoft YaHei UI',
+    'Microsoft YaHei',
     'PingFang SC',
     -apple-system,
     BlinkMacSystemFont,

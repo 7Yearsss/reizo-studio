@@ -1,12 +1,13 @@
 import { presentationMentions, usePresentationWorkspace, referencePresentation, selectPresentation, dropPresentationScope } from '../../state/presentationWorkspace';
-import { htmlMentions, useHtmlWorkspace, selectHtml, dropHtmlSelection, removeHtmlReference } from '../../state/htmlWorkspace';
 import { documentMentions, documentReferences, useDocumentWorkspace, addDocumentReference, selectDocument, dropDocumentSelection, removeDocumentReference } from '../../state/documentWorkspace';
 import { labelSelections } from '../../../shared/referenceLabels';
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
-import { AtSign, FileText, FileSpreadsheet, Presentation, Code2, Clapperboard, FolderTree, Paperclip, Image as ImageIcon, Video, Type, Volume2, Bot, Sparkles, BoxSelect, Layers, Pin, Wrench } from 'lucide-react';
+import { AtSign, FileText, FileSpreadsheet, Presentation, Clapperboard, FolderTree, Paperclip, Image as ImageIcon, Video, Type, Volume2, Bot, Sparkles, BoxSelect, Layers, Pin, Quote, Wrench } from 'lucide-react';
 import { isImeComposingEvent } from '../../lib/ime';
 import { cn } from '../../lib/cn';
 import { PromptInput } from '../agents/prompt-input';
+import type { PromptEditorHandle } from '../agents/prompt-editor';
+import { renumberCitations } from '../../../shared/promptDraft';
 import ModelPicker from './ModelPicker';
 import MentionMenu, { extractMentionQuery } from './MentionMenu';
 import SlashPalette, { applySlashArgs, buildSlashCommands, extractSlashQuery, type SlashCommand } from './SlashPalette';
@@ -28,6 +29,7 @@ import { getCanvasNodeThumbnail } from '../canvas/canvasThumbnail';
 import type { PermissionMode } from '../../../shared/settings';
 import type { TurnOutcome } from '../../../shared/stream';
 import { useSheetWorkspace, sheetMentions, pinSheetSelection, clearPinnedSheets, removePinnedSheet, flushSheetEdits, selectWorkbook } from '../../state/sheetWorkspace';
+import { labelSheetRanges, sameSheetPlace } from '../../../shared/sheetReferences';
 import { serializeSheetReference } from '../../../shared/sheetReferences';
 import { MAX_SHEET_UPLOAD_BYTES } from '../../../shared/sheetFile';
 import { importSheet, importDocument, importPresentation } from '../../api';
@@ -35,6 +37,7 @@ import * as artifactStore from '../../state/artifactStore';
 import * as uiStore from '../../state/uiStore';
 import { Button } from '../ui/button';
 import { toast } from '../../lib/toast';
+import { CHAT_DROP_FILES_EVENT } from '../../lib/chatDrop';
 
 const MODE_LABEL: Record<PermissionMode, string> = {
   ask: '每次询问',
@@ -61,6 +64,7 @@ export default function Composer({
   onDismissInterrupt,
   compact = false,
   onOverlayHeight,
+  draggingFiles = false,
 }: {
   sessionId?: string;
   disabled: boolean;
@@ -86,16 +90,37 @@ export default function Composer({
   compact?: boolean;
   /** Reports the floating overlay's rendered height so the message list can keep enough bottom padding for content to scroll fully clear of the docked cards. */
   onOverlayHeight?: (height: number) => void;
+  /** A file drag is hovering anywhere over the chat page (ChatPage owns the drop zone). */
+  draggingFiles?: boolean;
 }) {
   const [draft, setDraft] = useState('');
   const presentationRef = usePresentationWorkspace((s) => sessionId ? s.references[sessionId] : undefined);
-  const rawHtmlRefs = useHtmlWorkspace((s) => sessionId ? s.references[sessionId] : undefined);
   const rawDocumentRefs = useDocumentWorkspace((s) => sessionId ? s.references[sessionId] : undefined);
-  // Picked ranges are numbered across Doc then HTML, matching the labels sent with the message.
+  // Picked ranges are numbered across Doc ranges, matching the labels sent with the message.
   const documentRefs = useMemo(() => labelSelections(rawDocumentRefs ?? []), [rawDocumentRefs]);
-  const htmlRefs = useMemo(() => labelSelections(rawHtmlRefs ?? [], 1 + documentRefs.filter((r) => r.selection).length), [rawHtmlRefs, documentRefs]);
-  const activeSheet = useSheetWorkspace((s) => sessionId ? s.activeBySession[sessionId] : undefined);
+  const editorRef = useRef<PromptEditorHandle>(null);
+  // Numbered ranges in display order; the inline chips in the draft resolve against these.
   const pinnedSheets = useSheetWorkspace((s) => sessionId ? s.pinnedBySession[sessionId] : undefined);
+  // Sheet ranges are numbered after the document ones, matching sheetMentions at send time.
+  const sheetFirst = 1 + documentRefs.filter((r) => r.selection).length;
+  const sheetRefs = useMemo(() => labelSheetRanges(pinnedSheets ?? [], sheetFirst), [pinnedSheets, sheetFirst]);
+  const ranges = useMemo(() => [
+    ...documentRefs.filter((r) => r.selection && r.label).map((ref) => ({ label: ref.label!, name: ref.name, text: ref.selection?.text, kind: 'doc' as const, key: `doc:${ref.artifactId}:${JSON.stringify(ref.selection)}` })),
+    ...sheetRefs.filter((r) => r.range && r.label).map((ref) => ({ label: ref.label!, name: ref.name, text: `${ref.sheetName ? `${ref.sheetName}!` : ''}${ref.range}`, kind: 'sheet' as const, artifactId: ref.artifactId, key: `sheet:${ref.artifactId}:${ref.sheetId ?? ref.sheetName ?? ''}:${ref.range}` })),
+  ], [documentRefs, sheetRefs]);
+  const chipApi = useMemo(() => ({
+    info: (label: number) => {
+      const hit = ranges.find((r) => r.label === label);
+      return hit ? { kind: hit.kind === 'doc' ? '文档' : '表格', name: hit.name, text: hit.text } : undefined;
+    },
+    open: (label: number) => {
+      const hit = ranges.find((r) => r.label === label);
+      if (!hit || !sessionId) return;
+      if (hit.kind === 'doc') { selectDocument(sessionId, documentRefs.find((r) => r.label === label)!.artifactId); uiStore.setRightPanelTab('documents'); }
+      else { selectWorkbook(sessionId, hit.artifactId); uiStore.setRightPanelTab('sheets'); }
+    },
+  }), [ranges, sessionId, documentRefs]);
+  const activeSheet = useSheetWorkspace((s) => sessionId ? s.activeBySession[sessionId] : undefined);
   const [syncingSheet, setSyncingSheet] = useState(false);
   const preparing = useRef(false);
   const [mentions, setMentions] = useState<string[]>([]);
@@ -153,8 +178,32 @@ export default function Composer({
 
   /** Write [n] into the draft so the instruction that follows is tied to picked range n. */
   function citeReference(label: number) {
-    setDraft((d) => `${d}${d && !/\s$/.test(d) ? ' ' : ''}[${label}] `);
+    editorRef.current?.insertReference(label);
   }
+
+  // Ranges come and go: a removed one takes its chip with it and the numbers after it shift down;
+  // a newly added one (after "问 AI") gets its chip dropped into the sentence right away.
+  useEffect(() => {
+    const previous = rangeKeys.current;
+    const next = ranges.map((r) => r.key);
+    rangeKeys.current = next;
+    const added = next.filter((key) => !previous.includes(key));
+    const gone = previous.some((key) => !next.includes(key));
+    const shifted = previous.some((key, index) => next.includes(key) && next.indexOf(key) !== index);
+    if (gone || shifted) {
+      setDraft((d) => renumberCitations(d, (label) => {
+        const key = previous[label - 1];
+        if (key === undefined) return undefined;
+        const now = next.indexOf(key);
+        return now < 0 ? null : now + 1;
+      }));
+    }
+    if (citeNext.current && added.length) {
+      citeNext.current = false;
+      const label = next.indexOf(added[added.length - 1]) + 1;
+      window.setTimeout(() => editorRef.current?.insertReference(label), 0);
+    }
+  }, [ranges]);
 
   function buildSubmitPayload() {
     const selectionMentions = unpinnedSelectionNodes.map((n) => `canvas:${n.id}`);
@@ -164,7 +213,7 @@ export default function Composer({
         : `canvas:${r.id}`,
     );
     return {
-      mentions: [...mentions, ...refMentions, ...selectionMentions, ...(sessionId ? [...sheetMentions(sessionId), ...documentMentions(sessionId), ...htmlMentions(sessionId, 1 + documentReferences(sessionId).filter((r) => r.selection).length), ...presentationMentions(sessionId)] : [])],
+      mentions: [...mentions, ...refMentions, ...selectionMentions, ...(sessionId ? [...sheetMentions(sessionId, 1 + documentReferences(sessionId).filter((r) => r.selection).length), ...documentMentions(sessionId), ...presentationMentions(sessionId)] : [])],
       extra: { skillId, attachments, replaceFromId: replaceFromIdRef.current },
     };
   }
@@ -180,7 +229,7 @@ export default function Composer({
       chatStore.clearNodeRefs(sessionId);
       clearPinnedSheets(sessionId);
       // A picked range / slide / element is spent once sent; the file itself stays referenced as a whole.
-      dropDocumentSelection(sessionId); dropHtmlSelection(sessionId); dropPresentationScope(sessionId);
+      dropDocumentSelection(sessionId); dropPresentationScope(sessionId);
       chatStore.setPickingReference(sessionId, false);
     }
   }
@@ -238,10 +287,9 @@ export default function Composer({
   }
 
   /** ArrowUp at the start of the box recalls every queued message (Claude Code style). */
-  function recallQueuedMessages(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+  function recallQueuedMessages(textBeforeCaret: string) {
     if (!sessionId || queue.length === 0) return false;
-    const cursor = e.currentTarget.selectionStart ?? 0;
-    if (draft.slice(0, cursor).includes('\n')) return false;
+    if (textBeforeCaret.includes('\n')) return false;
     const items = chatStore.recallQueue(sessionId);
     if (items.length === 0) return false;
     const recalled = items.map((i) => i.text).join('\n');
@@ -252,9 +300,6 @@ export default function Composer({
   useEffect(() => {
     if (!draft.includes('@')) setMentions([]);
   }, [draft]);
-
-  const [draggingFiles, setDraggingFiles] = useState(false);
-  const dragDepth = useRef(0);
 
   async function addDroppedFiles(files: FileList | File[]) {
     const next = [...attachments];
@@ -328,6 +373,20 @@ export default function Composer({
     setAttachments(next);
   }
 
+  // ChatPage owns the drop zone (the whole conversation, not just this box) and
+  // hands the dropped files over; the ref keeps the latest closure (attachments).
+  const addDroppedFilesRef = useRef(addDroppedFiles);
+  addDroppedFilesRef.current = addDroppedFiles;
+  useEffect(() => {
+    const onDrop = (event: Event) => {
+      const detail = (event as CustomEvent<{ sessionId?: string; files?: File[] }>).detail;
+      if (detail?.sessionId !== sessionId || !detail.files?.length) return;
+      void addDroppedFilesRef.current(detail.files);
+    };
+    window.addEventListener(CHAT_DROP_FILES_EVENT, onDrop);
+    return () => window.removeEventListener(CHAT_DROP_FILES_EVENT, onDrop);
+  }, [sessionId]);
+
   const composerBodyRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
 
@@ -341,11 +400,29 @@ export default function Composer({
   }, [onOverlayHeight]);
 
   const focusComposer = useCallback(() => {
-    composerBodyRef.current?.querySelector('textarea')?.focus();
+    editorRef.current?.focus();
   }, []);
+  const citeNext = useRef(false);
+  const liveSheetRef = useRef(activeSheet); liveSheetRef.current = activeSheet;
+  const sheetRefsRef = useRef(sheetRefs); sheetRefsRef.current = sheetRefs;
+  const rangeKeys = useRef<string[]>([]);
   // Workspace editors ask for focus right after attaching a reference ("问 AI" / Ctrl+L).
   useEffect(() => {
-    const onFocus = (event: Event) => { if ((event as CustomEvent<{ sessionId?: string }>).detail?.sessionId === sessionId) window.setTimeout(focusComposer, 0); };
+    const onFocus = (event: Event) => {
+      const detail = (event as CustomEvent<{ sessionId?: string; cite?: boolean }>).detail;
+      if (detail?.sessionId !== sessionId) return;
+      if (detail.cite) {
+        citeNext.current = true;
+        // A range that is already quoted adds nothing new, so cite its existing number instead of ignoring the request.
+        window.setTimeout(() => {
+          const live = liveSheetRef.current;
+          const existing = live && sheetRefsRef.current.find((ref) => sameSheetPlace(ref, live));
+          if (citeNext.current && existing?.label) editorRef.current?.insertReference(existing.label);
+          citeNext.current = false;
+        }, 120);
+      }
+      window.setTimeout(focusComposer, 0);
+    };
     window.addEventListener('reizo:focus-composer', onFocus);
     return () => window.removeEventListener('reizo:focus-composer', onFocus);
   }, [sessionId, focusComposer]);
@@ -365,9 +442,6 @@ export default function Composer({
       interaction={interaction}
       interruptRequested={interruptRequested}
       recovering={Boolean(turnError?.includes('正在恢复'))}
-      // Always offer stop while a turn is live — the composer button switches to
-      // queue/send once the user has typed, so this stays the persistent interrupt.
-      onStop={onStop}
       onRetryStalled={onRetryStalled}
       skillName={activeSkill?.name}
     />
@@ -446,28 +520,7 @@ export default function Composer({
         {slash !== null && (
           <SlashPalette query={slash.query} args={slash.args} commands={slashCommands} onPick={pickSlash} />
         )}
-        <div
-          className="relative"
-          onDragOver={(e) => {
-            e.preventDefault();
-          }}
-          onDragEnter={(e) => {
-            if (e.dataTransfer.types.includes('Files')) {
-              dragDepth.current += 1;
-              setDraggingFiles(true);
-            }
-          }}
-          onDragLeave={() => {
-            dragDepth.current = Math.max(0, dragDepth.current - 1);
-            if (dragDepth.current === 0) setDraggingFiles(false);
-          }}
-          onDrop={(e) => {
-            e.preventDefault();
-            dragDepth.current = 0;
-            setDraggingFiles(false);
-            if (e.dataTransfer.files.length) void addDroppedFiles(e.dataTransfer.files);
-          }}
-        >
+        <div className="relative">
             {sessionId && <ComposerDock todos={todos} />}
             {syncingSheet && <p role="status" className="mb-2 text-xs text-ink-muted">正在保存工作区内容…</p>}
             {(attachments.length > 0 || nodeRefs.length > 0 || mentions.length > 0 || unpinnedSelectionNodes.length > 0) && (
@@ -647,18 +700,16 @@ export default function Composer({
                   </span>
                 </div>
               )}
-              {sessionId && (documentRefs.length || htmlRefs.length || presentationRef || activeSheet || pinnedSheets?.length) ? <div className="mb-1.5 flex flex-wrap items-center gap-1 px-1">
+              {sessionId && (documentRefs.length || presentationRef || activeSheet || sheetRefs.length) ? <div className="mb-1.5 flex flex-wrap items-center gap-1 px-1">
                 {documentRefs.map((ref, index) => <WorkspaceRefChip key={`doc:${index}`} icon={<FileText />} kind="文档" name={ref.name} detail={ref.selection ? `「${ref.selection.text ?? ''}」` : '全文'} label={ref.label} cite={() => citeReference(ref.label!)}
                   open={() => { selectDocument(sessionId, ref.artifactId); uiStore.setRightPanelTab('documents'); }} remove={() => removeDocumentReference(sessionId, index)} />)}
                 {presentationRef && <WorkspaceRefChip icon={<Presentation />} kind=" PPT " name={presentationRef.name} detail={presentationRef.elementIds?.length ? `${presentationRef.elementIds.length} 个元素` : presentationRef.slideId ? '当前页' : '整份演示稿'}
                   open={() => { selectPresentation(sessionId, presentationRef.artifactId); uiStore.setRightPanelTab('presentations'); }} remove={() => referencePresentation(sessionId)} />}
-                {htmlRefs.map((ref, index) => <WorkspaceRefChip key={`html:${index}`} icon={<Code2 />} kind=" HTML " name={ref.name} detail={ref.selection ? `「${ref.selection.text ?? ''}」` : '整页'} label={ref.label} cite={() => citeReference(ref.label!)}
-                  open={() => { selectHtml(sessionId, ref.artifactId); uiStore.setRightPanelTab('html'); }} remove={() => removeHtmlReference(sessionId, index)} />)}
-                {pinnedSheets?.map((ref, index) => <WorkspaceRefChip key={`${ref.artifactId}:${index}`} icon={<Pin />} kind="表格" name={ref.name} detail={ref.range ? `${ref.sheetName ?? ''}!${ref.range}` : '整个工作簿'}
+                {sheetRefs.map((ref, index) => <WorkspaceRefChip key={`${ref.artifactId}:${index}`} icon={<Pin />} kind="表格" name={ref.name} detail={ref.range ? `${ref.sheetName ?? ''}!${ref.range}` : '整个工作簿'} label={ref.label} cite={() => citeReference(ref.label!)}
                   open={() => { selectWorkbook(sessionId, ref.artifactId); uiStore.setRightPanelTab('sheets'); }} remove={() => removePinnedSheet(sessionId, index)} />)}
-                {activeSheet && <WorkspaceRefChip icon={<FileSpreadsheet />} kind="表格" name={activeSheet.name} detail={`${activeSheet.range ? `${activeSheet.sheetName ?? ''}!${activeSheet.range}` : '当前工作表'} · 当前选区`} pinned={false}
+                {activeSheet && !sheetRefs.some((ref) => sameSheetPlace(ref, activeSheet)) && <WorkspaceRefChip icon={<FileSpreadsheet />} kind="表格" name={activeSheet.name} detail={`${activeSheet.range ? `${activeSheet.sheetName ?? ''}!${activeSheet.range}` : '当前工作表'} · 当前选区`} pinned={false}
                   open={() => { selectWorkbook(sessionId, activeSheet.artifactId); uiStore.setRightPanelTab('sheets'); }} />}
-                {activeSheet && <Button type="button" variant="ghost" size="xs" title="固定此选区，换选别的单元格后仍会引用" onClick={() => pinSheetSelection(sessionId)}><Pin data-icon="inline-start" />固定</Button>}
+                {activeSheet?.range && !sheetRefs.some((ref) => sameSheetPlace(ref, activeSheet)) && <Button type="button" variant="ghost" size="xs" title="把这个选区编号后写进句子里，可以和别的选区分别说明" onClick={() => { if (pinSheetSelection(sessionId)) { citeNext.current = true; window.setTimeout(() => { citeNext.current = false; }, 1500); focusComposer(); } }}><Quote data-icon="inline-start" />引用</Button>}
               </div> : null}
               <input
                 ref={fileInputRef}
@@ -672,10 +723,12 @@ export default function Composer({
               />
               <PromptInput
                 value={draft}
+                chips={chipApi}
+                editorRef={editorRef}
                 onValueChange={setDraft}
                 onSubmit={() => submit()}
                 loading={Boolean(sending && !interaction)}
-                onStop={onStop}
+                onStop={sending ? onStop : undefined}
                 onSendNow={() => submitNow()}
                 onEmptySendNow={queue.length > 0 ? steerAllQueued : undefined}
                 busySendTitle={
@@ -695,24 +748,23 @@ export default function Composer({
                       ? `技能 /${activeSkill.id} 生效中 — 直接描述任务，退格或 × 退出`
                       : '输入消息，/ 调用技能，@ 引用文件…'
                 }
-                onKeyDown={(e) => {
+                onKeyDown={(e, { textBeforeCaret }) => {
                   if (isImeComposingEvent(e)) return;
                   if ((mentionQuery !== null || slash !== null) && e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
                     return;
                   }
                   // Atomic chip delete: Backspace on an empty draft unpins the
-                  // skill, then the last Doc/HTML chip, mirroring how Cursor/Linear remove context chips.
+                  // skill, then the last Doc chip, mirroring how Cursor/Linear remove context chips.
                   if (e.key === 'Backspace' && draft === '' && skillId) {
                     e.preventDefault();
                     setSkillId(undefined);
-                  } else if (e.key === 'Backspace' && draft === '' && sessionId && (htmlRefs.length || documentRefs.length)) {
+                  } else if (e.key === 'Backspace' && draft === '' && sessionId && documentRefs.length) {
                     e.preventDefault();
-                    if (htmlRefs.length) removeHtmlReference(sessionId, htmlRefs.length - 1);
-                    else removeDocumentReference(sessionId, documentRefs.length - 1);
+                    removeDocumentReference(sessionId, documentRefs.length - 1);
                   }
                   // ↑ at the start of the box pulls queued messages back in for editing.
-                  if (e.key === 'ArrowUp' && recallQueuedMessages(e)) {
+                  if (e.key === 'ArrowUp' && recallQueuedMessages(textBeforeCaret)) {
                     e.preventDefault();
                   }
                 }}
@@ -805,7 +857,6 @@ function LiveStatusBar({
   interaction,
   interruptRequested,
   recovering,
-  onStop,
   onRetryStalled,
   skillName,
 }: {
@@ -814,7 +865,6 @@ function LiveStatusBar({
   interaction: ComponentProps<typeof ReplyStatusBar>['interaction'];
   interruptRequested: boolean;
   recovering: boolean;
-  onStop?: () => void;
   onRetryStalled?: () => void;
   skillName?: string;
 }) {
@@ -835,7 +885,6 @@ function LiveStatusBar({
       recovering={recovering}
       lastTextAt={lastTextAt}
       lastProgressAt={lastProgressAt}
-      onStop={onStop}
       onRetry={onRetryStalled}
       skillName={skillName}
     />

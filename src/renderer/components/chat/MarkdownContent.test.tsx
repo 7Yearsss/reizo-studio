@@ -46,3 +46,31 @@ describe('MarkdownContent', () => {
     expect(codeBody).not.toContain('我看了未提交文件');
   });
 });
+
+describe('mermaid fences', () => {
+  it('draws a finished fence as SVG', () => {
+    const html = renderToString(
+      <MarkdownContent content={'说明\n\n```mermaid\nflowchart LR\n  A --> B\n```\n'} />,
+    );
+    expect(html).toContain('data-mermaid="flowchart"');
+    expect(html).toContain('<svg');
+    expect(html).toContain('class="pele pele-flowchart"');
+  });
+
+  it('keeps an unfinished fence as source while it streams', () => {
+    const html = renderToString(
+      <MarkdownContent content={'```mermaid\nflowchart LR\n  A -->'} streaming />,
+    );
+    expect(html).toContain('data-mermaid="pending"');
+    expect(html).toContain('A --&gt;');
+    expect(html).not.toContain('class="pele');
+  });
+});
+
+describe('sheet cell links in replies', () => {
+  it('renders a sheet-qualified address as a link the chat can intercept', () => {
+    const html = renderToString(<MarkdownContent content={'问题在 Sheet1!C5，其余没问题'} />);
+    expect(html).toContain('href="#sheetcell:Sheet1!C5"');
+    expect(html).toContain('Sheet1!C5</a>');
+  });
+});

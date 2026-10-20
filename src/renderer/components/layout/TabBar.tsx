@@ -3,6 +3,7 @@ import { motion } from 'motion/react';
 import { cn } from '../../lib/cn';
 import { useTabStore } from '../../state/useTabStore';
 import { useUiStore } from '../../state/useUiStore';
+import { useChatStore } from '../../state/useChatStore';
 import * as tabStore from '../../state/tabStore';
 import * as uiStore from '../../state/uiStore';
 import Tooltip from '../ui/Tooltip';
@@ -19,6 +20,16 @@ export default function TabBar() {
   const tabs = useTabStore((s) => s.tabs);
   const activeTabId = useTabStore((s) => s.activeTabId);
   const mode = useUiStore((s) => s.mode);
+  const interactionBySession = useChatStore((s) => s.interactionBySession);
+  const sessions = useChatStore((s) => s.sessions);
+
+  // Same rule as the sidebar: live interaction wins, else the persisted marker.
+  const pendingKindFor = (sessionId?: string): 'ask' | 'permission' | null => {
+    if (!sessionId) return null;
+    const live = interactionBySession[sessionId];
+    if (live === undefined) return sessions.find((s) => s.id === sessionId)?.pendingInteraction ?? null;
+    return live ? live.kind : null;
+  };
 
   return (
     <div className="flex min-w-0 flex-1 items-center gap-1 px-2">
@@ -27,6 +38,7 @@ export default function TabBar() {
           .filter((tab) => tab.kind === 'launcher' || tab.kind === 'chat')
           .map((tab) => {
             const active = mode === 'chat' && tab.id === activeTabId;
+            const pendingKind = tab.id === activeTabId ? null : pendingKindFor(tab.sessionId);
             return (
               <ContextMenu key={tab.id}>
                 <ContextMenuTrigger>
@@ -50,6 +62,14 @@ export default function TabBar() {
                     )}
                     <MessageSquare size={12} className="relative z-10 shrink-0 opacity-70" />
                     <span className="relative z-10 flex-1 truncate text-left">{tab.title}</span>
+                    {pendingKind && (
+                      <span
+                        className="relative z-10 shrink-0 rounded-full bg-[var(--peach)] px-1.5 py-0.5 text-[10px] font-medium leading-none text-[var(--peach-ink)]"
+                        title={pendingKind === 'ask' ? '该对话正在等待你的回答' : '该对话正在等待你的批准'}
+                      >
+                        {pendingKind === 'ask' ? '待回答' : '待批准'}
+                      </span>
+                    )}
                     <span
                       role="button"
                       tabIndex={-1}

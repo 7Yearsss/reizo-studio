@@ -5,7 +5,7 @@ import { PROVIDER_PRESETS } from '../../../shared/providers';
 import {
   DEFAULT_APPEARANCE,
   DEFAULT_BUSY_ENTER,
-  DEFAULT_COMPUTER_USE,
+  DEFAULT_COMPUTER_USE, DEFAULT_AUTO_APPLY_HARNESS_LESSONS,
   DEFAULT_PERMISSION_MODE,
   DEFAULT_PROVIDER_ID,
   DEFAULT_REASONING_EFFORT,
@@ -25,6 +25,7 @@ interface DiskSettings {
   permissionMode?: PermissionMode;
   busyEnter?: BusyEnterBehavior;
   computerUse?: boolean;
+  autoApplyHarnessLessons?: boolean;
   mediaModels?: { image?: string; video?: string; draft?: string };
   directorSessions?: Record<string, boolean>;
   reasoningEffort?: ReasoningEffort | null;
@@ -83,6 +84,7 @@ export function createSettingsStore(root: string) {
       permissionMode: disk.permissionMode ?? DEFAULT_PERMISSION_MODE,
       busyEnter: disk.busyEnter ?? DEFAULT_BUSY_ENTER,
       computerUse: disk.computerUse ?? DEFAULT_COMPUTER_USE,
+      autoApplyHarnessLessons: disk.autoApplyHarnessLessons ?? DEFAULT_AUTO_APPLY_HARNESS_LESSONS,
       mediaModels: disk.mediaModels ?? {},
       directorSessions: disk.directorSessions ?? {},
       reasoningEffort: disk.reasoningEffort === undefined ? DEFAULT_REASONING_EFFORT : disk.reasoningEffort,
@@ -112,6 +114,7 @@ export function createSettingsStore(root: string) {
       permissionMode: settings.permissionMode,
       busyEnter: settings.busyEnter,
       computerUse: settings.computerUse,
+      autoApplyHarnessLessons: settings.autoApplyHarnessLessons,
       mediaModels: settings.mediaModels,
       directorSessions: settings.directorSessions,
       reasoningEffort: settings.reasoningEffort,
@@ -149,6 +152,7 @@ export function createSettingsStore(root: string) {
       permissionMode: settings.permissionMode,
       busyEnter: settings.busyEnter,
       computerUse: settings.computerUse,
+      autoApplyHarnessLessons: settings.autoApplyHarnessLessons,
       mediaModels: settings.mediaModels,
       directorSessions: settings.directorSessions,
       reasoningEffort: settings.reasoningEffort,
@@ -165,6 +169,7 @@ export function createSettingsStore(root: string) {
     if (patch.permissionMode) settings.permissionMode = patch.permissionMode;
     if (patch.busyEnter) settings.busyEnter = patch.busyEnter;
     if (patch.computerUse !== undefined) settings.computerUse = patch.computerUse;
+    if (patch.autoApplyHarnessLessons !== undefined) settings.autoApplyHarnessLessons = patch.autoApplyHarnessLessons;
     if (patch.mediaModels) {
       settings.mediaModels = { ...settings.mediaModels, ...patch.mediaModels };
     }

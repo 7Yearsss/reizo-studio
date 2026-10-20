@@ -12,10 +12,10 @@ import ChatPage from '../../pages/ChatPage';
 import { lazyWithRetry } from '../../lib/lazyWithRetry';
 import ToastContainer from '../ui/ToastContainer';
 import GlobalCommandPalette from './GlobalCommandPalette';
+import SettingsDialog from './SettingsDialog';
 
 // Keep the creative workspace ready; secondary modes load their editors only
 // when opened. In particular, the artifact route must not boot the sheet engine.
-const SettingsPage = lazyWithRetry(() => import('../../pages/SettingsPage'));
 const AutomationPage = lazyWithRetry(() => import('../../pages/AutomationPage'));
 const PluginsPage = lazyWithRetry(() => import('../../pages/PluginsPage'));
 const ArtifactsPage = lazyWithRetry(() => import('../../pages/ArtifactsPage'));
@@ -77,7 +77,6 @@ export default function MainLayout() {
           {!isChatView && (
             <div className="min-h-0 min-w-0 flex-1">
               <Suspense fallback={<ModePageLoading mode={mode} />}>
-              {mode === 'settings' && <SettingsPage />}
               {mode === 'automation' && <AutomationPage />}
               {mode === 'skills' && <PluginsPage />}
               {mode === 'artifacts' && <ArtifactsPage />}
@@ -96,6 +95,7 @@ export default function MainLayout() {
         </AnimatePresence>
       </div>
       <ToastContainer />
+      <SettingsDialog />
       <GlobalCommandPalette />
     </div>
   );

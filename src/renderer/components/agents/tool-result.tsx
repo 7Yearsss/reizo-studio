@@ -63,10 +63,10 @@ export interface ToolResultOutputProps {
 }
 
 function getStatusLabel(status: ToolResultStatus) {
-  if (status === "running") return "Running";
-  if (status === "success") return "Completed";
-  if (status === "error") return "Failed";
-  return "Cancelled";
+  if (status === "running") return "进行中";
+  if (status === "success") return "已完成";
+  if (status === "error") return "失败";
+  return "已取消";
 }
 
 function getSwapKey(value: ReactNode, fallback: string) {

@@ -84,3 +84,74 @@ describe('DOCX fidelity', () => {
     for (const kept of [STYLED, TABLE, LIST, SECT, BOOKMARK]) expect(xml).toContain(kept);
   });
 });
+
+describe('tracked-changes export', () => {
+  it('writes an edit as a minimal deletion + insertion and leaves untouched blocks verbatim', async () => {
+    const original = await fixture();
+    const content = parseDocumentContent(JSON.stringify(await importDocx(original)))!;
+    const block = blockText(content, '项目预计十月上线。');
+    const edited = applyDocumentEdit(content, { op: 'replaceText', blockId: block.id, start: 4, end: 6, text: '十一月' });
+    const xml = await documentXml(await exportDocx(edited, original, { revisions: { author: 'Reizo', date: '2026-10-11T00:00:00Z' } }));
+    expect(xml).toMatch(/<w:ins w:id="\d+" w:author="Reizo" w:date="2026-10-11T00:00:00Z"><w:r><w:t xml:space="preserve">一<\/w:t><\/w:r><\/w:ins>/);
+    expect(xml).toContain('项目预计十');
+    for (const kept of [STYLED, BOOKMARK, HEADING, TABLE, LIST, SECT]) expect(xml).toContain(kept);
+    // Without revisions the same edit is applied silently.
+    expect(await documentXml(await exportDocx(edited, original))).not.toContain('<w:ins');
+  });
+
+  it('keeps a deleted block in place, struck through, and marks a new block as inserted', async () => {
+    const original = await fixture();
+    const content = parseDocumentContent(JSON.stringify(await importDocx(original)))!;
+    const first = documentBlocks(content)[0];
+    const edited = applyDocumentEdit(applyDocumentEdit(content, { op: 'deleteBlock', blockId: blockText(content, '项目预计十月上线。').id }),
+      { op: 'insertBlocks', afterId: first.id, nodes: [{ type: 'paragraph', content: [{ type: 'text', text: '新增' }] }] });
+    const xml = await documentXml(await exportDocx(edited, original, { revisions: { author: 'Reizo' } }));
+    expect(xml).toMatch(/<w:del [^>]*><w:r><w:delText>项目预计十月上线。<\/w:delText><\/w:r><\/w:del>/);
+    expect(xml).not.toContain('<w:t>项目预计十月上线。</w:t>');
+    expect(xml).toMatch(/<w:pPr><w:rPr><w:ins [^>]*\/><\/w:rPr><\/w:pPr><w:ins [^>]*><w:r><w:t xml:space="preserve">新增<\/w:t><\/w:r><\/w:ins>/);
+    // The struck paragraph's mark is deleted too, and the document still reads back as the edited text.
+    expect(xml).toMatch(/<w:rPr><w:del [^>]*\/><\/w:rPr>/);
+    const reread = await importDocx(Buffer.from(await exportDocx(edited, original, { revisions: { author: 'Reizo' } })));
+    const texts = documentBlocks(reread).map((b) => b.text);
+    expect(texts).toContain('新增');
+    expect(texts).not.toContain('项目预计十月上线。');
+  });
+
+  it('diffs paragraphs inside an unchanged table structure', async () => {
+    const original = await fixture();
+    const content = parseDocumentContent(JSON.stringify(await importDocx(original)))!;
+    const cell = documentBlocks(content).find((b) => b.type === 'paragraph' && b.text.length > 0 && !['Styled sample', '项目预计十月上线。'].includes(b.text) && b.text !== '苹果' && b.text !== '香蕉')!;
+    const edited = applyDocumentEdit(content, { op: 'replaceText', blockId: cell.id, start: 0, end: cell.inlineSize, text: '改过的单元格' });
+    const xml = await documentXml(await exportDocx(edited, original, { revisions: {} }));
+    expect(xml).toContain('<w:delText');
+    expect(xml).toContain('改过的单元格');
+    expect(xml).toContain('<w:tbl>');
+  });
+});
+
+describe('typeset export', () => {
+  it('writes the official layout into the DOCX: fonts, sizes, fixed line height, indent and alignment', async () => {
+    const { applyFormat, OFFICIAL_SPEC } = await import('../../../../shared/documentFormat');
+    const original = await fixture();
+    const content = parseDocumentContent(JSON.stringify(await importDocx(original)))!;
+    const { content: formatted, changed } = applyFormat(content, OFFICIAL_SPEC);
+    expect(changed).toBeGreaterThan(0);
+    const xml = await documentXml(await exportDocx(formatted, original));
+    // Body paragraph "项目预计十月上线。": 仿宋 三号 (16pt = sz 32), exact 28pt lines, two-character first-line indent, justified.
+    const body = xml.slice(xml.indexOf('<w:p>', xml.indexOf('Styled sample') + 1));
+    const paragraph = body.slice(0, body.indexOf('</w:p>'));
+    expect(paragraph).toContain('w:eastAsia="仿宋_GB2312"');
+    expect(paragraph).toContain('<w:sz w:val="32"/>');
+    expect(paragraph).toContain('<w:color w:val="000000"/>');
+    expect(paragraph).toContain('w:line="560" w:lineRule="exact"');
+    expect(paragraph).toContain('w:firstLine="640"');
+    expect(paragraph).toContain('<w:jc w:val="both"/>');
+    // The title is centred in 方正小标宋简体 二号 (22pt = sz 44) and the original file's header/styles are untouched.
+    expect(xml).toContain('w:eastAsia="方正小标宋简体"');
+    expect(xml).toContain('<w:sz w:val="44"/>');
+    expect(await (await JSZip.loadAsync(await exportDocx(formatted, original))).file('word/header1.xml')!.async('string')).toBe(HEADER_XML);
+    // The fixed line height survives a round trip.
+    const again = await importDocx(Buffer.from(await exportDocx(formatted, original)));
+    expect(JSON.stringify(again.doc)).toContain('"lineExact":28');
+  });
+});

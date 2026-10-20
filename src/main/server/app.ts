@@ -1,5 +1,5 @@
+import path from 'node:path';
 import { presentationReviewAdapter } from './agent/presentationTools';
-import { htmlReviewAdapter } from './agent/htmlTools';
 import { createArtifactReviewStore } from './storage/artifactReviewStore';
 import { documentReviewAdapter } from './agent/documentReviewAdapter';
 import { sheetReviewAdapter } from './agent/sheetReviewAdapter';
@@ -12,9 +12,11 @@ import { createSettingsStore } from './storage/settingsStore';
 import { createSessionsRouter } from './routes/sessions';
 import { createChatRouter } from './routes/chat';
 import { createSettingsRouter } from './routes/settings';
+import { createHarnessRouter } from './routes/harness';
 import { createSkillsRouter } from './routes/skills';
 import { createSchedulesRouter } from './routes/schedules';
 import { createMattingRouter } from './routes/matting';
+import { createVoiceRouter } from './routes/voice';
 import { createScheduleStore } from './storage/scheduleStore';
 import { createThoughtStore } from './storage/thoughtStore';
 import { createProjectStore } from './storage/projectStore';
@@ -24,6 +26,12 @@ import { createProjectsRouter } from './routes/projects';
 import { createArtifactsRouter, createSessionArtifactsRouter } from './routes/artifacts';
 import { createRefsRouter } from './routes/refs';
 import { createCanvasRouter } from './routes/canvas';
+import { generateText } from 'ai';
+import { createOpenAiModel } from './agent/provider/openai';
+import { resolveSettingsModel } from './providerResolver';
+import { usageFetch } from './agent/provider/usageFetch';
+import { quotaFetch, llmSchedulerFor } from './agent/provider/quotaFetch';
+import { canvasWorkStopped } from './canvas/workLifecycle';
 import { createComputerUseRouter } from './routes/computerUse';
 import { createCanvasStore } from './storage/canvasStore';
 import { openDb, type DbHandle } from './db/client';
@@ -41,6 +49,11 @@ import { stopCanvasRun, stopCanvasRunsForStore } from './canvas/graphExecutor';
 import { resumeVideoJobs, stopVideoJobsForStore } from './canvas/asyncJobManager';
 import { createCanvasMaintenanceRouter } from './routes/canvasMaintenance';
 import { createUsageRouter } from './routes/usage';
+import { closeAllMcpSessions, closeSessionMcp } from './agent/mcpTools';
+import { createVideoEditorRouter } from './routes/videoEditor';
+import { stopEditorMedia } from './videoEditor/mediaExchange';
+import { stopVideoEditor } from './videoEditor/service';
+import { videoExportTasksFor, stopVideoExportTasks } from './videoEditor/exportTaskService';
 
 export interface CreateAppOptions {
   /** Directory the local session/settings JSON files live under. */
@@ -157,7 +170,7 @@ export function createApp(options: CreateAppOptions) {
   // features work under `test:api` too.
   const db = options.db ?? openDb(':memory:');
   const artifactStore = createArtifactStore(db, options.dataRoot);
-  const artifactReviews = createArtifactReviewStore(db, artifactStore, options.dataRoot, { doc: documentReviewAdapter, html: htmlReviewAdapter, presentation: presentationReviewAdapter, sheet: sheetReviewAdapter });
+  const artifactReviews = createArtifactReviewStore(db, artifactStore, options.dataRoot, { doc: documentReviewAdapter, presentation: presentationReviewAdapter, sheet: sheetReviewAdapter });
   const canvasStore = createCanvasStore(db);
   recoverCanvasJobs(canvasStore);
   let canvasJobsStopped = false;
@@ -166,9 +179,13 @@ export function createApp(options: CreateAppOptions) {
   const startCanvasJobs = () => {
     if (canvasJobsStarted || canvasJobsStopped) return;
     canvasJobsStarted = true;
+    void videoExportTasksFor(options.dataRoot, canvasStore).start().catch((error) => console.error('导出任务恢复失败', error));
     resumeVideoJobs({ canvasStore, settingsStore, providerStore, dataRoot: options.dataRoot });
   };
   const stopCanvasJobs = () => {
+    stopVideoExportTasks(options.dataRoot);
+    stopVideoEditor(options.dataRoot);
+    stopEditorMedia(options.dataRoot);
     if (canvasJobsStopped) return;
     canvasJobsStopped = true;
     stopVideoJobsForStore(canvasStore);
@@ -176,6 +193,7 @@ export function createApp(options: CreateAppOptions) {
     nodeJobsFor(canvasStore).shutdown();
     stopCanvasRunsForStore(canvasStore);
     recoverCanvasJobs(canvasStore, 'shutdown');
+    void closeAllMcpSessions();
   };
 
   // Ask cards the user never answered survive an app restart.
@@ -189,11 +207,18 @@ export function createApp(options: CreateAppOptions) {
   });
 
   app.get('/api/health', (c) => c.json({ ok: true }));
-  const skillsDirs = options.skillsDirs ?? [];
+  app.route('/api/video-editor', createVideoEditorRouter(options.dataRoot, sessionStore, canvasStore, artifactStore));
+  const userSkillsDir = path.join(options.dataRoot, 'skills');
+  const skillsDirs = options.skillsDirs
+    ? options.skillsDirs.includes(userSkillsDir)
+      ? options.skillsDirs
+      : [...options.skillsDirs, userSkillsDir]
+    : [userSkillsDir];
   const memoryEventsStore = createMemoryEventsStore(options.dataRoot);
   const scheduleStore = options.scheduleStore ?? createScheduleStore(options.dataRoot);
   const thoughtStore = options.thoughtStore ?? createThoughtStore(options.dataRoot);
   app.route('/api/sessions', createSessionsRouter(sessionStore, artifactStore, (sessionId) => {
+    void closeSessionMcp(sessionId);
     const canvasId = canvasStore.findCanvasBySession(sessionId)?.id;
     if (!canvasId) return;
     return () => { stopCanvasRun(canvasId, canvasStore); };
@@ -220,17 +245,27 @@ export function createApp(options: CreateAppOptions) {
   app.route('/api/memory', createMemoryRouter(memoryEventsStore, settingsStore));
   app.route('/api/sessions', createSessionArtifactsRouter(artifactStore, sessionStore));
   app.route('/api/artifacts', createArtifactsRouter(artifactStore));
-  app.route('/api', createDocumentsRouter(artifactStore, sessionStore, artifactReviews));
+  // One-shot rewrite for the review bar's "重写这条": a plain completion on the configured chat model, no turn or history.
+  const rewriteText = async (system: string, prompt: string, signal?: AbortSignal): Promise<string> => {
+    const { providerId, modelId, apiKey, baseUrl } = resolveSettingsModel(await settingsStore.get(), { category: 'llm' });
+    const model = createOpenAiModel({ apiKey, modelId, baseUrl, fetch: quotaFetch(llmSchedulerFor(canvasStore), providerId,
+      usageFetch(canvasStore.usage, { providerId, model: modelId, category: 'llm', accepting: () => !canvasWorkStopped(canvasStore) }), true) });
+    const { text } = await generateText({ model, system, prompt, abortSignal: signal });
+    return text;
+  };
+  app.route('/api', createDocumentsRouter(artifactStore, sessionStore, artifactReviews, rewriteText));
   app.route('/api/sessions', createPresentationsRouter(artifactStore, sessionStore));
   app.route('/api/refs', createRefsRouter(largeValueStore));
   app.route('/api/projects', createProjectsRouter(projectStore, sessionStore));
   app.route('/api/settings', createSettingsRouter(settingsStore));
   app.route('/api/admin/providers', createAdminProvidersRouter(providerStore));
   app.route('/api/providers', createPublicProvidersRouter(providerStore));
-  app.route('/api/skills', createSkillsRouter(skillsDirs));
+  app.route('/api/skills', createSkillsRouter(skillsDirs, { dataRoot: options.dataRoot, sessionStore, rewriteText }));
+  app.route('/api/harness', createHarnessRouter(options.dataRoot));
   app.route('/api/computer-use', createComputerUseRouter(options.dataRoot, settingsStore));
   app.route('/api/schedules', createSchedulesRouter(scheduleStore, thoughtStore));
   app.route('/api/matting', createMattingRouter(options.dataRoot));
+  app.route('/api/voice', createVoiceRouter(options.dataRoot));
   app.route('/api/canvas-maintenance', createCanvasMaintenanceRouter(db, options.dataRoot));
   app.route('/api/usage', createUsageRouter(db));
 

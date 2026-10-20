@@ -272,13 +272,37 @@ export function installShowcaseTransport() {
   Object.defineProperty(window, 'sessionStorage', { value: memoryStorage() });
   const unsupported = async (): Promise<never> => { throw new Error(disabled); };
   const bridge = { getApiOrigin: async () => origin, platform: 'web', listWorkspace: async (): Promise<DirEntry[]> => [], flattenWorkspace: async (): Promise<DirEntry[]> => [],
+    accountStatus: async () => ({ status: 'signed-out' as const, webOrigin: origin, message: '此为演示页面，请在桌面工作台中登录。' }),
+    accountLogin: unsupported, accountLogout: unsupported, accountReopen: unsupported, accountRefresh: unsupported,
     readWorkspaceFile: unsupported, pickFolder: async () => null, windowIsMaximized: async () => false,
     windowMinimize: async (): Promise<void> => {}, windowClose: async (): Promise<void> => {}, windowToggleMaximize: async () => false,
     runCommand: unsupported, readDroppedFile: unsupported, revealInFolder: unsupported,
     deleteWorkspacePath: unsupported, createWorkspaceEntry: unsupported, gitStatus: async () => ({ available: false, branch: null, dirty: false, porcelain: '', recent: '' }),
-    installSkill: unsupported, uninstallSkill: unsupported, searchSkillHub: async () => ({ items: [], total: 0 }),
+    installSkill: unsupported, uninstallSkill: unsupported, listPlugins: async () => [], searchMcpCatalog: async () => ({ items: [] }), listPluginCatalog: async () => ({ marketplace: '', items: [] }), installCatalogPlugin: unsupported, listMcpServers: async () => [], saveMcpServers: unsupported, testMcpServer: unsupported, listHooks: async () => [], saveHooks: unsupported, installPlugin: unsupported, setPluginEnabled: unsupported, uninstallPlugin: unsupported, searchSkillHub: async () => ({ items: [], total: 0 }),
     installSkillHubSkill: unsupported, previewSkillHubSkill: unsupported, exportPdf: unsupported,
+    checkNodeEnvironment: async () => ({ available: true, version: 'v20.0.0' }),
+    resetMcpBaseline: unsupported,
+    getQuickIntegrationsStatus: async () => ({
+      notion: { connected: false },
+      gmail: { connected: false },
+      feishu: { connected: false },
+      wecom: { connected: false },
+      dingtalk: { connected: false },
+      yuque: { connected: false },
+      gitee: { connected: false },
+      github: { connected: false },
+    }),
+    connectNotion: unsupported,
+    startGoogleOAuth: unsupported,
+    connectFeishu: unsupported,
+    connectWeCom: unsupported,
+    connectDingTalk: unsupported,
+    connectYuque: unsupported,
+    connectGitee: unsupported,
+    connectGitHub: unsupported,
+    disconnectIntegration: unsupported,
   } satisfies Omit<ReizoBridge, 'platform'> & { platform: 'web' };
+
   window.reizo = bridge as unknown as ReizoBridge;
   return transport;
 }

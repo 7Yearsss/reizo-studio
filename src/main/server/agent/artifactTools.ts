@@ -4,7 +4,8 @@ import type { ArtifactStore } from '../storage/artifactStore';
 import { ArtifactVersionConflictError } from '../storage/artifactStore';
 import type { ArtifactReviewStore } from '../storage/artifactReviewStore';
 import { sheetEditSchema } from './sheetReviewAdapter';
-import type { SheetReviewOperation } from '../../../shared/sheetReview';
+import { applySheetReviewOperations, diffSheetContent, type SheetReviewOperation } from '../../../shared/sheetReview';
+import { checkSheet, newSheetFindings, SHEET_CHECK_LABELS } from '../../../shared/sheetChecks';
 import { sheetPivots } from '../../../shared/sheetPivot';
 import { describeChartSource, sheetCharts } from '../../../shared/sheetChart';
 import { summarizeSheet } from '../../../shared/sheetReferences';
@@ -18,6 +19,16 @@ import {
   type SheetCreateSheet,
   type SheetOperation,
 } from '../../../shared/sheetContent';
+
+/** What a proposal would newly break, found by applying it to a scratch copy: formulas replaced by constants, and fresh audit findings. */
+function describeEditWarnings(base: NonNullable<ReturnType<typeof parseSheetContent>>, operations: SheetReviewOperation[]): string[] {
+  const candidate = applySheetReviewOperations(base, operations);
+  const warnings: string[] = [];
+  const overwritten = diffSheetContent(base, candidate).sheets.flatMap((sheet) => sheet.cells.filter((cell) => cell.before?.f && !cell.after?.f).map((cell) => `${sheet.name}!${cell.a1}`));
+  if (overwritten.length) warnings.push(`会把 ${overwritten.length} 个公式单元格改成静态值（${overwritten.slice(0, 6).join('、')}${overwritten.length > 6 ? ' 等' : ''}），之后原数据变化时不会自动更新`);
+  for (const finding of newSheetFindings(base, candidate).slice(0, 8)) warnings.push(`${finding.sheet}!${finding.range}：${finding.message}`);
+  return warnings;
+}
 
 export function createArtifactTools(options: {
   sessionId: string;
@@ -38,6 +49,18 @@ export function createArtifactTools(options: {
         if (!content) return { ok: false, error: '表格内容无法解析' };
         const pivots = sheetPivots(content).map((p) => ({ id: p.id, name: p.name, source: `${content.sheets.find((s) => s.id === p.source.sheetId)?.name ?? p.source.sheetId}!${p.source.range}`, output: p.output ? `${content.sheets.find((s) => s.id === p.target.sheetId)?.name ?? p.target.sheetId}!${p.output}` : undefined, rows: p.rows, columns: p.columns, values: p.values, filters: p.filters, totals: p.totals }));
         return { ok: true, artifactId, name: artifact.name, version: artifact.version, sheets: content.sheets.map((s) => ({ id: s.id, name: s.name })), ...(pivots.length ? { pivots } : {}), ...(sheetCharts(content).length ? { charts: sheetCharts(content).map((c) => ({ id: c.id, name: c.name, type: c.type, source: describeChartSource(content, c) })) } : {}), summary: summarizeSheet(content, { sheet, range }, READ_PAGE_BUDGET) };
+      },
+    }),
+    check_sheet: tool({
+      description: '对 Excel 工作簿做确定性的体检：错误值（#REF! 等）、与同列不一致的公式、公式列里混入的手写数值、SUM 等汇总范围漏掉相邻数据、文本型数字、多余空格、公式里写死的数值、整列引用。返回带工作表和单元格地址的问题清单，有明确修法的附 fix（公式或值）。只检查，不修改；据此调用 propose_sheet_edits（用返回的 version，把 fix 写成 setFormulas/setValues）生成待审核修改，不要漏报，也不要编造清单里没有的问题；info 级别的只提示，除非用户要求，不要去改。',
+      inputSchema: z.object({ artifactId: z.string(), sheet: z.string().optional().describe('只检查这张工作表（名称或 ID）'), max: z.number().int().min(1).max(200).optional() }),
+      execute: async ({ artifactId, sheet, max }) => {
+        const artifact = await options.artifactStore.get(artifactId);
+        if (!artifact || artifact.sessionId !== options.sessionId || artifact.kind !== 'sheet') return { ok: false, error: '未找到本会话的表格' };
+        const content = parseSheetContent(artifact.content);
+        if (!content) return { ok: false, error: '表格内容无法解析' };
+        const result = checkSheet(content, { sheet, max });
+        return { ok: true, artifactId, name: artifact.name, version: artifact.version, ...result, kinds: Object.fromEntries(Object.entries(result.counts).map(([kind, n]) => [SHEET_CHECK_LABELS[kind as keyof typeof SHEET_CHECK_LABELS], n])), note: result.total > result.findings.length ? `仅返回前 ${result.findings.length} 条，共 ${result.total} 条；修完后可再次检查。` : undefined };
       },
     }),
     generate_diagram: tool({
@@ -180,11 +203,14 @@ export function createArtifactTools(options: {
             if (error instanceof ArtifactVersionConflictError) return { ok: false, error: error.message };
             throw error;
           }
+          const audit = checkSheet(patched.content, { max: 8 });
+          const warnings = audit.findings.filter((f) => f.severity !== 'info').map((f) => `${f.sheet}!${f.range}：${f.message}`);
           return {
             ok: true,
             artifactId: sourceArtifactId,
             name: existing.name,
             version: updated?.version,
+            ...(warnings.length ? { warnings } : {}),
             summary: `已更新表格 "${existing.name}" (版本: v${patched.content.revision})，已在右侧产物区展示。`,
           };
         }
@@ -210,10 +236,13 @@ export function createArtifactTools(options: {
           source: 'generated',
           origin: { surface: 'chat', prompt: `生成表格: ${cleanTitle}` },
         });
+        const audit = checkSheet(contentResult.content, { max: 8 });
+        const warnings = audit.findings.filter((f) => f.severity !== 'info').map((f) => `${f.sheet}!${f.range}：${f.message}`);
         return {
           ok: true,
           artifactId: artifact.id,
           name: artifact.name,
+          ...(warnings.length ? { warnings } : {}),
           summary: `已创建表格 "${artifact.name}" (ID: ${artifact.id})，已在右侧产物区打开。`,
         };
       },
@@ -226,7 +255,12 @@ export function createArtifactTools(options: {
         execute: async ({ artifactId, expectedVersion, operations }) => {
           try {
             const review = await options.reviews!.create({ artifactId, sessionId: options.sessionId, expectedVersion, operations, origin: { surface: 'chat' } });
-            return { ok: true, artifactId, reviewId: review.id, pending: review.changes.length, changes: review.changes.map((change) => change.label), summary: '表格修改建议已生成，原表未改变，等待用户在 Excel 面板审核。' };
+            let warnings: string[] = [];
+            try {
+              const base = parseSheetContent(review.baseContent);
+              if (base) warnings = describeEditWarnings(base, operations);
+            } catch { /* The proposal itself is already stored; the self-check is best effort. */ }
+            return { ok: true, artifactId, reviewId: review.id, pending: review.changes.length, changes: review.changes.map((change) => change.label), ...(warnings.length ? { warnings, advice: '这些问题由本次修改引入。如果不是用户想要的，请如实告诉用户，并改用公式（而不是写死的值）重新提出建议。' } : {}), summary: '表格修改建议已生成，原表未改变，等待用户在 Excel 面板审核。' };
           } catch (error) {
             if (error instanceof ArtifactVersionConflictError) return { ok: false, error: '表格版本已变化，请重新 read_sheet 后再提出建议' };
             return { ok: false, error: error instanceof Error ? error.message : '创建建议失败' };

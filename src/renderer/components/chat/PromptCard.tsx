@@ -2,6 +2,8 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { FileText, Send, Square, X } from 'lucide-react';
 import { cn } from '../../lib/cn';
 import { isImeComposingEvent } from '../../lib/ime';
+import VoiceInputButton from './VoiceInputButton';
+import { appendVoiceText } from '../../../shared/voiceInput';
 
 export default function PromptCard({
   value,
@@ -20,6 +22,7 @@ export default function PromptCard({
   status,
   canSubmit,
   files,
+  selection,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -37,6 +40,7 @@ export default function PromptCard({
   status?: ReactNode;
   canSubmit?: boolean;
   files?: { key: string; name: string; imageUrl?: string; onRemove: () => void }[];
+  selection?: ReactNode;
 }) {
   const canSend = !disabled && (canSubmit ?? Boolean(value.trim()));
   const composingRef = useRef(false);
@@ -123,8 +127,10 @@ export default function PromptCard({
         title={hint ?? 'Enter 发送 · Shift+Enter 换行'}
         className="w-full resize-none bg-transparent text-[15px] leading-relaxed text-ink placeholder:text-ink-muted focus:outline-none disabled:opacity-60"
       />
+      {selection && <div className="mt-2 flex flex-wrap gap-2">{selection}</div>}
       <div className="mt-3 flex items-center gap-2">
         <div className="flex min-w-0 flex-1 items-center gap-2">{toolbar}</div>
+        <VoiceInputButton active={autoFocus} disabled={disabled} onTranscript={text => { onChange(appendVoiceText(value, text)); textareaRef.current?.focus(); }} />
         {sending ? (
           <>
             {canSend && (

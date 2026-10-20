@@ -160,7 +160,8 @@ export function createArtifactsRouter(artifactStore: ArtifactStore) {
       content,
       expectedVersion: Number.isInteger(expectedVersion) ? expectedVersion : undefined,
       origin: { surface: 'manual_edit' },
-      label: 'Manual edit',
+      // A deliberate bulk change keeps its own history entry instead of folding into the previous save.
+      label: body?.label === '排版' ? '排版' : 'Manual edit',
     });
     if (!updated) return c.json({ error: 'Artifact not found' }, 404);
     return c.json({ artifact: updated });

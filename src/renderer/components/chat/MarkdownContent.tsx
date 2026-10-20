@@ -3,10 +3,18 @@ import { Streamdown } from 'streamdown';
 import { code } from '@streamdown/code';
 import { Check, Copy } from 'lucide-react';
 import { normalizeMarkdownFences } from '../../lib/markdown/normalizeMarkdownFences';
+import { stripThinkTags } from '../../lib/markdown/stripThinkTags';
 import * as tabStore from '../../state/tabStore';
 import * as canvasStore from '../../state/canvasStore';
+import * as uiStore from '../../state/uiStore';
+import { requestSheetFocus } from '../../state/sheetWorkspace';
+import { linkSheetCells, parseSheetCellHref } from '../../lib/markdown/linkSheetCells';
+import { MermaidStreamBlock } from '../markdown/mermaidMarkdown';
 
-const STREAMDOWN_PLUGINS = { code };
+const STREAMDOWN_PLUGINS = {
+  code,
+  renderers: [{ language: ['mermaid', 'mmd'], component: MermaidStreamBlock }],
+};
 const STREAMDOWN_CONTROLS = {
   code: { copy: true, download: false },
   table: { copy: true, download: false, fullscreen: false },
@@ -48,13 +56,21 @@ export default function MarkdownContent({
   content: string;
   streaming?: boolean;
 }) {
-  const markdown = useMemo(() => normalizeMarkdownFences(content), [content]);
+  const markdown = useMemo(() => linkSheetCells(normalizeMarkdownFences(stripThinkTags(content))), [content]);
 
   const handleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement;
     const a = target.closest('a');
     if (!a) return;
     const href = a.getAttribute('href');
+    const cell = href ? parseSheetCellHref(href) : null;
+    if (cell) {
+      e.preventDefault();
+      e.stopPropagation();
+      const sessionId = tabStore.activeSessionId();
+      if (sessionId) { requestSheetFocus(sessionId, cell); uiStore.setRightPanelTab('sheets'); }
+      return;
+    }
     if (href && href.startsWith('canvas:')) {
       e.preventDefault();
       e.stopPropagation();

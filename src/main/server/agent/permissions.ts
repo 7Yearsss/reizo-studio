@@ -19,6 +19,8 @@ const READ_ONLY_GIT_REMOTE = /^git\s+remote(\s+(-v|--verbose))?\s*$/;
 
 export function needsApproval(mode: PermissionMode, toolName: string): boolean {
   if (CONTROL_TOOLS.has(toolName)) return true;
+  // Third-party MCP servers: ask (once per tool per session) unless the user chose full access.
+  if (toolName.startsWith('mcp__')) return mode !== 'full';
   if (mode === 'full') return false;
   if (WRITE_TOOLS.has(toolName)) return mode === 'ask';
   if (SHELL_TOOLS.has(toolName)) return true;

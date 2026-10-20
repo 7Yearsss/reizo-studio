@@ -1,9 +1,8 @@
 import { selectPresentation, refreshPresentationReviews, referencePresentation } from './presentationWorkspace';
 import { splitPresentationContext } from '../../shared/presentationReferences';
-import { selectHtml, refreshHtmlReviews, restoreHtmlReferences } from './htmlWorkspace';
-import { splitHtmlContext } from '../../shared/htmlReferences';
 import { selectDocument, refreshDocumentReviews, restoreDocumentReferences } from './documentWorkspace';
 import { splitDocumentContext } from '../../shared/documentReferences';
+import logoUrl from '../assets/logo.png';
 import * as api from '../api';
 import type { ChatMessage, ReplyActivity, SessionSummary, ToolCallPart } from '../../shared/chat';
 import type {
@@ -29,6 +28,7 @@ import { splitSheetContext } from '../../shared/sheetReferences';
 import { recordRecentSkill } from './skillStore';
 import { appendTerminalLine } from './terminalStore';
 import { notifyNeedsInput } from '../lib/notify';
+import { toast } from '../lib/toast';
 
 export interface PendingPermission {
   id: string;
@@ -774,9 +774,7 @@ export function editLastUserMessage(sessionId: string): void {
   if (!lastUser) return;
   const presentation = splitPresentationContext(lastUser.content);
   referencePresentation(sessionId, presentation.refs[0]);
-  const html = splitHtmlContext(presentation.text);
-  restoreHtmlReferences(sessionId, html.refs);
-  const document = splitDocumentContext(html.text);
+  const document = splitDocumentContext(presentation.text);
   restoreDocumentReferences(sessionId, document.refs);
   const sheet = splitSheetContext(document.text);
   restoreSheetReferences(sessionId, sheet.refs);
@@ -787,7 +785,7 @@ function notifyIfHidden(title: string): void {
   if (typeof document === 'undefined' || !document.hidden) return;
   if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
   try {
-    new Notification('Reizo', { body: title });
+    new Notification('Reizo', { body: title, icon: logoUrl });
   } catch {
     /* ignore */
   }
@@ -932,17 +930,12 @@ function makeEventFolder(
       case 'tool': {
         if ((event.name === 'generate_presentation' || event.name === 'propose_presentation_edits') && event.result) {
           try { const result = JSON.parse(event.result) as { ok?: boolean; artifactId?: string };
-            if (result.ok && result.artifactId) { selectPresentation(sessionId, result.artifactId); refreshPresentationReviews(result.artifactId); uiStore.setRightPanelTab('presentations'); void artifactStore.loadSessionArtifacts(sessionId); }
-          } catch { /* Incomplete tool output. */ }
-        }
-        if ((event.name === 'generate_html' || event.name === 'propose_html_edits') && event.result) {
-          try { const result = JSON.parse(event.result) as { ok?: boolean; artifactId?: string };
-            if (result.ok && result.artifactId) { selectHtml(sessionId, result.artifactId); refreshHtmlReviews(result.artifactId); uiStore.setRightPanelTab('html'); void artifactStore.loadSessionArtifacts(sessionId); }
+            if (result.ok && result.artifactId) { selectPresentation(sessionId, result.artifactId); refreshPresentationReviews(result.artifactId); uiStore.setRightPanelTabForSession(sessionId, 'presentations'); void artifactStore.loadSessionArtifacts(sessionId); }
           } catch { /* Incomplete tool output. */ }
         }
         if ((event.name === 'generate_document' || event.name === 'propose_document_edits') && event.result) {
           try { const result = JSON.parse(event.result) as { ok?: boolean; artifactId?: string };
-            if (result.ok && result.artifactId) { selectDocument(sessionId, result.artifactId); refreshDocumentReviews(result.artifactId); uiStore.setRightPanelTab('documents'); void artifactStore.loadSessionArtifacts(sessionId); }
+            if (result.ok && result.artifactId) { selectDocument(sessionId, result.artifactId); refreshDocumentReviews(result.artifactId); uiStore.setRightPanelTabForSession(sessionId, 'documents'); void artifactStore.loadSessionArtifacts(sessionId); }
           } catch { /* Incomplete tool output. */ }
         }
         if ((event.name === 'generate_sheet' || event.name === 'propose_sheet_edits') && event.result) {
@@ -951,7 +944,7 @@ function makeEventFolder(
             if (result.ok && result.artifactId) {
               selectWorkbook(sessionId, result.artifactId);
               refreshSheetReviews(result.artifactId);
-              uiStore.setRightPanelTab('sheets');
+              uiStore.setRightPanelTabForSession(sessionId, 'sheets');
               void artifactStore.loadSessionArtifacts(sessionId);
             }
           } catch { /* Incomplete streamed tool output. */ }
@@ -967,7 +960,7 @@ function makeEventFolder(
             event.name === 'open_canvas' ||
             (isCanvasTool(event.name) && event.name !== 'read_canvas' && event.name !== 'read_node')
           ) {
-            uiStore.setRightPanelTab('canvas');
+            uiStore.setRightPanelTabForSession(sessionId, 'canvas');
           }
           const trail = trailEntryFromTool(event);
           if (trail) {
@@ -1046,6 +1039,10 @@ function makeEventFolder(
             [sessionId]: event.tier === 'halt' ? `已停止：${event.reason}` : `这一轮可能卡住了：${event.reason}`,
           },
         });
+        break;
+      case 'notice':
+        if (event.tone === 'warn') toast.error(event.text);
+        else toast.info(event.text);
         break;
       case 'error':
         setState({

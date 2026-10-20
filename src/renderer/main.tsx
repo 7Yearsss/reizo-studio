@@ -2,7 +2,11 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import ErrorBoundary from './components/ErrorBoundary';
+import { ensureReizoBridge } from './lib/reizoBridge';
 import './index.css';
+
+// Ensure window.reizo is safely available even when opened in a regular web browser
+ensureReizoBridge();
 
 function showBootError(err: unknown): void {
   const message = err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err);

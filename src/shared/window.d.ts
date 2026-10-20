@@ -1,4 +1,23 @@
 import type { DirEntry } from './workspace';
+import type { PluginSummary } from './plugins';
+import type {
+  DingTalkConnectParams,
+  FeishuConnectParams,
+  GiteeConnectParams,
+  GitHubConnectParams,
+  GoogleOAuthParams,
+  HookEntry,
+  IntegrationConnectResult,
+  McpServerEntry,
+  McpTestResult,
+  NodeEnvStatus,
+  QuickIntegrationId,
+  QuickIntegrationsStatus,
+  WeComConnectParams,
+  YuqueConnectParams,
+} from './extensionConfig';
+
+import type { McpCatalogPage, PluginCatalog } from './catalog';
 import type {
   SkillHubInstallRequest,
   SkillHubInstallResult,
@@ -7,6 +26,11 @@ import type {
 } from './skillhub';
 
 export interface ReizoBridge {
+  accountStatus(): Promise<import('./account').AccountState>;
+  accountLogin(): Promise<import('./account').AccountState>;
+  accountLogout(): Promise<import('./account').AccountState>;
+  accountReopen(): Promise<import('./account').AccountState>;
+  accountRefresh(): Promise<import('./account').AccountState>;
   platform: NodeJS.Platform;
   getApiOrigin(): Promise<string>;
   windowMinimize(): Promise<void>;
@@ -30,6 +54,26 @@ export interface ReizoBridge {
     recent: string;
   }>;
   installSkill(): Promise<{ id: string } | null>;
+  listPlugins(): Promise<PluginSummary[]>;
+  /** Official MCP registry, searchable and paged by cursor. */
+  searchMcpCatalog(query: { search?: string; cursor?: string }): Promise<McpCatalogPage>;
+  /** Claude plugin marketplace (GitHub-hosted plugins). */
+  listPluginCatalog(): Promise<PluginCatalog>;
+  /** Downloads and installs a catalog plugin; it starts disabled. */
+  installCatalogPlugin(id: string): Promise<PluginSummary>;
+  /** User-level MCP servers (mcp.json), including disabled ones. Changes apply from the next turn. */
+  listMcpServers(): Promise<McpServerEntry[]>;
+  saveMcpServers(entries: McpServerEntry[]): Promise<void>;
+  /** Connect one server alone and list its tools; never saves anything. */
+  testMcpServer(entry: McpServerEntry): Promise<McpTestResult>;
+  /** Clears the trust-on-first-use baseline for one or all servers (re-trusting their current schema). */
+  resetMcpBaseline(serverName?: string): Promise<void>;
+  listHooks(): Promise<HookEntry[]>;
+  saveHooks(entries: HookEntry[]): Promise<void>;
+  /** Opens a folder picker and installs the chosen extension pack (disabled until the user enables it). */
+  installPlugin(): Promise<PluginSummary | null>;
+  setPluginEnabled(id: string, enabled: boolean): Promise<void>;
+  uninstallPlugin(id: string): Promise<void>;
   uninstallSkill(id: string): Promise<void>;
   searchSkillHub(query: SkillHubSearchQuery): Promise<SkillHubSearchResult>;
   installSkillHubSkill(request: SkillHubInstallRequest): Promise<SkillHubInstallResult>;
@@ -37,7 +81,19 @@ export interface ReizoBridge {
   previewSkillHubSkill(request: SkillHubInstallRequest): Promise<string>;
   /** Render an HTML document to PDF; resolves to base64 bytes. */
   exportPdf(html: string): Promise<string>;
+  checkNodeEnvironment(): Promise<NodeEnvStatus>;
+  getQuickIntegrationsStatus(): Promise<QuickIntegrationsStatus>;
+  connectNotion(token: string): Promise<IntegrationConnectResult>;
+  startGoogleOAuth(params: GoogleOAuthParams): Promise<IntegrationConnectResult>;
+  connectFeishu(params: FeishuConnectParams): Promise<IntegrationConnectResult>;
+  connectWeCom(params: WeComConnectParams): Promise<IntegrationConnectResult>;
+  connectDingTalk(params: DingTalkConnectParams): Promise<IntegrationConnectResult>;
+  connectYuque(params: YuqueConnectParams): Promise<IntegrationConnectResult>;
+  connectGitee(params: GiteeConnectParams): Promise<IntegrationConnectResult>;
+  connectGitHub(params: GitHubConnectParams): Promise<IntegrationConnectResult>;
+  disconnectIntegration(id: QuickIntegrationId): Promise<IntegrationConnectResult>;
 }
+
 
 declare global {
   interface Window {
