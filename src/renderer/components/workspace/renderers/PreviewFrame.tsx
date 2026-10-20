@@ -139,7 +139,7 @@ export default function PreviewFrame({
       return;
     }
     const prompt = buildPrompt();
-    chatStore.setComposerSeed(sessionId, prompt);
+    chatStore.seedComposer(sessionId, prompt);
     toast.success('已填入对话框，可直接回车发送');
     setSelectedElement(null);
   };

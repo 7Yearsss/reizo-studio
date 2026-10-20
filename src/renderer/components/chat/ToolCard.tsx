@@ -75,7 +75,7 @@ export default function ToolCard({ part, collapsed = false }: { part: ToolCallPa
       try {
         const parsed = JSON.parse(part.result) as Record<string, unknown>;
         if (typeof parsed.screenshotUrl === 'string') shot = parsed.screenshotUrl;
-        if (typeof parsed.summary === 'summary') summary = parsed.summary;
+        if (typeof parsed.summary === 'string') summary = parsed.summary;
       } catch {
         /* raw */
       }

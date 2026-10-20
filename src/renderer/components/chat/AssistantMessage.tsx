@@ -34,7 +34,7 @@ function QuoteButton({
       .split('\n')
       .map((line) => `> ${line}`)
       .join('\n');
-    chatStore.setComposerSeed(sessionId, `${cleanQuote}\n\n`);
+    chatStore.seedComposer(sessionId, `${cleanQuote}\n\n`);
     toast.success('已引用至输入框');
   };
 

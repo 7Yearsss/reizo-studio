@@ -201,7 +201,7 @@ export const ThinkingOrb = memo(function ThinkingOrb({
     <canvas
       ref={canvasRef}
       role="img"
-      aria-label="AI 正在思考中"
+      aria-label="AI 正在思考"
       className={className}
       style={{ width: `${size}px`, height: `${size}px`, display: 'inline-block', flexShrink: 0 }}
     />
