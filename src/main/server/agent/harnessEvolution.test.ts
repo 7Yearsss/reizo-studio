@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { applyHarnessProposal, listHarnessProposals, MAX_LESSONS_CHARS } from './harnessEvolution';
+import { applyAllHarnessProposals, applyHarnessProposal, listHarnessProposals, MAX_LESSONS_CHARS } from './harnessEvolution';
 import type { TurnTrace } from './turnTrace';
 
 const trace = (i: number): TurnTrace => ({
@@ -44,5 +44,15 @@ describe('harness evolution loop', () => {
     await writeFile(path.join(root, 'harness', 'systemprompt.md'), 'x'.repeat(MAX_LESSONS_CHARS));
     const [proposal] = await listHarnessProposals(root);
     await expect(applyHarnessProposal(root, proposal!.id)).rejects.toThrow(/full/);
+  });
+
+  it('auto-apply is throttled and only reads the tail of large trace files', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'harness-evo-'));
+    await mkdir(path.join(root, 'traces'));
+    const filler = JSON.stringify({ ...trace(0), tools: [] });
+    const old = Array.from({ length: 3000 }, () => filler).join('\n') + '\n';
+    await writeFile(path.join(root, 'traces', 'a.jsonl'), old + [1, 2].map((i) => JSON.stringify(trace(i))).join('\n') + '\n');
+    expect(await applyAllHarnessProposals(root, 60_000)).toBe(1);
+    expect(await applyAllHarnessProposals(root, 60_000)).toBe(0);
   });
 });

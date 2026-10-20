@@ -1,4 +1,4 @@
-import { readdir, readFile } from 'node:fs/promises';
+import { open, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { loadActiveHarnessRules, saveHarnessRulesOverride } from './harnessRules';
 import { proposeInvariantLessonsFromTraces, type HarnessProposal } from './harnessProposer';
@@ -11,23 +11,47 @@ import type { TurnTrace } from './turnTrace';
  * never inject prompt text.
  */
 
+/** Only the newest files / lines are scanned so cost stays flat as history grows. */
+const MAX_TRACE_FILES = 30;
+const TAIL_BYTES = 64 * 1024;
+const MAX_TRACES = 500;
+
+async function readTail(file: string): Promise<string> {
+  const handle = await open(file, 'r');
+  try {
+    const { size } = await handle.stat();
+    const start = Math.max(0, size - TAIL_BYTES);
+    const buffer = Buffer.alloc(size - start);
+    await handle.read(buffer, 0, buffer.length, start);
+    const text = buffer.toString('utf8');
+    // A tail cut can land mid-line; drop the partial first line.
+    return start > 0 ? text.slice(text.indexOf('\n') + 1) : text;
+  } finally {
+    await handle.close();
+  }
+}
+
 export async function readAllTraces(dataRoot: string): Promise<TurnTrace[]> {
   const dir = path.join(dataRoot, 'traces');
-  const names = await readdir(dir).catch(() => [] as string[]);
+  const names = (await readdir(dir).catch(() => [] as string[])).filter((name) => name.endsWith('.jsonl'));
+  const dated = await Promise.all(
+    names.map(async (name): Promise<{ name: string; mtime: number }> => ({ name, mtime: (await stat(path.join(dir, name)).catch(() => undefined))?.mtimeMs ?? 0 })),
+  );
+  const newest = dated.sort((a, b) => b.mtime - a.mtime).slice(0, MAX_TRACE_FILES);
   const traces: TurnTrace[] = [];
-  for (const name of names) {
-    if (!name.endsWith('.jsonl')) continue;
-    const text = await readFile(path.join(dir, name), 'utf8').catch(() => '');
+  for (const { name } of newest) {
+    const text = await readTail(path.join(dir, name)).catch(() => '');
     for (const line of text.split('\n')) {
       if (!line.trim()) continue;
       try {
         traces.push(JSON.parse(line) as TurnTrace);
       } catch {
-        // a torn trailing line must not hide the rest
+        // a torn line must not hide the rest
       }
     }
+    if (traces.length >= MAX_TRACES) break;
   }
-  return traces;
+  return traces.slice(0, MAX_TRACES);
 }
 
 /** Hard cap so auto-apply cannot grow the prompt without bound (mirrors Harness² ComponentSpec cap_chars). */
@@ -60,8 +84,14 @@ export async function applyHarnessProposal(dataRoot: string, id: string): Promis
   return true;
 }
 
-/** Auto mode: apply every pending proposal. Errors are swallowed — this runs fire-and-forget after a turn. */
-export async function applyAllHarnessProposals(dataRoot: string): Promise<number> {
+/** Auto mode: apply every pending proposal, at most once per interval. Errors are swallowed — this runs fire-and-forget after a turn. */
+const AUTO_APPLY_MIN_INTERVAL_MS = 10 * 60 * 1000;
+const lastAutoApply = new Map<string, number>();
+
+export async function applyAllHarnessProposals(dataRoot: string, minIntervalMs = AUTO_APPLY_MIN_INTERVAL_MS): Promise<number> {
+  const now = Date.now();
+  if (now - (lastAutoApply.get(dataRoot) ?? 0) < minIntervalMs) return 0;
+  lastAutoApply.set(dataRoot, now);
   let applied = 0;
   try {
     for (const proposal of await listHarnessProposals(dataRoot)) {
