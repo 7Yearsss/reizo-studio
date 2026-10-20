@@ -80,6 +80,45 @@ export function proposeInvariantLessonsFromTraces(traces: TurnTrace[]): HarnessP
     });
   }
 
+  const signals: Array<{ turns: number; id: string; title: string; lesson: string; cue: string }> = [
+    {
+      turns: summary.loopHaltTurns, id: 'break-tool-loops', title: 'Change approach instead of repeating a failing action',
+      cue: 'The same tool call or a near-identical retry keeps failing',
+      lesson: 'After two failed attempts at the same action, stop retrying: read the error, change the approach or inputs, or tell the user what is blocking you.',
+    },
+    {
+      turns: summary.reasoningLeakTurns, id: 'keep-reasoning-out-of-reply', title: 'Keep internal reasoning out of the final reply',
+      cue: 'Writing the final answer to the user',
+      lesson: 'The reply contains only the answer and what the user needs to act on; never paste planning notes, tool-selection thoughts or self-talk.',
+    },
+    {
+      turns: summary.deferredTurns, id: 'act-instead-of-deferring', title: 'Do the work in this turn instead of promising to',
+      cue: 'About to end a turn with "I will check / continue later"',
+      lesson: 'If the next step is something you can do now, do it now with a tool call; otherwise say plainly what is left and why you stopped.',
+    },
+    {
+      turns: summary.openTodoTurns, id: 'close-todos-before-finishing', title: 'Resolve the todo list before the final reply',
+      cue: 'A todo list exists and items are still open',
+      lesson: 'Complete or explicitly drop every open todo before concluding, and update the list so it matches what was actually done.',
+    },
+  ];
+  for (const signal of signals) {
+    if (signal.turns < 2) continue;
+    proposals.push({
+      dimension: 'INV',
+      targetKind: 'lesson_memory',
+      id: signal.id,
+      title: signal.title,
+      rationale: `Seen in ${signal.turns}/${summary.totalTurns} recent turns.`,
+      content: [
+        `- **Cue**: ${signal.cue}`,
+        `- **Lesson**: ${signal.lesson}`,
+        `- **Evidence**: ${signal.turns} turns`,
+        '- **Confidence**: high',
+      ].join('\n'),
+    });
+  }
+
   return proposals;
 }
 

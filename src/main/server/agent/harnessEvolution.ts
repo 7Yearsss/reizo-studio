@@ -30,6 +30,9 @@ export async function readAllTraces(dataRoot: string): Promise<TurnTrace[]> {
   return traces;
 }
 
+/** Hard cap so auto-apply cannot grow the prompt without bound (mirrors Harness² ComponentSpec cap_chars). */
+export const MAX_LESSONS_CHARS = 8_000;
+
 const marker = (id: string) => `<!-- harness-lesson:${id} -->`;
 
 export interface PendingHarnessProposal extends HarnessProposal {
@@ -52,6 +55,7 @@ export async function applyHarnessProposal(dataRoot: string, id: string): Promis
   const { systemPromptAddon } = await loadActiveHarnessRules(dataRoot);
   const block = `${marker(proposal.id)}\n### ${proposal.title}\n${proposal.content}`;
   const next = systemPromptAddon ? `${systemPromptAddon.trimEnd()}\n\n${block}` : `## Learned lessons\n\n${block}`;
+  if (next.length > MAX_LESSONS_CHARS) throw new Error('harness lessons are full; remove one from harness/systemprompt.md first');
   await saveHarnessRulesOverride(dataRoot, { systemPromptAddon: next });
   return true;
 }
