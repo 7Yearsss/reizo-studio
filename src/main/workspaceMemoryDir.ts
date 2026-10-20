@@ -13,7 +13,7 @@ export const MEMORY_DIR = 'memory';
 const INDEX_FILE = 'MEMORY.md';
 const INDEX_LINE = /^- \[([^\]]+)\]\(([^)]+)\)\s*(?:—\s*(.*))?$/;
 
-export type MemoryType = 'user' | 'feedback' | 'project' | 'reference';
+export type MemoryType = 'user' | 'feedback' | 'project' | 'reference' | 'lesson';
 
 export interface MemoryEntry {
   fileName: string;
@@ -30,7 +30,27 @@ export interface MemoryManifestItem {
   type: MemoryType;
 }
 
-const MEMORY_TYPES: MemoryType[] = ['user', 'feedback', 'project', 'reference'];
+const MEMORY_TYPES: MemoryType[] = ['user', 'feedback', 'project', 'reference', 'lesson'];
+
+/**
+ * Harness² D3: Tripwire against persisting raw credentials, private keys, or benchmark
+ * contamination markers into workspace memory files (`memory/*.md` / `MEMORY.md`).
+ */
+const FORBIDDEN_MEMORY_PATTERNS: Array<{ re: RegExp; reason: string }> = [
+  { re: /\bsk-[A-Za-z0-9_-]{20,}\b/, reason: 'OpenAI/API secret key (sk-...)' },
+  { re: /\bAIza[0-9A-Za-z_-]{30,}\b/, reason: 'Google API key (AIza...)' },
+  { re: /\bgh[pousr]_[A-Za-z0-9_]{20,}\b/, reason: 'GitHub token (gh...)' },
+  { re: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/, reason: 'PEM private key' },
+  { re: /\b(?:ground_truth_score|eval_answer_key|benchmark_secret)\b/i, reason: 'forbidden evaluation marker' },
+];
+
+export function assertMemorySafe(text: string): void {
+  for (const { re, reason } of FORBIDDEN_MEMORY_PATTERNS) {
+    if (re.test(text)) {
+      throw new Error(`Refusing to persist unsafe memory content (${reason})`);
+    }
+  }
+}
 
 export function memoryFileNameFor(name: string): string {
   const slug = name
@@ -155,6 +175,7 @@ export async function writeMemoryEntry(
   workspaceRoot: string,
   entry: { name: string; description: string; type: MemoryType; body: string },
 ): Promise<{ path: string; fileName: string }> {
+  assertMemorySafe(`${entry.name}\n${entry.description}\n${entry.body}`);
   await ensureMemoryDir(workspaceRoot);
   const fileName = memoryFileNameFor(entry.name);
   const relPath = `${MEMORY_DIR}/${fileName}`;

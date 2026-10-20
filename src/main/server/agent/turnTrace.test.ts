@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { createTurnTraceCollector, writeTurnTrace } from './turnTrace';
+import { createTurnTraceCollector, summarizeTraceHistory, writeTurnTrace } from './turnTrace';
 
 describe('turn trace', () => {
   it('records tool timing, failures, steps, loop verdicts and continue passes', () => {
@@ -27,6 +27,32 @@ describe('turn trace', () => {
     expect(result.loopVerdicts).toEqual([{ tier: 'warn', reason: 'same tool failing' }]);
     expect(result.continuePasses).toEqual(['todos']);
     expect(result.durationMs).toBe(290);
+
+    const md = trace.toTrajectoryMarkdown();
+    expect(md).toContain('[ACTION 1] read_file({})');
+    expect(md).toContain('[OBSERVATION 1] ok');
+    expect(md).toContain('[ACTION 2] edit_file({})');
+    expect(md).toContain('[ERROR 2] no match');
+  });
+
+  it('summarizes multi-turn trace history and separates recurring failures from 1/k noise', () => {
+    const t1 = createTurnTraceCollector({ sessionId: 's1', model: 'm' });
+    t1.onEvent({ type: 'tool', id: '1', name: 'edit_file', args: {}, error: 'no match' });
+    t1.onEvent({ type: 'tool', id: '2', name: 'read_file', args: {}, error: 'ENOENT' });
+    t1.onContinue('undelivered');
+    const t2 = createTurnTraceCollector({ sessionId: 's2', model: 'm' });
+    t2.onEvent({ type: 'tool', id: '3', name: 'edit_file', args: {}, error: 'no match again' });
+    t2.onEvent({ type: 'tool_loop', tier: 'warn', reason: 'stuck' });
+
+    const summary = summarizeTraceHistory([
+      t1.finish({ outcome: 'completed', text: '', reasoningLeak: false }),
+      t2.finish({ outcome: 'completed', text: '', reasoningLeak: false }),
+    ]);
+    expect(summary.totalTurns).toBe(2);
+    expect(summary.recurringToolFailures.map((f) => f.tool)).toEqual(['edit_file']);
+    expect(summary.singleTurnToolFailures.map((f) => f.tool)).toEqual(['read_file']);
+    expect(summary.loopWarnCount).toBe(1);
+    expect(summary.undeliveredCount).toBe(1);
   });
 
   it('caps tool rows and reports how many were dropped', () => {

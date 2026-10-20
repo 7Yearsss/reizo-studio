@@ -1,3 +1,5 @@
+import { readdir, readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { isStepCount, tool, ToolLoopAgent, type LanguageModel, type ToolSet } from 'ai';
 import { z } from 'zod';
 
@@ -8,6 +10,10 @@ import { z } from 'zod';
  * Deliberately narrow (v1): the sub-agent gets only read-only workspace tools, so it can never
  * bypass the approval and review flows, and it cannot delegate further. Several delegate calls in
  * one step run in parallel (the SDK executes a step's tool calls concurrently), capped per session.
+ *
+ * Harness² A8: also supports custom read-only specialist roles loaded from
+ * `<dir>/sub_agents/<name>/AGENT.md` or `<dir>/agents/<name>/AGENT.md`.
+ * Loose markdown in those folders is ignored so a workspace notes directory is not treated as a role.
  */
 
 export const SUBAGENT_TOOL_NAME = 'delegate_research';
@@ -17,6 +23,14 @@ export const SUBAGENT_MAX_STEPS = 24;
 export const SUBAGENT_MAX_CONCURRENT = 3;
 const MAX_RESULT_CHARS = 8_000;
 
+export interface SubagentRole {
+  name: string;
+  description: string;
+  instructions: string;
+  /** Optional subset of READ_ONLY_TOOLS allowed for this specialist role. */
+  tools?: string[];
+}
+
 const INSTRUCTIONS = [
   'You are a research sub-agent working for a main agent. Investigate the task using only the read-only tools you have.',
   'You cannot modify anything and you cannot ask the user questions.',
@@ -25,10 +39,83 @@ const INSTRUCTIONS = [
   'Reply in the same language as the task.',
 ].join(' ');
 
-export function pickReadOnlyTools<T extends Record<string, unknown>>(all: T | undefined): Record<string, unknown> {
+export function parseSubagentFile(raw: string, fallbackName: string): SubagentRole | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (!trimmed.startsWith('---')) {
+    return { name: fallbackName, description: `Specialist sub-agent: ${fallbackName}`, instructions: trimmed };
+  }
+  const end = trimmed.indexOf('\n---', 3);
+  if (end < 0) {
+    return { name: fallbackName, description: `Specialist sub-agent: ${fallbackName}`, instructions: trimmed };
+  }
+  const matter = trimmed.slice(3, end).trim();
+  const body = trimmed.slice(end + 4).trim();
+  const fields: Record<string, string> = {};
+  for (const line of matter.split(/\r?\n/)) {
+    const idx = line.indexOf(':');
+    if (idx < 0) continue;
+    fields[line.slice(0, idx).trim()] = line.slice(idx + 1).trim().replace(/^["']|["']$/g, '');
+  }
+  const tools = fields.tools
+    ? fields.tools
+        .replace(/^\[|\]$/g, '')
+        .split(',')
+        .map((s) => s.trim().replace(/^["']|["']$/g, ''))
+        .filter((t) => (READ_ONLY_TOOLS as readonly string[]).includes(t))
+    : undefined;
+  return {
+    name: fields.name || fallbackName,
+    description: fields.description || `Specialist sub-agent: ${fields.name || fallbackName}`,
+    instructions: body || INSTRUCTIONS,
+    ...(tools?.length ? { tools } : {}),
+  };
+}
+
+/**
+ * Harness² A8: Load custom sub-agent role definitions from `<dir>/sub_agents/<name>/AGENT.md`
+ * or `<dir>/agents/<name>/AGENT.md`.
+ */
+export async function loadSubagentRoles(dirs: string[]): Promise<SubagentRole[]> {
+  const byName = new Map<string, SubagentRole>();
+  for (const baseDir of dirs) {
+    for (const sub of ['sub_agents', 'agents']) {
+      const target = path.join(baseDir, sub);
+      try {
+        const entries = await readdir(target, { withFileTypes: true });
+        for (const entry of entries) {
+          if (!entry.isDirectory()) continue;
+          const agentMd = path.join(target, entry.name, 'AGENT.md');
+          try {
+            const raw = await readFile(agentMd, 'utf8');
+            const parsed = parseSubagentFile(raw, entry.name);
+            if (parsed) byName.set(parsed.name, parsed);
+          } catch {
+            /* skip */
+          }
+        }
+      } catch {
+        /* directory absent */
+      }
+    }
+  }
+  return [...byName.values()];
+}
+
+export function formatAvailableSubagents(roles: SubagentRole[]): string {
+  if (!roles.length) return '';
+  return `Available specialist roles (pass \`role\` to delegate_research): ${roles.map((r) => `${r.name} (${r.description})`).join('; ')}.`;
+}
+
+export function pickReadOnlyTools<T extends Record<string, unknown>>(
+  all: T | undefined,
+  allowedNames: readonly string[] = READ_ONLY_TOOLS,
+): Record<string, unknown> {
   const picked: Record<string, unknown> = {};
   if (!all) return picked;
-  for (const name of READ_ONLY_TOOLS) if (name in all) picked[name] = all[name];
+  for (const name of READ_ONLY_TOOLS) {
+    if (allowedNames.includes(name) && name in all) picked[name] = all[name];
+  }
   return picked;
 }
 
@@ -46,8 +133,11 @@ export function createSubagentTool(options: {
   /** Lazy for the same reason as `getModel`. */
   getProviderOptions?: () => unknown;
   maxSteps?: number;
+  /** Optional specialist roles (Harness² A8). */
+  roles?: SubagentRole[];
 }) {
   let running = 0;
+  const roleHint = options.roles?.length ? ` ${formatAvailableSubagents(options.roles)}` : '';
   return {
     [SUBAGENT_TOOL_NAME]: tool({
       description:
@@ -55,20 +145,29 @@ export function createSubagentTool(options: {
         'tracing how something works, collecting facts across a large workspace. It returns only a short summary of findings, ' +
         'so use it when the exploration would otherwise flood this conversation. Do NOT use it for small lookups you can do ' +
         'yourself with one or two tool calls, and never for edits. Give it a complete, self-contained task (it cannot see this chat). ' +
-        'Several independent delegations in the same step run in parallel.',
+        'Several independent delegations in the same step run in parallel.' +
+        roleHint,
       inputSchema: z.object({
         task: z.string().min(1).describe('A complete, self-contained research task, including what to report back.'),
+        role: z.string().optional().describe('Optional specialist sub-agent role name when a domain specialist fits.'),
       }),
-      execute: async ({ task }, { abortSignal }): Promise<string> => {
+      execute: async ({ task, role }, { abortSignal }): Promise<string> => {
         if (running >= SUBAGENT_MAX_CONCURRENT) {
           return `Too many sub-agents are already running (limit ${SUBAGENT_MAX_CONCURRENT}). Wait for them or do this one yourself.`;
         }
         running += 1;
         try {
+          const matchedRole = role ? options.roles?.find((r) => r.name === role) : undefined;
+          const activeTools = matchedRole?.tools?.length
+            ? pickReadOnlyTools(options.tools, matchedRole.tools)
+            : options.tools;
+          const activeInstructions = matchedRole
+            ? `${INSTRUCTIONS}\n\nSpecialist Role (${matchedRole.name}):\n${matchedRole.instructions}`
+            : INSTRUCTIONS;
           const agent = new ToolLoopAgent({
             model: options.getModel(),
-            instructions: INSTRUCTIONS,
-            tools: options.tools as ToolSet,
+            instructions: activeInstructions,
+            tools: activeTools as ToolSet,
             stopWhen: isStepCount(options.maxSteps ?? SUBAGENT_MAX_STEPS),
             maxRetries: 1,
             providerOptions: options.getProviderOptions?.() as never,

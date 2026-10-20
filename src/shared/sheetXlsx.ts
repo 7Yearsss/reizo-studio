@@ -1,10 +1,12 @@
 import ExcelJS from "exceljs";
 import { addNativeCharts } from "./sheetXlsxCharts";
+import { evaluateWorkbookFormulas } from "./sheetFormulaEval";
 import {
   MAX_COLS,
   MAX_GRID_CELLS,
   MAX_ROWS,
   MAX_SHEETS,
+  a1Of,
   emptyGrid,
   parseA1Range,
   putSheetCell,
@@ -491,13 +493,19 @@ function applyUniverStyleToCell(cell: ExcelJS.Cell, style: UniverStyle | undefin
   if (Object.keys(alignment).length) cell.alignment = alignment;
 }
 
-function writeCompactCell(worksheet: ExcelJS.Worksheet, row: number, col: number, cell: SheetCell): void {
+function writeCompactCell(
+  worksheet: ExcelJS.Worksheet,
+  row: number,
+  col: number,
+  cell: SheetCell,
+  evaluatedResult?: SheetCellValue,
+): void {
   const target = worksheet.getCell(row + 1, col + 1);
   // A merged slave aliases its master in ExcelJS; stale slave data must never overwrite it.
   if (target.isMerged && target.master.address !== target.address) return;
   if (cell.f) {
     const formula = cell.f.replace(/^=/, "");
-    const result = cell.v;
+    const result = cell.v !== undefined && cell.v !== null ? cell.v : evaluatedResult;
     target.value = result !== undefined && result !== null ? { formula, result } : { formula };
   } else if (cell.v !== undefined) {
     target.value = cell.v;
@@ -506,8 +514,10 @@ function writeCompactCell(worksheet: ExcelJS.Worksheet, row: number, col: number
 
 function writeSheetFromSnapshot(
   worksheet: ExcelJS.Worksheet,
+  sheetId: string,
   sheet: ExportUniverWorksheet,
   styles: Record<string, UniverStyle>,
+  evaluated: Map<string, SheetCellValue>,
 ): void {
   for (const [rowKey, row] of Object.entries(sheet.cellData ?? {})) {
     const rowIndex = Number(rowKey);
@@ -518,7 +528,8 @@ function writeSheetFromSnapshot(
       const target = worksheet.getCell(rowIndex + 1, colIndex + 1);
       if (cell.f) {
         const formula = cell.f.replace(/^=/, "");
-        const result = cell.v;
+        const fallback = evaluated.get(`${sheetId}!${a1Of(rowIndex, colIndex)}`);
+        const result = cell.v !== undefined && cell.v !== null ? cell.v : fallback;
         target.value = result !== undefined && result !== null ? { formula, result } : { formula };
       } else if (cell.v !== undefined && cell.v !== null) {
         target.value = cell.v;
@@ -570,6 +581,7 @@ export async function sheetContentToXlsxBuffer(content: SheetArtifactContent): P
   const workbook = new ExcelJS.Workbook();
   workbook.calcProperties.fullCalcOnLoad = true;
   const snapshot = asExportableSnapshot(content.univerSnapshot);
+  const evaluated = evaluateWorkbookFormulas(content);
   const usedNames = new Set<string>();
   const sheetNames = new Map<string, string>();
 
@@ -578,7 +590,7 @@ export async function sheetContentToXlsxBuffer(content: SheetArtifactContent): P
     sheetNames.set(grid.id, worksheet.name);
     const univerSheet = snapshot?.sheets?.[grid.id];
     if (univerSheet) {
-      writeSheetFromSnapshot(worksheet, univerSheet, snapshot?.styles ?? {});
+      writeSheetFromSnapshot(worksheet, grid.id, univerSheet, snapshot?.styles ?? {}, evaluated);
     }
     // Reconcile against the compact grid regardless: it's the source of truth
     // for values (agent edits always land there), and this fills in any cell
@@ -589,7 +601,8 @@ export async function sheetContentToXlsxBuffer(content: SheetArtifactContent): P
       for (const [colKey, cell] of Object.entries(row)) {
         const colIndex = Number(colKey);
         if (!Number.isInteger(colIndex)) continue;
-        writeCompactCell(worksheet, rowIndex, colIndex, cell);
+        const evalVal = evaluated.get(`${grid.id}!${a1Of(rowIndex, colIndex)}`);
+        writeCompactCell(worksheet, rowIndex, colIndex, cell, evalVal);
       }
     }
   }

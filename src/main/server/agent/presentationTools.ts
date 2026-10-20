@@ -23,6 +23,22 @@ function fresh(value: unknown): unknown { if (Array.isArray(value)) return value
 function summary(element: PresentationElement): string {
   return JSON.stringify(element, (key, value) => typeof value === 'string' && value.startsWith('data:image/') ? `[内嵌图片，${value.length} 字符]` : value);
 }
+
+/** Harness² A5: Deterministic geometry/bounds audit for 1280×720 slides on write. */
+function checkPresentationBounds(deck: ReturnType<typeof normalizePresentation>): string[] {
+  const warnings: string[] = [];
+  for (const slide of deck.slides) {
+    for (const { element } of presentationElements(slide)) {
+      const box = presentationElementBox(element);
+      if (!box) continue;
+      if (box.x < -10 || box.y < -10 || box.x + box.width > 1290 || box.y + box.height > 730) {
+        warnings.push(`${slide.title || slide.id} 元素 ${element.id ?? ''} 超出 1280×720 画布边界 (${Math.round(box.x)},${Math.round(box.y)} ${Math.round(box.width)}×${Math.round(box.height)})`);
+      }
+    }
+  }
+  return warnings.slice(0, 6);
+}
+
 export const presentationReviewAdapter: ArtifactReviewAdapter = {
   prepare(_content, operations) {
     return operations.map((operation) => {
@@ -75,7 +91,12 @@ export function createPresentationTools(options: { sessionId: string; projectId?
         }), scope: options.getReferences?.().find((r) => r.artifactId === artifactId) };
       } }),
     generate_presentation: tool({ description: '新建可编辑 PPT。slides[].layout 使用 Template V2：elements 数组，每元素有 type、position:{x,y}、size:{width,height}；text 用 runs:[{text}]、font:{family,size,color,bold}；image 用 data；rectangle/ellipse 用 fill:{color}；坐标 1280×720。修改已有稿必须提出建议。', inputSchema: z.object({ title: z.string().min(1).max(200), slides: z.array(slideSchema).min(1).max(64) }), execute: async ({ title, slides }) => {
-      try { const artifact = await artifacts.create({ sessionId, projectId: options.projectId, name: title, kind: 'presentation', mimeType: PRESENTATION_MIME, source: 'generated', origin: { surface: 'chat' }, content: JSON.stringify(normalizePresentation({ schemaVersion: 1, slides })) }); return { ok: true, artifactId: artifact.id, name: artifact.name, version: artifact.version }; } catch (error) { return { ok: false, error: String(error) }; }
+      try {
+        const normalized = normalizePresentation({ schemaVersion: 1, slides });
+        const artifact = await artifacts.create({ sessionId, projectId: options.projectId, name: title, kind: 'presentation', mimeType: PRESENTATION_MIME, source: 'generated', origin: { surface: 'chat' }, content: JSON.stringify(normalized) });
+        const warnings = checkPresentationBounds(normalized);
+        return { ok: true, artifactId: artifact.id, name: artifact.name, version: artifact.version, ...(warnings.length ? { warnings } : {}) };
+      } catch (error) { return { ok: false, error: String(error) }; }
     } }),
     propose_presentation_edits: tool({ description: '为已有 PPT 提出待审核的页面/元素修改。消息里已带当前演示稿内容时直接使用其中的 version 和 ID；否则先读取最新 version 和 ID。使用 expectedVersion。updateElement.patch 按 JSON Merge Patch 合并：只写要改的字段，嵌套对象逐键合并（如只改颜色传 {font:{color:"FF0000"}}，字号等保持不变），null 删除字段，数组（runs、points、rows）整体替换；不能覆盖 id 或子元素数组。移动/缩放用 transformElement（x/y/width/height 只传要改的，矢量形状也适用）；对齐与均匀分布用 arrangeElements（单个元素默认相对整页，多个元素默认相对它们的整体范围）。原文保持不变，只能由用户在 PPT 面板接受或拒绝。', inputSchema: z.object({ artifactId: z.string(), expectedVersion: z.number().int().positive(), operations: z.array(editSchema).min(1).max(40) }), execute: async ({ artifactId, expectedVersion, operations }) => {
       try {

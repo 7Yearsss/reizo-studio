@@ -11,6 +11,9 @@ import {
 
 /**
  * zcode-style memory jobs: post-turn extraction and pre-turn semantic recall.
+ * Enhanced with Harness² B1–B3:
+ * - Structured `lesson` memories (`cue / lesson / evidence / confidence`) distilled from tool errors & recoveries.
+ * - Verified workspace facts anchored with `"In this workspace, ..."` / `"在本工作区中，..."` when a tool call failed due to a missing command or environment constraint.
  * Both are best-effort — failures are logged, never surfaced to the user.
  */
 
@@ -32,25 +35,57 @@ export async function drainMemoryJobs(): Promise<void> {
   await Promise.allSettled([...pendingJobs]);
 }
 
-const EXTRACT_SYSTEM = `You maintain a memory store for an AI agent. Given one conversation turn, extract durable facts worth remembering across sessions.
+const EXTRACT_SYSTEM = `You maintain a memory store for an AI agent. Given one conversation turn (and optional tool trajectory), extract durable facts and operational lessons worth remembering across sessions.
 
 Rules:
-- Only save: lasting user preferences, corrections/feedback the user gave, non-obvious project facts, external references.
-- Never save: anything derivable from the workspace itself (code structure, file contents, git history), one-off task details, things already covered by an existing memory.
+- Only save:
+  1. Lasting user preferences ("user"), corrections/feedback ("feedback"), non-obvious project facts ("project"), external references ("reference").
+  2. Operational lessons ("lesson") when the tool trajectory shows a failure that was diagnosed/overcome, or a verified workspace environment constraint.
+- Never save: raw file dumps, git history, one-off task details, secrets/API keys, or things already covered by an existing memory.
+- Verified workspace environment facts (e.g., a CLI tool that is missing or a command needed to run tests in this repo) ARE allowed as "lesson" or "project" memories, and MUST start with "In this workspace, ..." (or "在本工作区中，...") and cite the observed tool error/output.
 - Keep each memory self-contained and under 120 words.
 - For "feedback" memories, include why the user wants it and how to apply it.
+- For "lesson" memories, provide structured fields ("cue", "lesson", "evidence", "confidence": "high|medium") or format the body with those four bullets.
 
-Reply with ONLY a JSON object: {"memories": [{"name": "kebab-case-title", "description": "one line", "type": "user|feedback|project|reference", "body": "..."}], "deletions": ["existing-file-name.md"]}
+Reply with ONLY a JSON object:
+{"memories": [{"name": "kebab-case-title", "description": "one line", "type": "user|feedback|project|reference|lesson", "body": "...", "cue": "optional trigger", "lesson": "optional action rule", "evidence": "optional observed tool failure/fix", "confidence": "high|medium"}], "deletions": ["existing-file-name.md"]}
 Use "deletions" for existing memories this turn proved wrong or obsolete. Empty arrays are fine — most turns produce nothing.`;
+
+export interface ExtractedMemoryCandidate {
+  name?: string;
+  description?: string;
+  type?: string;
+  body?: string;
+  cue?: string;
+  lesson?: string;
+  evidence?: string;
+  confidence?: string;
+}
+
+export function formatLessonBody(mem: ExtractedMemoryCandidate): string {
+  if (mem.type === 'lesson' && (mem.cue || mem.lesson || mem.evidence)) {
+    const lines = [
+      mem.cue ? `- **Cue**: ${mem.cue}` : '',
+      mem.lesson ? `- **Lesson**: ${mem.lesson}` : '',
+      mem.evidence ? `- **Evidence**: ${mem.evidence}` : '',
+      mem.confidence ? `- **Confidence**: ${mem.confidence}` : '',
+      mem.body && mem.body !== mem.lesson ? `\n${mem.body}` : '',
+    ].filter(Boolean);
+    return lines.join('\n');
+  }
+  return (mem.body ?? '').trim();
+}
 
 export function scheduleMemoryExtraction(opts: {
   workspaceRoot: string;
   model: LanguageModel;
   userText: string;
   assistantText: string;
+  /** Optional tool trajectory markdown (`[ACTION] / [OBSERVATION] / [ERROR]`) from TurnTraceCollector (Harness² B2). */
+  turnTrajectory?: string;
   onChanged?: (wrote: MemoryItem[], deleted: MemoryItem[]) => void;
 }): void {
-  const { workspaceRoot, model, userText, assistantText, onChanged } = opts;
+  const { workspaceRoot, model, userText, assistantText, turnTrajectory, onChanged } = opts;
   if (!userText.trim() && !assistantText.trim()) return;
   track(
     (async () => {
@@ -59,12 +94,17 @@ export function scheduleMemoryExtraction(opts: {
         const existing = manifest.length
           ? manifest.map((m) => `- ${m.fileName}: ${m.name} (${m.type}) — ${m.description}`).join('\n')
           : '(none)';
+        const trajectoryBlock =
+          turnTrajectory && turnTrajectory !== '(no tool calls)'
+            ? `\nTool Trajectory:\n${turnTrajectory.slice(0, 2500)}\n`
+            : '';
         const result = await generateText({
           model,
           system: EXTRACT_SYSTEM,
           prompt:
             `Existing memories:\n${existing}\n\n` +
             `Turn:\nUser: ${userText.slice(0, 2000)}\n` +
+            `${trajectoryBlock}` +
             `Assistant: ${assistantText.slice(0, 3000)}`,
           maxOutputTokens: 1200,
         });
@@ -85,17 +125,18 @@ export function scheduleMemoryExtraction(opts: {
         }
         const wrote: MemoryItem[] = [];
         for (const mem of parsed.memories.slice(0, EXTRACT_MAX_NEW)) {
-          if (!mem.name || !mem.body) continue;
+          const formattedBody = formatLessonBody(mem);
+          if (!mem.name || !formattedBody) continue;
           const saved = await writeMemoryEntry(workspaceRoot, {
             name: mem.name,
-            description: mem.description || mem.name,
+            description: mem.description || mem.cue || mem.name,
             type: normalizeMemoryType(mem.type),
-            body: `${mem.body}\n\n_Updated ${new Date().toISOString().slice(0, 10)}_`,
+            body: `${formattedBody}\n\n_Updated ${new Date().toISOString().slice(0, 10)}_`,
           });
           wrote.push({
             file: saved.fileName,
             name: mem.name,
-            description: mem.description || mem.name,
+            description: mem.description || mem.cue || mem.name,
             type: normalizeMemoryType(mem.type),
           });
         }
@@ -114,11 +155,11 @@ export function scheduleMemoryExtraction(opts: {
 }
 
 interface Extracted {
-  memories: Array<{ name?: string; description?: string; type?: string; body?: string }>;
+  memories: ExtractedMemoryCandidate[];
   deletions: string[];
 }
 
-function parseExtraction(text: string): Extracted | null {
+export function parseExtraction(text: string): Extracted | null {
   const match = text.match(/\{[\s\S]*\}/);
   if (!match) return null;
   try {

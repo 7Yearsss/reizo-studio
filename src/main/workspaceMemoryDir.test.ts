@@ -3,6 +3,7 @@ import { mkdtemp, rm, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
+  assertMemorySafe,
   deleteMemoryEntry,
   listMemoryManifest,
   memoryFileNameFor,
@@ -66,6 +67,28 @@ describe('workspaceMemoryDir', () => {
     const entry = await readMemoryEntry(root, 'feedback-1.md');
     expect(entry?.type).toBe('feedback');
     expect(entry?.body).toBe('Always confirm before deleting.');
+  });
+
+  it('supports lesson memory type and tripwire blocks secrets', async () => {
+    expect(normalizeMemoryType('lesson')).toBe('lesson');
+    await writeMemoryEntry(root, {
+      name: 'xlsx-formula-lesson',
+      description: 'Keep formulas live when updating sheets',
+      type: 'lesson',
+      body: '- **Cue**: Editing summary rows\n- **Lesson**: Use SUMIFS instead of static numbers',
+    });
+    const loaded = await readMemoryEntry(root, 'xlsx-formula-lesson.md');
+    expect(loaded?.type).toBe('lesson');
+
+    expect(() => assertMemorySafe('api key is sk-1234567890abcdefghijklmnop')).toThrow(/unsafe memory content/);
+    await expect(
+      writeMemoryEntry(root, {
+        name: 'leaked-key',
+        description: 'bad',
+        type: 'project',
+        body: 'sk-1234567890abcdefghijklmnop',
+      }),
+    ).rejects.toThrow(/unsafe memory content/);
   });
 
   it('preserves non-index lines in MEMORY.md when rebuilding', async () => {
