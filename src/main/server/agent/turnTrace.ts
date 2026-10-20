@@ -41,6 +41,12 @@ export interface TraceHistorySummary {
   loopWarnCount: number;
   loopHaltCount: number;
   undeliveredCount: number;
+  /** Turns (not events) that hit the tool-loop guard's halt tier. */
+  loopHaltTurns: number;
+  reasoningLeakTurns: number;
+  /** Turns the continuation pass had to push because the model stopped with a deferral / open todos. */
+  deferredTurns: number;
+  openTodoTurns: number;
 }
 
 type TraceEvent = { type: string; [key: string]: unknown };
@@ -134,6 +140,10 @@ export function summarizeTraceHistory(traces: TurnTrace[]): TraceHistorySummary 
   let loopWarnCount = 0;
   let loopHaltCount = 0;
   let undeliveredCount = 0;
+  let loopHaltTurns = 0;
+  let reasoningLeakTurns = 0;
+  let deferredTurns = 0;
+  let openTodoTurns = 0;
 
   traces.forEach((t, idx) => {
     for (const v of t.loopVerdicts) {
@@ -141,6 +151,10 @@ export function summarizeTraceHistory(traces: TurnTrace[]): TraceHistorySummary 
       else if (v.tier === 'halt') loopHaltCount += 1;
     }
     if (t.continuePasses.includes('undelivered')) undeliveredCount += 1;
+    if (t.loopVerdicts.some((v) => v.tier === 'halt')) loopHaltTurns += 1;
+    if (t.reasoningLeak) reasoningLeakTurns += 1;
+    if (t.continuePasses.includes('deferred')) deferredTurns += 1;
+    if (t.continuePasses.includes('todos')) openTodoTurns += 1;
     for (const tool of t.tools) {
       if (tool.ok) continue;
       const entry = byTool.get(tool.name) ?? { turns: new Set<number>(), calls: 0 };
@@ -171,6 +185,10 @@ export function summarizeTraceHistory(traces: TurnTrace[]): TraceHistorySummary 
     loopWarnCount,
     loopHaltCount,
     undeliveredCount,
+    loopHaltTurns,
+    reasoningLeakTurns,
+    deferredTurns,
+    openTodoTurns,
   };
 }
 
