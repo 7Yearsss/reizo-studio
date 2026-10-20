@@ -75,7 +75,7 @@ export default function ToolCard({ part, collapsed = false }: { part: ToolCallPa
       try {
         const parsed = JSON.parse(part.result) as Record<string, unknown>;
         if (typeof parsed.screenshotUrl === 'string') shot = parsed.screenshotUrl;
-        if (typeof parsed.summary === 'string') summary = parsed.summary;
+        if (typeof parsed.summary === 'summary') summary = parsed.summary;
       } catch {
         /* raw */
       }
@@ -87,7 +87,7 @@ export default function ToolCard({ part, collapsed = false }: { part: ToolCallPa
     return (
       <ToolResult
         tool={summary}
-        title={toolLabel('computer')}
+        title={toolLabel('computer', part)}
         status={running ? 'running' : part.error ? 'error' : 'success'}
         kind="request"
         defaultOpen={!collapsed}
@@ -124,7 +124,7 @@ export default function ToolCard({ part, collapsed = false }: { part: ToolCallPa
   return (
     <ToolResult
       tool={target}
-      title={toolLabel(part.name)}
+      title={toolLabel(part.name, part)}
       status={running ? 'running' : part.error ? 'error' : 'success'}
       kind={kind}
       defaultOpen={!collapsed && (isWrite || Boolean(part.error))}

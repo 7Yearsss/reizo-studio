@@ -1,10 +1,12 @@
-import { RotateCcw } from 'lucide-react';
+import { Quote, RotateCcw } from 'lucide-react';
 import type { ReasoningSegment, ReplyActivity, ToolCallPart } from '../../../shared/chat';
 import type { TurnOutcome } from '../../../shared/stream';
 import MarkdownContent, { CopyButton } from './MarkdownContent';
 import WorkGroupCard from './WorkGroupCard';
 import AskAnswers from './AskAnswers';
 import GeneratedMediaStrip from './GeneratedMediaStrip';
+import * as chatStore from '../../state/chatStore';
+import { toast } from '../../lib/toast';
 
 function StreamingCaret() {
   return (
@@ -12,6 +14,42 @@ function StreamingCaret() {
       className="ml-0.5 inline-block h-[0.95em] w-[2px] translate-y-0.5 animate-pulse rounded-sm bg-accent align-text-bottom"
       aria-hidden
     />
+  );
+}
+
+function QuoteButton({
+  sessionId,
+  content,
+  className,
+}: {
+  sessionId?: string;
+  content: string;
+  className?: string;
+}) {
+  const handleQuote = () => {
+    if (!sessionId || !content) return;
+    const selection = window.getSelection()?.toString().trim();
+    const quoteText = selection && content.includes(selection) ? selection : content;
+    const cleanQuote = quoteText
+      .split('\n')
+      .map((line) => `> ${line}`)
+      .join('\n');
+    chatStore.setComposerSeed(sessionId, `${cleanQuote}\n\n`);
+    toast.success('已引用至输入框');
+  };
+
+  if (!sessionId || !content) return null;
+
+  return (
+    <button
+      type="button"
+      onClick={handleQuote}
+      className={className}
+      title="引用回复内容（若选中文本则仅引用所选片段）"
+    >
+      <Quote size={11} />
+      <span>引用</span>
+    </button>
   );
 }
 
@@ -89,14 +127,19 @@ export default function AssistantMessage({
           <div className="flex gap-3 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
             <CopyButton
               text={content}
-              className="inline-flex items-center gap-1 text-[11px] text-ink-muted hover:text-ink"
+              className="inline-flex items-center gap-1 text-[11px] text-ink-muted hover:text-ink cursor-pointer"
+            />
+            <QuoteButton
+              sessionId={sessionId}
+              content={content}
+              className="inline-flex items-center gap-1 text-[11px] text-ink-muted hover:text-ink cursor-pointer"
             />
             {canRetry && (
               <button
                 type="button"
                 onClick={onRetry}
                 title={proposedEdits ? '重新让 AI 提出修改建议；已接受的修改不会撤销' : undefined}
-                className="inline-flex items-center gap-1 text-[11px] text-ink-muted hover:text-ink"
+                className="inline-flex items-center gap-1 text-[11px] text-ink-muted hover:text-ink cursor-pointer"
               >
                 <RotateCcw size={11} />
                 {proposedEdits ? '重新提出修改' : '重新生成'}

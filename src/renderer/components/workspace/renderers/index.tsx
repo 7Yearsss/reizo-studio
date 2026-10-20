@@ -1,27 +1,52 @@
+import { useMemo, useState } from 'react';
 import type { Artifact } from '../../../../shared/artifact';
 import type { ArtifactRendererDef, ArtifactRenderProps } from './types';
 import MarkdownRenderer from './MarkdownRenderer';
 import PreviewFrame from './PreviewFrame';
+import { withHtmlPreviewGuard } from './htmlGuards';
 import { createDeferredView } from '../../DeferredView';
 
 const DiagramRenderer = createDeferredView<ArtifactRenderProps>(() => import('./DiagramRenderer'), { label: '图表编辑器', minHeight: 320 });
 const SheetRenderer = createDeferredView<ArtifactRenderProps>(() => import('./SheetRenderer'), { label: '表格编辑器', minHeight: 320 });
 
-const HtmlRenderer: React.FC<ArtifactRenderProps> = ({ artifact, text }) => (
-  // `sandbox=""` blocks scripts entirely, which is the safe default for a
-  // static preview. When a "run" mode is added it switches to
-  // `sandbox="allow-scripts"` and wraps `text` with `withHtmlPreviewGuard`
-  // (see ./htmlGuards) to neutralise focus-steal / reload-loop / storage
-  // throws.
-  <PreviewFrame>
-    <iframe
-      title={artifact.name}
-      sandbox=""
-      className="h-full min-h-[160px] w-full bg-paper-raised"
-      srcDoc={text}
-    />
-  </PreviewFrame>
-);
+const HtmlRenderer: React.FC<ArtifactRenderProps> = ({ artifact, text }) => {
+  const [run, setRun] = useState(false);
+  const [inspecting, setInspecting] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  const activeScripts = run || inspecting;
+
+  const srcDoc = useMemo(() => {
+    return activeScripts ? withHtmlPreviewGuard(text) : text;
+  }, [activeScripts, text, reloadKey]);
+
+  return (
+    <PreviewFrame
+      run={run}
+      onToggleRun={() => setRun((v) => !v)}
+      inspecting={inspecting}
+      onToggleInspect={() => {
+        setInspecting((prev) => {
+          const next = !prev;
+          if (next && !run) setRun(true);
+          return next;
+        });
+      }}
+      onReload={() => setReloadKey((k) => k + 1)}
+      sessionId={artifact.sessionId}
+      artifactName={artifact.name}
+    >
+      <iframe
+        key={`${activeScripts ? 'run' : 'static'}-${reloadKey}`}
+        title={artifact.name}
+        sandbox={activeScripts ? 'allow-scripts' : ''}
+        referrerPolicy="no-referrer"
+        className="h-full min-h-[160px] w-full border-0 bg-paper-raised"
+        srcDoc={srcDoc}
+      />
+    </PreviewFrame>
+  );
+};
 
 const ImageRenderer: React.FC<ArtifactRenderProps> = ({ artifact, text, rawUrl }) => {
   const src = rawUrl || (text.startsWith('data:') || text.startsWith('http') ? text : '');
@@ -87,20 +112,11 @@ const REGISTRY: ArtifactRendererDef[] = [
   { id: 'sheet', canRender: (a) => a.renderer === 'sheet' || a.kind === 'sheet', supportsStreaming: false, Component: SheetRenderer },
   { id: 'svg', canRender: (a) => a.renderer === 'svg' || a.kind === 'svg', supportsStreaming: true, Component: SvgRenderer },
   { id: 'html', canRender: (a) => a.renderer === 'html' || a.kind === 'html', supportsStreaming: true, Component: HtmlRenderer },
-  { id: 'markdown', canRender: (a) => a.renderer === 'markdown' || a.kind === 'markdown' || a.kind === 'text', supportsStreaming: true, Component: MarkdownRenderer },
-  { id: 'code', canRender: (a) => a.renderer === 'code' || a.kind === 'code' || a.kind === 'json', supportsStreaming: true, Component: CodeRenderer },
+  { id: 'markdown', canRender: (a) => a.renderer === 'markdown' || a.kind === 'markdown', supportsStreaming: true, Component: MarkdownRenderer },
+  { id: 'code', canRender: (a) => a.renderer === 'code' || a.kind === 'code', supportsStreaming: true, Component: CodeRenderer },
   { id: 'raw', canRender: () => true, supportsStreaming: true, Component: RawRenderer },
 ];
 
 export function pickRenderer(artifact: Artifact): ArtifactRendererDef {
-  return (
-    REGISTRY.find((r) => r.id === artifact.renderer && r.canRender(artifact)) ??
-    REGISTRY.find((r) => r.canRender(artifact)) ??
-    REGISTRY[REGISTRY.length - 1]
-  );
-}
-
-export function rendererIsBlob(artifact: Artifact): boolean {
-  const r = pickRenderer(artifact).id;
-  return r === 'image' || r === 'video' || r === 'audio';
+  return REGISTRY.find((entry) => entry.canRender(artifact)) ?? REGISTRY[REGISTRY.length - 1];
 }
