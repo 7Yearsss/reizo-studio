@@ -45,7 +45,9 @@ import { CONTINUE_USER_MESSAGE, MAX_CONTINUE_PASSES, shouldContinueAgentPass } f
 import { appendHookNote, createHookRunner, loadHooks, wrapToolsWithHooks } from './hooks';
 import { connectMcpTools, MCP_TOOL_PREFIX } from './mcpTools';
 import { hasReasoningLeak } from './reasoningLeak';
-import { createSubagentTool, pickReadOnlyTools } from './subagentTools';
+import { createSubagentTool, loadSubagentRoles, pickReadOnlyTools } from './subagentTools';
+import { loadActiveHarnessRules } from './harnessRules';
+import { recordSkillExperience } from './skillRefiner';
 import { loadPluginContributions } from '../plugins/pluginStore';
 import { createTurnTraceCollector, writeTurnTrace } from './turnTrace';
 import { readWorkspaceMemory } from '../../workspaceMemory';
@@ -343,11 +345,14 @@ export async function runChatTurn(options: {
     Boolean(dataRoot) && settings.computerUse === true && isComputerUseSupported();
 
   const sessionArtifactsHint = artifactStore && options.artifactReviews ? await describeSessionArtifacts(artifactStore, sessionId) : '';
+  const activeHarnessRules = await loadActiveHarnessRules(dataRoot);
 
   const systemParts = [
     workspacePath
       ? `You are Reizo Studio, a local desktop agent that finishes real work in the user's files. The workspace is at: ${workspacePath}. For workspace tasks prefer tools over guessing: use list_dir/read_file/find_files/grep to inspect, edit_file/write_file to change files, run_command for tests and git, ask_user when you need a choice, todo_write for a visible plan, and memory_read/memory_write/memory_delete for durable memory files (indexed in MEMORY.md). Greetings, small talk, and questions you can answer from this prompt get a direct reply with no tool calls; the memory index below is already loaded, so only memory_read a file whose description matters for the current task.`
       : 'You are Reizo Studio, a helpful creative assistant running locally on the user\'s desktop. Use ask_user if you need the user to choose.',
+    activeHarnessRules.systemPromptAddon,
+    activeHarnessRules.guardrails,
     'Image Generation Rules:\n' +
     '- When the user asks to generate, draw, or paint an image (e.g., "生图", "画一张...", "生成图片", "设计海报", "绘制插画"), ALWAYS call the `generate_image` tool directly within this chat conversation. The image will be generated and rendered inline for the user.\n' +
     '- The `generate_image` tool automatically uses the configured provider (such as Reizo key with gpt-image-2). Never refuse or tell the user that OpenAI API Key is missing. Just invoke `generate_image` directly.\n' +
@@ -385,6 +390,7 @@ export async function runChatTurn(options: {
       : '',
     skill
       ? `The user invoked skill "${skill.name}". Follow this skill:\n${skill.body}\n\n` +
+        (skill.experience ? `Accumulated experience for "${skill.name}" (EXPERIENCE.md):\n${skill.experience}\n\n` : '') +
         'If this skill declares a "提问"/"Questions" section, collect each missing input through `ask_user` question cards (concrete options + free text) before producing output — never ask those questions as plain chat text. Ask each question at most once; an input the user already answered is never re-asked.'
       : '',
     projectInstructions ? `Project "${projectName}" working rules:\n${projectInstructions}` : '',
@@ -429,6 +435,23 @@ export async function runChatTurn(options: {
   const todos: TodoItem[] = [];
   const loopGuard = createToolLoopGuard();
   const trace = createTurnTraceCollector({ sessionId, model: modelId });
+  let turnDelivered = false;
+  const DELIVERABLE_TOOLS = new Set([
+    'write_file',
+    'edit_file',
+    'generate_sheet',
+    'propose_sheet_edits',
+    'generate_document',
+    'propose_document_edits',
+    'generate_presentation',
+    'propose_presentation_edits',
+    'generate_diagram',
+    'generate_image',
+    'add_node',
+    'run_node',
+    'run_graph',
+    'create_storyboard_pipeline',
+  ]);
 
   const toolset = workspacePath
     ? createWorkspaceTools({
@@ -521,11 +544,14 @@ export async function runChatTurn(options: {
   const mcp = dataRoot ? await connectMcpTools({ dataRoot, sessionId, permissionMode: settings.permissionMode, extraServers: pluginPack.mcpServers }) : undefined;
   const hasMcpTools = mcp !== undefined && Object.keys(mcp.tools).length > 0;
   // Read-only research sub-agent: only the read tools, hook-wrapped like the main agent's. `model` is built below, hence the getters.
+  const subagentRoleDirs = [workspacePath, dataRoot].filter((d): d is string => Boolean(d));
+  const subagentRoles = subagentRoleDirs.length ? await loadSubagentRoles(subagentRoleDirs) : [];
   const subagentTools = toolset
     ? createSubagentTool({
         getModel: () => model,
         tools: wrapToolsWithHooks(pickReadOnlyTools(toolset.tools), hookRunner),
         getProviderOptions: () => providerOptions,
+        roles: subagentRoles,
       })
     : undefined;
   const tools = rawTools || hasMcpTools
@@ -678,10 +704,14 @@ export async function runChatTurn(options: {
           event.type === 'tool' &&
           (event.result !== undefined || event.error !== undefined)
         ) {
+          if (event.error === undefined && DELIVERABLE_TOOLS.has(event.name)) {
+            turnDelivered = true;
+          }
           const verdict = loopGuard.record({
             name: event.name,
             args: event.args,
             ok: event.error === undefined,
+            error: event.error !== undefined ? String(event.error) : undefined,
           });
           if (verdict && verdict.tier !== 'ok') {
             send({ type: 'tool_loop', tier: verdict.tier, reason: verdict.reason });
@@ -696,13 +726,27 @@ export async function runChatTurn(options: {
     onTurnTerminal: ({ outcome, text }) => {
       const reasoningLeak = hasReasoningLeak({ userText, reply: text });
       if (reasoningLeak) console.warn(`[chat] reasoning leaked into the reply session=${sessionId} model=${modelId}`);
+      const turnTrajectory = trace.toTrajectoryMarkdown();
       if (dataRoot) void writeTurnTrace(dataRoot, trace.finish({ outcome, text, reasoningLeak }));
-      if (outcome !== 'completed' || !workspacePath) return;
+      if (outcome !== 'completed') return;
+      if (skill && dataRoot) {
+        void (async () => {
+          try {
+            const latest = await sessionStore.get(sessionId);
+            if (!latest) return;
+            await recordSkillExperience({ dataRoot, skill, messages: latest.messages });
+          } catch (err) {
+            console.warn(`[skillRefiner] experience record failed skill=${skill.id}: ${(err as Error).message}`);
+          }
+        })();
+      }
+      if (!workspacePath) return;
       scheduleMemoryExtraction({
         workspaceRoot: workspacePath,
         model,
         userText,
         assistantText: text,
+        turnTrajectory,
         onChanged: (wrote, deleted) => {
           if (wrote.length > 0) {
             emit({ type: 'memory', action: 'wrote', items: wrote });
@@ -798,7 +842,13 @@ export async function runChatTurn(options: {
     onContinuePass: async ({ getAssistant, finishReason, passIndex, signal }) => {
       if (passIndex >= MAX_CONTINUE_PASSES) return null;
       const snap = getAssistant();
-      const reason = shouldContinueAgentPass({ text: snap.text, todos, finishReason });
+      const reason = shouldContinueAgentPass({
+        text: snap.text,
+        todos,
+        finishReason,
+        userText,
+        delivered: turnDelivered,
+      });
       if (!reason) return null;
       console.info(`[chat] continue pass reason=${reason} pass=${passIndex + 1}`);
       trace.onContinue(reason);

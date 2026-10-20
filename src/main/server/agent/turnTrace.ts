@@ -34,13 +34,30 @@ export interface TurnTrace {
   reasoningLeak: boolean;
 }
 
+export interface TraceHistorySummary {
+  totalTurns: number;
+  recurringToolFailures: Array<{ tool: string; failedTurns: number; totalCalls: number; sampleError?: string }>;
+  singleTurnToolFailures: Array<{ tool: string; failedTurns: number; totalCalls: number; sampleError?: string }>;
+  loopWarnCount: number;
+  loopHaltCount: number;
+  undeliveredCount: number;
+}
+
 type TraceEvent = { type: string; [key: string]: unknown };
+
+interface TrajectoryItem {
+  name: string;
+  argsText: string;
+  ok: boolean;
+  outputText: string;
+}
 
 export function createTurnTraceCollector(options: { sessionId: string; model: string; now?: () => number }) {
   const now = options.now ?? Date.now;
   const startedAt = now();
   const callStart = new Map<string, number>();
   const tools: ToolTrace[] = [];
+  const trajectory: TrajectoryItem[] = [];
   let toolsDropped = 0;
   let steps = 0;
   const loopVerdicts: TurnTrace['loopVerdicts'] = [];
@@ -63,11 +80,32 @@ export function createTurnTraceCollector(options: { sessionId: string; model: st
           ok: !failed,
           ...(failed ? { error: String(event.error).slice(0, 200) } : {}),
         });
+        trajectory.push({
+          name: String(event.name ?? ''),
+          argsText: safeStringify(event.args ?? {}),
+          ok: !failed,
+          outputText: failed ? String(event.error ?? '') : safeStringify(event.result ?? ''),
+        });
       } else if (event.type === 'tool_loop') {
         loopVerdicts.push({ tier: String(event.tier), reason: String(event.reason).slice(0, 200) });
       }
     },
     onContinue(reason: string) { continuePasses.push(reason); },
+    /**
+     * Harness² D5: Render the collected tool trajectory as `[ACTION]`, `[OBSERVATION]`, and `[ERROR]`
+     * blocks for post-turn lesson extraction or harness diagnosis (`obs_trunc` default 600 chars).
+     */
+    toTrajectoryMarkdown(obsTrunc = 600): string {
+      if (trajectory.length === 0) return '(no tool calls)';
+      return trajectory
+        .map((item, idx) => {
+          const action = `[ACTION ${idx + 1}] ${item.name}(${truncateMiddle(item.argsText, 300)})`;
+          const tag = item.ok ? 'OBSERVATION' : 'ERROR';
+          const body = truncateMiddle(item.outputText, obsTrunc);
+          return `${action}\n[${tag} ${idx + 1}] ${body}`;
+        })
+        .join('\n\n');
+    },
     finish(input: { outcome: string; text: string; reasoningLeak: boolean }): TurnTrace {
       return {
         at: new Date(startedAt).toISOString(),
@@ -85,6 +123,70 @@ export function createTurnTraceCollector(options: { sessionId: string; model: st
       };
     },
   };
+}
+
+/**
+ * Harness² B6: Aggregate multiple TurnTraces to distinguish recurring multi-turn failure
+ * patterns from 1/k single-turn noise (which must not be turned into global rules).
+ */
+export function summarizeTraceHistory(traces: TurnTrace[]): TraceHistorySummary {
+  const byTool = new Map<string, { turns: Set<number>; calls: number; sampleError?: string }>();
+  let loopWarnCount = 0;
+  let loopHaltCount = 0;
+  let undeliveredCount = 0;
+
+  traces.forEach((t, idx) => {
+    for (const v of t.loopVerdicts) {
+      if (v.tier === 'warn') loopWarnCount += 1;
+      else if (v.tier === 'halt') loopHaltCount += 1;
+    }
+    if (t.continuePasses.includes('undelivered')) undeliveredCount += 1;
+    for (const tool of t.tools) {
+      if (tool.ok) continue;
+      const entry = byTool.get(tool.name) ?? { turns: new Set<number>(), calls: 0 };
+      entry.turns.add(idx);
+      entry.calls += 1;
+      if (!entry.sampleError && tool.error) entry.sampleError = tool.error;
+      byTool.set(tool.name, entry);
+    }
+  });
+
+  const recurringToolFailures: TraceHistorySummary['recurringToolFailures'] = [];
+  const singleTurnToolFailures: TraceHistorySummary['singleTurnToolFailures'] = [];
+  for (const [tool, stat] of byTool.entries()) {
+    const item = {
+      tool,
+      failedTurns: stat.turns.size,
+      totalCalls: stat.calls,
+      ...(stat.sampleError ? { sampleError: stat.sampleError } : {}),
+    };
+    if (stat.turns.size >= 2) recurringToolFailures.push(item);
+    else singleTurnToolFailures.push(item);
+  }
+
+  return {
+    totalTurns: traces.length,
+    recurringToolFailures,
+    singleTurnToolFailures,
+    loopWarnCount,
+    loopHaltCount,
+    undeliveredCount,
+  };
+}
+
+function safeStringify(val: unknown): string {
+  if (typeof val === 'string') return val;
+  try {
+    return JSON.stringify(val);
+  } catch {
+    return String(val);
+  }
+}
+
+function truncateMiddle(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const half = Math.floor(max / 2);
+  return `${text.slice(0, half)}…(${text.length - max} chars omitted)…${text.slice(-half)}`;
 }
 
 /** Append one trace line; trims the file to its newest lines once it grows past the cap. */

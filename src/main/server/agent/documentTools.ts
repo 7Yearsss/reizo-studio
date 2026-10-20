@@ -56,8 +56,11 @@ export function createDocumentTools(options: { sessionId: string; projectId?: st
       inputSchema: z.object({ title: z.string().trim().min(1).max(200), html: z.string().max(500000) }),
       execute: async ({ title, html }) => {
         try {
-          const artifact = await artifacts.create({ sessionId, projectId: options.projectId, name: title, kind: 'doc', mimeType: DOCUMENT_MIME, source: 'generated', content: JSON.stringify(documentFromHtml(html)), origin: { surface: 'chat' } });
-          return { ok: true, artifactId: artifact.id, name: artifact.name, version: artifact.version };
+          const docContent = documentFromHtml(html);
+          const artifact = await artifacts.create({ sessionId, projectId: options.projectId, name: title, kind: 'doc', mimeType: DOCUMENT_MIME, source: 'generated', content: JSON.stringify(docContent), origin: { surface: 'chat' } });
+          const audit = checkDocument(documentBlocks(docContent).map((b) => ({ id: b.id, type: b.type, text: b.text })), { max: 6 });
+          const warnings = audit.findings.map((f) => `${f.blockId}: ${f.message}`);
+          return { ok: true, artifactId: artifact.id, name: artifact.name, version: artifact.version, ...(warnings.length ? { warnings } : {}) };
         } catch (error) { return { ok: false, error: error instanceof Error ? error.message : '创建失败' }; }
       },
     }),
