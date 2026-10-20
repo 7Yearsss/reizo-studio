@@ -4,6 +4,7 @@ import { labelSelections } from '../../../shared/referenceLabels';
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import { AtSign, FileText, FileSpreadsheet, Presentation, Clapperboard, FolderTree, Paperclip, Image as ImageIcon, Video, Type, Volume2, Bot, Sparkles, BoxSelect, Layers, Pin, Quote, Wrench } from 'lucide-react';
 import { isImeComposingEvent } from '../../lib/ime';
+import { AnimatePresence, motion } from 'motion/react';
 import { cn } from '../../lib/cn';
 import { PromptInput } from '../agents/prompt-input';
 import type { PromptEditorHandle } from '../agents/prompt-editor';
@@ -672,7 +673,20 @@ export default function Composer({
               'rounded-3xl border bg-paper-raised p-2 shadow-[var(--shadow-outline),0_12px_32px_rgba(30,55,85,0.05)] transition-colors',
               draggingFiles ? 'border-accent ring-2 ring-accent/40' : 'border-transparent',
             )}>
-              {liveStatus ? <div className="mb-2 px-2">{liveStatus}</div> : null}
+              <AnimatePresence initial={false}>
+                {liveStatus && (
+                  <motion.div
+                    key="composer-live-status"
+                    initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+                    animate={{ opacity: 1, height: 'auto', marginBottom: 8 }}
+                    exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+                    transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+                    className="overflow-hidden px-2"
+                  >
+                    {liveStatus}
+                  </motion.div>
+                )}
+              </AnimatePresence>
               {activeSkill && (
                 <div className="mb-1.5 px-1">
                   <span

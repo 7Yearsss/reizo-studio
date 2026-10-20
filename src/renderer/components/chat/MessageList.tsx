@@ -128,7 +128,10 @@ export default function MessageList({
         viewportClassName={compact ? 'px-3.5 pt-12' : 'px-8 pt-12'}
         contentClassName="mx-auto max-w-3xl space-y-8"
         viewportProps={{
-          style: { paddingBottom: (bottomInset ?? (compact ? 144 : 176)) + 12 },
+          style: {
+            paddingBottom: (bottomInset ?? (compact ? 144 : 176)) + 12,
+            transition: 'padding-bottom 0.28s cubic-bezier(0.16, 1, 0.3, 1)',
+          },
           onScroll: (event) => {
             const el = event.currentTarget;
             if (el.scrollTop < GROW_TRIGGER_PX && windowStart > 0 && growAnchorRef.current === null) {

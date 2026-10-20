@@ -314,13 +314,24 @@ export function MessageScroller({
     const content = contentRef.current;
     if (!content || typeof ResizeObserver === "undefined") return;
 
-    const observer = new ResizeObserver(() => {
+    let previousHeight = content.offsetHeight;
+
+    const observer = new ResizeObserver((entries) => {
       // Mid panel-drag the content height changes every frame from re-wrapping:
       // pin to the end instantly (a smooth scroll restarted each frame judders)
       // and leave the rail scan for the release.
       const resizing = isPanelResizing();
       if (!resizing) scheduleRailSync();
       if (!followOutput || !followingRef.current) return;
+
+      const currentHeight = entries[0]?.contentRect?.height ?? content.offsetHeight;
+      const isGrowing = currentHeight >= previousHeight - 1;
+      previousHeight = currentHeight;
+
+      // When content shrinks (e.g. accordion/thinking card collapse upon turn completion),
+      // do not forcefully snap or pull the scroll position downwards, preserving reading stability.
+      if (!isGrowing && !resizing) return;
+
       scrollToEnd(resizing || reduce || !smooth ? "auto" : "smooth");
     });
     observer.observe(content);
