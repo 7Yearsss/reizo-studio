@@ -1,6 +1,16 @@
 import { createDeferredView } from '../DeferredView';
-import { useEffect, useState } from 'react';
-import { Code2, Copy, Download, Eye, FileDown, History, X } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  CheckCircle2,
+  Code2,
+  Copy,
+  Download,
+  Eye,
+  FileDown,
+  History,
+  ShieldAlert,
+  X,
+} from 'lucide-react';
 import type { Artifact } from '../../../shared/artifact';
 import { isBlobKind } from '../../../shared/artifact';
 import * as api from '../../api';
@@ -12,6 +22,7 @@ import HandoffMenu from './HandoffMenu';
 import { parseSheetContent } from '../../../shared/sheetContent';
 import SheetDocument from './SheetDocument';
 import { sendArtifactToVideoEditor } from '../../lib/sendToVideoEditor';
+import { lintArtifact } from '../../lib/lintArtifact';
 
 const DocumentEditor = createDeferredView<{ artifact: Artifact }>(() => import('./DocumentEditor'), { label: 'Doc', minHeight: 420 });
 
@@ -37,6 +48,7 @@ function GeneralArtifactPreview({
   const [loading, setLoading] = useState(true);
   const [showRail, setShowRail] = useState(false);
   const [sourceView, setSourceView] = useState(false);
+  const [showLint, setShowLint] = useState(false);
 
   useEffect(() => {
     setVersion(artifact.version);
@@ -61,6 +73,13 @@ function GeneralArtifactPreview({
       cancelled = true;
     };
   }, [artifact.id, version]);
+
+  const lintFindings = useMemo(() => {
+    if (!text || (artifact.kind !== 'html' && artifact.kind !== 'svg' && artifact.renderer !== 'html')) {
+      return [];
+    }
+    return lintArtifact(text);
+  }, [text, artifact.kind, artifact.renderer]);
 
   async function copy() {
     if (!text) return;
@@ -137,10 +156,91 @@ function GeneralArtifactPreview({
             <span className="ml-1.5 text-[11px] text-ink-muted">v{version}</span>
           )}
         </span>
+
+        {/* Anti-AI-Slop design quality badge */}
+        {lintFindings.length > 0 ? (
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowLint((v) => !v)}
+              className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 transition-colors"
+              title="点击查看 AI 设计规范审计提示"
+            >
+              <ShieldAlert size={12} />
+              <span>{lintFindings.length} 项规范提示</span>
+            </button>
+            {showLint && (
+              <div className="absolute right-0 top-full z-50 mt-1.5 w-80 rounded-lg border border-line bg-paper-raised p-2.5 shadow-xl">
+                <div className="flex items-center justify-between border-b border-line/60 pb-1.5">
+                  <span className="text-xs font-semibold text-ink">AI 设计规范审计</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowLint(false)}
+                    className="text-xs text-ink-muted hover:text-ink"
+                  >
+                    关闭
+                  </button>
+                </div>
+                <div className="mt-2 max-h-60 overflow-y-auto space-y-2 text-[11px]">
+                  {lintFindings.map((finding, idx) => (
+                    <div key={idx} className="rounded border border-amber-500/20 bg-amber-500/5 p-2">
+                      <div className="font-medium text-amber-700 dark:text-amber-300">
+                        {finding.message}
+                      </div>
+                      {finding.snippet && (
+                        <div className="mt-1 truncate rounded bg-black/5 dark:bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-ink-muted">
+                          {finding.snippet}
+                        </div>
+                      )}
+                      <div className="mt-1 text-ink-muted leading-tight">
+                        建议：{finding.fix}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const prompt =
+                      `请根据设计规范优化当前页面：\n` +
+                      lintFindings.map((f, i) => `${i + 1}. ${f.fix}`).join('\n');
+                    void navigator.clipboard.writeText(prompt);
+                    setShowLint(false);
+                  }}
+                  className="mt-2.5 w-full rounded bg-paper-inset py-1 text-center text-xs font-medium text-ink hover:bg-line transition-colors"
+                >
+                  复制修复 Prompt 至剪贴板
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          (artifact.kind === 'html' || artifact.kind === 'svg' || artifact.renderer === 'html') &&
+          text && (
+            <span
+              className="inline-flex items-center gap-1 rounded bg-emerald-500/10 px-1.5 py-0.5 text-[11px] text-emerald-600 dark:text-emerald-400"
+              title="设计规范检查通过：未发现典型 AI 俗套特征"
+            >
+              <CheckCircle2 size={11} />
+              <span>规范合规</span>
+            </span>
+          )
+        )}
+
         {artifact.status === 'streaming' && (
           <span className="rounded bg-accent/10 px-1.5 text-[11px] text-accent">生成中…</span>
         )}
-        {['image', 'video', 'audio'].includes(artifact.kind) && artifact.status === 'complete' && <button type="button" disabled={loading} className="shrink-0 rounded border border-line px-2 py-1 text-xs disabled:opacity-50" onClick={() => void sendArtifactToVideoEditor(artifact.sessionId, artifact.id, version)} title={`发送当前预览版本 v${version} 到该作品所属对话的剪辑工程`}>送到剪辑</button>}
+        {['image', 'video', 'audio'].includes(artifact.kind) && artifact.status === 'complete' && (
+          <button
+            type="button"
+            disabled={loading}
+            className="shrink-0 rounded border border-line px-2 py-1 text-xs disabled:opacity-50"
+            onClick={() => void sendArtifactToVideoEditor(artifact.sessionId, artifact.id, version)}
+            title={`发送当前预览版本 v${version} 到该作品所属对话的剪辑工程`}
+          >
+            送到剪辑
+          </button>
+        )}
         {artifact.status === 'error' && (
           <span className="rounded bg-red-500/10 px-1.5 text-[11px] text-red-500">中断</span>
         )}

@@ -6,9 +6,11 @@
  *   - freeze the frame with `<meta http-equiv=refresh>` or a `location.reload`
  *     loop
  *   - throw on `localStorage` / `history` because the frame is an opaque origin
+ *   - crash silently with unhandled errors
  *
- * These guards neutralise all three without changing what a well-behaved page
- * sees. Ported from open-design's `file-viewer-render-mode` detection notes.
+ * These guards neutralise focus/reload/storage throws and report unhandled runtime
+ * errors to the parent frame so users get immediate visibility instead of a blank screen.
+ * Ported and enhanced from Open Design's preview architecture.
  */
 export const HTML_PREVIEW_GUARD_SCRIPT = `
 (function () {
@@ -74,6 +76,18 @@ export const HTML_PREVIEW_GUARD_SCRIPT = `
     }
     shim('localStorage');
     shim('sessionStorage');
+
+    // 4. Runtime error reporter: post errors to the parent frame so the user knows if code broke.
+    window.addEventListener('error', function (evt) {
+      try {
+        window.parent.postMessage({
+          type: 'reizo:preview-error',
+          message: evt.message || '未知脚本错误',
+          lineno: evt.lineno,
+          colno: evt.colno,
+        }, '*');
+      } catch (err) {}
+    });
   } catch (e) {}
 })();
 `;

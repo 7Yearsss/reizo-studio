@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Timer } from 'lucide-react';
+import { ArrowRight, LayoutGrid, List, Timer } from 'lucide-react';
 import type { PendingAsk } from '../../state/chatStore';
 import { computeRecommendedAnswers } from '../../../shared/askAutoResolve';
 import { ApprovalCard } from '../agents/approval-card';
@@ -127,6 +127,7 @@ function DirectionAsk({
     return init;
   });
   const [freeText, setFreeText] = useState<Record<string, string>>({});
+  const [viewMode, setViewMode] = useState<'grid' | 'stack'>('grid');
 
   const complete = pending.questions.every((q) => {
     if (q.kind === 'direction') return Boolean(picks[q.id]);
@@ -134,79 +135,114 @@ function DirectionAsk({
   });
 
   return (
-    // Long asks (e.g. an 8-question skill card) used to grow the composer overlay
-    // past the viewport — everything above the fold became unreachable. Cap the
-    // card and scroll the question list so every question stays clickable, while
-    // the title and submit stay pinned.
-    <div className="rise-in flex max-h-[70vh] flex-col gap-3 rounded-xl border border-line bg-paper-raised p-3">
-      <span className="text-xs font-semibold">选一个方向</span>
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
-      {pending.questions.map((q) => (
-        <div key={q.id} className="flex flex-col gap-2">
-          <span className="text-[12px] text-ink">{q.prompt}</span>
-          {q.kind === 'direction' && q.directions ? (
-            <div
-              className={cn(
-                'grid grid-cols-1 gap-2',
-                q.directions.length >= 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-2',
-              )}
-            >
-              {q.directions.map((d) => (
-                <DirectionCardChoice
-                  key={d.id}
-                  direction={d}
-                  selected={picks[q.id] === d.id}
-                  recommended={q.recommended?.trim() === d.id}
-                  onPick={() => setPicks((p) => ({ ...p, [q.id]: d.id }))}
-                  sessionId={sessionId}
-                />
-              ))}
-            </div>
-          ) : q.options && q.options.length > 0 ? (
-            <div className="flex flex-wrap gap-1.5">
-              {q.options.map((opt) => {
-                const isRec = q.recommended?.trim() === opt;
-                return (
-                  <button
-                    key={opt}
-                    type="button"
-                    onClick={() => setPicks((p) => ({ ...p, [q.id]: opt }))}
-                    className={[
-                      'rounded-full px-2.5 py-1 text-[11px]',
-                      picks[q.id] === opt
-                        ? 'bg-accent text-white'
-                        : isRec
-                          ? 'bg-paper-inset text-ink ring-1 ring-success/60'
-                          : 'bg-paper-inset text-ink',
-                    ].join(' ')}
-                  >
-                    {opt}
-                  </button>
-                );
-              })}
-            </div>
-          ) : (
-            <input
-              value={freeText[q.id] ?? ''}
-              onChange={(e) => {
-                setFreeText((f) => ({ ...f, [q.id]: e.target.value }));
-                setPicks((p) => ({ ...p, [q.id]: e.target.value }));
-              }}
-              placeholder="输入…"
-              className="rounded-lg border border-line bg-paper px-2 py-1 text-[12px] outline-none"
-            />
-          )}
+    <div className="rise-in flex max-h-[70vh] flex-col gap-3 rounded-xl border border-line bg-paper-raised p-3 shadow-xs">
+      <div className="flex items-center justify-between border-b border-line/60 pb-2">
+        <span className="text-xs font-semibold text-ink">选择视觉方向</span>
+        <div className="flex items-center gap-0.5 rounded-md bg-paper-inset p-0.5 text-ink-muted">
+          <button
+            type="button"
+            onClick={() => setViewMode('grid')}
+            className={cn(
+              'rounded p-1 transition-colors',
+              viewMode === 'grid' ? 'bg-paper-raised text-ink shadow-2xs' : 'hover:text-ink',
+            )}
+            title="网格平铺对比"
+          >
+            <LayoutGrid size={12} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('stack')}
+            className={cn(
+              'rounded p-1 transition-colors',
+              viewMode === 'stack' ? 'bg-paper-raised text-ink shadow-2xs' : 'hover:text-ink',
+            )}
+            title="单列聚焦视图"
+          >
+            <List size={12} />
+          </button>
         </div>
-      ))}
       </div>
-      <button
-        type="button"
-        disabled={!complete}
-        onClick={() => onAnswer(picks)}
-        className="self-end rounded-full bg-accent px-3 py-1 text-[12px] text-white disabled:opacity-40"
-      >
-        确定
-      </button>
+
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-0.5">
+        {pending.questions.map((q) => (
+          <div key={q.id} className="flex flex-col gap-2">
+            <span className="text-[12px] font-medium text-ink">{q.prompt}</span>
+            {q.kind === 'direction' && q.directions ? (
+              <div
+                className={cn(
+                  'gap-2.5 transition-all duration-200',
+                  viewMode === 'grid'
+                    ? cn(
+                        'grid grid-cols-1',
+                        q.directions.length >= 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-2',
+                      )
+                    : 'flex flex-col',
+                )}
+              >
+                {q.directions.map((d) => (
+                  <DirectionCardChoice
+                    key={d.id}
+                    direction={d}
+                    selected={picks[q.id] === d.id}
+                    recommended={q.recommended?.trim() === d.id}
+                    onPick={() => setPicks((p) => ({ ...p, [q.id]: d.id }))}
+                    sessionId={sessionId}
+                  />
+                ))}
+              </div>
+            ) : q.options && q.options.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {q.options.map((opt) => {
+                  const isRec = q.recommended?.trim() === opt;
+                  return (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => setPicks((p) => ({ ...p, [q.id]: opt }))}
+                      className={[
+                        'rounded-full px-2.5 py-1 text-[11px] transition-all',
+                        picks[q.id] === opt
+                          ? 'bg-accent text-white shadow-xs'
+                          : isRec
+                            ? 'bg-paper-inset text-ink ring-1 ring-success/60 hover:bg-paper-inset/80'
+                            : 'bg-paper-inset text-ink hover:bg-paper-inset/80',
+                      ].join(' ')}
+                    >
+                      {opt}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <input
+                value={freeText[q.id] ?? ''}
+                onChange={(e) => {
+                  setFreeText((f) => ({ ...f, [q.id]: e.target.value }));
+                  setPicks((p) => ({ ...p, [q.id]: e.target.value }));
+                }}
+                placeholder="输入…"
+                className="rounded-lg border border-line bg-paper px-2 py-1 text-[12px] outline-none transition-colors focus:border-accent"
+              />
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="flex items-center justify-between border-t border-line/60 pt-2">
+        <span className="text-[11px] text-ink-muted">
+          {complete ? '已选择方案，点击进入下一步' : '请挑选一个视觉设计方向'}
+        </span>
+        <button
+          type="button"
+          disabled={!complete}
+          onClick={() => onAnswer(picks)}
+          className="inline-flex items-center gap-1.5 rounded-full bg-accent px-3.5 py-1 text-[12px] font-medium text-white shadow-xs transition-opacity hover:opacity-90 disabled:opacity-40"
+        >
+          <span>下一步</span>
+          <ArrowRight size={12} />
+        </button>
+      </div>
     </div>
   );
 }
