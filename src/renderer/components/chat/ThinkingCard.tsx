@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { ChevronRight, Sparkles } from 'lucide-react';
 import { cn } from '../../lib/cn';
 import { ReasoningText } from '../agents/loading-states/reasoning-text';
+import { ThinkingOrb } from './ThinkingOrb';
+import { CountingNumber } from './CountingNumber';
 
 /** `Xs` for under a minute, `Xm Ys` above. Floors at 1s so it's never "0s". */
 export function formatThinkingDuration(ms: number): string {
@@ -21,7 +23,8 @@ const THINKING_PHRASES = [
 ];
 
 /**
- * Collapsible model-reasoning block with beUI ReasoningText.
+ * Collapsible model-reasoning block with beUI ReasoningText,
+ * organic ThinkingOrb 2D canvas texture, and fluid CountingNumber.
  */
 export default function ThinkingCard({
   content,
@@ -54,7 +57,11 @@ export default function ThinkingCard({
         aria-expanded={expanded}
         className="flex w-full select-none items-center gap-2 py-1 text-left text-ink-muted transition-opacity duration-150 hover:opacity-80"
       >
-        <Sparkles size={13} className="shrink-0 text-accent" />
+        {streaming ? (
+          <ThinkingOrb size={14} className="shrink-0" />
+        ) : (
+          <Sparkles size={13} className="shrink-0 text-accent" />
+        )}
         {streaming ? (
           <div className="flex items-center gap-2">
             <ReasoningText
@@ -65,7 +72,15 @@ export default function ThinkingCard({
             />
             {startedAt && (
               <span className="font-mono text-[11px] tabular-nums text-ink-muted">
-                {formatThinkingDuration(shownMs)}
+                <CountingNumber
+                  value={Math.max(1, Math.round(shownMs / 1000))}
+                  render={(sec) => {
+                    if (sec < 60) return `${sec}s`;
+                    const m = Math.floor(sec / 60);
+                    const s = sec % 60;
+                    return s === 0 ? `${m}m` : `${m}m ${s}s`;
+                  }}
+                />
               </span>
             )}
           </div>
@@ -79,7 +94,7 @@ export default function ThinkingCard({
       </button>
 
       {expanded && (
-        <div className="mt-1.5 border-l-2 border-line/70 py-1 pl-3">
+        <div className="mt-1.5 border-l-2 border-line/70 py-1 pl-3 transition-all">
           {content ? (
             <p className="text-[13px] leading-relaxed whitespace-pre-wrap text-ink-muted/90 italic select-text font-serif">
               {content}
