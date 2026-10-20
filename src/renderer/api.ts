@@ -398,6 +398,18 @@ export async function deleteMemoryFile(file: string, sessionId?: string): Promis
   await api(`/api/memory/${encodeURIComponent(file)}${q}`, { method: 'DELETE' });
 }
 
+export interface HarnessProposalDto { id: string; title: string; rationale: string; content: string; applied: boolean }
+
+export async function listHarnessProposals(): Promise<HarnessProposalDto[]> {
+  const res = await api('/api/harness/proposals');
+  const body = await res.json();
+  return body.proposals ?? [];
+}
+
+export async function applyHarnessProposal(id: string): Promise<void> {
+  await api(`/api/harness/proposals/${encodeURIComponent(id)}/apply`, { method: 'POST' });
+}
+
 export async function listSkills(): Promise<{ id: string; name: string; description: string; prompt?: string; source: 'bundled' | 'user'; coverUrl?: string }[]> {
   const res = await api('/api/skills');
   const body = await res.json();
