@@ -14,6 +14,7 @@ import { AdminProvidersSection } from './settings/AdminProvidersSection';
 import StorageMaintenanceSection from './settings/StorageMaintenanceSection';
 import UsageCostsSection from './settings/UsageCostsSection';
 import ExtensionsSection from './settings/ExtensionsSection';
+import HarnessLessonsSection from './settings/HarnessLessonsSection';
 
 type SectionId = uiStore.SettingsSection;
 
@@ -278,6 +279,8 @@ function GeneralSection() {
           </button>
         )}
       </div>
+
+      <HarnessLessonsSection />
     </div>
   );
 }

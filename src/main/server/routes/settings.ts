@@ -35,6 +35,12 @@ export function createSettingsRouter(settingsStore: SettingsStore) {
       patch.permissionMode = body.permissionMode;
     }
 
+    if (body.autoApplyHarnessLessons !== undefined) {
+      if (typeof body.autoApplyHarnessLessons !== 'boolean') {
+        return c.json({ error: 'autoApplyHarnessLessons must be a boolean' }, 400);
+      }
+      patch.autoApplyHarnessLessons = body.autoApplyHarnessLessons;
+    }
     if (body.computerUse !== undefined) {
       if (typeof body.computerUse !== 'boolean') {
         return c.json({ error: 'computerUse must be a boolean' }, 400);
