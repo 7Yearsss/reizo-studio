@@ -16,7 +16,6 @@ import PendingInteraction from './PendingInteraction';
 import QueuePanel from './QueuePanel';
 import ComposerDock from './ComposerDock';
 import WorkspaceRefChip from './WorkspaceRefChip';
-import ReplyStatusBar from './ReplyStatusBar';
 import InterruptedTurnBanner from './InterruptedTurnBanner';
 import SelectField from '../ui/SelectField';
 import { useSettingsStore } from '../../state/useSettingsStore';
@@ -436,18 +435,6 @@ export default function Composer({
     window.setTimeout(focusComposer, 0);
   }
 
-  const liveStatus = sessionId && sending ? (
-    <LiveStatusBar
-      sessionId={sessionId}
-      todos={todos}
-      interaction={interaction}
-      interruptRequested={interruptRequested}
-      recovering={Boolean(turnError?.includes('正在恢复'))}
-      onRetryStalled={onRetryStalled}
-      skillName={activeSkill?.name}
-    />
-  ) : null;
-
   return (
     <div
       ref={overlayRef}
@@ -673,20 +660,6 @@ export default function Composer({
               'rounded-3xl border bg-paper-raised p-2 shadow-[var(--shadow-outline),0_12px_32px_rgba(30,55,85,0.05)] transition-colors',
               draggingFiles ? 'border-accent ring-2 ring-accent/40' : 'border-transparent',
             )}>
-              <AnimatePresence initial={false}>
-                {liveStatus && (
-                  <motion.div
-                    key="composer-live-status"
-                    initial={{ opacity: 0, height: 0, marginBottom: 0 }}
-                    animate={{ opacity: 1, height: 'auto', marginBottom: 8 }}
-                    exit={{ opacity: 0, height: 0, marginBottom: 0 }}
-                    transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
-                    className="overflow-hidden px-2"
-                  >
-                    {liveStatus}
-                  </motion.div>
-                )}
-              </AnimatePresence>
               {activeSkill && (
                 <div className="mb-1.5 px-1">
                   <span
@@ -860,47 +833,3 @@ export default function Composer({
   );
 }
 
-/**
- * Live reply status subscribes to the per-token progress slices
- * (lastTextAt / lastProgressAt) itself so stream commits don't re-render the
- * whole composer — textarea included — 20 times a second.
- */
-function LiveStatusBar({
-  sessionId,
-  todos,
-  interaction,
-  interruptRequested,
-  recovering,
-  onRetryStalled,
-  skillName,
-}: {
-  sessionId: string;
-  todos: ComponentProps<typeof ReplyStatusBar>['todos'];
-  interaction: ComponentProps<typeof ReplyStatusBar>['interaction'];
-  interruptRequested: boolean;
-  recovering: boolean;
-  onRetryStalled?: () => void;
-  skillName?: string;
-}) {
-  const lastTextAt = useChatStore((s) => s.lastTextAtBySession[sessionId]);
-  const lastProgressAt = useChatStore((s) => s.lastProgressAtBySession[sessionId]);
-  const turnStartedAt = useChatStore((s) => s.turnStartedAtBySession[sessionId]);
-  const liveToolCount =
-    useChatStore((s) => s.streamingToolsBySession[sessionId])?.filter(
-      (part) => part.result === undefined && part.error === undefined,
-    ).length ?? 0;
-  return (
-    <ReplyStatusBar
-      startedAt={turnStartedAt}
-      toolCount={liveToolCount}
-      todos={todos}
-      interaction={interaction}
-      interruptRequested={interruptRequested}
-      recovering={recovering}
-      lastTextAt={lastTextAt}
-      lastProgressAt={lastProgressAt}
-      onRetry={onRetryStalled}
-      skillName={skillName}
-    />
-  );
-}
