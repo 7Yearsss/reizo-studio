@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import { CodeBlock, type CodeBlockProps } from '../agents/code-block';
 import { cn } from '../../lib/cn';
 import HtmlPreview from './HtmlPreview';
+import { mermaidMarkdownComponents } from '../markdown/mermaidMarkdown';
 
 export type PreviewKind = 'markdown' | 'html' | 'code';
 
@@ -73,7 +74,7 @@ export default function FilePreview({ path, content }: { path: string; content: 
         code
       ) : kind === 'markdown' ? (
         <div className="markdown min-h-0 flex-1 overflow-auto px-4 py-3 text-[14px] leading-[1.75] text-ink">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+          <ReactMarkdown components={mermaidMarkdownComponents} remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
         </div>
       ) : (
         <div className="h-[360px] min-h-0 flex-1 p-2">

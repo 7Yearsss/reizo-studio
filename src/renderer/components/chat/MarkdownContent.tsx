@@ -9,8 +9,12 @@ import * as canvasStore from '../../state/canvasStore';
 import * as uiStore from '../../state/uiStore';
 import { requestSheetFocus } from '../../state/sheetWorkspace';
 import { linkSheetCells, parseSheetCellHref } from '../../lib/markdown/linkSheetCells';
+import { MermaidStreamBlock } from '../markdown/mermaidMarkdown';
 
-const STREAMDOWN_PLUGINS = { code };
+const STREAMDOWN_PLUGINS = {
+  code,
+  renderers: [{ language: ['mermaid', 'mmd'], component: MermaidStreamBlock }],
+};
 const STREAMDOWN_CONTROLS = {
   code: { copy: true, download: false },
   table: { copy: true, download: false, fullscreen: false },
