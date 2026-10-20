@@ -174,8 +174,8 @@ function toActivityItems(input: {
       items.push({
         id: activity.id,
         type: 'tool',
-        action: toolAction(activity.tool.name),
-        target: toolTarget(activity.tool) || toolLabel(activity.tool.name),
+        action: toolAction(activity.tool.name, activity.tool),
+        target: toolTarget(activity.tool) || toolLabel(activity.tool.name, activity.tool),
       });
     }
   } else {
@@ -214,8 +214,8 @@ function toActivityItems(input: {
       items.push({
         id: part.id,
         type: 'tool',
-        action: toolAction(part.name),
-        target: toolTarget(part) || toolLabel(part.name),
+        action: toolAction(part.name, part),
+        target: toolTarget(part) || toolLabel(part.name, part),
       });
     });
     flush(input.parts.length);

@@ -1,14 +1,19 @@
 import {
   Check,
+  CheckCircle2,
   Circle,
   FileText,
+  GitBranch,
   Globe2,
+  Hammer,
   ImageIcon,
   MessageSquare,
+  Package,
   PencilLine,
   Search,
   Sparkles,
   SquareTerminal,
+  Trash2,
   Wrench,
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
@@ -166,16 +171,33 @@ function SearchRow({ item }: { item: AgentActivitySearch }) {
 }
 
 function ActionIcon({ action }: { action: string }) {
-  if (action === "read") return <FileText className="size-4" />;
-  if (action === "edit" || action === "write") {
-    return <PencilLine className="size-4" />;
-  }
-  if (action === "run") return <SquareTerminal className="size-4" />;
-  return <Wrench className="size-4" />;
+  if (action === "read") return <FileText className="size-4 text-blue-500" />;
+  if (action === "search") return <Search className="size-4 text-amber-500" />;
+  if (action === "edit" || action === "write") return <PencilLine className="size-4 text-indigo-500" />;
+  if (action === "git") return <GitBranch className="size-4 text-emerald-500" />;
+  if (action === "test") return <CheckCircle2 className="size-4 text-purple-500" />;
+  if (action === "build") return <Hammer className="size-4 text-orange-500" />;
+  if (action === "install") return <Package className="size-4 text-cyan-500" />;
+  if (action === "delete") return <Trash2 className="size-4 text-rose-500" />;
+  if (action === "run") return <SquareTerminal className="size-4 text-foreground/80" />;
+  return <Wrench className="size-4 text-muted-foreground" />;
 }
 
+const ACTION_LABEL: Record<string, string> = {
+  read: '读取',
+  search: '搜索',
+  edit: '改写',
+  write: '写入',
+  delete: '删除',
+  git: 'Git',
+  test: '测试',
+  build: '构建',
+  install: '安装',
+  run: '执行',
+};
+
 function ToolRow({ item }: { item: AgentActivityTool }) {
-  const action = item.action.charAt(0).toUpperCase() + item.action.slice(1);
+  const actionText = ACTION_LABEL[item.action] ?? (item.action.charAt(0).toUpperCase() + item.action.slice(1));
 
   return (
     <div className="flex min-h-8 min-w-0 items-center gap-2.5 rounded-md px-1.5 py-0.5 leading-5">
@@ -185,7 +207,7 @@ function ToolRow({ item }: { item: AgentActivityTool }) {
       >
         <ActionIcon action={item.action} />
       </span>
-      <span className="shrink-0 font-medium text-foreground/90">{action}</span>
+      <span className="shrink-0 font-medium text-foreground/90">{actionText}</span>
       <span className="min-w-0 flex-1 truncate rounded-lg bg-muted/80 px-2.5 py-1 font-mono text-xs text-muted-foreground/70">
         {item.target}
       </span>
