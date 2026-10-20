@@ -35,7 +35,13 @@ export async function readAllTraces(dataRoot: string): Promise<TurnTrace[]> {
   const dir = path.join(dataRoot, 'traces');
   const names = (await readdir(dir).catch(() => [] as string[])).filter((name) => name.endsWith('.jsonl'));
   const dated = await Promise.all(
-    names.map(async (name): Promise<{ name: string; mtime: number }> => ({ name, mtime: (await stat(path.join(dir, name)).catch(() => undefined))?.mtimeMs ?? 0 })),
+    names.map(async (name): Promise<{ name: string; mtime: number }> => {
+      try {
+        return { name, mtime: (await stat(path.join(dir, name))).mtimeMs };
+      } catch {
+        return { name, mtime: 0 };
+      }
+    }),
   );
   const newest = dated.sort((a, b) => b.mtime - a.mtime).slice(0, MAX_TRACE_FILES);
   const traces: TurnTrace[] = [];
