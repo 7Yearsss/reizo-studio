@@ -1,7 +1,9 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { Hono } from 'hono';
+import type { SessionStore } from '../../../shared/chat';
 import { loadSkills, type Skill } from '../../skills';
+import { applySkillRefinement, proposeSkillRefinement } from '../agent/skillRefiner';
 
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp']);
 
@@ -27,7 +29,14 @@ async function coverUrlFor(skill: Skill): Promise<string | undefined> {
   return `/api/skills/${encodeURIComponent(skill.id)}/assets/${encodeURIComponent(file)}`;
 }
 
-export function createSkillsRouter(dirs: string[]) {
+export function createSkillsRouter(
+  dirs: string[],
+  options?: {
+    dataRoot?: string;
+    sessionStore?: SessionStore;
+    rewriteText?: (system: string, prompt: string) => Promise<string>;
+  },
+) {
   const router = new Hono();
 
   router.get('/', async (c) => {
@@ -92,6 +101,61 @@ export function createSkillsRouter(dirs: string[]) {
         coverUrl: await coverUrlFor(skill),
       },
     });
+  });
+
+  /**
+   * Harness² B4: Propose a self-optimization diff for `SKILL.md` from a completed session's trajectory.
+   */
+  router.post('/:id/propose-refinement', async (c) => {
+    if (!options?.dataRoot || !options?.sessionStore) {
+      return c.json({ error: 'skill refinement is not configured' }, 400);
+    }
+    const id = c.req.param('id');
+    const body = (await c.req.json().catch(() => ({}))) as { sessionId?: string };
+    if (!body.sessionId) return c.json({ error: 'sessionId is required' }, 400);
+    const session = await options.sessionStore.get(body.sessionId);
+    if (!session) return c.json({ error: 'session not found' }, 404);
+    const skills = await loadSkills(dirs);
+    const skill = skills.find((item) => item.id === id);
+    if (!skill) return c.json({ error: 'skill not found' }, 404);
+
+    const proposal = await proposeSkillRefinement({
+      dataRoot: options.dataRoot,
+      skill,
+      messages: session.messages,
+      rewriteText: options.rewriteText,
+    });
+    return c.json({ ok: true, proposal });
+  });
+
+  /**
+   * Harness² B3 + B4: Apply a user-confirmed `SKILL.md` refinement and append to `EXPERIENCE.md` in `<dataRoot>/skills/<id>/`.
+   */
+  router.post('/:id/apply-refinement', async (c) => {
+    if (!options?.dataRoot) {
+      return c.json({ error: 'skill refinement is not configured' }, 400);
+    }
+    const id = c.req.param('id');
+    const body = (await c.req.json().catch(() => ({}))) as {
+      after?: string;
+      experienceEntry?: { cue: string; lesson: string; evidence: string; confidence: 'high' | 'medium' } | null;
+    };
+    if (!body.after) return c.json({ error: 'after markdown is required' }, 400);
+    const skills = await loadSkills(dirs);
+    const skill = skills.find((item) => item.id === id);
+    if (!skill) return c.json({ error: 'skill not found' }, 404);
+
+    try {
+      const saved = await applySkillRefinement({
+        dataRoot: options.dataRoot,
+        skill,
+        afterMarkdown: body.after,
+        experienceEntry: body.experienceEntry ?? null,
+      });
+      return c.json({ ok: true, ...saved });
+    } catch (error) {
+      return c.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
+    }
   });
 
   return router;

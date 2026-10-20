@@ -203,11 +203,14 @@ export function createArtifactTools(options: {
             if (error instanceof ArtifactVersionConflictError) return { ok: false, error: error.message };
             throw error;
           }
+          const audit = checkSheet(patched.content, { max: 8 });
+          const warnings = audit.findings.filter((f) => f.severity !== 'info').map((f) => `${f.sheet}!${f.range}：${f.message}`);
           return {
             ok: true,
             artifactId: sourceArtifactId,
             name: existing.name,
             version: updated?.version,
+            ...(warnings.length ? { warnings } : {}),
             summary: `已更新表格 "${existing.name}" (版本: v${patched.content.revision})，已在右侧产物区展示。`,
           };
         }
@@ -233,10 +236,13 @@ export function createArtifactTools(options: {
           source: 'generated',
           origin: { surface: 'chat', prompt: `生成表格: ${cleanTitle}` },
         });
+        const audit = checkSheet(contentResult.content, { max: 8 });
+        const warnings = audit.findings.filter((f) => f.severity !== 'info').map((f) => `${f.sheet}!${f.range}：${f.message}`);
         return {
           ok: true,
           artifactId: artifact.id,
           name: artifact.name,
+          ...(warnings.length ? { warnings } : {}),
           summary: `已创建表格 "${artifact.name}" (ID: ${artifact.id})，已在右侧产物区打开。`,
         };
       },

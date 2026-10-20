@@ -1,8 +1,18 @@
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { tool } from 'ai';
 import { MockLanguageModelV3 } from 'ai/test';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { clipSubagentResult, createSubagentTool, pickReadOnlyTools, SUBAGENT_TOOL_NAME } from './subagentTools';
+import {
+  clipSubagentResult,
+  createSubagentTool,
+  loadSubagentRoles,
+  parseSubagentFile,
+  pickReadOnlyTools,
+  SUBAGENT_TOOL_NAME,
+} from './subagentTools';
 
 const usage = {
   inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
@@ -56,7 +66,7 @@ describe('delegate_research tool', () => {
     inputSchema: z.object({ path: z.string() }),
     execute: async ({ path }) => `contents of ${path}: hello`,
   });
-  type Exec = { execute: (input: { task: string }, options: { toolCallId: string; messages: unknown[]; abortSignal?: AbortSignal }) => Promise<string> };
+  type Exec = { execute: (input: { task: string; role?: string }, options: { toolCallId: string; messages: unknown[]; abortSignal?: AbortSignal }) => Promise<string> };
 
   it('runs its own loop with the given tools and returns only the final summary', async () => {
     const seen = { prompts: [] as string[] };
@@ -66,6 +76,34 @@ describe('delegate_research tool', () => {
     expect(seen.prompts).toHaveLength(2);
     expect(seen.prompts[1]).toContain('contents of a.txt: hello');
     expect(seen.prompts[0]).toContain('what does a.txt say?');
+  });
+
+  it('loads custom sub_agents/AGENT.md roles and applies specialist instructions', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'subagent-role-'));
+    try {
+      await mkdir(path.join(root, 'sub_agents', 'xlsx-auditor'), { recursive: true });
+      await writeFile(
+        path.join(root, 'sub_agents', 'xlsx-auditor', 'AGENT.md'),
+        '---\nname: xlsx-auditor\ndescription: Audits spreadsheet formulas\ntools: [read_file, grep]\n---\nFocus on #REF! and #VALUE! formula errors.',
+        'utf8',
+      );
+      const roles = await loadSubagentRoles([root]);
+      expect(roles).toHaveLength(1);
+      expect(roles[0].name).toBe('xlsx-auditor');
+      expect(roles[0].tools).toEqual(['read_file', 'grep']);
+
+      const seen = { prompts: [] as string[] };
+      const delegate = createSubagentTool({
+        getModel: () => scriptedModel(seen),
+        tools: { read_file: readFile },
+        roles,
+      })[SUBAGENT_TOOL_NAME] as unknown as Exec;
+      await delegate.execute({ task: 'audit sheet', role: 'xlsx-auditor' }, { toolCallId: 'c', messages: [] });
+      expect(seen.prompts[0]).toContain('Focus on #REF! and #VALUE! formula errors.');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+    expect(parseSubagentFile('Plain instructions', 'plain')?.name).toBe('plain');
   });
 
   it('turns a sub-agent failure into a result instead of failing the main turn', async () => {

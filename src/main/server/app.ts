@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { presentationReviewAdapter } from './agent/presentationTools';
 import { createArtifactReviewStore } from './storage/artifactReviewStore';
 import { documentReviewAdapter } from './agent/documentReviewAdapter';
@@ -206,7 +207,12 @@ export function createApp(options: CreateAppOptions) {
 
   app.get('/api/health', (c) => c.json({ ok: true }));
   app.route('/api/video-editor', createVideoEditorRouter(options.dataRoot, sessionStore, canvasStore, artifactStore));
-  const skillsDirs = options.skillsDirs ?? [];
+  const userSkillsDir = path.join(options.dataRoot, 'skills');
+  const skillsDirs = options.skillsDirs
+    ? options.skillsDirs.includes(userSkillsDir)
+      ? options.skillsDirs
+      : [...options.skillsDirs, userSkillsDir]
+    : [userSkillsDir];
   const memoryEventsStore = createMemoryEventsStore(options.dataRoot);
   const scheduleStore = options.scheduleStore ?? createScheduleStore(options.dataRoot);
   const thoughtStore = options.thoughtStore ?? createThoughtStore(options.dataRoot);
@@ -253,7 +259,7 @@ export function createApp(options: CreateAppOptions) {
   app.route('/api/settings', createSettingsRouter(settingsStore));
   app.route('/api/admin/providers', createAdminProvidersRouter(providerStore));
   app.route('/api/providers', createPublicProvidersRouter(providerStore));
-  app.route('/api/skills', createSkillsRouter(skillsDirs));
+  app.route('/api/skills', createSkillsRouter(skillsDirs, { dataRoot: options.dataRoot, sessionStore, rewriteText }));
   app.route('/api/computer-use', createComputerUseRouter(options.dataRoot, settingsStore));
   app.route('/api/schedules', createSchedulesRouter(scheduleStore, thoughtStore));
   app.route('/api/matting', createMattingRouter(options.dataRoot));

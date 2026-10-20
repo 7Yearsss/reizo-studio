@@ -1,15 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
+  classifyToolError,
   createToolLoopGuard,
   inspectToolStream,
   toolSignature,
   type ToolOutcome,
 } from './toolLoopGuard';
 
-const err = (name: string, args: Record<string, unknown> = {}): ToolOutcome => ({
+const err = (name: string, args: Record<string, unknown> = {}, error?: string): ToolOutcome => ({
   name,
   args,
   ok: false,
+  ...(error ? { error } : {}),
 });
 const ok = (name: string, args: Record<string, unknown> = {}): ToolOutcome => ({
   name,
@@ -142,6 +144,24 @@ describe('inspectToolStream', () => {
       ok(`tool_${i}`, { n: i }),
     );
     expect(inspectToolStream(stream).tier).toBe('ok');
+  });
+
+  it('classifies tool errors and attaches recovery hints to loop verdicts', () => {
+    expect(classifyToolError('Cannot read binary file a.png', 'read_file').kind).toBe('unreadable_binary');
+    expect(classifyToolError('ENOENT: no such file or directory').kind).toBe('not_found');
+    expect(classifyToolError('Command timed out after 30000ms').kind).toBe('timeout');
+    expect(classifyToolError('User denied this tool call').kind).toBe('permission');
+    expect(classifyToolError('pdftoppm: command not found').kind).toBe('missing_capability');
+    expect(classifyToolError('target content not found in file').kind).toBe('bad_input');
+
+    const verdict = inspectToolStream([
+      err('read_file', { path: 'a.png' }, 'Cannot read binary file'),
+      err('read_file', { path: 'b.png' }, 'Cannot read binary file'),
+      err('read_file', { path: 'c.png' }, 'Cannot read binary file'),
+    ]);
+    expect(verdict.tier).toBe('warn');
+    expect(verdict.errorKind).toBe('unreadable_binary');
+    expect(verdict.hint).toContain('UTF-8');
   });
 });
 

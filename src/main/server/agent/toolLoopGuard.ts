@@ -21,10 +21,21 @@
  * the caller should abort the turn / fail the node.
  */
 
+export type ToolErrorKind =
+  | 'bad_input'
+  | 'timeout'
+  | 'missing_capability'
+  | 'permission'
+  | 'unreadable_binary'
+  | 'not_found'
+  | 'unknown';
+
 export interface ToolOutcome {
   name: string;
   args: Record<string, unknown>;
   ok: boolean;
+  /** Optional error text for error classification and recovery hints (Harness² A7). */
+  error?: string;
   /** Did this call change state (write/edit/run/mutate)? Defaults by name. */
   mutating?: boolean;
 }
@@ -32,6 +43,59 @@ export interface ToolOutcome {
 export interface ToolLoopVerdict {
   tier: 'ok' | 'warn' | 'halt';
   reason: string;
+  /** Classified failure category when the latest failures carried error text. */
+  errorKind?: ToolErrorKind;
+  /** Actionable recovery hint for the agent/user based on `errorKind`. */
+  hint?: string;
+}
+
+/**
+ * Harness² A7: Classify a tool error string into a structured failure category
+ * with an actionable recovery hint so the agent changes strategy instead of blind-retrying.
+ */
+export function classifyToolError(
+  error: string | undefined,
+  toolName?: string,
+): { kind: ToolErrorKind; hint: string } {
+  const msg = (error ?? '').toLowerCase();
+  if (!msg) return { kind: 'unknown', hint: '请检查工具参数或换一种方式完成任务。' };
+  if (/binary|utf-8|not a text file|cannot read binary|\.png|\.jpg|\.mp4|\.pdf/i.test(msg)) {
+    return {
+      kind: 'unreadable_binary',
+      hint: `${toolName ?? '该工具'} 仅支持 UTF-8 文本，不能直接读取二进制媒体/Office 文件；请改用对应的专用工具（如 read_sheet / read_document / read_presentation）或直接结束检查。`,
+    };
+  }
+  if (/timeout|timed out|etimedout|deadline|超时/i.test(msg)) {
+    return {
+      kind: 'timeout',
+      hint: '命令或工具执行超时；请缩小单次处理范围、避免交互式阻塞命令，或拆分步骤执行。',
+    };
+  }
+  if (/permission|denied|eacces|eperm|not allowed|拒绝/i.test(msg)) {
+    return {
+      kind: 'permission',
+      hint: '权限受限或用户拒绝了该操作；请勿重复发起相同请求，向用户说明情况或采用无需该权限的替代方案。',
+    };
+  }
+  if (/command not found|is not recognized|no such tool|missing_capability|not installed|未安装|找不到命令/i.test(msg)) {
+    return {
+      kind: 'missing_capability',
+      hint: '当前环境缺少该命令或依赖；请勿反复重试同一命令，改用工作区内置工具或现有环境已安装的命令。',
+    };
+  }
+  if (/invalid|schema|expected|missing required|no match|target.*not found|参数|格式无效|版本已变化/i.test(msg)) {
+    return {
+      kind: 'bad_input',
+      hint: '输入参数或目标匹配不合法；请先重新读取最新内容与版本号，核对字段格式后再调用。',
+    };
+  }
+  if (/enoent|no such file|not found|未找到|不存在/i.test(msg)) {
+    return {
+      kind: 'not_found',
+      hint: '目标文件或实体不存在；请先用 find_files / list_dir 或不带 ID 的列表工具确认真实路径/ID，不要猜测名称。',
+    };
+  }
+  return { kind: 'unknown', hint: '同一调用反复失败；请停止重复尝试，切换工具或直接向用户说明阻碍。' };
 }
 
 export interface ToolLoopThresholds {
@@ -102,6 +166,16 @@ function shortName(sig: string): string {
   return sig.split('(')[0];
 }
 
+function attachDiagnosis(
+  verdict: ToolLoopVerdict,
+  outcomes: ToolOutcome[],
+): ToolLoopVerdict {
+  const lastFailed = [...outcomes].reverse().find((o) => !o.ok && o.error);
+  if (!lastFailed?.error) return verdict;
+  const { kind, hint } = classifyToolError(lastFailed.error, lastFailed.name);
+  return { ...verdict, errorKind: kind, hint };
+}
+
 export function inspectToolStream(
   outcomes: ToolOutcome[],
   thresholds: ToolLoopThresholds = DEFAULT_TOOL_LOOP_THRESHOLDS,
@@ -126,7 +200,10 @@ export function inspectToolStream(
 
   // L1: the same call (name+args) repeated verbatim, regardless of outcome.
   if (consecutiveIdentical >= 6) {
-    return { tier: 'halt', reason: `连续 ${consecutiveIdentical} 次完全相同的调用 ${shortName(lastSig)}` };
+    return attachDiagnosis(
+      { tier: 'halt', reason: `连续 ${consecutiveIdentical} 次完全相同的调用 ${shortName(lastSig)}` },
+      outcomes,
+    );
   }
 
   const worstSig = [...sigErrors.entries()].sort((a, b) => b[1] - a[1])[0];
@@ -141,13 +218,19 @@ export function inspectToolStream(
   const toolCount = worstTool?.[1] ?? 0;
 
   if (consecutiveErrors >= thresholds.consecutiveHalt) {
-    return { tier: 'halt', reason: `${consecutiveErrors} 次工具调用连续失败` };
+    return attachDiagnosis({ tier: 'halt', reason: `${consecutiveErrors} 次工具调用连续失败` }, outcomes);
   }
   if (sigCount >= thresholds.signatureHalt) {
-    return { tier: 'halt', reason: `同一操作 ${shortName(worstSig[0])} 失败 ${sigCount} 次` };
+    return attachDiagnosis(
+      { tier: 'halt', reason: `同一操作 ${shortName(worstSig[0])} 失败 ${sigCount} 次` },
+      outcomes,
+    );
   }
   if (toolCount >= thresholds.toolHalt) {
-    return { tier: 'halt', reason: `工具 ${worstTool[0]} 换参数反复失败 ${toolCount} 次` };
+    return attachDiagnosis(
+      { tier: 'halt', reason: `工具 ${worstTool[0]} 换参数反复失败 ${toolCount} 次` },
+      outcomes,
+    );
   }
 
   // L2 / L3: fingerprint-diversity collapse over the recent window.
@@ -162,13 +245,19 @@ export function inspectToolStream(
   }
 
   if (consecutiveErrors >= thresholds.consecutiveWarn) {
-    return { tier: 'warn', reason: `${consecutiveErrors} 次工具调用连续失败` };
+    return attachDiagnosis({ tier: 'warn', reason: `${consecutiveErrors} 次工具调用连续失败` }, outcomes);
   }
   if (sigCount >= thresholds.signatureWarn) {
-    return { tier: 'warn', reason: `同一操作 ${shortName(worstSig[0])} 反复失败 ${sigCount} 次` };
+    return attachDiagnosis(
+      { tier: 'warn', reason: `同一操作 ${shortName(worstSig[0])} 反复失败 ${sigCount} 次` },
+      outcomes,
+    );
   }
   if (toolCount >= thresholds.toolWarn) {
-    return { tier: 'warn', reason: `工具 ${worstTool[0]} 换参数反复失败 ${toolCount} 次` };
+    return attachDiagnosis(
+      { tier: 'warn', reason: `工具 ${worstTool[0]} 换参数反复失败 ${toolCount} 次` },
+      outcomes,
+    );
   }
   return { tier: 'ok', reason: '' };
 }

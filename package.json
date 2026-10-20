@@ -16,6 +16,7 @@
     "publish": "electron-forge publish",
     "lint": "eslint --ext .ts,.tsx .",
     "test:api": "node --require ./scripts/electron-stub.cjs -r tsx/cjs scripts/api-smoke-test.ts",
+    "test:eval": "node --require ./scripts/electron-stub.cjs -r tsx/cjs scripts/harness-benchmark.ts",
     "test:unit": "vitest run",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate"
