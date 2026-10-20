@@ -3,6 +3,7 @@ import { Columns2, Eye, Pencil } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { ArtifactRenderProps } from './types';
+import { mermaidMarkdownComponents } from '../../markdown/mermaidMarkdown';
 
 type Mode = 'preview' | 'split' | 'editor';
 const AUTOSAVE_MS = 900;
@@ -52,7 +53,7 @@ export default function MarkdownRenderer({ text, onCommitDraft }: ArtifactRender
 
   const preview = (
     <div className="markdown min-w-0 flex-1 overflow-auto px-3 py-2 text-xs">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{mode === 'preview' ? text : draft}</ReactMarkdown>
+      <ReactMarkdown components={mermaidMarkdownComponents} remarkPlugins={[remarkGfm]}>{mode === 'preview' ? text : draft}</ReactMarkdown>
     </div>
   );
   const editor = (

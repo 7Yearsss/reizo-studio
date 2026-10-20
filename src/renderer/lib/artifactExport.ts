@@ -3,6 +3,7 @@ import { createElement } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Artifact } from '../../shared/artifact';
+import { mermaidMarkdownComponents } from '../components/markdown/mermaidMarkdown';
 
 const PRINT_CSS = `
   :root { color-scheme: light; }
@@ -15,7 +16,7 @@ const PRINT_CSS = `
   code { background: #f5f3ef; padding: 0.1em 0.3em; border-radius: 4px; font-size: 0.9em; }
   pre code { background: none; padding: 0; }
   table { border-collapse: collapse; } td, th { border: 1px solid #ddd; padding: 6px 10px; }
-  img { max-width: 100%; }
+  img, svg { max-width: 100%; height: auto; }
   blockquote { border-left: 3px solid #ddd; margin: 0.8em 0; padding-left: 1em; color: #555; }
 `;
 
@@ -30,7 +31,7 @@ export function toHtmlDocument(artifact: Artifact, text: string): string {
   }
   const inner =
     artifact.kind === 'markdown' || artifact.kind === 'text'
-      ? renderToStaticMarkup(createElement(ReactMarkdown, { remarkPlugins: [remarkGfm] }, text))
+      ? renderToStaticMarkup(createElement(ReactMarkdown, { components: mermaidMarkdownComponents, remarkPlugins: [remarkGfm] }, text))
       : `<pre>${escapeHtml(text)}</pre>`;
   return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(
     artifact.name,
