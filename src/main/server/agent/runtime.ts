@@ -46,6 +46,7 @@ import { appendHookNote, createHookRunner, loadHooks, wrapToolsWithHooks } from 
 import { connectMcpTools, MCP_TOOL_PREFIX } from './mcpTools';
 import { hasReasoningLeak } from './reasoningLeak';
 import { createSubagentTool, loadSubagentRoles, pickReadOnlyTools } from './subagentTools';
+import { applyAllHarnessProposals } from './harnessEvolution';
 import { loadActiveHarnessRules } from './harnessRules';
 import { recordSkillExperience } from './skillRefiner';
 import { loadPluginContributions } from '../plugins/pluginStore';
@@ -727,7 +728,11 @@ export async function runChatTurn(options: {
       const reasoningLeak = hasReasoningLeak({ userText, reply: text });
       if (reasoningLeak) console.warn(`[chat] reasoning leaked into the reply session=${sessionId} model=${modelId}`);
       const turnTrajectory = trace.toTrajectoryMarkdown();
-      if (dataRoot) void writeTurnTrace(dataRoot, trace.finish({ outcome, text, reasoningLeak }));
+      if (dataRoot) {
+        void writeTurnTrace(dataRoot, trace.finish({ outcome, text, reasoningLeak })).then(() => {
+          if (settings.autoApplyHarnessLessons) void applyAllHarnessProposals(dataRoot);
+        });
+      }
       if (outcome !== 'completed') return;
       if (skill && dataRoot) {
         void (async () => {

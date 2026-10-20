@@ -55,3 +55,17 @@ export async function applyHarnessProposal(dataRoot: string, id: string): Promis
   await saveHarnessRulesOverride(dataRoot, { systemPromptAddon: next });
   return true;
 }
+
+/** Auto mode: apply every pending proposal. Errors are swallowed — this runs fire-and-forget after a turn. */
+export async function applyAllHarnessProposals(dataRoot: string): Promise<number> {
+  let applied = 0;
+  try {
+    for (const proposal of await listHarnessProposals(dataRoot)) {
+      if (proposal.applied) continue;
+      if (await applyHarnessProposal(dataRoot, proposal.id)) applied += 1;
+    }
+  } catch (error) {
+    console.warn(`[harness] auto-apply failed: ${(error as Error).message}`);
+  }
+  return applied;
+}

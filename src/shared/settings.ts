@@ -33,6 +33,8 @@ export interface LocalSettings {
   busyEnter: BusyEnterBehavior;
   /** Let the agent drive the real mouse/keyboard/screen (the `computer` tool). Off by default. */
   computerUse: boolean;
+  /** Apply harness lessons (derived from recurring tool failures) to the agent prompt without asking. */
+  autoApplyHarnessLessons: boolean;
   mediaModels: MediaModels;
   /** Per-session opt-in: agent may proactively use canvas tools instead of only on explicit request. */
   directorSessions: Record<string, boolean>;
@@ -55,6 +57,8 @@ export interface PublicSettings {
   permissionMode: PermissionMode;
   busyEnter: BusyEnterBehavior;
   computerUse: boolean;
+  /** Apply harness lessons (derived from recurring tool failures) to the agent prompt without asking. */
+  autoApplyHarnessLessons: boolean;
   mediaModels: MediaModels;
   directorSessions: Record<string, boolean>;
   reasoningEffort: ReasoningEffort | null;
@@ -66,6 +70,7 @@ export interface SettingsPatch {
   permissionMode?: PermissionMode;
   busyEnter?: BusyEnterBehavior;
   computerUse?: boolean;
+  autoApplyHarnessLessons?: boolean;
   mediaModels?: MediaModels;
   reasoningEffort?: ReasoningEffort | null;
   directorSession?: { sessionId: string; enabled: boolean };
@@ -83,6 +88,7 @@ export const DEFAULT_APPEARANCE: Appearance = 'system';
 export const DEFAULT_PERMISSION_MODE: PermissionMode = 'ask';
 export const DEFAULT_BUSY_ENTER: BusyEnterBehavior = 'queue';
 export const DEFAULT_COMPUTER_USE = false;
+export const DEFAULT_AUTO_APPLY_HARNESS_LESSONS = false;
 export const DEFAULT_PROVIDER_ID = 'openai';
 /** 'low' default: reasoning models (gpt-5.6-sol class) otherwise burn 10-90s thinking before the first token. */
 export const DEFAULT_REASONING_EFFORT: ReasoningEffort | null = 'low';
