@@ -6,7 +6,8 @@ import { editNodeTitle, isLocalEdit, type ImageEditKind } from '../../../shared/
 import { resolveSettingsModel } from '../providerResolver';
 import { classifyMediaError } from '../canvas/mediaError';
 import { startImageNode } from '../canvas/imageExecutor';
-import { stageCanvasAssets } from '../canvas/assets';
+import { readCanvasAsset, stageCanvasAssets } from '../canvas/assets';
+import type { ArtifactStore } from '../storage/artifactStore';
 import { CanvasCommandError, createCanvasApplication } from '../canvas/application';
 import { canvasWorkSignal, canvasWorkStopped } from '../canvas/workLifecycle';
 import { nodeJobsFor, NodeJobsClosedError, type NodeJobSubmission } from '../canvas/nodeJobs';
@@ -49,15 +50,38 @@ export function createImageTools(options: {
   settingsStore: SettingsStore;
   dataRoot: string;
   sessionId?: string;
+  projectId?: string | null;
   canvasStore?: CanvasStore;
+  artifactStore?: ArtifactStore;
 }) {
-  const { settingsStore, dataRoot, sessionId, canvasStore } = options;
+  const { settingsStore, dataRoot, sessionId, projectId, canvasStore, artifactStore } = options;
+
+  /** Mirror a chat-generated image into the session's Artifacts ("会话作品"); best-effort, never fails the tool. */
+  async function saveToArtifacts(asset: string, prompt: string, model: string | undefined, jobId: string | undefined, canvasId?: string) {
+    if (!artifactStore || !sessionId) return;
+    try {
+      const ext = (asset.split('.').pop() || 'png').toLowerCase();
+      const mimeType = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png';
+      await artifactStore.createOrAddVersion({
+        sessionId,
+        projectId: projectId ?? null,
+        name: `${asset.split('/').pop()?.replace(/\.[^.]+$/, '') || 'image'}.${ext}`,
+        kind: 'image',
+        bytes: await readCanvasAsset(dataRoot, asset),
+        mimeType,
+        source: 'generated',
+        origin: { surface: 'chat', prompt: prompt.slice(0, 400), model, jobId, canvasId },
+      });
+    } catch {
+      /* artifacts are a convenience copy; the image itself is already delivered */
+    }
+  }
   const canvasApp = canvasStore ? createCanvasApplication(canvasStore) : undefined;
 
   return {
     generate_image: tool({
       description:
-        '在当前对话中直接生成并展示图片（支持插画、海报、头像、设计草图等各种文生图需求）。当用户表示“生图”、“画一张图”、“生成海报/插画”时，必须调用此工具直接在对话中生成，不要另外调用画布操作或打开画布界面。',
+        '在当前对话中直接生成并展示图片（支持插画、海报、头像、设计草图等各种文生图需求）。当用户表示“生图”、“画一张图”、“生成海报/插画”时，必须调用此工具直接在对话中生成，不要另外调用画布操作或打开画布界面。需要多张独立素材（主图、细节图、场景图等）时，每张素材单独调用一次，不要把多个画面拼成一张拼图；横版内容请使用 1792x1024，竖版使用 1024x1792。',
       inputSchema: z.object({
         prompt: z
           .string()
@@ -102,6 +126,7 @@ export function createImageTools(options: {
             if (!asset) return { ok: false, jobId: job.id, error: '生图接口未返回有效图片数据' };
             const captured = (job.input.node as { params?: { prompt?: string; size?: string } } | undefined)?.params;
             const imageSize = captured?.size ?? '1024x1024';
+            await saveToArtifacts(asset, image?.prompt ?? captured?.prompt ?? cleanPrompt, image?.model ?? job.model ?? model, job.id, canvas.id);
             return { ok: true, jobId: job.id, imageUrl: `/api/canvas/assets/${asset}`, prompt: image?.prompt ?? captured?.prompt ?? cleanPrompt,
               size: imageSize, model: image?.model ?? job.model ?? model, summary: `已在对话中生成图片 (${imageSize})` };
           } catch (error) {
@@ -137,6 +162,7 @@ export function createImageTools(options: {
             mimeType: ext === 'jpg' ? 'image/jpeg' : 'image/png', kind: 'image' }], context?.abortSignal);
           try {
             staged.keep();
+            await saveToArtifacts(staged.files[0].path, cleanPrompt, effectiveModel, undefined);
             return {
               ok: true,
               imageUrl: `/api/canvas/assets/${staged.files[0].path}`,

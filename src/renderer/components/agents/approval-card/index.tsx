@@ -38,6 +38,7 @@ export type {
 } from "./types";
 
 const EMPTY_ANSWER: ApprovalCardAnswer = { selected: [], custom: "" };
+const ROLL_TITLE_MAX_CHARS = 24;
 
 function getStatusLabel(status: ApprovalCardStatus) {
   if (status === "submitting") return "Submitting";
@@ -316,9 +317,14 @@ export function ApprovalCard({
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-start gap-3">
             <h3 className="min-w-0 flex-1 text-base font-medium leading-5 text-foreground">
-              <ActionSwapRollText value={titleKey}>
-                {displayTitle}
-              </ActionSwapRollText>
+              {typeof displayTitle === "string" && displayTitle.length > ROLL_TITLE_MAX_CHARS ? (
+                // The roll animation is single-line and truncates; long prompts must wrap in full.
+                <span className="block whitespace-pre-wrap break-words">{displayTitle}</span>
+              ) : (
+                <ActionSwapRollText value={titleKey}>
+                  {displayTitle}
+                </ActionSwapRollText>
+              )}
             </h3>
             {questionMode && interactive ? (
               <span className="shrink-0 text-xs tabular-nums text-muted-foreground/65">

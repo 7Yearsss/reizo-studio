@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import type { ToolCallPart } from '../../../shared/chat';
+import Lightbox from '../canvas/Lightbox';
 import { ToolResult, ToolResultOutput } from '../agents/tool-result';
 import { ImageGeneration } from '../agents/image-generation';
 import { getResolvedApiOrigin } from '../../api';
@@ -9,6 +11,7 @@ import { toolDetail, toolDiffPreview, toolLabel, toolTarget } from './toolDispla
 
 export default function ToolCard({ part, collapsed = false }: { part: ToolCallPart; collapsed?: boolean }) {
   const running = part.result === undefined && part.error === undefined;
+  const [previewing, setPreviewing] = useState(false);
 
   if (part.name === 'generate_image' || part.name === 'create_image') {
     const prompt = typeof part.args?.prompt === 'string' ? part.args.prompt : undefined;
@@ -50,6 +53,9 @@ export default function ToolCard({ part, collapsed = false }: { part: ToolCallPa
       imageUrl = imageUrl.startsWith('/') ? `${origin}${imageUrl}` : `${origin}/${imageUrl}`;
     }
     const status = running ? 'generating' : part.error ? 'error' : 'complete';
+    // Reserve the requested ratio so landscape/portrait images are shown whole, not cropped to a square.
+    const dims = /(\d+)\s*[x×]\s*(\d+)/i.exec(resolution);
+    const aspectRatio = dims && Number(dims[1]) > 0 && Number(dims[2]) > 0 ? `${dims[1]} / ${dims[2]}` : '1 / 1';
 
     return (
       <div className="my-2 flex w-full justify-start text-left">
@@ -57,13 +63,20 @@ export default function ToolCard({ part, collapsed = false }: { part: ToolCallPa
           status={status}
           prompt={prompt}
           resolution={resolution}
+          aspectRatio={aspectRatio}
           size="compact"
           className="mr-auto"
         >
           {imageUrl ? (
-            <img src={imageUrl} alt={prompt || 'AI 生成图片'} className="size-full object-cover" />
+            <img
+              src={imageUrl}
+              alt={prompt || 'AI 生成图片'}
+              onClick={() => setPreviewing(true)}
+              className="size-full cursor-zoom-in object-contain"
+            />
           ) : null}
         </ImageGeneration>
+        {previewing && imageUrl ? <Lightbox src={imageUrl} onClose={() => setPreviewing(false)} /> : null}
       </div>
     );
   }

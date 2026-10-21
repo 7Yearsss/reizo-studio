@@ -1,5 +1,7 @@
 import { createContext, forwardRef, useContext, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
-import { InputRule, Node, mergeAttributes, type JSONContent } from '@tiptap/core';
+import { Extension, InputRule, Node, mergeAttributes, type JSONContent } from '@tiptap/core';
+import { Plugin } from '@tiptap/pm/state';
+import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, type NodeViewProps } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { cn } from '@/renderer/lib/cn';
@@ -75,6 +77,32 @@ const ReferenceChip = Node.create<{ isLabel: (label: number) => boolean }>({
   },
 });
 
+const URL_PATTERN = /https?:\/\/[^\s<>"'，。；、）)】」]+/g;
+
+/** Styles pasted/typed URLs as links (decoration only — the draft text is untouched). */
+const UrlHighlight = Extension.create({
+  name: 'urlHighlight',
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        props: {
+          decorations: (state) => {
+            const decorations: Decoration[] = [];
+            state.doc.descendants((node, pos) => {
+              if (!node.isText || !node.text) return;
+              for (const match of node.text.matchAll(URL_PATTERN)) {
+                const from = pos + (match.index ?? 0);
+                decorations.push(Decoration.inline(from, from + match[0].length, { class: 'prompt-editor-url' }));
+              }
+            });
+            return DecorationSet.create(state.doc, decorations);
+          },
+        },
+      }),
+    ];
+  },
+});
+
 export interface PromptEditorHandle {
   focus(): void;
   /** Put range `label`'s chip at the caret (the end when the editor is not focused). */
@@ -126,6 +154,7 @@ export const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(fu
         horizontalRule: false, italic: false, listItem: false, listKeymap: false, orderedList: false,
         strike: false, underline: false, link: false, dropcursor: false, gapcursor: false, trailingNode: false,
       }),
+      UrlHighlight,
       ReferenceChip.configure({ isLabel: (label: number) => isLabelRef.current(label) }),
     ],
     [],
