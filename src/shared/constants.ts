@@ -24,6 +24,7 @@ export const IPC = {
   WORKSPACE_RUN: 'reizo:workspace-run',
   FILE_READ_ABSOLUTE: 'reizo:file-read-absolute',
   WORKSPACE_REVEAL: 'reizo:workspace-reveal',
+  OPEN_EXTERNAL: 'reizo:open-external',
   WORKSPACE_DELETE: 'reizo:workspace-delete',
   WORKSPACE_CREATE: 'reizo:workspace-create',
   WORKSPACE_GIT: 'reizo:workspace-git',

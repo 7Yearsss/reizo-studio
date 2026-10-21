@@ -47,7 +47,8 @@ contextBridge.exposeInMainWorld('reizo', {
     if (!filePath) return Promise.reject(new Error('Not a file on disk'));
     return ipcRenderer.invoke(IPC.FILE_READ_ABSOLUTE, filePath);
   },
-  revealInFolder: (relativePath?: string) => ipcRenderer.invoke(IPC.WORKSPACE_REVEAL, relativePath),
+  openExternal: (url: string): Promise<void> => ipcRenderer.invoke(IPC.OPEN_EXTERNAL, url),
+  revealInFolder:(relativePath?: string) => ipcRenderer.invoke(IPC.WORKSPACE_REVEAL, relativePath),
   deleteWorkspacePath: (relativePath: string) => ipcRenderer.invoke(IPC.WORKSPACE_DELETE, relativePath),
   createWorkspaceEntry: (relativePath: string, kind: 'file' | 'dir') =>
     ipcRenderer.invoke(IPC.WORKSPACE_CREATE, { relativePath, kind }),

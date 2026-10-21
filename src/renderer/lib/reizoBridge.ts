@@ -86,6 +86,9 @@ export function ensureReizoBridge(): ReizoBridge {
     connectGitee: async () => ({ ok: false, error: 'Web browser environment does not support direct connect' }),
     connectGitHub: async () => ({ ok: false, error: 'Web browser environment does not support direct connect' }),
     disconnectIntegration: async () => ({ ok: false }),
+    openExternal: async (url: string) => {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    },
     accountStatus: async () => ({ status: 'signed-out' as const, webOrigin: '' }),
     accountLogin: async () => ({ status: 'signed-out' as const, webOrigin: '' }),
     accountLogout: async () => ({ status: 'signed-out' as const, webOrigin: '' }),

@@ -47,7 +47,13 @@ export function registerWorkspaceIpc(settingsStore: SettingsStore): void {
     return runWorkspaceCommand(root, command);
   });
 
-  ipcMain.handle(IPC.WORKSPACE_REVEAL, async (_event, relativePath?: string) => {
+  ipcMain.handle(IPC.OPEN_EXTERNAL, async (_event, url: unknown) => {
+    // Only web links ever leave the app; file:, javascript: etc. are refused.
+    if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) throw new Error('only http(s) links can be opened');
+    await shell.openExternal(url);
+  });
+
+  ipcMain.handle(IPC.WORKSPACE_REVEAL,async (_event, relativePath?: string) => {
     const root = await requireWorkspace(settingsStore);
     if (!relativePath) {
       await shell.openPath(root);

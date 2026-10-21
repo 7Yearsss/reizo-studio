@@ -33,6 +33,7 @@ export interface ReizoBridge {
   accountRefresh(): Promise<import('./account').AccountState>;
   platform: NodeJS.Platform;
   getApiOrigin(): Promise<string>;
+  openExternal(url: string): Promise<void>;
   windowMinimize(): Promise<void>;
   windowToggleMaximize(): Promise<boolean>;
   windowClose(): Promise<void>;

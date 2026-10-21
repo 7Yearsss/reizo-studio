@@ -1,4 +1,5 @@
-import { createContext, forwardRef, useContext, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
+import { createContext, forwardRef, useContext, useEffect, useImperativeHandle, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { Copy, ExternalLink, Pencil, Trash2 } from 'lucide-react';
 import { Extension, InputRule, Node, mergeAttributes, type JSONContent } from '@tiptap/core';
 import { Plugin } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
@@ -224,9 +225,91 @@ export const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(fu
     [editor],
   );
 
+  const [linkTip, setLinkTip] = useState<{ url: string; from: number; to: number; x: number; y: number } | null>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+
+  // The toolbar belongs to one click on a link: typing, scrolling away or clicking elsewhere dismisses it.
+  useEffect(() => {
+    if (!linkTip || !editor) return;
+    const close = () => setLinkTip(null);
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && (toolbarRef.current?.contains(target) || target.closest('.prompt-editor-url'))) return;
+      close();
+    };
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') close(); };
+    editor.on('update', close);
+    window.addEventListener('pointerdown', onPointerDown, true);
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('resize', close);
+    return () => {
+      editor.off('update', close);
+      window.removeEventListener('pointerdown', onPointerDown, true);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', close);
+    };
+  }, [editor, linkTip]);
+
+  const onLinkClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const el = (event.target as HTMLElement).closest<HTMLElement>('.prompt-editor-url');
+    if (!el || !editor || editor.isDestroyed) return;
+    const url = el.textContent ?? '';
+    const from = editor.view.posAtDOM(el, 0);
+    const rect = el.getBoundingClientRect();
+    setLinkTip({ url, from, to: from + url.length, x: Math.min(Math.max(rect.left, event.clientX - 70), rect.right), y: rect.top });
+  };
+
+  const copyLink = () => {
+    if (!linkTip) return;
+    void navigator.clipboard?.writeText(linkTip.url).catch((): void => undefined);
+    setLinkTip(null);
+  };
+  const editLink = () => {
+    if (!linkTip || !editor) return;
+    editor.chain().focus().setTextSelection({ from: linkTip.from, to: linkTip.to }).run();
+    setLinkTip(null);
+  };
+  const openLink = () => {
+    if (!linkTip) return;
+    void window.reizo?.openExternal(linkTip.url).catch((): void => undefined);
+    setLinkTip(null);
+  };
+  const removeLink = () => {
+    if (!linkTip || !editor) return;
+    editor.chain().focus().deleteRange({ from: linkTip.from, to: linkTip.to }).run();
+    setLinkTip(null);
+  };
+
   return (
     <ChipContext.Provider value={chips}>
-      <div className={cn('relative', className)}>
+      <div className={cn('relative', className)} onClick={onLinkClick}>
+        {linkTip ? (
+          <div
+            ref={toolbarRef}
+            role="toolbar"
+            style={{ position: 'fixed', left: Math.max(8, linkTip.x), top: Math.max(8, linkTip.y - 46), zIndex: 60 }}
+            className="flex items-center gap-0.5 rounded-xl border border-line bg-paper-raised p-1 text-ink shadow-lg"
+          >
+            {[
+              { label: 'Edit link', icon: Pencil, run: editLink },
+              { label: 'Open link', icon: ExternalLink, run: openLink },
+              { label: 'Copy link', icon: Copy, run: copyLink },
+              { label: 'Remove link', icon: Trash2, run: removeLink },
+            ].map(({ label, icon: Icon, run }) => (
+              <button
+                key={label}
+                type="button"
+                title={label}
+                aria-label={label}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={run}
+                className="grid size-8 place-items-center rounded-lg transition-colors hover:bg-paper-inset"
+              >
+                <Icon size={15} />
+              </button>
+            ))}
+          </div>
+        ) : null}
         {editor?.isEmpty && placeholder ? (
           <div aria-hidden="true" className="pointer-events-none absolute left-2 top-1.5 text-sm leading-6 text-muted-foreground/55">
             {placeholder}
