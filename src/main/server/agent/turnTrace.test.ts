@@ -5,6 +5,27 @@ import { describe, expect, it } from 'vitest';
 import { createTurnTraceCollector, summarizeTraceHistory, writeTurnTrace } from './turnTrace';
 
 describe('turn trace', () => {
+  it('records setup, phases, model-call spans, first events and the tool timeline', () => {
+    let t = 1000;
+    const trace = createTurnTraceCollector({ sessionId: 's1', model: 'm', now: () => t, originAt: 400 });
+    trace.mark('modelReady');
+    t += 10;
+    const call = trace.startModelCall();
+    t += 5; call.permitAcquired();
+    t += 700; call.headers(200);
+    t += 80;
+    trace.onEvent({ type: 'reasoning', delta: 'x' });
+    trace.onEvent({ type: 'tool', id: 'a', name: 'generate_document', args: {} });
+    t += 20; trace.onEvent({ type: 'tool', id: 'a', name: 'generate_document', args: {}, result: 'ok' });
+    t += 100; call.bodyDone();
+    const result = trace.finish({ outcome: 'completed', text: '', reasoningLeak: false });
+    expect(result.setupMs).toBe(600);
+    expect(result.phases).toEqual({ modelReady: 0 });
+    expect(result.modelCalls).toEqual([{ startMs: 10, queueMs: 5, headersMs: 700, bodyMs: 200, status: 200 }]);
+    expect(result.firstEvent).toEqual({ reasoning: 795, tool: 795 });
+    expect(result.toolTimeline).toEqual([{ name: 'generate_document', startMs: 795, endMs: 815 }]);
+  });
+
   it('records tool timing, failures, steps, loop verdicts and continue passes', () => {
     let t = 1000;
     const trace = createTurnTraceCollector({ sessionId: 's1', model: 'm', now: () => t });

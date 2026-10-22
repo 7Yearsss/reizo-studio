@@ -32,6 +32,29 @@ export interface TurnTrace {
   loopVerdicts: Array<{ tier: string; reason: string }>;
   continuePasses: string[];
   reasoningLeak: boolean;
+  /** Time spent in runChatTurn before the collector started (settings, prompt build, MCP connect, ...). */
+  setupMs?: number;
+  /** Named milestones, ms since the collector started (e.g. recallSettled, streamCreated). */
+  phases?: Record<string, number>;
+  /** One row per provider HTTP request (retries and continuation passes each add a row). */
+  modelCalls?: ModelCallTrace[];
+  /** ms since start of the first reasoning / text / tool event of the turn. */
+  firstEvent?: { reasoning?: number; text?: number; tool?: number };
+  /** Tool calls on the turn timeline (ms since start), including ones still running when the turn ended. */
+  toolTimeline?: Array<{ name: string; startMs: number; endMs?: number }>;
+}
+
+export interface ModelCallTrace {
+  /** ms since the collector started when the request was issued. */
+  startMs: number;
+  /** Waiting for an LLM scheduler permit (global/provider concurrency queue). */
+  queueMs: number;
+  /** Request sent → response headers (provider/gateway time-to-first-byte). */
+  headersMs?: number;
+  /** Headers → stream fully read; absent if the stream was aborted/never finished. */
+  bodyMs?: number;
+  status?: number;
+  error?: string;
 }
 
 export interface TraceHistorySummary {
@@ -58,9 +81,14 @@ interface TrajectoryItem {
   outputText: string;
 }
 
-export function createTurnTraceCollector(options: { sessionId: string; model: string; now?: () => number }) {
+export function createTurnTraceCollector(options: { sessionId: string; model: string; now?: () => number; originAt?: number }) {
   const now = options.now ?? Date.now;
   const startedAt = now();
+  const phases: Record<string, number> = {};
+  const modelCalls: ModelCallTrace[] = [];
+  const firstEvent: NonNullable<TurnTrace['firstEvent']> = {};
+  const toolTimeline: NonNullable<TurnTrace['toolTimeline']> = [];
+  const openTimeline = new Map<string, number>();
   const callStart = new Map<string, number>();
   const tools: ToolTrace[] = [];
   const trajectory: TrajectoryItem[] = [];
@@ -71,11 +99,19 @@ export function createTurnTraceCollector(options: { sessionId: string; model: st
 
   return {
     onEvent(event: TraceEvent) {
+      if (event.type === 'reasoning' || event.type === 'text') firstEvent[event.type] ??= now() - startedAt;
       if (event.type === 'status' && typeof event.step === 'number') steps = Math.max(steps, event.step + 1);
       else if (event.type === 'tool') {
         const id = String(event.id ?? '');
         const finished = event.result !== undefined || event.error !== undefined;
-        if (!finished) { callStart.set(id, now()); return; }
+        if (!finished) {
+          callStart.set(id, now());
+          firstEvent.tool ??= now() - startedAt;
+          if (toolTimeline.length < MAX_TOOL_ROWS) openTimeline.set(id, toolTimeline.push({ name: String(event.name ?? ''), startMs: now() - startedAt }) - 1);
+          return;
+        }
+        const row = openTimeline.get(id);
+        if (row !== undefined) { toolTimeline[row].endMs = now() - startedAt; openTimeline.delete(id); }
         const began = callStart.get(id);
         callStart.delete(id);
         if (tools.length >= MAX_TOOL_ROWS) { toolsDropped += 1; return; }
@@ -97,6 +133,22 @@ export function createTurnTraceCollector(options: { sessionId: string; model: st
       }
     },
     onContinue(reason: string) { continuePasses.push(reason); },
+    /** Record a named milestone (first call wins), ms since the collector started. */
+    mark(name: string) { phases[name] ??= now() - startedAt; },
+    /** Start a provider-request row; the returned handle fills in the rest as the request progresses. */
+    startModelCall() {
+      const issuedAt = now();
+      const row: ModelCallTrace = { startMs: issuedAt - startedAt, queueMs: 0 };
+      if (modelCalls.length < MAX_TOOL_ROWS) modelCalls.push(row);
+      let sentAt = issuedAt;
+      let headersAt = 0;
+      return {
+        permitAcquired() { sentAt = now(); row.queueMs = sentAt - issuedAt; },
+        headers(status: number) { headersAt = now(); row.headersMs = headersAt - sentAt; row.status = status; },
+        bodyDone() { if (headersAt) row.bodyMs = now() - headersAt; },
+        failed(error: unknown) { row.error = (error instanceof Error ? error.message : String(error)).slice(0, 200); },
+      };
+    },
     /**
      * Harness² D5: Render the collected tool trajectory as `[ACTION]`, `[OBSERVATION]`, and `[ERROR]`
      * blocks for post-turn lesson extraction or harness diagnosis (`obs_trunc` default 600 chars).
@@ -126,6 +178,11 @@ export function createTurnTraceCollector(options: { sessionId: string; model: st
         loopVerdicts,
         continuePasses,
         reasoningLeak: input.reasoningLeak,
+        ...(options.originAt === undefined ? {} : { setupMs: startedAt - options.originAt }),
+        phases,
+        modelCalls,
+        firstEvent,
+        toolTimeline,
       };
     },
   };

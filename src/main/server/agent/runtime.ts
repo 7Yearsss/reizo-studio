@@ -223,6 +223,7 @@ export async function runChatTurn(options: {
     scheduleStore,
   } = options;
 
+  const turnOriginAt = Date.now();
   let session = await sessionStore.get(sessionId);
   if (skill?.contractError) return Response.json({ error: skill.contractError }, { status: 400 });
   if (!session) {
@@ -435,7 +436,7 @@ export async function runChatTurn(options: {
   let emit: (event: ChatStreamEvent) => void = () => undefined;
   const todos: TodoItem[] = [];
   const loopGuard = createToolLoopGuard();
-  const trace = createTurnTraceCollector({ sessionId, model: modelId });
+  const trace = createTurnTraceCollector({ sessionId, model: modelId, originAt: turnOriginAt });
   let turnDelivered = false;
   const DELIVERABLE_TOOLS = new Set([
     'write_file',
@@ -543,6 +544,7 @@ export async function runChatTurn(options: {
       : undefined;
   // MCP servers (user-level mcp.json): their tools join the set behind approval; clients are pooled per-session.
   const mcp = dataRoot ? await connectMcpTools({ dataRoot, sessionId, permissionMode: settings.permissionMode, extraServers: pluginPack.mcpServers }) : undefined;
+  trace.mark('mcpConnected');
   const hasMcpTools = mcp !== undefined && Object.keys(mcp.tools).length > 0;
   // Read-only research sub-agent: only the read tools, hook-wrapped like the main agent's. `model` is built below, hence the getters.
   const subagentRoleDirs = [workspacePath, dataRoot].filter((d): d is string => Boolean(d));
@@ -562,7 +564,9 @@ export async function runChatTurn(options: {
   const accounting = options.usageStore ?? canvasStore?.usage;
   const model = createOpenAiModel({ apiKey, modelId, baseUrl,
     fetch: quotaFetch(canvasStore ? llmSchedulerFor(canvasStore) : standaloneLlmScheduler, providerId,
-      accounting ? usageFetch(accounting, { sessionId, providerId, model: modelId, category: 'llm', accepting: canvasStore ? () => !canvasWorkStopped(canvasStore) : undefined }) : undefined, true) });
+      accounting ? usageFetch(accounting, { sessionId, providerId, model: modelId, category: 'llm', accepting: canvasStore ? () => !canvasWorkStopped(canvasStore) : undefined }) : undefined, true,
+      () => trace.startModelCall()) });
+  trace.mark('modelReady');
 
   // Reasoning models on gateways can burn 10-90s "thinking" before the first
   // token (measured: gpt-5.6-sol 12-98s default vs ~3s at effort=low). Send the
@@ -586,6 +590,7 @@ export async function runChatTurn(options: {
   let recallInjected = false;
   let recallSettled: MemoryEntry[] | null = null;
   void withTimeout(recallPromise, RECALL_BUDGET.timeoutMs, []).then((entries) => {
+    trace.mark('recallSettled');
     recallSettled = entries;
   });
 
@@ -616,12 +621,14 @@ export async function runChatTurn(options: {
             });
           }
         }
+        trace.mark(`step${stepNumber}Prepare`);
         const compacted = compactModelMessages(stepMessages as ModelMessage[]);
         // Recall never holds the first token hostage: the first step waits a
         // short grace, later steps pick it up once it has settled.
         if (!recallInjected && recallSettled === null && stepNumber === 0) {
           const early = await withTimeout<MemoryEntry[] | null>(recallPromise, RECALL_BUDGET.firstStepGraceMs, null);
           if (early) recallSettled = early;
+          trace.mark('recallFirstStepWaitDone');
         }
         if (!recallInjected && recallSettled !== null) {
           recallInjected = true;
@@ -687,6 +694,7 @@ export async function runChatTurn(options: {
             compacted.push(deltaNote);
           }
         }
+        trace.mark(`step${stepNumber}PrepareDone`);
         return { messages: compacted };
       },
     });
@@ -722,7 +730,7 @@ export async function runChatTurn(options: {
         send(event);
       };
     },
-    createStream: (signal) => buildStream(history, signal),
+    createStream: (signal) => { trace.mark('streamCreated'); return buildStream(history, signal); },
     onEvent: (event) => trace.onEvent(event),
     onTurnTerminal: ({ outcome, text }) => {
       const reasoningLeak = hasReasoningLeak({ userText, reply: text });

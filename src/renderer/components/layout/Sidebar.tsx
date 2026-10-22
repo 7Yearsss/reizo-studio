@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type ReactElement } from 'react';
 import {
   ChevronRight,
   CirclePlus,
-  FolderKanban,
   LayoutGrid,
   Pencil,
   Plus,
@@ -16,17 +15,15 @@ import AccountControl from './AccountControl';
 import { useChatStore } from '../../state/useChatStore';
 import { useSettingsStore } from '../../state/useSettingsStore';
 import { useTabStore } from '../../state/useTabStore';
-import { useProjectStore } from '../../state/useProjectStore';
 import { useUiStore } from '../../state/useUiStore';
 import * as chatStore from '../../state/chatStore';
 import * as tabStore from '../../state/tabStore';
-import * as projectStore from '../../state/projectStore';
+import * as settingsStore from '../../state/settingsStore';
 import * as uiStore from '../../state/uiStore';
 import * as api from '../../api';
 import type { DirEntry } from '../../../shared/workspace';
 import type { SessionSummary } from '../../../shared/chat';
 import type { ChatInteraction } from '../../state/chatStore';
-import ProjectDialog from './ProjectDialog';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -39,8 +36,20 @@ import { toast } from '../../lib/toast';
 import Tooltip from '../ui/Tooltip';
 
 const COLLAPSE_KEY = 'reizo:sidebar-collapsed';
-const PROJECTS_FOLD_KEY = 'reizo:sidebar-projects';
+const FOLDER_FOLD_KEY = 'reizo:sidebar-folders';
 const CHATS_FOLD_KEY = 'reizo:sidebar-chats';
+
+function folderName(path: string): string {
+  return path.split(/[/\\]/).filter(Boolean).pop() ?? path;
+}
+
+function folderKey(path: string): string {
+  return path.replace(/[/\\]+$/, '').toLowerCase();
+}
+
+function samePath(a: string, b: string): boolean {
+  return folderKey(a) === folderKey(b);
+}
 
 function isMacPlatform(): boolean {
   if (typeof navigator === 'undefined') return false;
@@ -139,10 +148,7 @@ export default function Sidebar() {
   const sendingBySession = useChatStore((s) => s.sendingBySession);
   const workspacePath = useSettingsStore((s) => s.settings.workspacePath);
   const activeTab = useTabStore((s) => s.tabs.find((t) => t.id === s.activeTabId));
-  const projects = useProjectStore((s) => s.projects);
-  const projectsLoaded = useProjectStore((s) => s.loaded);
   const mode = useUiStore((s) => s.mode);
-  const selectedProjectId = useUiStore((s) => s.selectedProjectId);
   const collapsed = useUiStore((s) => s.sidebarCollapsed);
   const sidebarWidth = useUiStore((s) => s.sidebarWidth);
 
@@ -158,9 +164,15 @@ export default function Sidebar() {
   const [fileHits, setFileHits] = useState<DirEntry[]>([]);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
-  const [projectDialogOpen, setProjectDialogOpen] = useState(false);
-  const [confirmDeleteProject, setConfirmDeleteProject] = useState(false);
-  const [projectsOpen, setProjectsOpen] = useState(() => localStorage.getItem(PROJECTS_FOLD_KEY) !== '0');
+  // Folder rows are expanded unless the user collapsed them; the stored value is the collapsed set.
+  const [collapsedFolders, setCollapsedFolders] = useState<string[]>(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(FOLDER_FOLD_KEY) ?? '[]');
+      return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === 'string') : [];
+    } catch {
+      return [];
+    }
+  });
   const [chatsOpen, setChatsOpen] = useState(() => localStorage.getItem(CHATS_FOLD_KEY) !== '0');
 
   useEffect(() => {
@@ -170,10 +182,6 @@ export default function Sidebar() {
   useEffect(() => {
     if (!loaded) void chatStore.loadSessions();
   }, [loaded]);
-
-  useEffect(() => {
-    if (!projectsLoaded) void projectStore.loadProjects();
-  }, [projectsLoaded]);
 
   useEffect(() => {
     if (!query.trim() || !workspacePath) {
@@ -206,24 +214,56 @@ export default function Sidebar() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const visibleSessions = (
-    workspacePath ? sessions.filter((s) => !s.workspacePath || s.workspacePath === workspacePath) : sessions
-  ).filter((s) => !query.trim() || s.title.toLowerCase().includes(query.trim().toLowerCase()));
+  const q = query.trim().toLowerCase();
+  const matches = (session: SessionSummary) => !q || session.title.toLowerCase().includes(q);
 
-  const projectSessions = selectedProjectId
-    ? sessions.filter((s) => s.projectId === selectedProjectId)
-    : [];
+  // A project is a workspace folder: one row per distinct `workspacePath` seen on any session, plus the
+  // currently selected folder so it shows up the moment it is picked, before its first message.
+  const folderGroups = (() => {
+    const map = new Map<string, { path: string; sessions: SessionSummary[] }>();
+    const keyOf = folderKey;
+    if (workspacePath) map.set(keyOf(workspacePath), { path: workspacePath, sessions: [] });
+    const loose: SessionSummary[] = [];
+    for (const session of sessions) {
+      if (!session.workspacePath) { loose.push(session); continue; }
+      const key = keyOf(session.workspacePath);
+      const group = map.get(key) ?? { path: session.workspacePath, sessions: [] };
+      group.sessions.push(session);
+      map.set(key, group);
+    }
+    const groups = [...map.values()]
+      .map((g) => ({ ...g, visible: g.sessions.filter(matches) }))
+      .filter((g) => !q || g.visible.length > 0)
+      .sort((x, y) => {
+        const cur = Number(!!workspacePath && samePath(y.path, workspacePath)) - Number(!!workspacePath && samePath(x.path, workspacePath));
+        if (cur) return cur;
+        const latest = (g: { sessions: SessionSummary[] }) => Math.max(0, ...g.sessions.map((s) => Date.parse(s.updatedAt) || 0));
+        return latest(y) - latest(x);
+      });
+    return { groups, loose: loose.filter(matches) };
+  })();
+
+  function isFolderOpen(key: string): boolean {
+    return !!q || !collapsedFolders.includes(key);
+  }
+
+  function toggleFolder(key: string) {
+    setCollapsedFolders((prev) => {
+      const next = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
+      try { localStorage.setItem(FOLDER_FOLD_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }
+
+  async function newChatInFolder(path: string) {
+    if (!workspacePath || !samePath(path, workspacePath)) await settingsStore.patchSettings({ workspacePath: path });
+    const session = await chatStore.createSession('新对话');
+    uiStore.setMode('chat');
+    tabStore.openChatTab(session.id, session.title);
+  }
 
   function toggleCollapsed() {
     uiStore.toggleSidebar();
-  }
-
-  function toggleProjectsOpen() {
-    setProjectsOpen((o) => {
-      const next = !o;
-      localStorage.setItem(PROJECTS_FOLD_KEY, next ? '1' : '0');
-      return next;
-    });
   }
 
   function toggleChatsOpen() {
@@ -301,6 +341,81 @@ export default function Sidebar() {
     }
   };
 
+  const renderSession = (session: SessionSummary) => {
+    const active = activeTab?.kind === 'chat' && activeTab.sessionId === session.id;
+    const pendingKind = pendingKindFor(session, interactionBySession);
+    return (
+      <SessionContextMenu
+        key={session.id}
+        session={session}
+        onRename={() => {
+          setRenamingId(session.id);
+          setRenameValue(session.title);
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => {
+            uiStore.setMode('chat');
+            tabStore.openChatTab(session.id, session.title);
+          }}
+          className={cn(
+            'group flex w-full items-center gap-2 rounded-[10px] px-3 py-2 text-left text-[13px] leading-5 text-ink/75 outline-none transition-colors focus-visible:inset-ring-2 focus-visible:inset-ring-ink/30 hover:bg-[var(--sidebar-hover)] hover:text-ink',
+            active && 'bg-[var(--sidebar-selected)] font-medium text-ink hover:bg-[var(--sidebar-selected)]',
+          )}
+        >
+          <SessionStatus pending={!!pendingKind} unread={!!unreadBySession[session.id]} running={!!sendingBySession[session.id]} />
+          {renamingId === session.id ? (
+            <input
+              autoFocus
+              value={renameValue}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onBlur={() => {
+                if (renameValue.trim()) void chatStore.renameSession(session.id, renameValue.trim());
+                setRenamingId(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                if (e.key === 'Escape') setRenamingId(null);
+              }}
+              className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none"
+            />
+          ) : (
+            <span
+              className="flex min-w-0 flex-1 flex-col"
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                setRenamingId(session.id);
+                setRenameValue(session.title);
+              }}
+            >
+              <span className="truncate">{session.title}</span>
+              {session.listPreview && (
+                <span className="truncate text-[11px] leading-tight text-ink-muted/80">{session.listPreview}</span>
+              )}
+            </span>
+          )}
+          {pendingKind && <PendingInteractionBadge kind={pendingKind} />}
+          <span
+            role="button"
+            tabIndex={-1}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              void chatStore.deleteSession(session.id);
+              toast.info(`已删除会话「${session.title}」`);
+            }}
+            className="mt-0.5 shrink-0 self-start rounded p-1 text-ink-muted opacity-0 transition-opacity duration-[140ms] hover:bg-paper hover:text-danger group-hover:opacity-100"
+            aria-label="删除会话"
+          >
+            <Trash2 size={13} />
+          </span>
+        </button>
+      </SessionContextMenu>
+    );
+  };
+
   return (
     <aside
       ref={asideRef}
@@ -358,249 +473,83 @@ export default function Sidebar() {
         </button>
       </nav>
 
-      <div className="mt-7 flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
-        <div className="flex min-h-0 shrink-0 flex-col">
-          <div className="flex items-center gap-1">
-            <button type="button" onClick={toggleProjectsOpen} className={cn(foldRow, 'flex-1')} aria-expanded={projectsOpen}>
-              <ChevronRight
-                size={14}
-                className={cn(
-                  'shrink-0 transition-transform duration-150 ease-[var(--ease-out)] motion-reduce:transition-none',
-                  projectsOpen && 'rotate-90',
-                )}
-              />
-              项目
-            </button>
-            <button
-              type="button"
-              onClick={() => setProjectDialogOpen(true)}
-              title="新建项目"
-              aria-label="新建项目"
-              className="mr-1 inline-flex size-7 items-center justify-center rounded-lg text-ink-muted hover:bg-[var(--sidebar-hover)] hover:text-ink"
-            >
-              <Plus size={14} />
-            </button>
-          </div>
-          {projectsOpen && (
-            <div className="anim-fade max-h-40 shrink-0 overflow-y-auto px-1 pb-2">
-              {projects.length === 0 && (
-                <button
-                  type="button"
-                  onClick={() => setProjectDialogOpen(true)}
-                  className="w-full rounded-xl px-3 py-2 text-left text-xs leading-5 text-ink-muted hover:bg-[var(--sidebar-hover)]"
-                >
-                  创建一个项目
-                </button>
-              )}
-              {projects.map((project) => {
-                const active = selectedProjectId === project.id;
-                const count = sessions.filter((s) => s.projectId === project.id).length;
-                return (
-                  <button
-                    key={project.id}
-                    type="button"
-                    onClick={() => {
-                      uiStore.selectProject(active ? null : project.id);
-                      uiStore.setMode('chat');
-                    }}
-                    className={cn(
-                      'flex w-full items-center gap-2 rounded-[10px] px-3 py-2 text-left text-[13px] leading-5 text-ink/75 outline-none transition-colors focus-visible:inset-ring-2 focus-visible:inset-ring-ink/30 hover:bg-[var(--sidebar-hover)] hover:text-ink',
-                      active && 'bg-[var(--sidebar-selected)] font-medium text-ink hover:bg-[var(--sidebar-selected)]',
-                    )}
-                    title={project.description || project.name}
-                  >
-                    <FolderKanban size={14} className="shrink-0 opacity-70" />
-                    <span className="min-w-0 flex-1 truncate">{project.name}</span>
-                    {count ? <span className="shrink-0 text-[11px] tabular-nums text-ink-muted">{count}</span> : null}
-                  </button>
-                );
-              })}
-              {selectedProjectId && (
-                <div className="pt-2">
-                  <div className="mb-1 flex items-center justify-between px-1">
-                    <p className="px-2 text-[11px] text-ink-muted">项目对话</p>
+      <div className="mt-7 flex min-h-0 flex-1 flex-col overflow-hidden">
+        <button type="button" onClick={toggleChatsOpen} className={cn(foldRow, 'w-full')} aria-expanded={chatsOpen}>
+          <ChevronRight
+            size={14}
+            className={cn(
+              'shrink-0 transition-transform duration-150 ease-[var(--ease-out)] motion-reduce:transition-none',
+              chatsOpen && 'rotate-90',
+            )}
+          />
+          对话
+        </button>
+        {chatsOpen && (
+          <nav className="anim-fade min-h-0 flex-1 space-y-0.5 overflow-y-auto px-1 pb-2">
+            {folderGroups.groups.length === 0 && folderGroups.loose.length === 0 && !q && (
+              <p className="px-3 py-1.5 text-xs text-ink-muted">暂无会话</p>
+            )}
+            {folderGroups.groups.map((group) => {
+              const key = folderKey(group.path);
+              const open = isFolderOpen(key);
+              const current = !!workspacePath && samePath(group.path, workspacePath);
+              return (
+                <div key={key}>
+                  <div className="group/folder flex items-center">
                     <button
                       type="button"
-                      className="text-[11px] text-accent"
-                      onClick={async () => {
-                        const session = await chatStore.createSession('新对话', selectedProjectId);
-                        uiStore.setMode('chat');
-                        tabStore.openChatTab(session.id, session.title);
-                      }}
+                      onClick={() => toggleFolder(key)}
+                      aria-expanded={open}
+                      title={group.path}
+                      className={cn(
+                        'flex min-w-0 items-center gap-1 px-3 py-2 text-left text-[13px] leading-5 outline-none transition-colors hover:text-ink focus-visible:text-ink',
+                        current ? 'font-medium text-ink' : 'text-ink-muted',
+                      )}
                     >
-                      新建
+                      <span className="min-w-0 truncate">{folderName(group.path)}</span>
+                      <ChevronRight
+                        size={13}
+                        className={cn(
+                          'shrink-0 transition-transform duration-150 ease-[var(--ease-out)] motion-reduce:transition-none',
+                          open && 'rotate-90',
+                        )}
+                      />
+                    </button>
+                    <span className="flex-1" />
+                    <button
+                      type="button"
+                      onClick={() => void newChatInFolder(group.path)}
+                      title={`在 ${folderName(group.path)} 中新建对话`}
+                      aria-label={`在 ${folderName(group.path)} 中新建对话`}
+                      className="mr-2 hidden size-6 shrink-0 items-center justify-center text-ink-muted hover:text-ink group-hover/folder:inline-flex"
+                    >
+                      <Plus size={14} />
                     </button>
                   </div>
-                  {projectSessions.length === 0 && (
-                    <p className="px-3 py-1.5 text-xs text-ink-muted">这个项目还没有对话</p>
-                  )}
-                  {projectSessions.map((session) => {
-                    const active = activeTab?.kind === 'chat' && activeTab.sessionId === session.id;
-                    const pendingKind = pendingKindFor(session, interactionBySession);
-                    return (
-                      <SessionContextMenu key={session.id} session={session}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            uiStore.setMode('chat');
-                            tabStore.openChatTab(session.id, session.title);
-                          }}
-                          className={cn(
-                            'flex w-full items-center gap-2 rounded-[10px] px-3 py-2 text-left text-[13px] leading-5 text-ink/75 outline-none transition-colors focus-visible:inset-ring-2 focus-visible:inset-ring-ink/30 hover:bg-[var(--sidebar-hover)] hover:text-ink',
-                            active && 'bg-[var(--sidebar-selected)] font-medium text-ink hover:bg-[var(--sidebar-selected)]',
-                          )}
-                        >
-                          <SessionStatus pending={!!pendingKind} unread={!!unreadBySession[session.id]} running={!!sendingBySession[session.id]} />
-                          <span className="flex-1 truncate">{session.title}</span>
-                          {pendingKind && <PendingInteractionBadge kind={pendingKind} />}
-                        </button>
-                      </SessionContextMenu>
-                    );
-                  })}
-                  {confirmDeleteProject ? (
-                    <div className="mt-2 flex items-center gap-2 rounded-xl bg-paper-inset px-3 py-2 text-[12px] text-ink" role="alertdialog" aria-label="确认删除项目">
-                      <span className="min-w-0 flex-1">删除项目？对话会保留。</span>
-                      <button
-                        type="button"
-                        autoFocus
-                        className="rounded-[9px] px-2 py-1 text-danger hover:bg-danger/10"
-                        onClick={async () => {
-                          setConfirmDeleteProject(false);
-                          await projectStore.deleteProject(selectedProjectId);
-                          uiStore.selectProject(null);
-                          await chatStore.loadSessions();
-                        }}
-                      >
-                        删除
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded-[9px] px-2 py-1 text-ink-muted hover:bg-paper hover:text-ink"
-                        onClick={() => setConfirmDeleteProject(false)}
-                      >
-                        取消
-                      </button>
+                  {open && (
+                    <div className="space-y-0.5 pl-3">
+                      {group.visible.length === 0 && (
+                        <p className="px-3 py-1.5 text-xs text-ink-muted">这个文件夹还没有对话</p>
+                      )}
+                      {group.visible.map(renderSession)}
                     </div>
-                  ) : (
-                    <button
-                      type="button"
-                      className="mt-2 px-3 text-[11px] text-ink-muted transition-colors hover:text-danger"
-                      onClick={() => setConfirmDeleteProject(true)}
-                    >
-                      删除项目
-                    </button>
                   )}
                 </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div className="flex min-h-0 flex-1 flex-col">
-          <button type="button" onClick={toggleChatsOpen} className={cn(foldRow, 'w-full')} aria-expanded={chatsOpen}>
-            <ChevronRight
-              size={14}
-              className={cn(
-                'shrink-0 transition-transform duration-150 ease-[var(--ease-out)] motion-reduce:transition-none',
-                chatsOpen && 'rotate-90',
-              )}
-            />
-            对话
-          </button>
-          {chatsOpen && (
-            <nav className="anim-fade min-h-0 flex-1 space-y-0.5 overflow-y-auto px-1 pb-2">
-              {visibleSessions.length === 0 && !query.trim() && (
-                <p className="px-3 py-1.5 text-xs text-ink-muted">暂无会话</p>
-              )}
-              {visibleSessions.map((session) => {
-                const active = activeTab?.kind === 'chat' && activeTab.sessionId === session.id;
-                const pendingKind = pendingKindFor(session, interactionBySession);
-                return (
-                  <SessionContextMenu
-                    key={session.id}
-                    session={session}
-                    onRename={() => {
-                      setRenamingId(session.id);
-                      setRenameValue(session.title);
-                    }}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        uiStore.setMode('chat');
-                        tabStore.openChatTab(session.id, session.title);
-                      }}
-                      className={cn(
-                        'group flex w-full items-center gap-2 rounded-[10px] px-3 py-2 text-left text-[13px] leading-5 text-ink/75 outline-none transition-colors focus-visible:inset-ring-2 focus-visible:inset-ring-ink/30 hover:bg-[var(--sidebar-hover)] hover:text-ink',
-                        active && 'bg-[var(--sidebar-selected)] font-medium text-ink hover:bg-[var(--sidebar-selected)]',
-                      )}
-                    >
-                      <SessionStatus pending={!!pendingKind} unread={!!unreadBySession[session.id]} running={!!sendingBySession[session.id]} />
-                      {renamingId === session.id ? (
-                        <input
-                          autoFocus
-                          value={renameValue}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={(e) => setRenameValue(e.target.value)}
-                          onBlur={() => {
-                            if (renameValue.trim()) void chatStore.renameSession(session.id, renameValue.trim());
-                            setRenamingId(null);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-                            if (e.key === 'Escape') setRenamingId(null);
-                          }}
-                          className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none"
-                        />
-                      ) : (
-                        <span
-                          className="flex min-w-0 flex-1 flex-col"
-                          onDoubleClick={(e) => {
-                            e.stopPropagation();
-                            setRenamingId(session.id);
-                            setRenameValue(session.title);
-                          }}
-                        >
-                          <span className="truncate">{session.title}</span>
-                          {session.listPreview && (
-                            <span className="truncate text-[11px] leading-tight text-ink-muted/80">
-                              {session.listPreview}
-                            </span>
-                          )}
-                        </span>
-                      )}
-                      {pendingKind && <PendingInteractionBadge kind={pendingKind} />}
-                      <span
-                        role="button"
-                        tabIndex={-1}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          void chatStore.deleteSession(session.id);
-                          toast.info(`已删除会话「${session.title}」`);
-                        }}
-                        className="mt-0.5 shrink-0 self-start rounded p-1 text-ink-muted opacity-0 transition-opacity duration-[140ms] hover:bg-paper hover:text-danger group-hover:opacity-100"
-                        aria-label="删除会话"
-                      >
-                        <Trash2 size={13} />
-                      </span>
-                    </button>
-                  </SessionContextMenu>
-                );
-              })}
-              {searchOpen && fileHits.length > 0 && (
-                <div className="pt-2">
-                  <p className="px-3 pb-1 text-[11px] text-ink-muted">文件</p>
-                  {fileHits.map((hit) => (
-                    <div key={hit.relativePath} className="truncate px-3 py-1 text-xs text-ink-muted">
-                      {hit.relativePath}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </nav>
-          )}
-        </div>
+              );
+            })}
+            {folderGroups.loose.map(renderSession)}
+            {searchOpen && fileHits.length > 0 && (
+              <div className="pt-2">
+                <p className="px-3 pb-1 text-[11px] text-ink-muted">文件</p>
+                {fileHits.map((hit) => (
+                  <div key={hit.relativePath} className="truncate px-3 py-1 text-xs text-ink-muted">
+                    {hit.relativePath}
+                  </div>
+                ))}
+              </div>
+            )}
+          </nav>
+        )}
       </div>
 
       <div className="mt-3 shrink-0 border-t border-[var(--sidebar-line)] pt-3">
@@ -625,7 +574,6 @@ export default function Sidebar() {
         </div>
       )}
 
-      <ProjectDialog open={projectDialogOpen} onClose={() => setProjectDialogOpen(false)} />
     </aside>
   );
 }
