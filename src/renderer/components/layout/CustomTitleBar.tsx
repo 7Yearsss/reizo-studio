@@ -108,16 +108,14 @@ export default function CustomTitleBar() {
         <div className="titlebar-no-drag flex items-center gap-1">
           {/* On macOS the traffic lights take the logo's place. */}
           {!isMac && (
-            <Tooltip content="Reizo Studio" side="bottom">
-              <div className="flex h-7 w-7 items-center justify-center">
-                <img
-                  src={logoUrl}
-                  alt="Reizo"
-                  className="h-5 w-5 object-contain select-none"
-                  draggable={false}
-                />
-              </div>
-            </Tooltip>
+            <div className="flex h-7 w-7 items-center justify-center">
+              <img
+                src={logoUrl}
+                alt="Reizo"
+                className="h-5 w-5 object-contain select-none"
+                draggable={false}
+              />
+            </div>
           )}
 
           <Tooltip content={sidebarCollapsed ? `展开侧栏 (${sidebarModHint})` : `收起侧栏 (${sidebarModHint})`} side="bottom">
