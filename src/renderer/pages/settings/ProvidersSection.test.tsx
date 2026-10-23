@@ -9,10 +9,12 @@ const mocks = vi.hoisted(() => ({ patch: vi.fn(), settings: { activeProviderId: 
 vi.mock('../../state/useSettingsStore', () => ({ useSettingsStore: (selector: (state: unknown) => unknown) => selector({ settings: mocks.settings }) }));
 vi.mock('../../state/settingsStore', () => ({ patchSettings: mocks.patch }));
 vi.mock('../../lib/toast', () => ({ toast: { success: vi.fn(), info: vi.fn() } }));
+vi.mock('../../components/models/ModelIcon', () => ({ default: () => <span aria-hidden /> }));
 
 let root: Root, host: HTMLDivElement;
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  vi.stubGlobal('ResizeObserver', class { observe = vi.fn(); unobserve = vi.fn(); disconnect = vi.fn(); });
   mocks.patch.mockReset().mockResolvedValue({});
   mocks.settings = { activeProviderId: 'saved', providers: [
     { id: 'saved', name: 'Saved', tag: '官方', hasKey: true, model: 'a', models: [{ id: 'a', name: 'Model A' }, { id: 'b', name: 'Model B' }], baseUrl: 'https://example.test/v1' },
@@ -46,8 +48,10 @@ it('browses providers without writing settings and retains separate unsaved key 
 });
 
 it('changes an existing provider model without clearing its saved key', async () => {
-  const select = form('Saved').querySelector('select')!;
-  await act(async () => { select.value = 'b'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+  await act(async () => form('Saved').querySelector<HTMLButtonElement>('[aria-label="默认对话模型"]')!.click());
+  expect(document.querySelector('[aria-label="搜索模型或厂商"]')).not.toBeNull();
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-model-value="b"]')!.click());
+  expect(mocks.patch).not.toHaveBeenCalled();
   await submit('Saved');
   expect(mocks.patch).toHaveBeenCalledWith({ provider: { id: 'saved', model: 'b' }, activeProviderId: 'saved' });
 });
@@ -85,7 +89,7 @@ it('automatically loads account models and offers no manual key controls', async
   expect(form('Reizo 账号').textContent).toContain('无需填写 API Key');
   Object.assign(account, { hasKey: true, model: 'account-chat', models: [{ id: 'account-chat', name: 'Account Chat' }] });
   await act(async () => root.render(<ProvidersSection />));
-  expect(form('Reizo 账号').querySelector('select')!.value).toBe('account-chat');
+  expect(form('Reizo 账号').querySelector('[aria-label="默认对话模型"]')?.getAttribute('data-selected-model')).toBe('account-chat');
   await submit('Reizo 账号');
   expect(mocks.patch).toHaveBeenCalledWith({ provider: { id: 'reizo-account', model: 'account-chat' }, activeProviderId: 'reizo-account' });
   expect(form('Reizo 账号').textContent).not.toContain('更换密钥');

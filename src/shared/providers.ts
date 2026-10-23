@@ -153,11 +153,15 @@ export function getProviderPreset(id: string): ProviderPreset | undefined {
  * than the provider the request goes through.
  */
 export function modelVendorDomain(modelId: string): string | undefined {
-  const id = modelId.toLowerCase();
-  if (/^(gpt|o\d|dall-e|chatgpt)/.test(id)) return 'openai.com';
-  if (id.startsWith('grok')) return 'x.ai';
+  // Aggregators can prepend routing labels or a vendor namespace. Keep the
+  // original ID for requests; normalize only the name used for brand detection.
+  const id = (modelId.trim().toLowerCase().split('/').pop() ?? '')
+    .replace(/^(?:(?:\[[^\]]*\]|【[^】]*】)\s*)+/, '');
+  if (/^(gpt|o\d|dall-e|chatgpt|sora)/.test(id)) return 'openai.com';
+  if (/^(?:kc-)?grok/.test(id)) return 'x.ai';
+  if (/^(?:minimax|hailuo)/.test(id)) return 'minimax.io';
   if (id.startsWith('claude')) return 'anthropic.com';
-  if (id.startsWith('gemini') || id.includes('nano-banana')) return 'deepmind.google';
+  if (/^(gemini|veo|imagen)/.test(id) || id.includes('nano-banana')) return 'deepmind.google';
   if (id.startsWith('deepseek')) return 'deepseek.com';
   if (id.startsWith('kimi') || id.startsWith('moonshot')) return 'moonshot.cn';
   if (id.startsWith('glm') || id.startsWith('zhipu')) return 'bigmodel.cn';
@@ -168,6 +172,7 @@ export function modelVendorDomain(modelId: string): string | undefined {
   if (id.startsWith('kling')) return 'klingai.com';
   if (id.startsWith('wan')) return 'www.aliyun.com';
   if (id.startsWith('luma') || id.startsWith('ray')) return 'lumalabs.ai';
+  if (/^sd(?:2-5-|-(?:\d|fast-|mini-))/.test(id)) return undefined;
   if (id.startsWith('sd') || id.startsWith('stable')) return 'stability.ai';
   if (id.startsWith('llama') || id.startsWith('meta-')) return 'www.llama.com';
   return undefined;

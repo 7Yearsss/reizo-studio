@@ -1,4 +1,5 @@
 import type { ProviderPreset } from './providers';
+import type { ModelCatalog } from './modelCatalog';
 
 export type Appearance = 'system' | 'light' | 'dark';
 export type PermissionMode = 'ask' | 'workspace' | 'full';
@@ -25,6 +26,8 @@ export interface MediaModels {
 }
 
 export interface LocalSettings {
+  /** Account metadata merged at read time; not persisted with manual settings. */
+  accountCatalog?: ModelCatalog;
   appearance: Appearance;
   activeProviderId: string;
   workspacePath: string | null;
@@ -44,6 +47,7 @@ export interface LocalSettings {
 }
 
 export interface PublicProvider extends Pick<ProviderPreset, 'id' | 'name' | 'tag' | 'websiteUrl' | 'allowCustomBaseUrl' | 'description'> {
+  catalog?: ModelCatalog;
   hasKey: boolean;
   model: string;
   models: { id: string; name: string }[];

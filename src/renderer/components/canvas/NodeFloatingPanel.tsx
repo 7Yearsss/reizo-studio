@@ -15,6 +15,7 @@ import * as canvasStore from '../../state/canvasStore';
 import NodePanelViewport from './NodePanelViewport';
 import NodePanelSelect from './NodePanelSelect';
 import type { CanvasInputSource } from '../../state/canvasInputSources';
+import { useSettingsStore } from '../../state/useSettingsStore';
 
 const CONFIGURED_MODEL = '__configured_model__';
 
@@ -98,9 +99,15 @@ function NodePanelBody({ sessionId, node, prompt, onPromptChange, onPromptCommit
   const isAudio = nodeType === 'audio';
   const isNote = nodeType === 'note';
   const isImage = !isVideo && !isAudio && !isNote;
+  const settings = useSettingsStore(state => state.settings);
+  const active = settings.providers.find(provider => provider.id === settings.activeProviderId);
+  const account = active?.id === 'reizo-account';
+  const videoSupport = account ? active.catalog?.video.find(item => item.id === (model || settings.mediaModels?.video))?.video : undefined;
+  const durationOptions = [{ value: '5s', label: '5 秒' }, { value: '10s', label: '10 秒' }].filter(item => !account || videoSupport?.minSeconds && videoSupport.maxSeconds && Number.parseInt(item.value) >= videoSupport.minSeconds && Number.parseInt(item.value) <= videoSupport.maxSeconds);
+  const ratioOptions = [{ value: '16:9', label: '横屏 16:9' }, { value: '9:16', label: '竖屏 9:16' }, { value: '1:1', label: '方形 1:1' }].filter(item => !account || videoSupport?.aspectRatios?.includes(item.value));
   const typeLabel = isNote ? '文本与提示词' : isVideo ? '视频' : isAudio ? '音频' : '图片';
   const currentModel = model || CONFIGURED_MODEL;
-  const models = isVideo ? CANVAS_VIDEO_MODELS : CANVAS_IMAGE_MODELS;
+  const models = active?.catalog ? active.catalog[isVideo ? 'video' : 'image'] : account ? [] : isVideo ? CANVAS_VIDEO_MODELS : CANVAS_IMAGE_MODELS;
   const modelOptions = [{ value: CONFIGURED_MODEL, label: '沿用设置' }, ...models.map((item) => ({ value: item.id, label: item.name }))];
   const providerValue = audioProvider || audioProviders?.find((item) => item.isDefault)?.id || audioProviders?.[0]?.id || '';
   const candidateMap = useMemo(() => new Map(candidates.map((candidate) => [candidate.id, candidate])), [candidates]);
@@ -139,7 +146,7 @@ function NodePanelBody({ sessionId, node, prompt, onPromptChange, onPromptCommit
     <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-3">
       <div className="mb-2 flex items-center gap-2 overflow-x-auto pb-1">
         {refs.map((reference) => <RefChip key={reference.id} node={reference} disabled={running} onInsert={() => areaRef.current?.insertMentionNode(reference)} onRemove={() => { void canvasStore.removeComposerRef(sessionId, node.id, reference.id).catch((cause) => toast.error(cause instanceof Error ? cause.message : '移除参考失败')); }} />)}
-        <Button type="button" variant="ghost" size="sm" disabled={running} onClick={() => canvasStore.startPickingCanvasRefs(sessionId, node.id)}><Plus data-icon="inline-start" />参考</Button>
+        {!isVideo || !account || videoSupport?.startFrame ? <Button type="button" variant="ghost" size="sm" disabled={running} onClick={() => canvasStore.startPickingCanvasRefs(sessionId, node.id)}><Plus data-icon="inline-start" />参考</Button> : null}
       </div>
       {upstreamSources.length ? <p className="mb-2 text-[11px] leading-5 text-muted-foreground">已接入：{upstreamSources.map((source) => source.sourceTitle).join('、')}</p> : null}
       <FieldGroup className="gap-3">
@@ -156,8 +163,9 @@ function NodePanelBody({ sessionId, node, prompt, onPromptChange, onPromptCommit
         </Field>
         {paramsOpen ? <Field className="gap-2">
           <FieldLabel>生成参数</FieldLabel>
-          {isVideo && onDurationChange ? <PanelChoices label="视频时长" value={duration} options={[{ value: '5s', label: '5 秒' }, { value: '10s', label: '10 秒' }]} disabled={running} onChange={(value) => onDurationChange(value as '5s' | '10s')} /> : null}
-          {isVideo && onCameraChange ? <div className="flex items-center gap-2 text-xs"><span className="text-muted-foreground">运镜</span><CameraDial value={camera} onChange={onCameraChange} portalBoundary={boundary} restoreInputFocus={() => areaRef.current?.focus()} disabled={running} /></div> : null}
+          {isVideo && onDurationChange && durationOptions.length ? <PanelChoices label="视频时长" value={duration} options={durationOptions} disabled={running} onChange={(value) => onDurationChange(value as '5s' | '10s')} /> : null}
+          {isVideo && account && !durationOptions.length ? <p className="text-xs text-muted-foreground">时长与画幅使用模型默认值</p> : null}
+          {isVideo && onCameraChange && (!account || videoSupport?.camera) ? <div className="flex items-center gap-2 text-xs"><span className="text-muted-foreground">运镜</span><CameraDial value={camera} onChange={onCameraChange} portalBoundary={boundary} restoreInputFocus={() => areaRef.current?.focus()} disabled={running} /></div> : null}
           {isAudio && audioVoices?.length && onAudioVoiceChange ? <NodePanelSelect label="音色" value={audioVoice || audioVoices[0].id} options={audioVoices.map((voice) => ({ value: voice.id, label: voice.tag ? `${voice.name} (${voice.tag})` : voice.name }))} onChange={onAudioVoiceChange} disabled={running} boundary={boundary} /> : null}
           {isImage && onVariationsCountChange ? <PanelChoices label="变体数量" value={String(variationsCount)} options={[1, 2, 4].map((count) => ({ value: String(count), label: `${count} 张` }))} onChange={(value) => onVariationsCountChange(Number(value) as 1 | 2 | 4)} disabled={running} /> : null}
         </Field> : null}
@@ -169,7 +177,7 @@ function NodePanelBody({ sessionId, node, prompt, onPromptChange, onPromptCommit
         {isAudio && audioProviders?.length && onAudioProviderChange ? <NodePanelSelect label="音频供应商" value={providerValue} options={audioProviders.map((provider) => ({ value: provider.id, label: provider.name }))} onChange={onAudioProviderChange} disabled={running} boundary={boundary} /> : null}
         {!isNote && !isAudio && onModelChange ? <NodePanelSelect label="生成模型" value={currentModel} options={modelOptions} onChange={(value) => onModelChange(value === CONFIGURED_MODEL ? '' : value)} disabled={running} boundary={boundary} /> : null}
         {!isNote && !isAudio && !onModelChange ? <span className="max-w-44 truncate text-xs text-muted-foreground">{modelOptions.find((item) => item.value === currentModel)?.label || currentModel}</span> : null}
-        {isVideo && onRatioChange ? <NodePanelSelect label="画幅比例" value={ratio} options={[{ value: '16:9', label: '横屏 16:9' }, { value: '9:16', label: '竖屏 9:16' }, { value: '1:1', label: '方形 1:1' }]} onChange={(value) => onRatioChange(value as '16:9' | '9:16' | '1:1')} disabled={running} boundary={boundary} /> : null}
+        {isVideo && onRatioChange && ratioOptions.length ? <NodePanelSelect label="画幅比例" value={ratio} options={ratioOptions} onChange={(value) => onRatioChange(value as '16:9' | '9:16' | '1:1')} disabled={running} boundary={boundary} /> : null}
         {isImage && onSizeChange ? <NodePanelSelect label="图片尺寸" value={size} options={[{ value: '1024x1024', label: '方形 1:1' }, { value: '1024x1536', label: '竖幅 2:3' }, { value: '1536x1024', label: '横幅 3:2' }]} onChange={(value) => onSizeChange(value as '1024x1024' | '1024x1536' | '1536x1024')} disabled={running} boundary={boundary} /> : null}
         {isImage && onVariationsCountChange ? <NodePanelSelect label="变体数量" value={String(variationsCount)} options={[1, 2, 4].map((count) => ({ value: String(count), label: `${count} 张` }))} onChange={(value) => onVariationsCountChange(Number(value) as 1 | 2 | 4)} disabled={running} boundary={boundary} /> : null}
         {!isNote ? <Button type="button" variant={paramsOpen ? 'secondary' : 'ghost'} size="icon-sm" aria-label="生成参数" aria-expanded={paramsOpen} disabled={running} onClick={() => setParamsOpen((open) => !open)}><SlidersHorizontal /></Button> : null}

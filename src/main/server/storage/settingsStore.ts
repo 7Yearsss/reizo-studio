@@ -136,9 +136,17 @@ export function createSettingsStore(root: string, accountModels?: () => AccountM
   function withAccount(settings: LocalSettings): LocalSettings {
     const credential = accountModels?.();
     const selected = settings.providers[settings.activeProviderId];
+    const activeProviderId = credential && !selected?.apiKey ? 'reizo-account' : settings.activeProviderId;
+    const mediaModels = { ...settings.mediaModels };
+    if (activeProviderId === 'reizo-account' && credential?.catalog) {
+      for (const kind of ['image', 'video', 'draft'] as const) {
+        const models = credential.catalog[kind === 'draft' ? 'image' : kind];
+        if (!models.some(model => model.id === mediaModels[kind])) mediaModels[kind] = models[0]?.id;
+      }
+    }
     return {
       ...settings,
-      activeProviderId: credential && !selected?.apiKey ? 'reizo-account' : settings.activeProviderId,
+      activeProviderId, mediaModels, accountCatalog: credential?.catalog,
       providers: { ...settings.providers, 'reizo-account': {
         apiKey: credential?.apiKey ?? null,
         baseUrl: credential?.baseUrl,
@@ -161,6 +169,7 @@ export function createSettingsStore(root: string, accountModels?: () => AccountM
         hasKey: Boolean(stored.apiKey),
         model: stored.model || preset.defaultModel,
         models: preset.id === 'reizo-account' ? credential?.models ?? [] : preset.models,
+        ...(preset.id === 'reizo-account' && credential ? { catalog: credential.catalog ?? { text: credential.models.map(model => ({ ...model, protocol: 'openai' as const })), image: [], video: [] } } : {}),
         baseUrl: stored.baseUrl || preset.baseUrl,
       };
     });

@@ -43,7 +43,9 @@ export function resolveSettingsModel(settings: LocalSettings, request: {
     ? request.draft ? clean(settings.mediaModels?.draft) ?? DEFAULT_DRAFT_IMAGE_MODEL : requestedModel ?? clean(settings.mediaModels?.image) ?? (official ? 'dall-e-3' : 'gpt-image-2')
     : requestedModel ?? clean(stored.model) ?? clean(preset.defaultModel);
   if (!model) throw new ProviderResolutionError('Provider is missing a base URL or model id.');
-  return { providerId, modelId: model, apiKey: stored.apiKey.trim(), baseUrl };
+  const catalogModel = providerId === 'reizo-account' ? settings.accountCatalog?.[request.category === 'image' ? 'image' : 'text'].find(item => item.id === model) : undefined;
+  if (providerId === 'reizo-account' && settings.accountCatalog && !catalogModel) throw new ProviderResolutionError('当前账号没有此模型权限，请重新选择模型。');
+  return { providerId, modelId: model, apiKey: stored.apiKey.trim(), baseUrl, protocol: catalogModel?.protocol };
 }
 
 export async function resolveManagedProvider(store: ProviderStore, category: ProviderCategory, providerId?: string) {
@@ -93,6 +95,18 @@ export function resolveVideoProvider(settings: LocalSettings, request: {
 export async function resolveVideoExecution(settings: LocalSettings, request: {
   driverId: string; providerId?: string; submittedProviderId?: string; params: VideoGenerateParams; signal?: AbortSignal; autoProvider?: boolean;
 }, store?: ProviderStore) {
+  const useAccount = request.submittedProviderId === 'reizo-account' || !request.submittedProviderId &&
+    (request.providerId === 'reizo-account' || request.autoProvider && settings.activeProviderId === 'reizo-account');
+  if (useAccount) {
+    const stored = settings.providers?.['reizo-account'];
+    if (!stored?.apiKey) throw new ProviderResolutionError('请先登录 Reizo 并刷新账号模型状态。');
+    const id = supplied(request.params.model, '视频模型') ?? clean(settings.mediaModels?.video) ?? settings.accountCatalog?.video[0]?.id;
+    const model = settings.accountCatalog?.video.find(model => model.id === id);
+    if (!model?.video) throw new ProviderResolutionError('当前账号没有此视频模型权限，请刷新模型列表后重新选择。');
+    return { driver: getVideoDriver('new-api'), providerId: 'reizo-account', model: model.id,
+      params: { ...request.params, model: model.id },
+      credentials: { apiKey: stored.apiKey, baseUrl: stored.baseUrl, videoSupport: model.video, signal: request.signal } as VideoDriverOptions };
+  }
   let managedId = request.submittedProviderId;
   const legacyDriver = getVideoDriver(request.driverId);
   if (!managedId && legacyDriver.id !== request.driverId) managedId = request.driverId;

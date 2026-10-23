@@ -13,6 +13,19 @@ const folders: string[] = [];
 afterEach(async () => { for (const folder of folders.splice(0)) { expect(path.dirname(path.resolve(folder))).toBe(path.resolve(os.tmpdir())); await rm(folder, { recursive: true, force: true }); } });
 const lease: AccountModelCredential = { organizationId: 'org-1', organizationName: 'Workspace', apiKey: 'sk-account', baseUrl: 'https://relay.example/v1', expiresAt: '2099-01-01T00:00:00Z', models: [{ id: 'chat-1', name: 'Chat' }] };
 
+it('refreshes account media defaults from its public catalog without persisting credentials or metadata', async () => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), 'reizo-account-settings-')); folders.push(folder);
+  const current: AccountModelCredential = { ...lease, catalog: { text: [{ id: 'chat-1', name: 'Chat', protocol: 'openai' }], image: [{ id: 'nano-banana-2.1', name: 'Nano', protocol: 'openai-chat-image' }], video: [{ id: 'wan3.0-video', name: 'WAN', protocol: 'openai-video', video: { startFrame: false, endFrame: false, camera: false, reference: false } }] } };
+  const store = createSettingsStore(folder, () => current);
+  const result = await store.applyPatch({ activeProviderId: 'reizo-account', mediaModels: { video: 'obsolete-model' } });
+  expect(result.mediaModels).toMatchObject({ image: 'nano-banana-2.1', video: 'wan3.0-video', draft: 'nano-banana-2.1' });
+  expect(result.providers.find(p => p.id === 'reizo-account')?.catalog).toEqual(current.catalog);
+  const raw = await readFile(path.join(folder, 'settings.json'), 'utf8');
+  expect(raw).not.toContain('sk-account'); expect(raw).not.toContain('catalog');
+  current.catalog = { text: current.catalog!.text, image: [], video: [] };
+  expect((await store.getPublic()).mediaModels.video).toBeUndefined();
+});
+
 it('uses a login lease without a manual key and never persists or exposes it in settings', async () => {
   const folder = await mkdtemp(path.join(os.tmpdir(), 'reizo-account-settings-')); folders.push(folder);
   let current: AccountModelCredential | null = lease;

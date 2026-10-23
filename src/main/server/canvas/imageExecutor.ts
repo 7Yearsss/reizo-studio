@@ -32,7 +32,7 @@ const MAX_REFERENCE_IMAGES = 4;
 /** Gemini image models (nano-banana family) return images through
  * chat/completions with `modalities:[image,text]`, not /images/generations. */
 function isChatCompletionsImageModel(modelId: string): boolean {
-  return /^gemini-[\w.-]*image/i.test(modelId);
+  return /^(?:gemini.*(?:image|nano-banana)|nano-banana)/i.test((modelId.split('/').pop() ?? '').replace(/^(?:(?:\[[^\]]*\]|【[^】]*】)\s*)+/, ''));
 }
 
 interface RawImage {
@@ -97,7 +97,7 @@ async function generateImageViaChat(options: {
 
 /** Route to chat/completions for Gemini image models, /images otherwise. */
 async function generateOne(
-  resolved: { provider: ReturnType<typeof createOpenAiProvider>; providerId: string; modelId: string; apiKey: string; baseUrl?: string },
+  resolved: { provider: ReturnType<typeof createOpenAiProvider>; providerId: string; modelId: string; apiKey: string; baseUrl?: string; protocol?: string },
   prompt: string | { text: string; images: Uint8Array[] },
   size: string,
   job: NodeJobContext,
@@ -113,7 +113,7 @@ async function generateOne(
       }
       canvasStore.usage.setReport(`job:${job.id}`, reportId, []);
       let result: { images: RawImage[]; usage?: unknown };
-      if (isChatCompletionsImageModel(resolved.modelId)) {
+      if (resolved.protocol === 'openai-chat-image' || !resolved.protocol && isChatCompletionsImageModel(resolved.modelId)) {
         result = await generateImageViaChat({
           baseUrl: resolved.baseUrl, apiKey: resolved.apiKey, modelId: resolved.modelId,
           prompt: typeof prompt === 'string' ? prompt : prompt.text,
@@ -156,7 +156,7 @@ async function resolveImageProvider(
   settingsStore: SettingsStore,
   providerId: string | undefined,
   params: CanvasImageParams,
-): Promise<{ provider: ReturnType<typeof createOpenAiProvider>; providerId: string; modelId: string; apiKey: string; baseUrl?: string } | { error: string }> {
+): Promise<{ provider: ReturnType<typeof createOpenAiProvider>; providerId: string; modelId: string; apiKey: string; baseUrl?: string; protocol?: string } | { error: string }> {
   try {
     const resolved = resolveSettingsModel(await settingsStore.get(), { category: 'image', providerId, model: params.model, draft: params.draft });
     return { ...resolved, provider: createOpenAiProvider({ apiKey: resolved.apiKey, baseUrl: resolved.baseUrl, retryTransport: false }) };

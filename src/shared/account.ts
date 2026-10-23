@@ -1,3 +1,4 @@
+import type { ModelCatalog } from './modelCatalog';
 export interface AccountUser { id: string; username: string; displayName: string; email: string | null }
 /** Main-process only. Never include this object in AccountState or renderer IPC. */
 export interface AccountModelCredential {
@@ -7,6 +8,7 @@ export interface AccountModelCredential {
   baseUrl: string;
   expiresAt: string;
   models: { id: string; name: string }[];
+  catalog?: ModelCatalog;
 }
 export interface AccountState {
   status: 'signed-out' | 'pending' | 'authenticated' | 'offline';

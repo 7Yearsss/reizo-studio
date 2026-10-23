@@ -6,6 +6,7 @@ import * as settingsStore from '../../state/settingsStore';
 import { cn } from '../../lib/cn';
 import { toast } from '../../lib/toast';
 import { Input } from '../../components/motion/input';
+import ModelSelect from '../../components/models/ModelSelect';
 
 export default function ProvidersSection() {
   const settings = useSettingsStore((s) => s.settings);
@@ -119,12 +120,7 @@ export function ProviderDetail({ provider, active }: { provider: PublicProvider;
         {provider.allowCustomBaseUrl && <Input label="服务地址（Base URL）" value={baseUrl} onChange={setBaseUrl} placeholder="https://api.example.com/v1" className="w-full text-sm" />}
         <div className="rounded-xl bg-paper-inset/60 p-4">
           {provider.allowCustomBaseUrl ? <Input label="默认模型 ID" value={model} onChange={setModel} placeholder="例如 deepseek-chat" className="w-full text-sm" /> : (
-            <label className="block text-xs font-medium">默认对话模型
-              <select value={model} onChange={(event) => setModel(event.target.value)} className="mt-2 w-full min-w-0 rounded-lg border border-line bg-paper-raised px-3 py-2.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent">
-                {!provider.models.some((item) => item.id === model) && <option value={model}>{model || '请选择模型'}</option>}
-                {provider.models.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-              </select>
-            </label>
+            <div className="text-xs font-medium"><span>默认对话模型</span><ModelSelect models={provider.models} value={model} onChange={setModel} disabled={busy} /></div>
           )}
           <p className="mt-3 text-[11px] leading-relaxed text-ink-muted">保存后用作默认对话模型，也可在输入框中切换。</p>
         </div>

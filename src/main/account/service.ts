@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { AccountModelCredential, AccountState, AccountUser } from '../../shared/account';
+import { parseModelCatalog } from '../../shared/modelCatalog';
 
 export interface AccountCredential { token: string; origin: string; expiresAt: string; user: AccountUser; models?: AccountModelCredential }
 export interface AccountDependencies {
@@ -137,15 +138,16 @@ export class AccountService {
           const payload = await this.request('model-session', 'GET', active.token);
           if (generation !== this.generation) return this.snapshot();
           const value = payload.credential as AccountModelCredential | undefined;
+          const catalog = parseModelCatalog(value?.catalog);
           const url = new URL(value?.baseUrl ?? '');
           const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
           if (!value || typeof value.organizationId !== 'string' || !value.organizationId || typeof value.organizationName !== 'string' ||
             typeof value.apiKey !== 'string' || !/^sk-[A-Za-z0-9_-]+$/.test(value.apiKey) || !future(value.expiresAt, this.now()) ||
             Date.parse(value.expiresAt) > Date.parse(result.expiresAt) || url.username || url.password || url.search || url.hash ||
             (url.protocol !== 'https:' && !(local && new URL(this.deps.origin).protocol === 'http:' && url.protocol === 'http:')) ||
-            !Array.isArray(value.models) || !value.models.length || value.models.some(m => !m || typeof m.id !== 'string' || !m.id || typeof m.name !== 'string')) throw new Error('Invalid model session');
+            !Array.isArray(value.models) || (!value.models.length && !catalog?.image.length && !catalog?.video.length) || value.models.some(m => !m || typeof m.id !== 'string' || !m.id || typeof m.name !== 'string')) throw new Error('Invalid model session');
           models = { organizationId: value.organizationId, organizationName: value.organizationName, apiKey: value.apiKey, baseUrl: url.href.replace(/\/$/, ''), expiresAt: value.expiresAt,
-            models: value.models.map(m => ({ id: m.id, name: m.name })) };
+            models: value.models.map(m => ({ id: m.id, name: m.name })), ...(catalog ? { catalog } : {}) };
         } catch (error) {
           if (generation !== this.generation) return this.snapshot();
           if (error instanceof AccountHttpError && error.status === 401) { this.invalidate('登录已失效，请重新登录。'); return this.snapshot(); }
@@ -164,7 +166,7 @@ export class AccountService {
       this.credential = saved; this.pending = null;
       this.state = { status: 'authenticated', webOrigin: this.deps.origin, user: saved.user, expiresAt: saved.expiresAt,
         ...(this.deps.modelSessions ? { models: { ready: !!models, organizationId: models?.organizationId, organizationName: models?.organizationName,
-          catalogVersion: models ? createHash('sha256').update(JSON.stringify(models.models)).digest('hex') : undefined, message: modelMessage } } : {}) };
+          catalogVersion: models ? createHash('sha256').update(JSON.stringify([models.models, models.catalog])).digest('hex') : undefined, message: modelMessage } } : {}) };
       if (newlyConnected) {
         try { this.deps.connected(); }
         catch { this.state.message = '已登录，请手动返回工作台。'; }

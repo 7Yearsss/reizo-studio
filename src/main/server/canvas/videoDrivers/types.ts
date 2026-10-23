@@ -1,4 +1,5 @@
 import type { CameraControl } from '../../../../shared/cameraMotion';
+import type { VideoModelSupport } from '../../../../shared/modelCatalog';
 
 export type { CameraControl } from '../../../../shared/cameraMotion';
 
@@ -18,6 +19,7 @@ export interface VideoGenerateParams {
 }
 
 export interface VideoDriverOptions {
+  videoSupport?: VideoModelSupport;
   apiKey?: string;
   baseUrl?: string;
   context?: Record<string, unknown>;
