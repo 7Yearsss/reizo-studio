@@ -11,14 +11,14 @@ const requestId = 'b044ce0d-0296-4711-9ae4-632c965ac911';
 const grant = { token, requestId, code: 'ABCD-1234', expiresAt, verificationUrl: `${origin}/desktop/connect?request=${requestId}` };
 const authenticated = { status: 'authenticated', user, expiresAt };
 const response = (body: unknown, status = 200) => Response.json(body, { status });
-function fixture(saved: AccountCredential | null = null) {
+function fixture(saved: AccountCredential | null = null, modelSessions = false) {
   let disk = saved;
   let clock = now;
   const fetcher = vi.fn<typeof fetch>();
   const open = vi.fn(async () => undefined);
   const write = vi.fn((value: AccountCredential | null) => { disk = value; });
   const connected = vi.fn();
-  const deps = { origin, fetch: fetcher, read: () => disk, write, open, connected, now: () => clock };
+  const deps = { origin, fetch: fetcher, read: () => disk, write, open, connected, modelSessions, now: () => clock };
   return { service: new AccountService(deps), deps, fetcher, open, write, connected, advance: (ms: number) => { clock += ms; } };
 }
 
@@ -100,5 +100,58 @@ describe('browser account login', () => {
   it('allows loopback HTTP only in development and rejects credentials in origins', () => {
     expect(accountOrigin('http://localhost:3000', true)).toBe('http://localhost:3000');
     for (const url of ['http://localhost:3000', 'http://example.com', 'https://user:password@example.com', 'https://example.com/path']) expect(() => accountOrigin(url)).toThrow();
+  });
+});
+
+const modelSession = { organizationId: 'org-1', organizationName: '测试工作区', apiKey: 'sk-device-test', baseUrl: 'https://gateway.example/v1', expiresAt,
+  models: [{ id: 'chat-test', name: 'Chat Test' }] };
+
+describe('account model credentials', () => {
+  it('revalidates before using encrypted credentials and never exposes keys through account state', async () => {
+    const f = fixture({ token, origin, user, expiresAt, models: modelSession }, true);
+    expect(f.service.modelCredential()).toBeNull();
+    f.fetcher.mockResolvedValueOnce(response(authenticated)).mockResolvedValueOnce(response({ credential: modelSession }));
+    expect(await f.service.refresh()).toMatchObject({ status: 'authenticated', models: { ready: true, organizationId: 'org-1' } });
+    expect(f.service.modelCredential()).toEqual(modelSession);
+    const catalogVersion = f.service.snapshot().models?.catalogVersion;
+    f.fetcher.mockResolvedValueOnce(response(authenticated)).mockResolvedValueOnce(response({ credential: { ...modelSession, models: [{ id: 'chat-new', name: 'New Chat' }] } }));
+    await f.service.refresh();
+    expect(f.service.snapshot().models?.catalogVersion).not.toBe(catalogVersion);
+    expect(JSON.stringify(f.service.snapshot())).not.toContain('sk-device-test');
+    expect(f.write.mock.calls.at(-1)?.[0]?.models?.models[0].id).toBe('chat-new');
+    f.advance(600_001);
+    expect(f.service.modelCredential()).toBeNull();
+    expect(f.service.snapshot().models?.ready).toBe(false);
+  });
+
+  it('clears a previous lease on offline or rejected model refresh without signing out a valid identity', async () => {
+    const f = fixture({ token, origin, user, expiresAt }, true);
+    f.fetcher.mockResolvedValueOnce(response(authenticated)).mockResolvedValueOnce(response({ credential: modelSession }));
+    await f.service.refresh();
+    f.fetcher.mockResolvedValueOnce(response(authenticated)).mockResolvedValueOnce(response({}, 403));
+    expect(await f.service.refresh()).toMatchObject({ status: 'authenticated', models: { ready: false } });
+    expect(f.service.modelCredential()).toBeNull();
+    expect(f.write.mock.calls.at(-1)?.[0]?.models).toBeUndefined();
+  });
+
+  it('does not resurrect a model lease after logout races its response', async () => {
+    const f = fixture({ token, origin, user, expiresAt }, true);
+    let resolve!: (r: Response) => void;
+    f.fetcher.mockResolvedValueOnce(response(authenticated)).mockReturnValueOnce(new Promise(r => { resolve = r; })).mockResolvedValueOnce(response({ revoked: true }));
+    const refresh = f.service.refresh();
+    await vi.waitFor(() => expect(f.fetcher).toHaveBeenCalledTimes(2));
+    await f.service.logout(); resolve(response({ credential: modelSession })); await refresh;
+    expect(f.service.modelCredential()).toBeNull();
+    expect(f.service.snapshot().status).toBe('signed-out');
+    expect(f.write.mock.calls.every(([value]) => value === null)).toBe(true);
+  });
+
+  it('rejects insecure gateways, invalid model lists and leases outliving the desktop session', async () => {
+    for (const bad of [{ baseUrl: 'http://gateway.example/v1' }, { models: [] as { id: string; name: string }[] }, { expiresAt: new Date(now + 700_000).toISOString() }]) {
+      const f = fixture({ token, origin, user, expiresAt }, true);
+      f.fetcher.mockResolvedValueOnce(response(authenticated)).mockResolvedValueOnce(response({ credential: { ...modelSession, ...bad } }));
+      expect((await f.service.refresh()).models?.ready).toBe(false);
+      expect(f.service.modelCredential()).toBeNull();
+    }
   });
 });

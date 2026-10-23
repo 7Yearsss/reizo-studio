@@ -7,7 +7,7 @@ import AccountControl from './AccountControl';
 
 const mocks = vi.hoisted(() => ({ openSettings: vi.fn(), patchSettings: vi.fn(), success: vi.fn(), info: vi.fn(), error: vi.fn() }));
 vi.mock('../../state/uiStore', () => ({ openSettings: mocks.openSettings }));
-vi.mock('../../state/settingsStore', () => ({ patchSettings: mocks.patchSettings }));
+vi.mock('../../state/settingsStore', () => ({ patchSettings: mocks.patchSettings, loadSettings: vi.fn(async () => undefined) }));
 vi.mock('../../state/useSettingsStore', () => ({ useSettingsStore: (selector: (state: unknown) => unknown) => selector({ settings: { appearance: 'system' } }) }));
 vi.mock('../../lib/toast', () => ({ toast: { success: mocks.success, info: mocks.info, error: mocks.error } }));
 

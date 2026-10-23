@@ -6,11 +6,14 @@ import { createMainWindow } from '../window';
 import { AccountService, accountOrigin } from './service';
 import { createAccountStorage } from './storage';
 
-export function registerAccountIpc(dataRoot: string) {
+export function createDesktopAccountService(dataRoot: string) {
   const origin = accountOrigin(process.env.REIZO_ACCOUNT_ORIGIN || 'https://reizo-ai.com', !app.isPackaged);
   const storage = createAccountStorage(dataRoot, safeStorage);
+  return new AccountService({ origin, fetch, ...storage, modelSessions: true, open: (url) => shell.openExternal(url), connected: () => { createMainWindow(); } });
+}
+
+export function registerAccountIpc(dataRoot: string, service = createDesktopAccountService(dataRoot)) {
   let stopped = false;
-  const service = new AccountService({ origin, fetch, ...storage, open: (url) => shell.openExternal(url), connected: () => { if (!stopped) createMainWindow(); } });
   const rendererUrl = MAIN_WINDOW_VITE_DEV_SERVER_URL || pathToFileURL(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`)).href;
   const channels = [IPC.ACCOUNT_STATUS, IPC.ACCOUNT_LOGIN, IPC.ACCOUNT_LOGOUT, IPC.ACCOUNT_REOPEN, IPC.ACCOUNT_REFRESH] as const;
   for (const channel of channels) {
@@ -31,10 +34,10 @@ export function registerAccountIpc(dataRoot: string) {
     const pending = service.snapshot().status === 'pending';
     if (!pending && Date.now() - lastRefresh < 60_000) return;
     lastRefresh = Date.now();
-    void service.refresh().catch((): void => undefined);
+    if (!stopped) void service.refresh().catch((): void => undefined);
   };
   tick();
   const timer = setInterval(tick, 4000);
   timer.unref();
-  return () => { stopped = true; clearInterval(timer); for (const channel of channels) ipcMain.removeHandler(channel); };
+  return () => { stopped = true; service.dispose(); clearInterval(timer); for (const channel of channels) ipcMain.removeHandler(channel); };
 }

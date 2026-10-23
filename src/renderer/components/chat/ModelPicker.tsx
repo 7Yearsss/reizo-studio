@@ -234,7 +234,7 @@ export default function ModelPicker({ compact = false }: { compact?: boolean }) 
         </MorphPopoverContent>
       </MorphPopover>
       {/* Providers without preset models still need a free-form model id input. */}
-      {active.models.length === 0 && (
+      {active.models.length === 0 && active.id !== 'reizo-account' && (
         <input
           value={active.model}
           onChange={(e) =>

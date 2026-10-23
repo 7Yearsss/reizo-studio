@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Check, KeyRound, Search, ShieldCheck } from 'lucide-react';
 import type { PublicProvider } from '../../../shared/settings';
 import { useSettingsStore } from '../../state/useSettingsStore';
@@ -32,7 +32,7 @@ export default function ProvidersSection() {
                 <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-line bg-paper-raised text-xs font-semibold" aria-hidden>{provider.name.slice(0, 1)}</span>
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-1 text-xs font-medium"><span className="truncate">{provider.name}</span>{provider.id === settings.activeProviderId && <span className="shrink-0 rounded bg-success-bg px-1 text-[10px] text-success">默认</span>}</span>
-                  <span className="mt-1 block truncate text-[11px] text-ink-muted">{provider.hasKey ? provider.model : '尚未配置密钥'}</span>
+                  <span className="mt-1 block truncate text-[11px] text-ink-muted">{provider.hasKey ? provider.model : provider.id === 'reizo-account' ? '请登录并刷新账号状态' : '尚未配置密钥'}</span>
                 </span>
               </button>
             ))}
@@ -54,6 +54,7 @@ export default function ProvidersSection() {
 }
 
 export function ProviderDetail({ provider, active }: { provider: PublicProvider; active: boolean }) {
+  const accountProvider = provider.id === 'reizo-account';
   const [keyInput, setKeyInput] = useState('');
   const [editingKey, setEditingKey] = useState(!provider.hasKey);
   const [baseUrl, setBaseUrl] = useState(provider.baseUrl);
@@ -63,6 +64,7 @@ export function ProviderDetail({ provider, active }: { provider: PublicProvider;
   const [error, setError] = useState('');
   const dirty = Boolean(keyInput.trim()) || model !== provider.model || (provider.allowCustomBaseUrl && baseUrl !== provider.baseUrl);
   const canSave = Boolean(model.trim()) && (provider.hasKey || Boolean(keyInput.trim()) || Boolean(provider.allowCustomBaseUrl)) && (!provider.allowCustomBaseUrl || Boolean(baseUrl.trim()));
+  useEffect(() => { if (accountProvider) setModel(provider.model); }, [accountProvider, provider.model]);
 
   async function save() {
     if (pending.current || !canSave) return;
@@ -99,7 +101,7 @@ export function ProviderDetail({ provider, active }: { provider: PublicProvider;
       </header>
       {provider.description && <p className="mb-5 text-xs leading-relaxed text-ink-muted">{provider.description}</p>}
       <fieldset disabled={busy} className="min-w-0 space-y-5 disabled:opacity-60">
-        <div>
+        {accountProvider ? <p role="status" className="rounded-xl bg-paper-inset p-3 text-xs leading-relaxed text-ink-muted">{provider.hasKey ? '已连接当前工作区，模型凭据由账号自动管理。' : '请从左下角登录 Reizo，再在账号信息中刷新状态，无需填写 API Key。'}</p> : <div>
           <div className="mb-2 flex items-center justify-between text-xs">
             <span className="font-medium">API 密钥</span>
             {provider.hasKey && <span className="text-success">已配置</span>}
@@ -113,7 +115,7 @@ export function ProviderDetail({ provider, active }: { provider: PublicProvider;
             <button type="button" onClick={() => { setEditingKey(!editingKey); setKeyInput(''); }} className="text-ink-muted hover:text-ink">{editingKey ? '取消更换' : '更换密钥'}</button>
             <button type="button" onClick={() => void removeKey()} className="text-danger hover:opacity-80">移除密钥</button>
           </div>}
-        </div>
+        </div>}
         {provider.allowCustomBaseUrl && <Input label="服务地址（Base URL）" value={baseUrl} onChange={setBaseUrl} placeholder="https://api.example.com/v1" className="w-full text-sm" />}
         <div className="rounded-xl bg-paper-inset/60 p-4">
           {provider.allowCustomBaseUrl ? <Input label="默认模型 ID" value={model} onChange={setModel} placeholder="例如 deepseek-chat" className="w-full text-sm" /> : (
@@ -126,7 +128,7 @@ export function ProviderDetail({ provider, active }: { provider: PublicProvider;
           )}
           <p className="mt-3 text-[11px] leading-relaxed text-ink-muted">保存后用作默认对话模型，也可在输入框中切换。</p>
         </div>
-        <div className="flex items-start gap-2 text-[11px] leading-relaxed text-ink-muted"><ShieldCheck size={14} className="mt-0.5 shrink-0" /><span>密钥经系统级加密后仅保存在本机。</span></div>
+        <div className="flex items-start gap-2 text-[11px] leading-relaxed text-ink-muted"><ShieldCheck size={14} className="mt-0.5 shrink-0" /><span>{accountProvider ? '退出登录后，本机停止使用账号模型；再次登录会重新验证权限。' : '密钥经系统级加密后仅保存在本机。'}</span></div>
         {error && <p role="alert" className="text-xs text-danger">{error}</p>}
         <button type="submit" disabled={!canSave || busy || (active && !dirty)} className="w-full rounded-full bg-ink px-4 py-2.5 text-sm font-medium text-paper-raised hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-40">
           {busy ? '正在保存…' : active && !dirty ? '已是默认配置' : '保存并使用'}

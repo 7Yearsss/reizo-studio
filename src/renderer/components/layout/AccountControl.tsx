@@ -5,7 +5,7 @@ import { APP_VERSION } from '../../../shared/constants';
 import type { AccountState } from '../../../shared/account';
 import type { Appearance } from '../../../shared/settings';
 import { useSettingsStore } from '../../state/useSettingsStore';
-import { patchSettings } from '../../state/settingsStore';
+import { loadSettings, patchSettings } from '../../state/settingsStore';
 import { openSettings } from '../../state/uiStore';
 import { toast } from '../../lib/toast';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
@@ -29,6 +29,10 @@ export default function AccountControl() {
   const appearance = useSettingsStore((value) => value.settings.appearance);
   const accept = useCallback((next: AccountState) => {
     const completed = next.status === 'authenticated' && (attempt.current || previous.current?.status === 'pending');
+    const before = previous.current;
+    if (before?.status !== next.status || before?.models?.ready !== next.models?.ready || before?.models?.organizationId !== next.models?.organizationId || before?.models?.catalogVersion !== next.models?.catalogVersion) {
+      void loadSettings().catch((): void => undefined);
+    }
     previous.current = next;
     setState(next);
     if (completed) {
@@ -95,7 +99,7 @@ export default function AccountControl() {
   const user = state?.user;
   const name = user?.displayName || user?.username || (pending ? '等待登录' : '未登录');
   const initials = user ? Array.from(name).slice(0, 2).join('').toUpperCase() : '';
-  const subtitle = state?.status === 'offline' ? '暂时离线' : user ? user.email || `@${user.username}` : pending ? '在浏览器中继续' : '登录以连接 Reizo 账号';
+  const subtitle = state?.status === 'offline' ? '暂时离线' : state?.models?.ready ? state.models.organizationName || '账号模型已就绪' : user ? user.email || `@${user.username}` : pending ? '在浏览器中继续' : '登录以连接 Reizo 账号';
   const button = 'rounded-lg border border-line px-4 py-2 text-sm hover:bg-paper-inset focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50';
   const avatar = <span aria-hidden className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent/10 text-[11px] font-semibold tracking-wide text-ink">{user ? initials : <UserRound size={16} />}</span>;
   const showDialog = (value: 'login' | 'account') => { setMenuOpen(false); setError(''); setDialog(value); };
@@ -134,6 +138,7 @@ export default function AccountControl() {
           <div className="space-y-3"><p className="flex items-center gap-2 text-sm text-ink-muted"><LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" />等待浏览器授权</p><p className="select-all rounded-xl bg-paper-inset p-5 text-center font-mono text-3xl tracking-[0.18em]" aria-label="登录确认码">{state.code}</p><p className="text-xs leading-5 text-ink-muted">在网页中输入上方确认码。授权成功后，此窗口会自动关闭。</p></div> :
           <p className="py-2 text-sm text-ink-muted">点击下方按钮后，将打开系统默认浏览器。</p>}
         {(error || state?.message) && <p role="status" className="text-sm text-ink-muted">{error || state?.message}</p>}
+        {state?.models && <p role="status" className="text-sm text-ink-muted">{state.models.ready ? `账号模型已就绪 · ${state.models.organizationName}` : state.models.message || '账号模型暂不可用，请刷新状态。'}</p>}
         <div className="flex flex-wrap justify-end gap-2">
           {user ? <button disabled={busy} className={button} onClick={() => void action('accountRefresh')}><RefreshCw size={13} className="mr-2 inline" />刷新状态</button> : pending ?
             <><button disabled={busy} className={button} onClick={() => void action('accountLogout')}>取消登录</button><button disabled={busy} className={button} onClick={() => void action('accountReopen')}>重新打开浏览器</button></> :

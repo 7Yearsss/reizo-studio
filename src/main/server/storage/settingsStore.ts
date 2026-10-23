@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { safeDecrypt, safeEncrypt } from './providerStore';
 import { PROVIDER_PRESETS } from '../../../shared/providers';
+import type { AccountModelCredential } from '../../../shared/account';
 import {
   DEFAULT_APPEARANCE,
   DEFAULT_BUSY_ENTER,
@@ -40,7 +41,7 @@ function emptyStored(model: string, baseUrl?: string): StoredProvider {
   return { apiKey: null, model, baseUrl };
 }
 
-export function createSettingsStore(root: string) {
+export function createSettingsStore(root: string, accountModels?: () => AccountModelCredential | null) {
   const file = path.join(root, 'settings.json');
 
   async function readRaw(): Promise<DiskSettings> {
@@ -131,7 +132,23 @@ export function createSettingsStore(root: string) {
     return settings;
   }
 
+  /** Merge at read time only: account secrets never enter settings.json or replace manual keys. */
+  function withAccount(settings: LocalSettings): LocalSettings {
+    const credential = accountModels?.();
+    const selected = settings.providers[settings.activeProviderId];
+    return {
+      ...settings,
+      activeProviderId: credential && !selected?.apiKey ? 'reizo-account' : settings.activeProviderId,
+      providers: { ...settings.providers, 'reizo-account': {
+        apiKey: credential?.apiKey ?? null,
+        baseUrl: credential?.baseUrl,
+        model: credential?.models.find(m => m.id === settings.providers['reizo-account']?.model)?.id ?? credential?.models[0]?.id ?? '',
+      } },
+    };
+  }
+
   function toPublic(settings: LocalSettings): PublicSettings {
+    const credential = accountModels?.();
     const providers: PublicProvider[] = PROVIDER_PRESETS.map((preset) => {
       const stored = settings.providers[preset.id] ?? emptyStored(preset.defaultModel);
       return {
@@ -143,7 +160,7 @@ export function createSettingsStore(root: string) {
         description: preset.description,
         hasKey: Boolean(stored.apiKey),
         model: stored.model || preset.defaultModel,
-        models: preset.models,
+        models: preset.id === 'reizo-account' ? credential?.models ?? [] : preset.models,
         baseUrl: stored.baseUrl || preset.baseUrl,
       };
     });
@@ -190,6 +207,9 @@ export function createSettingsStore(root: string) {
     if (patch.provider) {
       const preset = PROVIDER_PRESETS.find((p) => p.id === patch.provider!.id);
       if (!preset) throw new Error('Unknown provider');
+      if (preset.id === 'reizo-account' && (patch.provider.apiKey !== undefined || patch.provider.baseUrl !== undefined)) {
+        throw new Error('Reizo 账号凭据由登录管理，无需手动填写。');
+      }
       const current = settings.providers[preset.id] ?? emptyStored(preset.defaultModel);
       if (patch.provider.apiKey !== undefined) {
         current.apiKey = patch.provider.apiKey?.trim() ? patch.provider.apiKey.trim() : null;
@@ -205,16 +225,16 @@ export function createSettingsStore(root: string) {
     }
 
     await writeRaw(serialize(settings));
-    return toPublic(settings);
+    return toPublic(withAccount(settings));
   }
 
   return {
     async get(): Promise<LocalSettings> {
-      return load();
+      return withAccount(await load());
     },
 
     async getPublic(): Promise<PublicSettings> {
-      return toPublic(await load());
+      return toPublic(withAccount(await load()));
     },
 
     applyPatch,

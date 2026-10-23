@@ -22,6 +22,7 @@ export function resolveSettingsModel(settings: LocalSettings, request: {
   const explicit = supplied(request.providerId, 'Provider');
   let providerId = explicit ?? clean(settings.activeProviderId) ?? 'openai';
   let stored = settings.providers?.[providerId];
+  if (providerId === 'reizo-account' && !clean(stored?.apiKey)) throw new ProviderResolutionError('请先登录 Reizo 并刷新账号模型状态。');
   // Preserve the existing implicit image fallback; an explicit provider never silently changes.
   if (request.category === 'image' && !explicit && !clean(stored?.apiKey)) {
     for (const id of ['reizo', 'openai']) if (id !== providerId && clean(settings.providers?.[id]?.apiKey)) {

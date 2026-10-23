@@ -13,6 +13,16 @@ export interface ProviderPreset {
 
 export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
+    id: 'reizo-account',
+    name: 'Reizo 账号',
+    tag: '当前工作区',
+    baseUrl: '',
+    defaultModel: '',
+    websiteUrl: 'https://reizo-ai.com',
+    description: '登录后自动使用当前 Reizo 工作区的模型额度，无需填写 API Key。',
+    models: [],
+  },
+  {
     id: 'reizo',
     name: 'Reizo',
     tag: 'Reizo',

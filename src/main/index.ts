@@ -19,7 +19,7 @@ import { startScheduler } from './schedulerHost';
 import { drainMemoryJobs } from './memoryJobs';
 import { registerSkillIpc } from './skillsIpc';
 import { registerPluginIpc } from './pluginsIpc';
-import { registerAccountIpc } from './account/ipc';
+import { createDesktopAccountService, registerAccountIpc } from './account/ipc';
 
 if (started) {
   app.quit();
@@ -71,7 +71,8 @@ async function bootstrap(): Promise<void> {
   if (app.isPackaged) process.env.REIZO_VIDEO_EDITOR_RUNTIME = path.join(process.resourcesPath, 'video-editor', 'runtime.json');
   const dataRoot = path.join(app.getPath('userData'), 'data');
   mkdirSync(dataRoot, { recursive: true });
-  const settingsStore = createSettingsStore(dataRoot);
+  const account = createDesktopAccountService(dataRoot);
+  const settingsStore = createSettingsStore(dataRoot, () => account.modelCredential());
   const scheduleStore = createScheduleStore(dataRoot);
   const thoughtStore = createThoughtStore(dataRoot);
   const skillsDirs = [path.join(process.cwd(), 'skills'), path.join(app.getAppPath(), 'skills'),
@@ -105,7 +106,7 @@ async function bootstrap(): Promise<void> {
   registerWorkspaceIpc(settingsStore);
   registerSkillIpc(path.join(dataRoot, 'skills'));
   registerPluginIpc(dataRoot, skillsDirs);
-  stopAccount = registerAccountIpc(dataRoot);
+  stopAccount = registerAccountIpc(dataRoot, account);
 
   createMainWindow();
   createTray();

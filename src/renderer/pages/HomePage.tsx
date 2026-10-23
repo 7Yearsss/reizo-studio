@@ -286,7 +286,7 @@ export default function HomePage({ active = true }: { active?: boolean }) {
           )}
           {!hasAnyKey && (
             <p className="mt-4 text-center text-xs text-ink-muted">
-              还没有 API Key。
+              登录 Reizo 即可连接账号模型，也可配置自己的 API Key。
               <button
                 type="button"
                 onClick={() => uiStore.setMode('settings')}

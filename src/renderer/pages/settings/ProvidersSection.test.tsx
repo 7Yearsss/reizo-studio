@@ -75,3 +75,18 @@ it('does not save a blank unconfigured provider or duplicate an in-flight save',
   await submit('New'); await submit('New'); expect(mocks.patch).toHaveBeenCalledTimes(1);
   await act(async () => finish());
 });
+
+it('automatically loads account models and offers no manual key controls', async () => {
+  const account: PublicProvider = { id: 'reizo-account', name: 'Reizo 账号', tag: '当前工作区', hasKey: false, model: '', models: [], baseUrl: '' };
+  mocks.settings.providers.push(account);
+  await act(async () => root.render(<ProvidersSection />));
+  await choose('Reizo 账号');
+  expect(form('Reizo 账号').querySelector('input[type="password"]')).toBeNull();
+  expect(form('Reizo 账号').textContent).toContain('无需填写 API Key');
+  Object.assign(account, { hasKey: true, model: 'account-chat', models: [{ id: 'account-chat', name: 'Account Chat' }] });
+  await act(async () => root.render(<ProvidersSection />));
+  expect(form('Reizo 账号').querySelector('select')!.value).toBe('account-chat');
+  await submit('Reizo 账号');
+  expect(mocks.patch).toHaveBeenCalledWith({ provider: { id: 'reizo-account', model: 'account-chat' }, activeProviderId: 'reizo-account' });
+  expect(form('Reizo 账号').textContent).not.toContain('更换密钥');
+});

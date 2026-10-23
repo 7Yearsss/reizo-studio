@@ -1,6 +1,7 @@
-import type { AccountState, AccountUser } from '../../shared/account';
+import { createHash } from 'node:crypto';
+import type { AccountModelCredential, AccountState, AccountUser } from '../../shared/account';
 
-export interface AccountCredential { token: string; origin: string; expiresAt: string; user: AccountUser }
+export interface AccountCredential { token: string; origin: string; expiresAt: string; user: AccountUser; models?: AccountModelCredential }
 export interface AccountDependencies {
   origin: string;
   fetch: typeof fetch;
@@ -9,6 +10,7 @@ export interface AccountDependencies {
   open: (url: string) => Promise<void>;
   connected: () => void;
   now?: () => number;
+  modelSessions?: boolean;
 }
 
 export function accountOrigin(value: string, development = false): string {
@@ -47,7 +49,21 @@ export class AccountService {
       } else if (saved) deps.write(null);
     } catch { this.state.message = '无法读取已保存的登录信息，请重新登录。'; }
   }
-  snapshot(): AccountState { return { ...this.state, ...(this.state.user ? { user: { ...this.state.user } } : {}) }; }
+  snapshot(): AccountState {
+    const models = this.state.models ? { ...this.state.models } : undefined;
+    if (models?.ready && !this.modelCredential()) {
+      models.ready = false;
+      models.message = '账号模型凭据已过期或连接中断，请刷新状态。';
+    }
+    return { ...this.state, ...(this.state.user ? { user: { ...this.state.user } } : {}), ...(models ? { models } : {}) };
+  }
+  /** Cached disk credentials are unusable until this process has revalidated the account. */
+  modelCredential(): AccountModelCredential | null {
+    const models = this.credential?.models;
+    return this.state.status === 'authenticated' && models && future(models.expiresAt, this.now()) && future(this.credential?.expiresAt, this.now())
+      ? structuredClone(models) : null;
+  }
+  dispose(): void { ++this.generation; this.credential = null; this.pending = null; this.state = { status: 'signed-out', webOrigin: this.deps.origin }; }
   private invalidate(message: string) {
     ++this.generation; this.pending = null; this.credential = null;
     this.state = { status: 'signed-out', webOrigin: this.deps.origin, message };
@@ -114,7 +130,30 @@ export class AccountService {
       if (result.status === 'pending' && this.pending) { this.state.message = undefined; return this.snapshot(); }
       if (result.status !== 'authenticated' || !isUser(result.user) || !future(result.expiresAt, this.now())) throw new Error('Invalid session');
       const newlyConnected = Boolean(this.pending);
-      const saved = { token: active.token, origin: this.deps.origin, expiresAt: result.expiresAt, user: result.user };
+      let models: AccountModelCredential | undefined;
+      let modelMessage: string | undefined;
+      if (this.deps.modelSessions) {
+        try {
+          const payload = await this.request('model-session', 'GET', active.token);
+          if (generation !== this.generation) return this.snapshot();
+          const value = payload.credential as AccountModelCredential | undefined;
+          const url = new URL(value?.baseUrl ?? '');
+          const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+          if (!value || typeof value.organizationId !== 'string' || !value.organizationId || typeof value.organizationName !== 'string' ||
+            typeof value.apiKey !== 'string' || !/^sk-[A-Za-z0-9_-]+$/.test(value.apiKey) || !future(value.expiresAt, this.now()) ||
+            Date.parse(value.expiresAt) > Date.parse(result.expiresAt) || url.username || url.password || url.search || url.hash ||
+            (url.protocol !== 'https:' && !(local && new URL(this.deps.origin).protocol === 'http:' && url.protocol === 'http:')) ||
+            !Array.isArray(value.models) || !value.models.length || value.models.some(m => !m || typeof m.id !== 'string' || !m.id || typeof m.name !== 'string')) throw new Error('Invalid model session');
+          models = { organizationId: value.organizationId, organizationName: value.organizationName, apiKey: value.apiKey, baseUrl: url.href.replace(/\/$/, ''), expiresAt: value.expiresAt,
+            models: value.models.map(m => ({ id: m.id, name: m.name })) };
+        } catch (error) {
+          if (generation !== this.generation) return this.snapshot();
+          if (error instanceof AccountHttpError && error.status === 401) { this.invalidate('登录已失效，请重新登录。'); return this.snapshot(); }
+          modelMessage = error instanceof AccountHttpError && error.status === 404 ? '网站尚未启用账号模型，请更新网页服务。' : '账号模型暂不可用，请刷新状态或联系工作区管理员。';
+        }
+      }
+      if (generation !== this.generation) return this.snapshot();
+      const saved: AccountCredential = { token: active.token, origin: this.deps.origin, expiresAt: result.expiresAt, user: result.user, ...(models ? { models } : {}) };
       try { this.deps.write(saved); }
       catch {
         this.pending = null; this.credential = null; ++this.generation;
@@ -123,7 +162,9 @@ export class AccountService {
         return this.snapshot();
       }
       this.credential = saved; this.pending = null;
-      this.state = { status: 'authenticated', webOrigin: this.deps.origin, user: saved.user, expiresAt: saved.expiresAt };
+      this.state = { status: 'authenticated', webOrigin: this.deps.origin, user: saved.user, expiresAt: saved.expiresAt,
+        ...(this.deps.modelSessions ? { models: { ready: !!models, organizationId: models?.organizationId, organizationName: models?.organizationName,
+          catalogVersion: models ? createHash('sha256').update(JSON.stringify(models.models)).digest('hex') : undefined, message: modelMessage } } : {}) };
       if (newlyConnected) {
         try { this.deps.connected(); }
         catch { this.state.message = '已登录，请手动返回工作台。'; }
