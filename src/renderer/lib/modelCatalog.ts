@@ -1,12 +1,14 @@
 import { modelVendorDomain } from '../../shared/providers';
 import type { PublicSettings } from '../../shared/settings';
 
-/** Video choices belong to the media catalog, independently of the chat model. */
-export function videoCatalogProvider(settings: Pick<PublicSettings, 'providers' | 'activeProviderId'>) {
+/** Image/video choices belong to the media catalog, independently of the chat model. */
+export function mediaCatalogProvider(settings: Pick<PublicSettings, 'providers' | 'activeProviderId'>) {
   const active = settings.providers.find(provider => provider.id === settings.activeProviderId);
   if (active?.id === 'reizo-account' || active?.catalog) return active;
   return settings.providers.find(provider => provider.id === 'reizo-account' && provider.hasKey && provider.catalog) ?? active;
 }
+
+export const videoCatalogProvider = mediaCatalogProvider;
 
 export interface ModelOption {
   value: string;

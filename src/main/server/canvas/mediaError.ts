@@ -15,6 +15,7 @@ export type MediaErrorCode =
   | 'auth'
   | 'timeout'
   | 'network'
+  | 'channel_unavailable'
   | 'server'
   | 'unknown';
 
@@ -43,6 +44,7 @@ const MESSAGES: Record<MediaErrorCode, (subject: MediaError['subject']) => strin
   auth: () => '生成失败：API Key 无效或缺失。在设置中检查。',
   timeout: () => '生成超时。稍后重试。',
   network: () => '网络错误，未能连接到生成服务。',
+  channel_unavailable: () => '生成失败：当前账号分组下，此模型没有可用渠道。请检查模型权限与分组配置。',
   server: () => '生成服务暂时不可用（服务端错误）。稍后重试。',
   unknown: () => '生成失败。',
 };
@@ -75,6 +77,9 @@ export function classifyMediaError(err: unknown): MediaError {
   if (/safety|content policy|content_policy|moderation|blocked|not allowed|violat|nsfw|sexual|prohibited/.test(lower)) {
     code = 'safety_rejection';
     if (subject === 'unknown') subject = 'prompt';
+  } else if (/无可用渠道|no (?:available|eligible) channels?\b/.test(lower)) {
+    code = 'channel_unavailable';
+    subject = 'account';
   } else if (status === 429 || /rate limit|too many requests/.test(lower)) {
     code = 'rate_limited';
   } else if (/quota|insufficient_quota|billing hard limit|exceeded your current quota/.test(lower)) {
@@ -95,9 +100,13 @@ export function classifyMediaError(err: unknown): MediaError {
     code = 'server';
   }
 
-  const message = /invalid json response/.test(lower)
+  let message = /invalid json response/.test(lower)
     ? '生成失败：图像服务返回的内容无法解析。'
     : MESSAGES[code](subject);
+  if (code === 'channel_unavailable') {
+    const requestId = /request[_ ]?id\s*[:=]\s*(\d{14}[A-Za-z0-9_-]{0,100})\b/i.exec(raw)?.[1];
+    if (requestId) message += `（请求编号：${requestId}）`;
+  }
   return {
     code,
     subject,

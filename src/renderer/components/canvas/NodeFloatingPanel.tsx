@@ -16,7 +16,7 @@ import NodePanelViewport from './NodePanelViewport';
 import NodePanelSelect from './NodePanelSelect';
 import type { CanvasInputSource } from '../../state/canvasInputSources';
 import { useSettingsStore } from '../../state/useSettingsStore';
-import { videoCatalogProvider } from '../../lib/modelCatalog';
+import { mediaCatalogProvider } from '../../lib/modelCatalog';
 
 const CONFIGURED_MODEL = '__configured_model__';
 
@@ -120,7 +120,7 @@ function NodePanelBody({ sessionId, node, prompt, onPromptChange, onPromptCommit
   const isImage = !isVideo && !isAudio && !isNote;
   const settings = useSettingsStore(state => state.settings);
   const active = settings.providers.find(provider => provider.id === settings.activeProviderId);
-  const mediaProvider = isVideo ? videoCatalogProvider(settings) : active;
+  const mediaProvider = isVideo || isImage ? mediaCatalogProvider(settings) : active;
   const account = mediaProvider?.id === 'reizo-account';
   const videoSupport = account ? mediaProvider.catalog?.video.find(item => item.id === (model || settings.mediaModels?.video))?.video : undefined;
   const durationOptions = [{ value: '5s', label: '5 秒' }, { value: '10s', label: '10 秒' }].filter(item => !account || videoSupport?.minSeconds && videoSupport.maxSeconds && Number.parseInt(item.value) >= videoSupport.minSeconds && Number.parseInt(item.value) <= videoSupport.maxSeconds);

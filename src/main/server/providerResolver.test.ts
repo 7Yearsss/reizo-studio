@@ -4,6 +4,24 @@ import type { ManagedProviderConfig } from '../../shared/providerRegistry';
 import type { ProviderStore } from './storage/providerStore';
 import { resolveSettingsModel, resolveVideoExecution } from './providerResolver';
 
+it('keeps account image routing independent of a manual text-only gateway key', () => {
+  const settings = { activeProviderId: 'reizo', mediaModels: {}, providers: {
+    reizo: { apiKey: 'text-key', baseUrl: 'https://gateway.example/v1', model: 'gpt-6-astra' },
+    'reizo-account': { apiKey: 'image-account-key', baseUrl: 'https://gateway.example/v1', model: 'account-chat' },
+  }, accountCatalog: { text: [], video: [], image: [
+    { id: 'gemini-image', name: 'Gemini', protocol: 'openai-chat-image' },
+    { id: 'gpt-image-2', name: 'GPT Image', protocol: 'openai-image' },
+  ] } } as unknown as LocalSettings;
+  expect(resolveSettingsModel(settings, { category: 'image' })).toMatchObject({ providerId: 'reizo-account', apiKey: 'image-account-key', modelId: 'gpt-image-2', protocol: 'openai-image' });
+  expect(resolveSettingsModel(settings, { category: 'llm' })).toMatchObject({ providerId: 'reizo', apiKey: 'text-key' });
+  expect(resolveSettingsModel(settings, { category: 'image', providerId: 'reizo' })).toMatchObject({ providerId: 'reizo', apiKey: 'text-key' });
+  expect(resolveSettingsModel(settings, { category: 'image', model: 'manual-only-image' })).toMatchObject({ providerId: 'reizo', modelId: 'manual-only-image' });
+  settings.accountCatalog.image = settings.accountCatalog.image.filter(model => model.id !== 'gpt-image-2');
+  expect(resolveSettingsModel(settings, { category: 'image' })).toMatchObject({ providerId: 'reizo-account', modelId: 'gemini-image', protocol: 'openai-chat-image' });
+  expect(settings.activeProviderId).toBe('reizo');
+  expect(settings.mediaModels).toEqual({});
+});
+
 it('allows GET recovery of an accepted account video after it is hidden while still rejecting new submissions', async () => {
   const settings = { providers: { 'reizo-account': { apiKey: 'rotated-key', baseUrl: 'https://gateway.example/v1' } },
     accountCatalog: { text: [], image: [], video: [] } } as unknown as LocalSettings;

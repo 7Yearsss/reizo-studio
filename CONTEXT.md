@@ -70,6 +70,13 @@ offer known supported ratios/durations; do not invent available models or prices
 Keep the signed-in account's video catalog available when the text conversation
 uses another configured provider. The conversation picker, canvas picker and
 video executor must preserve this independence and the selected media identity.
+Image generation and image model pickers share this independence. When a signed-in
+account advertises the requested image model (or no image model was selected),
+automatic image requests use that account's media credentials, not the active
+text provider's key. Honor an explicitly supplied image provider and keep models
+exclusive to a manual provider on that provider. Choose image defaults only from
+the account's advertised image catalog; do not change the text selection or retry
+a failed generation on another provider.
 
 **Asset**:
 An existing media result with its own identity and origin, independent of the node currently displaying it.

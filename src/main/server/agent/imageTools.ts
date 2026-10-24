@@ -95,7 +95,7 @@ export function createImageTools(options: {
         model: z
           .string()
           .optional()
-          .describe('生图模型，默认自动使用 gpt-image-2（Reizo网关）或 dall-e-3（OpenAI官方直连）'),
+          .describe('仅在用户明确选择生图模型时传入其真实编号；否则留空，由配置的图片模型与账号图片目录决定，不沿用文字模型或猜测模型编号'),
       }),
       execute: async ({ prompt, size, model }, context) => {
         const cleanPrompt = prompt.trim();

@@ -36,6 +36,16 @@ it('shows the signed-in account video catalog even when a different chat provide
   expect(document.body.textContent).not.toContain('可灵 Kling 1.5');
 });
 
+it('shows only real account image choices while a different text provider is active', async () => {
+  mocks.activeProviderId = 'openai';
+  mocks.providers[0].catalog.image.push({ id: 'account-only-image', name: 'Account Image', protocol: 'openai-image' });
+  await act(async () => root.render(<ModelPicker />));
+  await act(async () => [...document.querySelectorAll<HTMLButtonElement>('[aria-label="模型类型"] button')].find(button => button.textContent === '图像')?.click());
+  expect(document.querySelector('[data-model-value="gpt-image-2"]')).not.toBeNull();
+  expect(document.querySelector('[data-model-value="account-only-image"]')).not.toBeNull();
+  expect(document.querySelector('[data-model-value="dall-e-3"]')).toBeNull();
+});
+
 it('collapses other vendors and selects the correct provider when two providers offer the same model', async () => {
   const vendor = document.querySelector<HTMLButtonElement>('button[aria-label="OpenAI，2 个模型"]')!;
   expect(vendor.getAttribute('aria-expanded')).toBe('false');

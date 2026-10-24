@@ -20,7 +20,16 @@ export function resolveSettingsModel(settings: LocalSettings, request: {
   category: 'image' | 'llm'; providerId?: string; model?: string; draft?: boolean;
 }) {
   const explicit = supplied(request.providerId, 'Provider');
+  const requestedModel = supplied(request.model, '模型');
   let providerId = explicit ?? clean(settings.activeProviderId) ?? 'openai';
+  const selectedImage = request.draft ? clean(settings.mediaModels?.draft) : requestedModel ?? clean(settings.mediaModels?.image);
+  const accountImages = settings.accountCatalog?.image ?? [];
+  // Automatic media uses its account catalog, independently of the text conversation's key.
+  // Explicit providers and models exclusive to a manually configured provider stay pinned.
+  if (request.category === 'image' && !explicit && clean(settings.providers?.['reizo-account']?.apiKey) &&
+      accountImages.length && (!selectedImage || accountImages.some(model => model.id === selectedImage))) {
+    providerId = 'reizo-account';
+  }
   let stored = settings.providers?.[providerId];
   if (providerId === 'reizo-account' && !clean(stored?.apiKey)) throw new ProviderResolutionError('请先登录 Reizo 并刷新账号模型状态。');
   // Preserve the existing implicit image fallback; an explicit provider never silently changes.
@@ -38,9 +47,12 @@ export function resolveSettingsModel(settings: LocalSettings, request: {
   let official = false;
   try { const url = new URL(baseUrl); official = url.hostname === 'api.openai.com'; if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) throw new Error(); }
   catch { throw new ProviderResolutionError('Provider Base URL 无效'); }
-  const requestedModel = supplied(request.model, '模型');
+  const defaultImageModel = providerId === 'reizo-account'
+    ? (request.draft ? accountImages.find(model => model.id === DEFAULT_DRAFT_IMAGE_MODEL)?.id : undefined) ??
+      accountImages.find(model => model.id === 'gpt-image-2')?.id ?? accountImages[0]?.id
+    : request.draft ? DEFAULT_DRAFT_IMAGE_MODEL : official ? 'dall-e-3' : 'gpt-image-2';
   const model = request.category === 'image'
-    ? request.draft ? clean(settings.mediaModels?.draft) ?? DEFAULT_DRAFT_IMAGE_MODEL : requestedModel ?? clean(settings.mediaModels?.image) ?? (official ? 'dall-e-3' : 'gpt-image-2')
+    ? selectedImage ?? defaultImageModel
     : requestedModel ?? clean(stored.model) ?? clean(preset.defaultModel);
   if (!model) throw new ProviderResolutionError('Provider is missing a base URL or model id.');
   const catalogModel = providerId === 'reizo-account' ? settings.accountCatalog?.[request.category === 'image' ? 'image' : 'text'].find(item => item.id === model) : undefined;
