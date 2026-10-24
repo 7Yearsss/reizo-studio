@@ -22,6 +22,7 @@ import { createAskUserTool, createWorkspaceTools } from './workspaceTools';
 import { createScheduleTools } from './scheduleTools';
 import { createCanvasTools } from './canvasTools';
 import { createArtifactTools } from './artifactTools';
+import { FILE_GENERATION_INSTRUCTIONS } from './fileTools';
 import { buildSheetContext } from './sheetContext';
 import { buildDocumentContext } from './documentContext';
 import { buildPresentationContext } from './presentationContext';
@@ -41,7 +42,7 @@ import { inlineCanvasRefImages } from './canvasRefImages';
 import { consumeInteractions, waitForInteractions } from './permissions';
 import { translateOpenAiChunk } from './translators/openai';
 import { compactAssistantParts, compactModelMessages } from './modelHistory';
-import { CONTINUE_USER_MESSAGE, MAX_CONTINUE_PASSES, shouldContinueAgentPass } from './continuePass';
+import { CONTINUE_USER_MESSAGE, MAX_CONTINUE_PASSES, shouldContinueAgentPass, hasDeliveredArtifact } from './continuePass';
 import { appendHookNote, createHookRunner, loadHooks, wrapToolsWithHooks } from './hooks';
 import { connectMcpTools, MCP_TOOL_PREFIX } from './mcpTools';
 import { hasReasoningLeak } from './reasoningLeak';
@@ -354,6 +355,8 @@ export async function runChatTurn(options: {
       : 'You are Reizo Studio, a helpful creative assistant running locally on the user\'s desktop. Use ask_user if you need the user to choose.',
     activeHarnessRules.systemPromptAddon,
     activeHarnessRules.guardrails,
+    artifactStore ? FILE_GENERATION_INSTRUCTIONS : '',
+    'Response formatting: Use Markdown for readable replies. Use **bold** sparingly for key conclusions or important values, real lists for parallel items, and fenced code blocks with a language for code. Do not wrap an entire reply in a code block. When a workspace file has actually been produced, link it as [descriptive filename](relative/path.ext) so the user can preview it. Keep existing canvas node links as canvas:<nodeId>. Never invent a downloadable file or a successful output before a tool confirms it.',
     'Image Generation Rules:\n' +
     '- When the user asks to generate, draw, or paint an image (e.g., "生图", "画一张...", "生成图片", "设计海报", "绘制插画"), ALWAYS call the `generate_image` tool directly within this chat conversation. The image will be generated and rendered inline for the user.\n' +
     '- The `generate_image` tool automatically uses the configured provider (such as Reizo key with gpt-image-2). Never refuse or tell the user that OpenAI API Key is missing. Just invoke `generate_image` directly.\n' +
@@ -436,23 +439,6 @@ export async function runChatTurn(options: {
   const todos: TodoItem[] = [];
   const loopGuard = createToolLoopGuard();
   const trace = createTurnTraceCollector({ sessionId, model: modelId });
-  let turnDelivered = false;
-  const DELIVERABLE_TOOLS = new Set([
-    'write_file',
-    'edit_file',
-    'generate_sheet',
-    'propose_sheet_edits',
-    'generate_document',
-    'propose_document_edits',
-    'generate_presentation',
-    'propose_presentation_edits',
-    'generate_diagram',
-    'generate_image',
-    'add_node',
-    'run_node',
-    'run_graph',
-    'create_storyboard_pipeline',
-  ]);
 
   const toolset = workspacePath
     ? createWorkspaceTools({
@@ -705,9 +691,6 @@ export async function runChatTurn(options: {
           event.type === 'tool' &&
           (event.result !== undefined || event.error !== undefined)
         ) {
-          if (event.error === undefined && DELIVERABLE_TOOLS.has(event.name)) {
-            turnDelivered = true;
-          }
           const verdict = loopGuard.record({
             name: event.name,
             args: event.args,
@@ -852,7 +835,7 @@ export async function runChatTurn(options: {
         todos,
         finishReason,
         userText,
-        delivered: turnDelivered,
+        delivered: hasDeliveredArtifact(snap.parts),
       });
       if (!reason) return null;
       console.info(`[chat] continue pass reason=${reason} pass=${passIndex + 1}`);

@@ -8,6 +8,7 @@ import { toolAction, toolLabel, toolTarget } from './toolDisplay';
 
 /** Tools whose full card (with its diff or output) stays visible after the turn ends. */
 const PERSISTENT_TOOL_NAMES = new Set([
+  'generate_file',
   'edit_file',
   'write_file',
   'memory_write',

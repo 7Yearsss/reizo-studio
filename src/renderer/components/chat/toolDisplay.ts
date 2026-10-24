@@ -289,6 +289,7 @@ export function toolLabel(name: string, part?: ToolCallPart): string {
     case 'computer': return '操作电脑';
     case 'generate_diagram': return '生成流程图';
     case 'generate_sheet': return '生成表格';
+    case 'generate_file': return '生成文件';
     case 'read_sheet': return '读取表格';
     case 'check_sheet': return '检查表格';
     case 'read_document': return '读取文档';
@@ -318,6 +319,7 @@ export function toolAction(name: string, part?: ToolCallPart): string {
   }
   if (name === 'edit_file') return 'edit';
   if (name === 'write_file') return 'write';
+  if (name === 'generate_file') return 'write';
   if (name === 'generate_sheet' || name === 'propose_sheet_edits') return 'edit';
   if (name === 'grep' || name === 'find_files') return 'search';
   return 'read';
@@ -347,6 +349,7 @@ export function toolTarget(part: ToolCallPart): string {
   if (part.name === 'edit_file' || part.name === 'write_file') {
     return path ? `${part.name} --path ${quote(path)}` : part.name;
   }
+  if (part.name === 'generate_file') return typeof args.filename === 'string' ? args.filename : '';
   if (path) return path;
   if (query) return `query: ${query}`;
   if (command) return `$ ${command}`;

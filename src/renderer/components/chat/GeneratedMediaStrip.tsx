@@ -15,13 +15,16 @@ function MediaThumb({ node, onClick }: { node: CanvasNode; onClick: () => void }
       type="button"
       onClick={onClick}
       title={node.title}
-      className="h-24 w-24 shrink-0 overflow-hidden rounded-lg border border-line bg-paper-inset transition-transform hover:scale-[1.03]"
+      className="group/media flex w-36 shrink-0 flex-col items-start gap-2 text-left"
     >
+      <span className="block h-28 w-36 overflow-hidden rounded-xl border border-line bg-paper-inset transition-opacity group-hover/media:opacity-90">
       {node.type === 'video' ? (
         <video src={`${url}#t=0.001`} muted playsInline preload="metadata" className="h-full w-full object-cover" />
       ) : (
         <img src={url} alt={node.title} className="h-full w-full object-cover" />
       )}
+      </span>
+      <span className="chat-file-link inline-block max-w-full truncate text-xs">{node.title || (node.type === 'video' ? '视频预览' : '图片预览')} ↗</span>
     </button>
   );
 }

@@ -5,6 +5,7 @@ import MarkdownRenderer from './MarkdownRenderer';
 import PreviewFrame from './PreviewFrame';
 import { withHtmlPreviewGuard } from './htmlGuards';
 import { createDeferredView } from '../../DeferredView';
+import TextFilePreview from '../TextFilePreview';
 
 const DiagramRenderer = createDeferredView<ArtifactRenderProps>(() => import('./DiagramRenderer'), { label: '图表编辑器', minHeight: 320 });
 const SheetRenderer = createDeferredView<ArtifactRenderProps>(() => import('./SheetRenderer'), { label: '表格编辑器', minHeight: 320 });
@@ -100,6 +101,10 @@ const RawRenderer: React.FC<ArtifactRenderProps> = ({ text }) => (
   </pre>
 );
 
+const TextRenderer: React.FC<ArtifactRenderProps> = ({ text }) => (
+  <TextFilePreview content={text} />
+);
+
 function Empty({ label }: { label: string }) {
   return <p className="px-3 py-6 text-xs text-ink-muted">{label}</p>;
 }
@@ -112,6 +117,7 @@ const REGISTRY: ArtifactRendererDef[] = [
   { id: 'sheet', canRender: (a) => a.renderer === 'sheet' || a.kind === 'sheet', supportsStreaming: false, Component: SheetRenderer },
   { id: 'svg', canRender: (a) => a.renderer === 'svg' || a.kind === 'svg', supportsStreaming: true, Component: SvgRenderer },
   { id: 'html', canRender: (a) => a.renderer === 'html' || a.kind === 'html', supportsStreaming: true, Component: HtmlRenderer },
+  { id: 'raw', canRender: (a) => a.kind === 'text', supportsStreaming: true, Component: TextRenderer },
   { id: 'markdown', canRender: (a) => a.renderer === 'markdown' || a.kind === 'markdown', supportsStreaming: true, Component: MarkdownRenderer },
   { id: 'code', canRender: (a) => a.renderer === 'code' || a.kind === 'code', supportsStreaming: true, Component: CodeRenderer },
   { id: 'raw', canRender: () => true, supportsStreaming: true, Component: RawRenderer },

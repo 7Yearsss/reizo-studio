@@ -48,8 +48,10 @@ vi.mock('./tabStore', () => ({
 vi.mock('./settingsStore', () => ({
   getSnapshot: () => ({ settings: { activeProviderId: 'reizo', providers: [{ id: 'reizo', model: 'gpt-5.4' }] } }),
 }));
-vi.mock('./uiStore', () => ({ getSnapshot: () => ({ selectedProjectId: null as string | null }) }));
-vi.mock('./artifactStore', () => ({ loadSessionArtifacts: vi.fn(), dropSessionArtifacts: vi.fn() }));
+const uiMock = { getSnapshot: () => ({ selectedProjectId: null as string | null }), setRightPanelTabForSession: vi.fn() };
+const artifactMock = { loadSessionArtifacts: vi.fn(), dropSessionArtifacts: vi.fn(), openArtifact: vi.fn(async () => true) };
+vi.mock('./uiStore', () => uiMock);
+vi.mock('./artifactStore', () => artifactMock);
 vi.mock('./terminalStore', () => ({ appendTerminalLine: vi.fn() }));
 
 let store: typeof import('./chatStore');
@@ -57,6 +59,8 @@ let store: typeof import('./chatStore');
 beforeEach(async () => {
   vi.resetModules();
   Object.values(apiMock).forEach((fn) => 'mockClear' in fn && fn.mockClear());
+  uiMock.setRightPanelTabForSession.mockClear();
+  artifactMock.openArtifact.mockClear();
   store = await import('./chatStore');
 });
 
@@ -86,6 +90,24 @@ function feed(lines: string): void {
 const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 describe('chatStore streaming fold', () => {
+  it('opens the generated TXT in its owning session after the tool succeeds', async () => {
+    feed(envLines([
+      { type: 'tool', id: 'file-1', name: 'generate_file', args: { filename: '出师表.txt' }, result: JSON.stringify({ ok: true, artifactId: 'file-txt', name: '出师表.txt' }) },
+      { type: 'done', outcome: 'completed', aborted: false },
+    ]));
+    await store.sendMessage('s1', '帮我生成一个出师表的 txt');
+    await settle();
+    expect(artifactMock.openArtifact).toHaveBeenCalledWith('s1', 'file-txt');
+    expect(uiMock.setRightPanelTabForSession).toHaveBeenCalledWith('s1', 'artifacts');
+  });
+  it('does not open a file for a failed generation', async () => {
+    feed(envLines([
+      { type: 'tool', id: 'file-1', name: 'generate_file', args: {}, result: '{"ok":false,"error":"failed"}' },
+      { type: 'done', outcome: 'completed', aborted: false },
+    ]));
+    await store.sendMessage('s1', '生成 TXT');
+    expect(artifactMock.openArtifact).not.toHaveBeenCalled();
+  });
   it('folds text deltas and a tool result, then reconciles from getSession', async () => {
     feed(
       envLines([
@@ -170,7 +192,7 @@ describe('chatStore streaming fold', () => {
   });
 
   it('reveals text on the typewriter clock instead of every delta', async () => {
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
     try {
       let release: () => void = () => undefined;
       apiMock.sendMessage.mockImplementation(

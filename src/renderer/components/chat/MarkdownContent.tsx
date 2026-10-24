@@ -1,5 +1,6 @@
-import { useMemo, useState, useCallback } from 'react';
-import { Streamdown } from 'streamdown';
+import { useMemo, useState, useCallback, type ReactNode } from 'react';
+import type { PluggableList } from 'unified';
+import { Streamdown, defaultRemarkPlugins } from 'streamdown';
 import { code } from '@streamdown/code';
 import { Check, Copy } from 'lucide-react';
 import { normalizeMarkdownFences } from '../../lib/markdown/normalizeMarkdownFences';
@@ -10,6 +11,16 @@ import * as uiStore from '../../state/uiStore';
 import { requestSheetFocus } from '../../state/sheetWorkspace';
 import { linkSheetCells, parseSheetCellHref } from '../../lib/markdown/linkSheetCells';
 import { MermaidStreamBlock } from '../markdown/mermaidMarkdown';
+import { workspaceFileLinks, workspaceFilePath } from '../../lib/markdown/workspaceFileLinks';
+import WorkspaceFileDialog from '../workspace/WorkspaceFileDialog';
+import { openArtifact } from '../../state/artifactStore';
+import { compactFileReply, type GeneratedReplyFile } from '../../lib/markdown/compactFileReply';
+
+const REMARK_PLUGINS = [...Object.values(defaultRemarkPlugins), workspaceFileLinks];
+const NO_GENERATED_FILES: GeneratedReplyFile[] = [];
+const MARKDOWN_COMPONENTS = {
+  strong: ({ children }: { children?: ReactNode }) => <strong data-streamdown="strong">{children}</strong>,
+};
 
 const STREAMDOWN_PLUGINS = {
   code,
@@ -52,17 +63,39 @@ export function CopyButton({ text, className }: { text: string; className?: stri
 export default function MarkdownContent({
   content,
   streaming = false,
+  generatedFiles = NO_GENERATED_FILES,
 }: {
   content: string;
   streaming?: boolean;
+  generatedFiles?: GeneratedReplyFile[];
 }) {
+  const [previewPath, setPreviewPath] = useState<string | null>(null);
   const markdown = useMemo(() => linkSheetCells(normalizeMarkdownFences(stripThinkTags(content))), [content]);
+  // Streamdown keys its processor cache by plugin name/options. Pass files as
+  // options so one message's download policy cannot leak into another message.
+  const remarkPlugins = useMemo<PluggableList>(() => [...REMARK_PLUGINS, [compactFileReply, { files: generatedFiles, compactSummaries: !streaming }]], [generatedFiles, streaming]);
 
   const handleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement;
     const a = target.closest('a');
     if (!a) return;
     const href = a.getAttribute('href');
+    if (href?.startsWith('#artifact:')) {
+      e.preventDefault();
+      e.stopPropagation();
+      const sessionId = tabStore.activeSessionId();
+      if (sessionId) void openArtifact(sessionId, href.slice(10)).then(opened => {
+        if (opened) uiStore.setRightPanelTabForSession(sessionId, 'artifacts');
+      });
+      return;
+    }
+    const filePath = href ? workspaceFilePath(href) : null;
+    if (filePath) {
+      e.preventDefault();
+      e.stopPropagation();
+      setPreviewPath(filePath);
+      return;
+    }
     const cell = href ? parseSheetCellHref(href) : null;
     if (cell) {
       e.preventDefault();
@@ -89,6 +122,8 @@ export default function MarkdownContent({
         isAnimating={streaming}
         parseIncompleteMarkdown={streaming}
         plugins={STREAMDOWN_PLUGINS}
+        remarkPlugins={remarkPlugins}
+        components={MARKDOWN_COMPONENTS}
         controls={STREAMDOWN_CONTROLS}
         translations={STREAMDOWN_TRANSLATIONS}
         linkSafety={LINK_SAFETY}
@@ -98,6 +133,7 @@ export default function MarkdownContent({
       >
         {markdown}
       </Streamdown>
+      {previewPath && <WorkspaceFileDialog path={previewPath} onClose={() => setPreviewPath(null)} />}
     </div>
   );
 }

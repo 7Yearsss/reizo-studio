@@ -522,6 +522,18 @@ export function readWorkspaceFile(relativePath: string) {
   return window.reizo.readWorkspaceFile(relativePath);
 }
 
+export async function readWorkspacePreview(path: string): Promise<import('../shared/filePreview').WorkspacePreview> {
+  return (await api(`/api/workspace/preview?${new URLSearchParams({ path })}`)).json();
+}
+
+export async function downloadArtifactFile(id: string, version?: number): Promise<Blob> {
+  return (await api(`/api/artifacts/${encodeURIComponent(id)}/download${version ? `?v=${version}` : ''}`)).blob();
+}
+
+export async function workspaceMediaUrl(path: string): Promise<string> {
+  return `${await apiOrigin()}/api/workspace/media?${new URLSearchParams({ path })}`;
+}
+
 export function flattenWorkspace(): Promise<DirEntry[]> {
   return window.reizo.flattenWorkspace();
 }

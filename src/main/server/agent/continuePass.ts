@@ -1,4 +1,23 @@
 import type { TodoItem } from '../../../shared/stream';
+import type { ToolCallPart } from '../../../shared/chat';
+
+const DELIVERABLE_TOOLS = new Set([
+  'generate_file', 'write_file', 'edit_file', 'generate_sheet', 'propose_sheet_edits',
+  'generate_document', 'propose_document_edits', 'generate_presentation', 'propose_presentation_edits',
+  'generate_diagram', 'generate_image', 'add_node', 'run_node', 'run_graph', 'create_storyboard_pipeline',
+]);
+
+/** Inspect the canonical turn snapshot, including SDK tool results, not just side-channel events. */
+export function hasDeliveredArtifact(parts: ToolCallPart[]): boolean {
+  return parts.some(part => {
+    if (!DELIVERABLE_TOOLS.has(part.name) || part.error !== undefined || part.result === undefined) return false;
+    if (part.name !== 'generate_file') return true;
+    try {
+      const result = JSON.parse(part.result);
+      return result.ok === true && typeof result.artifactId === 'string' && result.artifactId.length > 0;
+    } catch { return false; }
+  });
+}
 
 /** Extra provider passes after the model first stops with text. Bounded. */
 export const MAX_CONTINUE_PASSES = 2;
@@ -47,9 +66,9 @@ export function looksLikeDeliverableRequest(userText: string): boolean {
   if (!trimmed) return false;
   if (/(?:怎么|如何|怎样)|how\s+(?:do|to|can)\s+i\b/i.test(trimmed) && /[?？]|吗/.test(trimmed)) return false;
   const zh =
-    /(?:生成|制作|创建|新建|导出|写一(?:份|个|篇)|做一(?:份|个|张))[\s\S]{0,30}?(?:表格|工作簿|预算表|Excel|xlsx|文档|报告|Word|docx|PPT|演示稿|幻灯片|流程图|架构图|时序图)/i;
+    /(?:生成|制作|创建|新建|导出|写一(?:份|个|篇)|做一(?:份|个|张))[\s\S]{0,60}?(?:文件|附件|txt|markdown|csv|json|html|\.md\b|表格|工作簿|预算表|Excel|xlsx|文档|报告|Word|docx|PPT|演示稿|幻灯片|流程图|架构图|时序图)/i;
   const en =
-    /\b(?:create|generate|build|write|export)\b[\s\S]{0,40}\b(?:spreadsheet|workbook|xlsx|document|docx|report|presentation|slides|pptx|diagram)\b/i;
+    /\b(?:create|generate|build|write|export)\b[\s\S]{0,60}\b(?:file|txt|markdown|csv|json|html|spreadsheet|workbook|xlsx|document|docx|report|presentation|slides|pptx|diagram)\b/i;
   return zh.test(trimmed) || en.test(trimmed);
 }
 

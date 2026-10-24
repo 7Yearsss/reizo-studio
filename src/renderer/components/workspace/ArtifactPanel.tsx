@@ -87,7 +87,8 @@ function readFileForUpload(file: File): Promise<{ content: string; mimeType: str
 export default function ArtifactPanel({ sessionId }: { sessionId: string }) {
   const artifacts = useArtifactStore((s) => s.bySession[sessionId]) ?? [];
   const loading = useArtifactStore((s) => s.loadingBySession[sessionId]) ?? false;
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedId = useArtifactStore((s) => s.selectedIdBySession[sessionId]) ?? null;
+  const setSelectedId = (id: string | null) => artifactStore.selectArtifact(sessionId, id);
   const [dragOver, setDragOver] = useState(false);
   const [picking, setPicking] = useState(false);
   const [checked, setChecked] = useState<Set<string>>(new Set());
@@ -118,12 +119,12 @@ export default function ArtifactPanel({ sessionId }: { sessionId: string }) {
   }, [sessionId]);
 
   useEffect(() => {
-    if (selectedId && !artifacts.some((a) => a.id === selectedId)) setSelectedId(null);
+    if (!loading && selectedId && !artifacts.some((a) => a.id === selectedId)) artifactStore.selectArtifact(sessionId, null);
     setChecked((prev) => {
       const next = new Set([...prev].filter((id) => artifacts.some((a) => a.id === id)));
       return next.size === prev.size ? prev : next;
     });
-  }, [artifacts, selectedId]);
+  }, [artifacts, selectedId, loading, sessionId]);
 
   const selected = useMemo(
     () => artifacts.find((a) => a.id === selectedId) ?? null,

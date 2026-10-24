@@ -15,16 +15,15 @@ import type { Artifact } from '../../../shared/artifact';
 import { isBlobKind } from '../../../shared/artifact';
 import * as api from '../../api';
 import * as artifactStore from '../../state/artifactStore';
-import { downloadBase64, toHtmlDocument } from '../../lib/artifactExport';
 import { pickRenderer } from './renderers';
 import ArtifactVersionRail from './ArtifactVersionRail';
 import HandoffMenu from './HandoffMenu';
 import { parseSheetContent } from '../../../shared/sheetContent';
-import SheetDocument from './SheetDocument';
 import { sendArtifactToVideoEditor } from '../../lib/sendToVideoEditor';
 import { lintArtifact } from '../../lib/lintArtifact';
 
 const DocumentEditor = createDeferredView<{ artifact: Artifact }>(() => import('./DocumentEditor'), { label: 'Doc', minHeight: 420 });
+const SheetDocument = createDeferredView<{ artifact: Artifact; onClose: () => void }>(() => import('./SheetDocument'), { label: 'Excel', minHeight: 320 });
 
 
 const PresentationEditor = createDeferredView<{ artifact: Artifact }>(() => import('./PresentationEditor'), { label: 'PPT', minHeight: 420 });
@@ -125,6 +124,7 @@ function GeneralArtifactPreview({
     if (!window.reizo?.exportPdf) return;
     setPdfBusy(true);
     try {
+      const { toHtmlDocument, downloadBase64 } = await import('../../lib/artifactExport');
       const base64 = await window.reizo.exportPdf(toHtmlDocument(artifact, text));
       downloadBase64(base64, artifact.name.replace(/\.[^.]+$/, '') + '.pdf', 'application/pdf');
     } catch {

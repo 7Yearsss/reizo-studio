@@ -29,6 +29,6 @@ describe('ToolCard command details', () => {
         }}
       />
     );
-    expect(html).toContain('$ npm run typecheck');
+    expect(html).toContain('&quot;command&quot;: &quot;npm run typecheck&quot;');
   });
 });

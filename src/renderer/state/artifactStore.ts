@@ -7,6 +7,7 @@ export interface ArtifactState {
   contentByKey: Record<string, ArtifactWithContent>;
   versionsById: Record<string, ArtifactVersion[]>;
   loadingBySession: Record<string, boolean>;
+  selectedIdBySession: Record<string, string | null>;
 }
 
 let state: ArtifactState = {
@@ -14,6 +15,7 @@ let state: ArtifactState = {
   contentByKey: {},
   versionsById: {},
   loadingBySession: {},
+  selectedIdBySession: {},
 };
 const listeners = new Set<() => void>();
 
@@ -29,6 +31,21 @@ export function subscribe(listener: () => void): () => void {
 
 export function getSnapshot(): ArtifactState {
   return state;
+}
+
+export function selectArtifact(sessionId: string, id: string | null): void {
+  setState({ selectedIdBySession: { ...state.selectedIdBySession, [sessionId]: id } });
+}
+
+/** Resolve the exact output before selecting it, including when the panel was closed. */
+export async function openArtifact(sessionId: string, id: string): Promise<boolean> {
+  try {
+    const artifact = await api.getArtifact(id);
+    if (artifact.sessionId !== sessionId) return false;
+    upsertArtifact(artifact);
+    selectArtifact(sessionId, id);
+    return true;
+  } catch { return false; }
 }
 
 export function upsertArtifact(artifact: ArtifactWithContent): void {
@@ -95,5 +112,7 @@ export function invalidateArtifact(id: string): void {
 export function dropSessionArtifacts(sessionId: string): void {
   const bySession = { ...state.bySession };
   delete bySession[sessionId];
-  setState({ bySession });
+  const selectedIdBySession = { ...state.selectedIdBySession };
+  delete selectedIdBySession[sessionId];
+  setState({ bySession, selectedIdBySession });
 }

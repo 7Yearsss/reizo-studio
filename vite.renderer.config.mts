@@ -12,7 +12,7 @@ export default defineConfig({
     alias: { '@': path.resolve(import.meta.dirname, 'src') },
   },
   // Only discover dependencies from the app, not HTML in local editor/package fixtures.
-  optimizeDeps: { entries: ['index.html'] },
+  optimizeDeps: { entries: ['index.html'], include: ['react-dom/server'] },
   // Windows: default bind is ::1; Electron then loads http://localhost via
   // IPv4 (127.0.0.1) and gets ERR_CONNECTION_REFUSED. Pin IPv4.
   // Port 46173, not the Vite default 5173 — on this machine the low 5xxx

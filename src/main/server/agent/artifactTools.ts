@@ -10,6 +10,7 @@ import { sheetPivots } from '../../../shared/sheetPivot';
 import { describeChartSource, sheetCharts } from '../../../shared/sheetChart';
 import { summarizeSheet } from '../../../shared/sheetReferences';
 import { READ_PAGE_BUDGET } from './readBudget';
+import { createFileTools } from './fileTools';
 import { serializeCanvasContent } from '../../../shared/canvasContent';
 import {
   applySheetOperations,
@@ -38,6 +39,7 @@ export function createArtifactTools(options: {
   reviews?: ArtifactReviewStore;
 }) {
   return {
+    ...createFileTools(options),
     read_sheet: tool({
       description: '读取本会话表格的最新版本、数据和公式。不提供 artifactId 时列出工作簿；读取指定 sheet/range 可查看左上角预览之外的数据。修改前读取并使用返回的 version 作为 expectedVersion。',
       inputSchema: z.object({ artifactId: z.string().optional(), sheet: z.string().optional(), range: z.string().optional() }),
