@@ -967,6 +967,16 @@ export async function cancelCanvasJob(canvasId: string, jobId: string): Promise<
   await api(`/api/canvas/${canvasId}/jobs/${jobId}/cancel`, { method: 'POST' });
 }
 
+export async function getCanvasJob(canvasId: string, jobId: string, signal?: AbortSignal): Promise<import('../shared/canvasJobs').CanvasJob> {
+  const data = await (await api(`/api/canvas/${encodeURIComponent(canvasId)}/jobs/${encodeURIComponent(jobId)}`, { signal })).json();
+  // Chat receipts follow an explicitly requested query recovery after a reload.
+  return data.recoveryJob ?? data.job;
+}
+
+export async function queryCanvasVideoJob(canvasId: string, jobId: string): Promise<import('../shared/canvasJobs').CanvasJob> {
+  return (await (await api(`/api/canvas/${encodeURIComponent(canvasId)}/jobs/${encodeURIComponent(jobId)}/query`, { method: 'POST' })).json()).job;
+}
+
 export async function retryCanvasJob(canvasId: string, jobId: string, operationId: string): Promise<{ jobId: string }> {
   return (await api(`/api/canvas/${canvasId}/jobs/${jobId}/retry`, { method: 'POST',
     headers: { 'content-type': 'application/json', 'Idempotency-Key': operationId }, body: JSON.stringify({ confirmedSpend: true }) })).json();

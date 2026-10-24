@@ -5,8 +5,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { PublicProvider } from '../../../shared/settings';
 import ModelPicker from './ModelPicker';
 
-const mocks = vi.hoisted(() => ({ patch: vi.fn(), providers: [] as PublicProvider[] }));
-vi.mock('../../state/useSettingsStore', () => ({ useSettingsStore: (selector: (state: unknown) => unknown) => selector({ settings: { activeProviderId: 'reizo-account', providers: mocks.providers, mediaModels: {} } }) }));
+const mocks = vi.hoisted(() => ({ patch: vi.fn(), activeProviderId: 'reizo-account', providers: [] as PublicProvider[] }));
+vi.mock('../../state/useSettingsStore', () => ({ useSettingsStore: (selector: (state: unknown) => unknown) => selector({ settings: { activeProviderId: mocks.activeProviderId, providers: mocks.providers, mediaModels: {} } }) }));
 vi.mock('../../state/settingsStore', () => ({ patchSettings: mocks.patch }));
 vi.mock('../models/ModelIcon', () => ({ default: () => <span aria-hidden /> }));
 let root: Root, host: HTMLDivElement;
@@ -14,6 +14,7 @@ beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('ResizeObserver', class { observe = vi.fn(); unobserve = vi.fn(); disconnect = vi.fn(); });
   mocks.patch.mockReset().mockResolvedValue({});
+  mocks.activeProviderId = 'reizo-account';
   mocks.providers = [
     { id: 'reizo-account', name: 'Reizo 账号', tag: '', hasKey: true, model: '[满血G]gemini-flash', baseUrl: '', models: [{ id: '[满血G]gemini-flash', name: '[满血G]gemini-flash' }, { id: 'gpt-6-astra', name: 'GPT-6 Astra' }] },
     { id: 'openai', name: 'OpenAI 官方', tag: '', hasKey: true, model: 'gpt-6-astra', baseUrl: '', models: [{ id: 'gpt-6-astra', name: 'GPT-6 Astra' }] },
@@ -25,6 +26,15 @@ beforeEach(async () => {
   await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="模型"]')!.click());
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
+
+it('shows the signed-in account video catalog even when a different chat provider is active', async () => {
+  mocks.activeProviderId = 'openai';
+  await act(async () => root.render(<ModelPicker />));
+  const videoTab = [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '视频')!;
+  await act(async () => videoTab.click());
+  expect(document.body.textContent).toContain('wan3.0-video');
+  expect(document.body.textContent).not.toContain('可灵 Kling 1.5');
+});
 
 it('collapses other vendors and selects the correct provider when two providers offer the same model', async () => {
   const vendor = document.querySelector<HTMLButtonElement>('button[aria-label="OpenAI，2 个模型"]')!;

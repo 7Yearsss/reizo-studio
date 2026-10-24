@@ -37,10 +37,11 @@ async function awaitImageJob(store: CanvasStore, submission: NodeJobSubmission) 
   const signal = canvasWorkSignal(store);
   let onStopped!: () => void;
   const stopped = new Promise<void>((resolve) => { onStopped = resolve; });
+  const timer = setTimeout(onStopped, 120_000);
   signal.addEventListener('abort', onStopped, { once: true });
   try {
     if (!signal.aborted) await Promise.race([submission.completion, stopped]);
-  } finally { signal.removeEventListener('abort', onStopped); }
+  } finally { clearTimeout(timer); signal.removeEventListener('abort', onStopped); }
   // Host shutdown may have closed SQLite before this continuation resumes.
   if (canvasWorkStopped(store) || !nodeJobsFor(store).isAccepting()) return null;
   return store.jobs.get(submission.job.id);
@@ -119,15 +120,29 @@ export function createImageTools(options: {
               operationId: toolOperation(context?.toolCallId, 'generate_image', 'job'), signal: context?.abortSignal });
             const job = await awaitImageJob(canvasStore, accepted);
             if (!job) return { ok: false, jobId: accepted.job.id, error: '应用正在退出，图片任务已中断。' };
-            if (job.status !== 'succeeded') return { ok: false, jobId: job.id, error: job.error ?? (job.status === 'cancelled' ? '图片任务已停止。' : '图片生成未完成，请重试。') };
-            const output = job.result as { assets?: string[]; resultSet?: Array<{ asset: string; prompt?: string; model?: string }> } | undefined;
+            if (job.status === 'queued' || job.status === 'running') {
+              // Keep the provider stream within its chunk deadline. The saved receipt
+              // lets chat follow a long image render without opening the canvas.
+              void accepted.completion.then(async () => {
+                if (canvasWorkStopped(canvasStore)) return;
+                const finished = canvasStore.jobs.get(accepted.job.id);
+                const output = finished?.result as { assets?: string[] } | undefined;
+                if (finished?.status === 'succeeded' && output?.assets?.[0]) {
+                  await saveToArtifacts(output.assets[0], cleanPrompt, finished.model ?? model, finished.id, canvas.id);
+                }
+              }).catch((): void => undefined);
+              return { ok: true, canvasId: canvas.id, nodeId: created.id, jobId: job.id, status: job.status,
+                prompt: cleanPrompt, size: size ?? '1024x1024', summary: '图片仍在生成，结果会在对话卡片中自动更新，请勿重复提交。' };
+            }
+            if (job.status !== 'succeeded') return { ok: false, canvasId: canvas.id, nodeId: created.id, jobId: job.id, error: job.error ?? (job.status === 'cancelled' ? '图片任务已停止。' : '图片生成未完成，请重试。') };
+            const output = job.result as { assets?: string[]; resultSet?: Array<{ asset: string; assetId?: string; prompt?: string; model?: string }> } | undefined;
             const image = output?.resultSet?.[0];
             const asset = image?.asset ?? output?.assets?.[0];
             if (!asset) return { ok: false, jobId: job.id, error: '生图接口未返回有效图片数据' };
             const captured = (job.input.node as { params?: { prompt?: string; size?: string } } | undefined)?.params;
             const imageSize = captured?.size ?? '1024x1024';
             await saveToArtifacts(asset, image?.prompt ?? captured?.prompt ?? cleanPrompt, image?.model ?? job.model ?? model, job.id, canvas.id);
-            return { ok: true, jobId: job.id, imageUrl: `/api/canvas/assets/${asset}`, prompt: image?.prompt ?? captured?.prompt ?? cleanPrompt,
+            return { ok: true, canvasId: canvas.id, nodeId: created.id, jobId: job.id, assetId: image?.assetId, status: 'succeeded', imageUrl: `/api/canvas/assets/${asset}`, prompt: image?.prompt ?? captured?.prompt ?? cleanPrompt,
               size: imageSize, model: image?.model ?? job.model ?? model, summary: `已在对话中生成图片 (${imageSize})` };
           } catch (error) {
             const classified = classifyMediaError(error);

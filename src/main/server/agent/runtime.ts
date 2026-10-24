@@ -28,6 +28,7 @@ import { buildDocumentContext } from './documentContext';
 import { buildPresentationContext } from './presentationContext';
 import { parseSheetReferences, wrapSheetContext } from '../../../shared/sheetReferences';
 import { createImageTools } from './imageTools';
+import { createVideoTools } from './videoTools';
 import { createComputerTools, isComputerUseSupported } from './computerTools';
 import { COMPUTER_TOOL_NAME, SCREENSHOT_RETENTION } from '../../../shared/computerUse';
 import { readScreenshotSync, screenshotContentOutput } from '../../computerUse/store';
@@ -361,6 +362,7 @@ export async function runChatTurn(options: {
     '- When the user asks to generate, draw, or paint an image (e.g., "生图", "画一张...", "生成图片", "设计海报", "绘制插画"), ALWAYS call the `generate_image` tool directly within this chat conversation. The image will be generated and rendered inline for the user.\n' +
     '- The `generate_image` tool automatically uses the configured provider (such as Reizo key with gpt-image-2). Never refuse or tell the user that OpenAI API Key is missing. Just invoke `generate_image` directly.\n' +
     '- DO NOT touch the canvas or call `add_node(type: "image")` or `open_canvas` for standard image generation requests. Standard image generation belongs 100% in this chat conversation.\n' +
+    '- Video Generation Rules: Before a standard video request, call `get_video_models` to read actual available models and known capabilities. If the user has not explicitly selected a video model for this request, use `ask_user` with the returned model question so they can choose; preselect the configured model when recommended. Reuse already answered choices and never ask the same input twice. Collect missing visual direction with direction cards, and missing ratio/duration with choice questions, offering only values supported by the selected model and this client (5s/10s; 16:9/9:16/1:1). Do not guess prices, quality, speed or capabilities. Unknown capabilities stay unspecified; if there are no available models, explain how to configure them instead of submitting. Then call `generate_video` in chat with BOTH the selected model id and providerId; these are video settings, independent of the chat text model. Its durable task card shows loading and then the playable result, even after your reply ends. Do not call add_node/run_node/open_canvas for these requests. A queued/running receipt is not a completed video or upstream submission confirmation. Do not poll, resubmit, or tell the user to go to the canvas; they may explicitly take the result there themselves.\n' +
     (settings.directorSessions?.[sessionId]
       ? '- Canvas Rules (导演模式 ON): You are the director of the session canvas. When a request implies producing multiple assets, a series, or a multi-step creative workflow (e.g. 一套物料, 分镜, 系列图, A/B 方向), proactively plan it on the canvas: lay out the whole plan first using `add_node`/`create_storyboard_pipeline` with `asProposal: true` so the user sees ghost nodes before anything generates. After the user accepts the proposal, run nodes — prefer batching several per pass. For single one-off images, `generate_image` in chat is still correct.\n' +
         '- Before calling `run_graph` / `create_storyboard_pipeline` for a multi-node pipeline, `read_canvas` and check whether the node set covers every deliverable the request implies (e.g. "广告" implies voiceover/subtitle nodes, "九宫格" implies nine distinct compositions rather than nine repeats). If something is missing, either add the nodes first or ask the user — do not run first and discover the gap afterwards.\n'
@@ -488,6 +490,10 @@ export async function runChatTurn(options: {
     ? createImageTools({ settingsStore, dataRoot, sessionId, projectId: session.projectId, canvasStore, artifactStore })
     : undefined;
 
+  const videoTools = canvasStore && dataRoot
+    ? createVideoTools({ sessionId, canvasStore, settingsStore, dataRoot, providerStore: options.canvasProviderStore })
+    : undefined;
+
   const computerTools =
     computerEnabled && dataRoot
       ? createComputerTools({
@@ -522,6 +528,7 @@ export async function runChatTurn(options: {
           ...(artifactStore && options.artifactReviews ? createPresentationTools({ sessionId, projectId: session.projectId, artifacts: artifactStore, reviews: options.artifactReviews, getReferences: () => currentPresentationRefs }) : {}),
           ...(artifactStore && options.artifactReviews ? createDocumentTools({ sessionId, projectId: session.projectId, artifacts: artifactStore, reviews: options.artifactReviews, getReferences: () => currentDocumentRefs }) : {}),
           ...(imageTools ?? {}),
+          ...(videoTools ?? {}),
           ...(computerTools?.tools ?? {}),
           ...(scheduleTools ?? {}),
           ...(skill?.contract && canvasStore && dataRoot ? createDeliveryTools({ skill, canvasStore, sessionId, dataRoot, artifactStore }) : {}),

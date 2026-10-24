@@ -12,6 +12,38 @@ function request(options: VideoDriverOptions, timeout = 60000): RequestInit {
     redirect: 'error', signal: AbortSignal.any([AbortSignal.timeout(timeout), ...(options.signal ? [options.signal] : [])]) };
 }
 
+/** Keep public gateway diagnostics; credentials and unbounded error pages stay out of chat/history. */
+async function submissionError(response: Response, options: VideoDriverOptions): Promise<Error> {
+  let detail = '';
+  let requestId = response.headers.get('x-request-id') ?? response.headers.get('x-oneapi-request-id') ?? '';
+  const reader = response.body?.getReader();
+  if (reader) {
+    try {
+      const chunks: Uint8Array[] = [];
+      let length = 0;
+      while (length < 8192) {
+        const next = await reader.read();
+        if (next.done) break;
+        const bytes = next.value.subarray(0, 8192 - length);
+        chunks.push(bytes); length += bytes.length;
+      }
+      const data = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      const error = data?.error;
+      detail = typeof error?.message === 'string' ? error.message : typeof data?.message === 'string' ? data.message : '';
+      requestId ||= typeof data?.request_id === 'string' ? data.request_id : '';
+    } catch { /* An HTML page or malformed response has no trustworthy provider message. */ }
+    finally { void reader.cancel().catch((): void => undefined); }
+  }
+  if (options.apiKey) { detail = detail.split(options.apiKey).join('[redacted]'); requestId = requestId.split(options.apiKey).join('[redacted]'); }
+  detail = detail.replace(/Bearer\s+["']?[^\s,;"']+/gi, 'Bearer [redacted]')
+    .replace(/sk-[A-Za-z0-9_-]+/g, '[redacted]')
+    .replace(/\b(api[_-]?key|key|access[_-]?token|refresh[_-]?token|token|secret|password)\s*[=:]\s*["']?[^\s,;"']+/gi, '$1=[redacted]')
+    .replace(/https?:\/\/[^\s/@:]+:[^\s/@]+@/gi, 'https://[redacted]@')
+    .replace(/\p{Cc}/gu, ' ').slice(0, 400);
+  const safeRequestId = /^[A-Za-z0-9_.:-]{1,160}$/.test(requestId) ? requestId : '';
+  return new Error(`视频提交失败（HTTP ${response.status}）${detail ? `：${detail}` : '，网关未确认接收任务'}${safeRequestId ? `（请求编号：${safeRequestId}）` : ''}`);
+}
+
 function videoRequest(params: VideoGenerateParams, options: VideoDriverOptions): Record<string, unknown> {
   base(options);
   const support = options.videoSupport;
@@ -54,7 +86,7 @@ export const newApiDriver: VideoDriver = {
     const baseUrl = base(options);
     const body = videoRequest(params, options);
     const response = await fetch(`${baseUrl}/videos`, { ...request(options), method: 'POST', body: JSON.stringify(body) });
-    if (!response.ok) throw new Error(`视频提交失败（HTTP ${response.status}），请检查模型额度与网关配置`);
+    if (!response.ok) throw await submissionError(response, options);
     const result = await response.json() as { id?: string; task_id?: string };
     const taskId = result.id || result.task_id || '';
     if (!validTask(taskId)) throw new Error('视频网关未返回有效任务编号');

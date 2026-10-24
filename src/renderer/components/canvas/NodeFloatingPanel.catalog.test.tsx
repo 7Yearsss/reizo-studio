@@ -1,13 +1,16 @@
 // @vitest-environment jsdom
 import { act, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { expect, it, vi } from 'vitest';
+import { beforeEach, expect, it, vi } from 'vitest';
 import type { CanvasNode } from '../../../shared/canvas';
 import NodeFloatingPanel from './NodeFloatingPanel';
 
+const mocks = vi.hoisted(() => ({ activeProviderId: 'reizo-account' }));
+beforeEach(() => { mocks.activeProviderId = 'reizo-account'; });
+
 vi.mock('@xyflow/react', () => ({ useStore: (selector: (state: unknown) => unknown) => selector({ nodeLookup: new Map() }) }));
 vi.mock('../../state/useSettingsStore', () => ({ useSettingsStore: (selector: (state: unknown) => unknown) => selector({ settings: {
-  activeProviderId: 'reizo-account', mediaModels: { video: 'wan3.0-video' }, providers: [{ id: 'reizo-account', catalog: { image: [], video: [{ id: 'wan3.0-video', name: 'WAN 3', protocol: 'openai-video', video: { startFrame: false, endFrame: false, reference: false, camera: false } }] } }],
+  activeProviderId: mocks.activeProviderId, mediaModels: { video: 'wan3.0-video' }, providers: [{ id: 'openai', hasKey: true }, { id: 'reizo-account', hasKey: true, catalog: { image: [], video: [{ id: 'wan3.0-video', name: 'WAN 3', protocol: 'openai-video', video: { startFrame: false, endFrame: false, reference: false, camera: false } }] } }],
 } }) }));
 vi.mock('../../state/canvasStore', () => ({ composerRefIds: (): string[] => [], setMentionComposer: vi.fn() }));
 vi.mock('./NodePanelViewport', () => ({ default: ({ children }: { children: ReactNode }) => <div>{children}</div> }));
@@ -45,7 +48,8 @@ it('locks generation until submission completes and shows request failures so th
   }
 });
 
-it('uses account video options on canvas and hides unverified duration, ratio, camera and reference controls', async () => {
+it.each(['reizo-account', 'openai'])('uses real account video options while chat uses %s and hides unverified controls', async activeProviderId => {
+  mocks.activeProviderId = activeProviderId;
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.useFakeTimers();
   const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);

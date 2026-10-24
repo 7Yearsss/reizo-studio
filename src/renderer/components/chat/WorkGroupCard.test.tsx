@@ -1,9 +1,25 @@
 // @vitest-environment jsdom
 import { renderToString } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import WorkGroupCard from './WorkGroupCard';
 
+// SSR markup does not depend on persisted UI preferences or Node's experimental storage.
+vi.hoisted(() => { vi.stubGlobal('localStorage', {
+  getItem: (): string | null => null, setItem: (): void => undefined, removeItem: (): void => undefined,
+}); });
+afterAll(() => vi.unstubAllGlobals());
+
 describe('WorkGroupCard', () => {
+  it('keeps completed media visible while the assistant continues replying', () => {
+    const html = renderToString(<WorkGroupCard streaming parts={[
+      { type: 'tool', id: 'image', name: 'generate_image', args: {}, result: JSON.stringify({ imageUrl: 'https://example.test/image.png' }) },
+      { type: 'tool', id: 'video', name: 'generate_video', args: {}, result: JSON.stringify({ videoUrl: 'https://example.test/video.mp4' }) },
+    ]} />);
+    expect(html).toContain('data-media-kind="image"');
+    expect(html).toContain('data-media-kind="video"');
+    expect(html).toContain('<video');
+    expect(html.match(/data-slot="chat-media"/g)).toHaveLength(2);
+  });
   it('labels a settled tool group as finished, never as an ambiguous process', () => {
     const html = renderToString(
       <WorkGroupCard

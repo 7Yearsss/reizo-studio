@@ -7,8 +7,10 @@ import { openDb } from '../db/client';
 import { createSqliteSessionStore } from '../storage/sqliteSessionStore';
 import { createCanvasStore } from '../storage/canvasStore';
 import type { SettingsStore } from '../storage/settingsStore';
+import type { LocalSettings } from '../../../shared/settings';
 import { createCanvasRouter } from './canvas';
 import { nodeJobsFor } from '../canvas/nodeJobs';
+import { getActiveJob, stopVideoJobsForStore } from '../canvas/asyncJobManager';
 
 const generate = vi.hoisted(() => vi.fn());
 vi.mock('ai', async (original) => ({ ...await original<typeof import('ai')>(), generateImage: generate }));
@@ -18,9 +20,9 @@ const settings = { get: async () => ({ activeProviderId: 'openai', providers: {
 } }) } as unknown as SettingsStore;
 const cleanup: Array<() => Promise<void>> = [];
 beforeEach(() => { generate.mockReset(); });
-afterEach(async () => { for (const fn of cleanup.splice(0)) await fn(); });
+afterEach(async () => { for (const fn of cleanup.splice(0)) await fn(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
-async function fixture() {
+async function fixture(currentSettings = settings) {
   const handle = openDb(':memory:');
   const sessions = createSqliteSessionStore(handle);
   const store = createCanvasStore(handle);
@@ -29,8 +31,9 @@ async function fixture() {
   const node = store.addNode(canvasId, { type: 'image', x: 0, y: 0, w: 100, h: 100,
     params: { prompt: 'product', size: '1024x1024' } }).node;
   const dataRoot = await mkdtemp(path.join(os.tmpdir(), 'reizo-job-http-'));
-  const app = new Hono().route('/api/canvas', createCanvasRouter(store, settings, sessions, dataRoot));
+  const app = new Hono().route('/api/canvas', createCanvasRouter(store, currentSettings, sessions, dataRoot));
   cleanup.push(async () => {
+    stopVideoJobsForStore(store);
     nodeJobsFor(store).shutdown();
     handle.close();
     if (path.dirname(path.resolve(dataRoot)) === path.resolve(os.tmpdir())) await rm(dataRoot, { recursive: true, force: true });
@@ -43,6 +46,48 @@ async function fixture() {
 }
 
 describe('durable canvas job HTTP interface', () => {
+  it('recovers a timed-out video by GET only and follows the saved recovery without rewriting its history', async () => {
+    vi.useFakeTimers();
+    const account = { get: async () => ({ providers: { 'reizo-account': { apiKey: 'sk-fixture', baseUrl: 'https://gateway.example/v1' } },
+      accountCatalog: { text: [], image: [], video: [] } } as unknown as LocalSettings) } as unknown as SettingsStore;
+    const f = await fixture(account);
+    const video = f.store.addNode(f.canvasId, { type: 'video', x: 0, y: 0, w: 100, h: 100, params: {} }).node;
+    const original = f.store.jobs.enqueue({ canvasId: f.canvasId, nodeId: video.id, nodeType: 'video',
+      input: { driverId: 'new-api', params: { prompt: 'saved', model: 'hidden-model' }, request: { providerId: 'reizo-account' } } });
+    f.store.jobs.markSubmitted(original.id, { providerId: 'reizo-account', model: 'hidden-model' });
+    f.store.jobs.recordRemoteTask(original.id, { driverId: 'new-api', taskId: 'remote-task', context: { baseUrl: 'https://gateway.example/v1' } });
+    f.store.jobs.finish(original.id, 'interrupted', { error: '视频查询超过 10 分钟', cancelReason: 'query_uncertain' });
+    const history = f.store.jobs.get(original.id);
+    let completed = false;
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(init?.method ?? 'GET').toBe('GET');
+      return new Response(url.endsWith('/content') ? 'video-bytes' : JSON.stringify({
+      status: completed ? 'completed' : 'in_progress', progress: 50,
+      }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    const endpoint = `/api/canvas/${f.canvasId}/jobs/${original.id}`;
+    expect((await f.app.request(`/api/canvas/foreign/jobs/${original.id}/query`, { method: 'POST' })).status).toBe(404);
+    expect((await f.app.request(`/api/canvas/${f.canvasId}/jobs/missing/query`, { method: 'POST' })).status).toBe(404);
+    const accepted = await f.app.request(`${endpoint}/query`, { method: 'POST' });
+    expect(accepted.status).toBe(202);
+    const { job } = await accepted.json();
+    const again = await (await f.app.request(`${endpoint}/query`, { method: 'POST' })).json();
+    expect(again.job.id).toBe(job.id);
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+    const observed = await (await f.app.request(endpoint)).json();
+    expect(observed.job).toEqual(history);
+    expect(observed.recoveryJob.observation).toMatchObject({ status: 'processing', progress: 50 });
+    const completion = getActiveJob(f.canvasId, video.id, f.store).completion;
+    completed = true;
+    vi.advanceTimersByTime(2500); await completion;
+    const restored = await (await f.app.request(endpoint)).json();
+    expect(restored.recoveryJob).toMatchObject({ id: job.id, status: 'succeeded' });
+    expect(restored.recoveryJob.result.assets).toHaveLength(1);
+    expect(restored.job).toEqual(history);
+    expect(fetcher.mock.calls.every(call => !(call[1] as RequestInit)?.method || (call[1] as RequestInit).method === 'GET')).toBe(true);
+  });
+
   it('returns an accepted durable job ID and reuses it without resubmitting paid work', async () => {
     const { store, run, canvasId } = await fixture();
     generate.mockImplementation(() => new Promise<void>((): void => undefined));

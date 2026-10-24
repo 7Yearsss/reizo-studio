@@ -93,19 +93,25 @@ export function resolveVideoProvider(settings: LocalSettings, request: {
 }
 
 export async function resolveVideoExecution(settings: LocalSettings, request: {
-  driverId: string; providerId?: string; submittedProviderId?: string; params: VideoGenerateParams; signal?: AbortSignal; autoProvider?: boolean;
+  driverId: string; providerId?: string; submittedProviderId?: string; params: VideoGenerateParams; signal?: AbortSignal; autoProvider?: boolean; polling?: boolean;
 }, store?: ProviderStore) {
+  const selectedVideoModel = clean(request.params.model) ?? clean(settings.mediaModels?.video) ?? settings.accountCatalog?.video[0]?.id;
+  const automaticAccountVideo = request.autoProvider && !request.providerId &&
+    Boolean(settings.providers?.['reizo-account']?.apiKey && settings.accountCatalog?.video.some(model => model.id === selectedVideoModel));
   const useAccount = request.submittedProviderId === 'reizo-account' || !request.submittedProviderId &&
-    (request.providerId === 'reizo-account' || request.autoProvider && settings.activeProviderId === 'reizo-account');
+    (request.providerId === 'reizo-account' || request.autoProvider && settings.activeProviderId === 'reizo-account' || automaticAccountVideo);
   if (useAccount) {
     const stored = settings.providers?.['reizo-account'];
     if (!stored?.apiKey) throw new ProviderResolutionError('请先登录 Reizo 并刷新账号模型状态。');
     const id = supplied(request.params.model, '视频模型') ?? clean(settings.mediaModels?.video) ?? settings.accountCatalog?.video[0]?.id;
+    if (!id) throw new ProviderResolutionError('视频任务缺少模型编号，请刷新模型列表后重新选择。');
     const model = settings.accountCatalog?.video.find(model => model.id === id);
-    if (!model?.video) throw new ProviderResolutionError('当前账号没有此视频模型权限，请刷新模型列表后重新选择。');
-    return { driver: getVideoDriver('new-api'), providerId: 'reizo-account', model: model.id,
-      params: { ...request.params, model: model.id },
-      credentials: { apiKey: stored.apiKey, baseUrl: stored.baseUrl, videoSupport: model.video, signal: request.signal } as VideoDriverOptions };
+    // A hidden model must not orphan an already accepted task. The gateway still authorizes every GET.
+    const queryingAcceptedTask = request.polling && request.submittedProviderId === 'reizo-account' && request.driverId === 'new-api' && id;
+    if (!model?.video && !queryingAcceptedTask) throw new ProviderResolutionError('当前账号没有此视频模型权限，请刷新模型列表后重新选择。');
+    return { driver: getVideoDriver('new-api'), providerId: 'reizo-account', model: id,
+      params: { ...request.params, model: id },
+      credentials: { apiKey: stored.apiKey, baseUrl: stored.baseUrl, videoSupport: model?.video, signal: request.signal } as VideoDriverOptions };
   }
   let managedId = request.submittedProviderId;
   const legacyDriver = getVideoDriver(request.driverId);

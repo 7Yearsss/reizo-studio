@@ -57,6 +57,7 @@ export default function AssistantMessage({
   return (
     <div className={`anim-msg group space-y-3 ${currentMatch ? 'chat-search-current' : ''}`}>
       <WorkGroupCard
+        sessionId={sessionId}
         reasoning={reasoning}
         reasoningSegments={reasoningSegments}
         reasoningStreaming={reasoningStreaming}

@@ -16,6 +16,7 @@ import NodePanelViewport from './NodePanelViewport';
 import NodePanelSelect from './NodePanelSelect';
 import type { CanvasInputSource } from '../../state/canvasInputSources';
 import { useSettingsStore } from '../../state/useSettingsStore';
+import { videoCatalogProvider } from '../../lib/modelCatalog';
 
 const CONFIGURED_MODEL = '__configured_model__';
 
@@ -119,13 +120,14 @@ function NodePanelBody({ sessionId, node, prompt, onPromptChange, onPromptCommit
   const isImage = !isVideo && !isAudio && !isNote;
   const settings = useSettingsStore(state => state.settings);
   const active = settings.providers.find(provider => provider.id === settings.activeProviderId);
-  const account = active?.id === 'reizo-account';
-  const videoSupport = account ? active.catalog?.video.find(item => item.id === (model || settings.mediaModels?.video))?.video : undefined;
+  const mediaProvider = isVideo ? videoCatalogProvider(settings) : active;
+  const account = mediaProvider?.id === 'reizo-account';
+  const videoSupport = account ? mediaProvider.catalog?.video.find(item => item.id === (model || settings.mediaModels?.video))?.video : undefined;
   const durationOptions = [{ value: '5s', label: '5 秒' }, { value: '10s', label: '10 秒' }].filter(item => !account || videoSupport?.minSeconds && videoSupport.maxSeconds && Number.parseInt(item.value) >= videoSupport.minSeconds && Number.parseInt(item.value) <= videoSupport.maxSeconds);
   const ratioOptions = [{ value: '16:9', label: '横屏 16:9' }, { value: '9:16', label: '竖屏 9:16' }, { value: '1:1', label: '方形 1:1' }].filter(item => !account || videoSupport?.aspectRatios?.includes(item.value));
   const typeLabel = isNote ? '文本与提示词' : isVideo ? '视频' : isAudio ? '音频' : '图片';
   const currentModel = model || CONFIGURED_MODEL;
-  const models = active?.catalog ? active.catalog[isVideo ? 'video' : 'image'] : account ? [] : isVideo ? CANVAS_VIDEO_MODELS : CANVAS_IMAGE_MODELS;
+  const models = mediaProvider?.catalog ? mediaProvider.catalog[isVideo ? 'video' : 'image'] : account ? [] : isVideo ? CANVAS_VIDEO_MODELS : CANVAS_IMAGE_MODELS;
   const configuredModel = settings.mediaModels?.[isVideo ? 'video' : 'image'];
   const defaultModelName = models.find(item => item.id === configuredModel)?.name;
   const modelOptions = [{ value: CONFIGURED_MODEL, label: defaultModelName ? `默认 · ${defaultModelName}` : '沿用设置' }, ...models.map((item) => ({ value: item.id, label: item.name }))];

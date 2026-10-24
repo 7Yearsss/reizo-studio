@@ -130,14 +130,15 @@ function DirectionAsk({
   const [viewMode, setViewMode] = useState<'grid' | 'stack'>('grid');
 
   const complete = pending.questions.every((q) => {
-    if (q.kind === 'direction') return Boolean(picks[q.id]);
-    return true;
+    if (q.kind === 'direction') return Boolean(q.directions?.some(direction => direction.id === picks[q.id]));
+    if (q.options?.length) return q.options.includes(picks[q.id]);
+    return Boolean(picks[q.id]?.trim());
   });
 
   return (
     <div className="rise-in flex max-h-[70vh] flex-col gap-3 rounded-xl border border-line bg-paper-raised p-3 shadow-xs">
       <div className="flex items-center justify-between border-b border-line/60 pb-2">
-        <span className="text-xs font-semibold text-ink">选择视觉方向</span>
+        <span className="text-xs font-semibold text-ink">{pending.questions.some(q => q.kind !== 'direction') ? '确认生成设置' : '选择视觉方向'}</span>
         <div className="flex items-center gap-0.5 rounded-md bg-paper-inset p-0.5 text-ink-muted">
           <button
             type="button"
@@ -231,7 +232,7 @@ function DirectionAsk({
 
       <div className="flex items-center justify-between border-t border-line/60 pt-2">
         <span className="text-[11px] text-ink-muted">
-          {complete ? '已选择方案，点击进入下一步' : '请挑选一个视觉设计方向'}
+          {complete ? '已选择方案，点击进入下一步' : '请完成以上选择'}
         </span>
         <button
           type="button"

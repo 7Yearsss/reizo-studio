@@ -50,6 +50,24 @@ type InlineResult = { ok: boolean; jobId?: string; imageUrl?: string; prompt?: s
 type EditResult = { ok: boolean; id?: string; jobId?: string; error?: string };
 
 describe('session image tools use durable jobs', () => {
+  it('hands a long image render back to chat as a durable receipt before the provider stream deadline', async () => {
+    const { canvasStore, tools } = await fixture();
+    const pending = deferred<typeof image>();
+    generate.mockReturnValue(pending.promise);
+    const execute = tools.generate_image.execute as (input: { prompt: string; size: string }, context: { toolCallId: string }) => Promise<InlineResult & { canvasId: string; nodeId: string; status: string }>;
+    vi.useFakeTimers();
+    try {
+      const running = execute({ prompt: 'slow image', size: '1024x1024' }, { toolCallId: 'slow-image' });
+      await vi.advanceTimersByTimeAsync(120_000);
+      const receipt = await running;
+      expect(receipt).toMatchObject({ ok: true, status: 'running' });
+      expect(receipt.canvasId).toBeTruthy(); expect(receipt.nodeId).toBeTruthy();
+      vi.useRealTimers();
+      pending.resolve(image);
+      await vi.waitFor(() => expect(canvasStore.jobs.get(receipt.jobId!)?.status).toBe('succeeded'));
+      expect(generate).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); }
+  });
   it('keeps inline output fields and legacy image sizes while persisting a reusable session asset', async () => {
     const { canvasStore, sessionId, tools } = await fixture();
     generate.mockResolvedValue(image);

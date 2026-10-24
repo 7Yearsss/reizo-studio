@@ -27,6 +27,8 @@ export interface ImageGenerationProps {
   resolution?: string;
   /** CSS aspect ratio reserved before generated media is available. */
   aspectRatio?: CSSProperties["aspectRatio"];
+  /** Interactive media needs a group so playback/preview controls stay accessible. */
+  mediaRole?: "img" | "group";
   size?: "compact" | "fluid";
   /** Lets the active dither cluster follow fine-pointer movement. */
   interactive?: boolean;
@@ -294,6 +296,7 @@ export function ImageGeneration({
   prompt,
   resolution = "1024 × 1024",
   aspectRatio = "1 / 1",
+  mediaRole = "img",
   size = "compact",
   interactive = true,
   statusText,
@@ -325,7 +328,7 @@ export function ImageGeneration({
         )}
       >
         <div
-          role="img"
+          role={mediaRole}
           aria-label={resolvedLabel}
           style={{ aspectRatio }}
           className="relative isolate w-full overflow-hidden rounded-xl bg-muted"

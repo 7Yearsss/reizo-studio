@@ -11,6 +11,13 @@ export interface CanvasRemoteTask {
   context?: Record<string, unknown>;
 }
 
+/** Live query observation. Rebuilt from the provider after restart, never a terminal outcome. */
+export interface CanvasJobObservation {
+  status: 'queued' | 'processing' | 'reconnecting' | 'downloading';
+  progress?: number;
+  observedAt: string;
+}
+
 /** Persisted execution identity. Inputs contain canvas data, never provider credentials. */
 export interface CanvasJob {
   id: string;
@@ -31,6 +38,7 @@ export interface CanvasJob {
   createdAt: string;
   submittedAt?: string;
   endedAt?: string;
+  observation?: CanvasJobObservation;
 }
 
 export interface CanvasJobEnqueueInput {

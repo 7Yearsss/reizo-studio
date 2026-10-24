@@ -6,7 +6,7 @@ import * as settingsStore from '../../state/settingsStore';
 import { cn } from '../../lib/cn';
 import { modelVendorDomain } from '../../../shared/providers';
 import { CANVAS_IMAGE_MODELS, CANVAS_VIDEO_MODELS } from '../../../shared/canvas';
-import type { ModelOption } from '../../lib/modelCatalog';
+import { videoCatalogProvider, type ModelOption } from '../../lib/modelCatalog';
 import ModelIcon from '../models/ModelIcon';
 import ModelList from '../models/ModelList';
 import { MODEL_POPOVER_CLASS } from '../models/ModelSelect';
@@ -32,7 +32,8 @@ export default function ModelPicker({ compact = false }: { compact?: boolean }) 
     return models.map((model) => ({ ...model, value: JSON.stringify([provider.id, model.id]), providerId: provider.id,
       source: configured.length > 1 ? provider.name : undefined }));
   });
-  const mediaModels = active.catalog ? active.catalog[tab === 'video' ? 'video' : 'image'] : active.id === 'reizo-account' ? [] : tab === 'image' ? CANVAS_IMAGE_MODELS : CANVAS_VIDEO_MODELS;
+  const mediaProvider = tab === 'video' ? videoCatalogProvider(settings) ?? active : active;
+  const mediaModels = mediaProvider.catalog ? mediaProvider.catalog[tab === 'video' ? 'video' : 'image'] : mediaProvider.id === 'reizo-account' ? [] : tab === 'image' ? CANVAS_IMAGE_MODELS : CANVAS_VIDEO_MODELS;
   const options = tab === 'text' ? textOptions : mediaModels.map((model) => ({ ...model, value: model.id }));
   const selectedValue = tab === 'text' ? JSON.stringify([active.id, active.model || '__custom']) : settings.mediaModels?.[tab];
 

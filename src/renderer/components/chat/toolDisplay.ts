@@ -286,6 +286,8 @@ export function toolLabel(name: string, part?: ToolCallPart): string {
     case 'connect_nodes': return '连接画布节点';
     case 'delete_node': return '删除画布节点';
     case 'generate_image': return '生成图片';
+    case 'generate_video': return '生成视频';
+    case 'get_video_models': return '读取视频模型';
     case 'computer': return '操作电脑';
     case 'generate_diagram': return '生成流程图';
     case 'generate_sheet': return '生成表格';

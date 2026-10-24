@@ -4,7 +4,7 @@ import type { ToolCallPart } from '../../../shared/chat';
 const DELIVERABLE_TOOLS = new Set([
   'generate_file', 'write_file', 'edit_file', 'generate_sheet', 'propose_sheet_edits',
   'generate_document', 'propose_document_edits', 'generate_presentation', 'propose_presentation_edits',
-  'generate_diagram', 'generate_image', 'add_node', 'run_node', 'run_graph', 'create_storyboard_pipeline',
+  'generate_diagram', 'generate_image', 'generate_video', 'add_node', 'run_node', 'run_graph', 'create_storyboard_pipeline',
 ]);
 
 /** Inspect the canonical turn snapshot, including SDK tool results, not just side-channel events. */

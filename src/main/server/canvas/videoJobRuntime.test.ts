@@ -25,7 +25,7 @@ vi.mock('node:fs/promises', async (original) => {
 });
 
 import { startVideoNode } from './videoExecutor';
-import { cancelVideoJob, getActiveJob, isRecoverableVideoJob, resumeVideoJobs, stopVideoJobsForStore } from './asyncJobManager';
+import { cancelVideoJob, getActiveJob, isRecoverableVideoJob, resumeVideoJobs, stopVideoJobsForStore, videoJobObservation, recoverVideoJob, latestVideoQueryJob } from './asyncJobManager';
 import { stopCanvasWork } from './workLifecycle';
 import * as imageExecutor from './imageExecutor';
 import * as assetFiles from './assets';
@@ -68,6 +68,32 @@ async function fixture() {
 }
 
 describe('durable video lifecycle', () => {
+  it('uses refreshed credentials on each query while preserving the original task handle', async () => {
+    vi.useFakeTimers(); const f = await fixture();
+    let apiKey = 'first-key';
+    const currentSettings = { get: async () => ({ providers: { openai: { apiKey } } }) } as unknown as SettingsStore;
+    const accepted = startVideoNode({ ...f.options, settingsStore: currentSettings }); await accepted.submitted;
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(mocks.poll.mock.calls.at(-1)?.[1].apiKey).toBe('first-key');
+    apiKey = 'rotated-key';
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(mocks.poll.mock.calls.at(-1)).toEqual(['task', expect.objectContaining({ apiKey: 'rotated-key', context: remoteContext })]);
+    expect(mocks.submit).toHaveBeenCalledOnce();
+  });
+
+  it('keeps querying a twenty-minute video and retrieves its result without another submission', async () => {
+    vi.useFakeTimers(); const f = await fixture();
+    const accepted = startVideoNode(f.options); await accepted.submitted;
+    // A wall-clock jump reproduces the long wait without hundreds of artificial polls.
+    vi.setSystemTime(Date.now() + 20 * 60 * 1000);
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(f.store.jobs.get(accepted.job.id)?.status).toBe('running');
+    mocks.poll.mockResolvedValueOnce({ status: 'succeed', videoBuffer: Buffer.from('long-video') });
+    vi.advanceTimersByTime(30_000); await accepted.completion;
+    expect(f.store.jobs.get(accepted.job.id)?.status).toBe('succeeded');
+    expect(mocks.submit).toHaveBeenCalledOnce();
+  });
+
   it('admits synchronously, freezes inputs/hash, and commits terminal output with retained history', async () => {
     vi.useFakeTimers();
     const f = await fixture();
@@ -216,19 +242,52 @@ describe('durable video lifecycle', () => {
     expect(f.store.jobs.get(accepted.job.id)?.status).toBe('succeeded'); expect(mocks.submit).toHaveBeenCalledOnce(); expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
-  it('distinguishes provider task failure from exhausted retryable query errors', async () => {
+  it('backs off temporary query failures and recovers without POSTing, but honors provider task failure', async () => {
     vi.useFakeTimers(); const f = await fixture();
     mocks.poll.mockRejectedValue(new VideoPollError('provider temporarily unavailable', true));
     const accepted = startVideoNode(f.options); await accepted.submitted;
-    for (let i = 0; i < 5; i += 1) { vi.advanceTimersByTime(2_500); await flush(); }
-    await accepted.completion;
-    expect(f.store.jobs.get(accepted.job.id)).toMatchObject({ status: 'interrupted', remoteTask: { taskId: 'task' } });
-    expect(mocks.submit).toHaveBeenCalledOnce(); expect(mocks.poll).toHaveBeenCalledTimes(5);
+    await vi.advanceTimersByTimeAsync(160_000);
+    expect(f.store.jobs.get(accepted.job.id)).toMatchObject({ status: 'running', remoteTask: { taskId: 'task' } });
+    expect(videoJobObservation(f.store, accepted.job.id)?.status).toBe('reconnecting');
+    expect(mocks.submit).toHaveBeenCalledOnce(); expect(mocks.poll.mock.calls.length).toBeGreaterThanOrEqual(5);
+    expect(mocks.poll.mock.calls.length).toBeLessThan(10);
+    mocks.poll.mockResolvedValueOnce({ status: 'succeed', videoBuffer: Buffer.from('reconnected') });
+    vi.advanceTimersByTime(60_000); await accepted.completion;
+    expect(f.store.jobs.get(accepted.job.id)?.status).toBe('succeeded');
     mocks.poll.mockResolvedValueOnce({ status: 'failed', error: 'provider rejected content' });
     const next = startVideoNode({ ...f.options, operationId: 'new-operation' }); await next.submitted;
     vi.advanceTimersByTime(2_500); await next.completion;
     expect(f.store.jobs.get(next.job.id)).toMatchObject({ status: 'failed', error: 'provider rejected content' });
-    expect(f.store.getNode(f.canvasId, f.node.id)?.output?.assets).toEqual(['old.mp4']);
+    expect(f.store.getNode(f.canvasId, f.node.id)?.output?.assets?.[1]).toBe('old.mp4');
+  });
+
+  it('recovers a previously timed-out handle through a linked query-only job and preserves terminal history', async () => {
+    const f = await fixture(); const original = startVideoNode(f.options); await original.submitted;
+    stopVideoJobsForStore(f.store);
+    f.store.jobs.finish(original.job.id, 'interrupted', { error: '视频查询超过 10 分钟', cancelReason: 'query_uncertain' });
+    const history = f.store.jobs.get(original.job.id);
+    mocks.submit.mockClear();
+    mocks.poll.mockResolvedValueOnce({ status: 'succeed', videoBuffer: Buffer.from('recovered'), usage: { total_tokens: 1 } });
+    const recovered = recoverVideoJob({ canvasStore: f.store, settingsStore: settings, dataRoot: f.dir }, history);
+    const replay = recoverVideoJob({ canvasStore: f.store, settingsStore: settings, dataRoot: f.dir }, history);
+    expect(replay.job.id).toBe(recovered.job.id);
+    await recovered.completion;
+    expect(f.store.jobs.get(original.job.id)).toEqual(history);
+    expect(latestVideoQueryJob(f.store, history)).toMatchObject({ id: recovered.job.id, status: 'succeeded', remoteTask: history.remoteTask });
+    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(mocks.poll).toHaveBeenCalledOnce();
+    expect(f.store.usage.list().records).toHaveLength(1);
+  });
+
+  it('does not recover a cancelled, unknown or superseded remote task', async () => {
+    const f = await fixture(); const first = startVideoNode(f.options); await first.submitted;
+    cancelVideoJob(f.canvasId, f.node.id, f.store);
+    const options = { canvasStore: f.store, settingsStore: settings, dataRoot: f.dir };
+    expect(() => recoverVideoJob(options, f.store.jobs.get(first.job.id))).toThrow();
+    f.handle.raw.prepare("UPDATE canvas_jobs SET status = 'interrupted' WHERE id = ?").run(first.job.id);
+    const second = startVideoNode({ ...f.options, operationId: 'newer' }); await second.submitted;
+    expect(() => recoverVideoJob(options, f.store.jobs.get(first.job.id))).toThrow('替代');
+    expect(mocks.submit).toHaveBeenCalledTimes(2);
   });
 
   it('removes a partial/unpublished file after terminal projection rolls back', async () => {

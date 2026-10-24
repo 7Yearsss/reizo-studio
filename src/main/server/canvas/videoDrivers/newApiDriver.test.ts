@@ -32,3 +32,26 @@ it('distinguishes rejected tasks from retryable queries and rejects path injecti
   expect(await newApiDriver.poll('task', scoped)).toMatchObject({ status: 'failed' });
   await expect(newApiDriver.poll('../models', scoped)).rejects.toMatchObject({ retryable: false });
 });
+
+it('preserves a sanitized gateway error and request id instead of guessing a quota problem', async () => {
+  const fetcher = vi.fn().mockResolvedValue(Response.json({ error: {
+    message: 'upstream model unavailable, api_key=upstream-private-value; Bearer fixture-only', code: 'upstream_error',
+  } }, { status: 500, headers: { 'x-request-id': 'request-fixture-500' } }));
+  vi.stubGlobal('fetch', fetcher);
+  const error = await newApiDriver.submit({ model: 'grok-imagine-video-1.5', prompt: 'fixture' }, options).catch(cause => cause);
+  expect(error.message).toContain('upstream model unavailable');
+  expect(error.message).toContain('request-fixture-500');
+  expect(error.message).not.toContain('upstream-private-value');
+  expect(error.message).not.toContain('fixture-only');
+  expect(error.message).not.toContain('模型额度');
+  expect(fetcher).toHaveBeenCalledOnce();
+});
+
+it('does not put a raw gateway error page or credentials into the saved error', async () => {
+  const fetcher = vi.fn().mockResolvedValue(new Response('<html>private-provider-debug-token</html>', { status: 502 }));
+  vi.stubGlobal('fetch', fetcher);
+  const error = await newApiDriver.submit({ model: 'video', prompt: 'fixture' }, options).catch(cause => cause);
+  expect(error.message).toContain('HTTP 502');
+  expect(error.message).not.toContain('private-provider-debug-token');
+  expect(error.message).not.toContain('<html>');
+});
