@@ -48,6 +48,8 @@ export interface VideoDriver {
   supportsRecovery?: boolean;
   defaultModel?: string;
   modelForRequest?(params: VideoGenerateParams, options: VideoDriverOptions): string;
+  /** Pure validation before the durable network-attempt marker is written. */
+  validateRequest?(params: VideoGenerateParams, options: VideoDriverOptions): void;
   validateRemoteContext?(taskId: string, context?: Record<string, unknown>): boolean;
   submit(
     params: VideoGenerateParams,

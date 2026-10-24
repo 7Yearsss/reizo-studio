@@ -31,7 +31,7 @@ export interface NodeFloatingPanelProps {
   candidates: CanvasNode[];
   upstreamSources: UpstreamSourceItem[];
   running: boolean;
-  onRun: () => void;
+  onRun: () => void | Promise<void>;
   nodeType?: 'image' | 'video' | 'audio' | 'note';
   autoFocus?: boolean;
   // Audio specific controls
@@ -50,7 +50,6 @@ export interface NodeFloatingPanelProps {
   onModelChange?: (model: string) => void;
   variationsCount?: 1 | 2 | 4;
   onVariationsCountChange?: (count: 1 | 2 | 4) => void;
-  estimatedCost?: number;
   // Video specific controls
   ratio?: '16:9' | '9:16' | '1:1';
   onRatioChange?: (ratio: '16:9' | '9:16' | '1:1') => void;
@@ -68,6 +67,9 @@ function NodeFloatingPanel(props: NodeFloatingPanelProps) {
   // Hiding the body while dragging must not reset a paid request already in flight.
   const [refining, setRefining] = useState(false);
   const refiningRef = useRef(false);
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   useEffect(() => {
     if (!visible || dragging) { setReady(false); return; }
     const timer = setTimeout(() => setReady(true), 100);
@@ -83,14 +85,30 @@ function NodeFloatingPanel(props: NodeFloatingPanelProps) {
     } catch (cause) { toast.error(cause instanceof Error ? cause.message : '提示词润色失败'); }
     finally { refiningRef.current = false; setRefining(false); }
   };
-  return ready && visible && !dragging ? <NodePanelBody {...props} refining={refining} onRefine={refine} /> : null;
+  const run = async () => {
+    if (submittingRef.current || props.running) return;
+    submittingRef.current = true;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await props.onRun();
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : '生成请求失败，请重试';
+      setSubmitError(message);
+      toast.error(message);
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
+  };
+  return ready && visible && !dragging ? <NodePanelBody {...props} running={props.running || submitting} onRun={run} submitError={submitError} submitting={submitting} refining={refining} onRefine={refine} /> : null;
 }
 
 function NodePanelBody({ sessionId, node, prompt, onPromptChange, onPromptCommit, candidates, upstreamSources, running, onRun,
   nodeType = 'image', autoFocus = false, audioProvider, onAudioProviderChange, audioProviders, audioVoice, onAudioVoiceChange,
   audioVoices, onAgentExpand, size = '1024x1024', onSizeChange, model, onModelChange, variationsCount = 1,
-  onVariationsCountChange, estimatedCost = 5, ratio = '16:9', onRatioChange, duration = '5s', onDurationChange,
-  camera, onCameraChange, refining, onRefine }: NodeFloatingPanelProps & { refining: boolean; onRefine: () => Promise<void> }) {
+  onVariationsCountChange, ratio = '16:9', onRatioChange, duration = '5s', onDurationChange,
+  camera, onCameraChange, refining, onRefine, submitError, submitting }: NodeFloatingPanelProps & { refining: boolean; onRefine: () => Promise<void>; submitError: string | null; submitting: boolean }) {
   const areaRef = useRef<MentionTextAreaHandle>(null);
   const lastSyncedPrompt = useRef(prompt);
   const [boundary, setBoundary] = useState<HTMLDivElement | null>(null);
@@ -108,7 +126,9 @@ function NodePanelBody({ sessionId, node, prompt, onPromptChange, onPromptCommit
   const typeLabel = isNote ? '文本与提示词' : isVideo ? '视频' : isAudio ? '音频' : '图片';
   const currentModel = model || CONFIGURED_MODEL;
   const models = active?.catalog ? active.catalog[isVideo ? 'video' : 'image'] : account ? [] : isVideo ? CANVAS_VIDEO_MODELS : CANVAS_IMAGE_MODELS;
-  const modelOptions = [{ value: CONFIGURED_MODEL, label: '沿用设置' }, ...models.map((item) => ({ value: item.id, label: item.name }))];
+  const configuredModel = settings.mediaModels?.[isVideo ? 'video' : 'image'];
+  const defaultModelName = models.find(item => item.id === configuredModel)?.name;
+  const modelOptions = [{ value: CONFIGURED_MODEL, label: defaultModelName ? `默认 · ${defaultModelName}` : '沿用设置' }, ...models.map((item) => ({ value: item.id, label: item.name }))];
   const providerValue = audioProvider || audioProviders?.find((item) => item.isDefault)?.id || audioProviders?.[0]?.id || '';
   const candidateMap = useMemo(() => new Map(candidates.map((candidate) => [candidate.id, candidate])), [candidates]);
   const refs = useMemo(() => canvasStore.composerRefIds(node).map((id) => candidateMap.get(id) || canvasStore.nodeById(sessionId, id)).filter((item): item is CanvasNode => Boolean(item)), [node, candidateMap, sessionId]);
@@ -117,7 +137,6 @@ function NodePanelBody({ sessionId, node, prompt, onPromptChange, onPromptCommit
   const hasFrame = upstreamSources.some((item) => item.handleId === 'start_frame' || item.sourceType === 'image' && isVideo);
   const canGenerate = Boolean(prompt.trim() || hasPrompt || isVideo && hasFrame);
   const placeholder = hasPrompt ? '已接入上游文本，可在此补充创作要求…' : hasFrame ? '已接入首帧，描述动态与运镜…' : isNote ? '输入提示词、分镜剧本或旁白，输入 @ 引用节点…' : isVideo ? '描述主体动作与镜头运动，输入 @ 引用节点…' : isAudio ? '描述音色、配乐或旁白，输入 @ 引用节点…' : '描述主体、构图与光影，输入 @ 引用节点…';
-  const cost = isNote ? 'Agent' : (isAudio ? 3 : estimatedCost) * (isVideo || isAudio ? 1 : variationsCount);
   useEffect(() => {
     canvasStore.setMentionComposer(sessionId, node.id, (source) => areaRef.current?.insertMentionNode(source));
   }, [sessionId, node.id]);
@@ -149,6 +168,7 @@ function NodePanelBody({ sessionId, node, prompt, onPromptChange, onPromptCommit
         {!isVideo || !account || videoSupport?.startFrame ? <Button type="button" variant="ghost" size="sm" disabled={running} onClick={() => canvasStore.startPickingCanvasRefs(sessionId, node.id)}><Plus data-icon="inline-start" />参考</Button> : null}
       </div>
       {upstreamSources.length ? <p className="mb-2 text-[11px] leading-5 text-muted-foreground">已接入：{upstreamSources.map((source) => source.sourceTitle).join('、')}</p> : null}
+      {node.runState === 'error' && node.output?.error ? <p role="alert" className="mb-2 rounded-lg bg-danger/10 px-2.5 py-2 text-xs leading-5 text-danger">{node.output.error}</p> : null}
       <FieldGroup className="gap-3">
         <Field className="gap-1.5">
           <FieldLabel>提示词</FieldLabel>
@@ -184,12 +204,13 @@ function NodePanelBody({ sessionId, node, prompt, onPromptChange, onPromptCommit
       </div>
       <div className="flex items-center gap-2">
         {(isImage || isVideo) ? <Button type="button" variant="ghost" size="sm" disabled={refining || running || !prompt.trim()} onClick={() => { void onRefine(); }}>{refining ? <Loader2 data-icon="inline-start" className="animate-spin motion-reduce:animate-none" /> : <Sparkles data-icon="inline-start" />}{refining ? '润色中' : '润色'}</Button> : null}
-        <Button type="button" size="sm" disabled={running || !canGenerate} onClick={isNote && onAgentExpand ? onAgentExpand : onRun} title={isNote ? 'AI 扩写剧本与提示词' : `生成${typeLabel}`}>
+        <Button type="button" size="sm" disabled={running || !canGenerate} onClick={isNote && onAgentExpand ? onAgentExpand : () => { void onRun(); }} title={isNote ? 'AI 扩写剧本与提示词' : account ? `生成${typeLabel}，费用按模型实际用量从账号余额结算` : `生成${typeLabel}`}>
           {running ? <Loader2 data-icon="inline-start" className="animate-spin motion-reduce:animate-none" /> : isNote ? <Bot data-icon="inline-start" /> : <Sparkles data-icon="inline-start" />}
-          {running ? '生成中' : isNote ? '扩写' : isImage && variationsCount > 1 ? `生成 ${variationsCount} 张` : '生成'}{!isNote ? <span aria-label={`画布算力点估算 ${cost} 点`} className="tabular-nums">{cost} 点</span> : null}
+          {submitting ? '提交中' : running ? '生成中' : isNote ? '扩写' : isImage && variationsCount > 1 ? `生成 ${variationsCount} 张` : '生成'}
         </Button>
       </div>
     </footer>
+    {submitError ? <p role="alert" className="px-3 pb-3 text-xs text-destructive">{submitError}</p> : null}
   </NodePanelViewport>;
 }
 

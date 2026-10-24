@@ -185,9 +185,11 @@ function launch(entry: ActiveJob, options: VideoRuntimeOptions, loadParams?: (si
       entry.releasePermit = await generationSchedulerFor(store).acquire(providerId, entry.signal);
       if (!isCurrent(entry)) return;
       if (!entry.job.remoteTask) {
+        if (!store.jobs.setProvider(entry.job.id, { providerId, model: resolved.model })) return;
         const params = loadParams ? await loadParams(entry.signal) : entry.job.input.params as unknown as VideoGenerateParams;
         if (!isCurrent(entry)) return;
         const submittedParams = { ...params, model: resolved.model };
+        driver.validateRequest?.(submittedParams, credentialOptions);
         if (!store.jobs.markSubmitted(entry.job.id, { providerId, model: resolved.model })) {
           if (isCurrent(entry)) fail('视频提交状态不确定，未重新提交。', 'interrupted');
           return;

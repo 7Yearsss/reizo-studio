@@ -9,7 +9,6 @@ import {
   type ImageEditKind,
   type ImageEditParams,
 } from '../../../../shared/canvasImageEdit';
-import { estimateNodeCost } from '../../../../shared/canvasPricing';
 import { chromeScale } from '../chromeScale';
 import { cn } from '../../../lib/cn';
 import * as canvasStore from '../../../state/canvasStore';
@@ -66,7 +65,6 @@ export default function EditParamsPanel({
 
   const kind = edit.kind;
   const canRerun = !isLocalEdit(kind);
-  const cost = estimateNodeCost(node);
 
   const apply = async (rerun: boolean) => {
     await canvasStore.reviseImageEdit(
@@ -91,7 +89,6 @@ export default function EditParamsPanel({
       <div className="flex flex-col gap-3 rounded-2xl border border-line/50 bg-[#161618]/95 p-3 text-xs text-ink shadow-2xl backdrop-blur-xl">
         <div className="flex items-center justify-between">
           <span className="text-[11px] font-medium text-ink-muted">编辑参数 · {editNodeTitle(kind)}</span>
-          {canRerun ? <span className="text-[10px] text-ink-muted/70">~{cost} 点</span> : null}
         </div>
 
         {kind === 'relight' ? <RelightFields value={draft} onChange={setDraft} /> : null}

@@ -1,4 +1,4 @@
-import { VideoPollError, type VideoDriver, type VideoDriverOptions } from './types';
+import { VideoPollError, type VideoDriver, type VideoDriverOptions, type VideoGenerateParams } from './types';
 import { providerUrl } from './remoteEndpoints';
 
 function base(options: VideoDriverOptions): string {
@@ -12,6 +12,36 @@ function request(options: VideoDriverOptions, timeout = 60000): RequestInit {
     redirect: 'error', signal: AbortSignal.any([AbortSignal.timeout(timeout), ...(options.signal ? [options.signal] : [])]) };
 }
 
+function videoRequest(params: VideoGenerateParams, options: VideoDriverOptions): Record<string, unknown> {
+  base(options);
+  const support = options.videoSupport;
+  if (!params.model || !support) throw new Error('视频模型目录尚未同步，请刷新账号状态');
+  if (params.endImageBytes || params.cameraMotion && params.cameraMotion !== 'none' || params.camera && Object.values(params.camera).some(value => typeof value === 'number' && value !== 0)) {
+    throw new Error('当前模型未确认支持尾帧或运镜参数，请移除这些设置');
+  }
+  const body: Record<string, unknown> = { model: params.model, prompt: params.prompt };
+  const fields = support.fields ?? [];
+  const images = [...(params.startImageBytes ? [params.startImageBytes] : []), ...(params.referenceImages ?? []).map(image => image.bytes)]
+    .filter((image, index, values) => values.findIndex(other => Buffer.from(other).equals(Buffer.from(image))) === index);
+  if (images.length) {
+    if (!support.startFrame || images.length > 1 && !support.reference) throw new Error('当前模型未确认支持这些参考图片，请先移除图片');
+    if (images.length > (support.reference ? 2 : 1)) throw new Error('当前客户端最多支持此模型的两张参考图');
+    const encoded = images.map(bytes => `data:image/png;base64,${Buffer.from(bytes).toString('base64')}`);
+    if (fields.includes('images')) body.images = encoded;
+    else if (fields.includes('input_reference')) body.input_reference = encoded[0];
+    else if (fields.includes('image')) body.image = encoded[0];
+    else throw new Error('当前视频模型不支持参考图片');
+  }
+  const seconds = params.duration ? Number.parseInt(params.duration) : undefined;
+  if (seconds && support.minSeconds && support.maxSeconds) {
+    if (seconds < support.minSeconds || seconds > support.maxSeconds) throw new Error('视频时长超出模型支持范围');
+    if (fields.includes('seconds')) body.seconds = String(seconds);
+    else if (fields.includes('duration')) body.duration = seconds;
+  }
+  if (params.ratio && support.aspectRatios?.includes(params.ratio) && fields.includes('aspect_ratio')) body.aspect_ratio = params.ratio;
+  return body;
+}
+
 /** Unified new-api video surface. All authenticated requests stay on the configured gateway. */
 export const newApiDriver: VideoDriver = {
   id: 'new-api', name: 'Reizo 视频', supportsRecovery: true,
@@ -19,33 +49,10 @@ export const newApiDriver: VideoDriver = {
     try { return validTask(taskId) && typeof context?.baseUrl === 'string' && Boolean(providerUrl(context.baseUrl)); }
     catch { return false; }
   },
+  validateRequest(params, options) { videoRequest(params, options); },
   async submit(params, options) {
     const baseUrl = base(options);
-    const support = options.videoSupport;
-    if (!params.model || !support) throw new Error('视频模型目录尚未同步，请刷新账号状态');
-    if (params.endImageBytes || params.cameraMotion && params.cameraMotion !== 'none' || params.camera && Object.values(params.camera).some(value => typeof value === 'number' && value !== 0)) {
-      throw new Error('当前模型未确认支持尾帧或运镜参数，请移除这些设置');
-    }
-    const body: Record<string, unknown> = { model: params.model, prompt: params.prompt };
-    const fields = support.fields ?? [];
-    const images = [...(params.startImageBytes ? [params.startImageBytes] : []), ...(params.referenceImages ?? []).map(image => image.bytes)]
-      .filter((image, index, values) => values.findIndex(other => Buffer.from(other).equals(Buffer.from(image))) === index);
-    if (images.length) {
-      if (!support.startFrame || images.length > 1 && !support.reference) throw new Error('当前模型未确认支持这些参考图片，请先移除图片');
-      if (images.length > (support.reference ? 2 : 1)) throw new Error('当前客户端最多支持此模型的两张参考图');
-      const encoded = images.map(bytes => `data:image/png;base64,${Buffer.from(bytes).toString('base64')}`);
-      if (fields.includes('images')) body.images = encoded;
-      else if (fields.includes('input_reference')) body.input_reference = encoded[0];
-      else if (fields.includes('image')) body.image = encoded[0];
-      else throw new Error('当前视频模型不支持参考图片');
-    }
-    const seconds = params.duration ? Number.parseInt(params.duration) : undefined;
-    if (seconds && support.minSeconds && support.maxSeconds) {
-      if (seconds < support.minSeconds || seconds > support.maxSeconds) throw new Error('视频时长超出模型支持范围');
-      if (fields.includes('seconds')) body.seconds = String(seconds);
-      else if (fields.includes('duration')) body.duration = seconds;
-    }
-    if (params.ratio && support.aspectRatios?.includes(params.ratio) && fields.includes('aspect_ratio')) body.aspect_ratio = params.ratio;
+    const body = videoRequest(params, options);
     const response = await fetch(`${baseUrl}/videos`, { ...request(options), method: 'POST', body: JSON.stringify(body) });
     if (!response.ok) throw new Error(`视频提交失败（HTTP ${response.status}），请检查模型额度与网关配置`);
     const result = await response.json() as { id?: string; task_id?: string };

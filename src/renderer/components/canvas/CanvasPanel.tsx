@@ -61,7 +61,7 @@ import { useChatStore } from '../../state/useChatStore';
 import { cn } from '../../lib/cn';
 import { setCanvasInteracting } from '../../lib/canvasInteraction';
 import { layoutGraph, wouldCycle, isPortCompatible } from '../../../shared/canvasGraph';
-import { estimateGraphCost } from '../../../shared/canvasPricing';
+import { summarizeGraphRuns } from '../../../shared/canvasExecution';
 import type { CanvasEdge, CanvasGroupParams, CanvasNode, CanvasNodeType } from '../../../shared/canvas';
 import { extractSubgraph, formatSubgraphForPrompt } from '../../../shared/canvasSubgraph';
 import { nodeReadinessIssues } from '../../../shared/canvasReadiness';
@@ -1585,8 +1585,8 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     });
   }, [flash]);
 
-  const costEstimate = useMemo(() => {
-    return estimateGraphCost(storeNodes, storeEdges);
+  const runSummary = useMemo(() => {
+    return summarizeGraphRuns(storeNodes, storeEdges);
   }, [storeNodes, storeEdges]);
 
   const hasImage = storeNodes.some((n) => n.type === 'image');
@@ -1597,8 +1597,8 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       setConfirmAll(true);
       if (confirmTimer.current) clearTimeout(confirmTimer.current);
       confirmTimer.current = setTimeout(() => setConfirmAll(false), 4500);
-      const cachedMsg = costEstimate.cachedCount > 0 ? ` (跳过 ${costEstimate.cachedCount} 个已缓存)` : '';
-      flash(`准备运行 ${costEstimate.runnableCount} 个待生成节点${cachedMsg}，预计消耗约 ${costEstimate.totalPoints} 算力点。再次点击以确认运行。`);
+      const cachedMsg = runSummary.cachedCount > 0 ? ` (跳过 ${runSummary.cachedCount} 个已缓存)` : '';
+      flash(`准备运行 ${runSummary.runnableCount} 个待生成节点${cachedMsg}。再次点击以确认运行。`);
       return;
     }
     setConfirmAll(false);
@@ -2123,7 +2123,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
             {graphRun?.running ? (
               <NavButton title={`停止运行 (${graphRun.done}/${graphRun.total})`} side="right" primary onClick={() => { void canvasStore.stopGraph(sessionId); }}><Square /></NavButton>
             ) : (
-              <NavButton title={confirmAll ? `再次点击确认：${costEstimate.runnableCount} 个节点，约 ${costEstimate.totalPoints} 算力点` : `运行整图 (${costEstimate.runnableCount} 个待生成节点，约 ${costEstimate.totalPoints} 算力点)`} side="right" primary active={confirmAll} disabled={!hasRunnable} onClick={runAll}><PlayCircle /></NavButton>
+              <NavButton title={confirmAll ? `再次点击确认：${runSummary.runnableCount} 个节点` : `运行整图 (${runSummary.runnableCount} 个待生成节点)`} side="right" primary active={confirmAll} disabled={!hasRunnable} onClick={runAll}><PlayCircle /></NavButton>
             )}
             <ToolbarDropdown
               open={openTool === 'more'}
