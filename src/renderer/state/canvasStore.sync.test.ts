@@ -14,6 +14,7 @@ vi.mock('../lib/notify', () => ({ primeNotifications: vi.fn(), notifyJobDone: vi
 vi.mock('../lib/toast', () => ({ toast: { info: vi.fn(), error: vi.fn() } }));
 vi.mock('../api', () => ({
   getCanvas: vi.fn(),
+  importCanvasImage: vi.fn(),
   editCanvas: vi.fn(),
   addCanvasNode: vi.fn(),
   addCanvasEdge: vi.fn(),
@@ -64,6 +65,14 @@ afterEach(async () => {
 });
 
 describe('canvas store commit synchronization', () => {
+  it('imports a clipboard image before its session canvas has ever been opened', async () => {
+    vi.mocked(api.importCanvasImage).mockResolvedValue(node('uploaded'));
+    const file = new File([new Uint8Array([137, 80, 78, 71])], 'clipboard.png', { type: 'image/png' });
+    const result = await store.importImage('s1', file, { x: 40, y: 60 });
+    expect(result?.id).toBe('uploaded');
+    expect(api.getCanvas).toHaveBeenCalledWith('s1', undefined);
+    expect(api.importCanvasImage).toHaveBeenCalledWith('c1', expect.objectContaining({ name: 'clipboard.png', dataBase64: 'iVBORw==' }));
+  });
   it('keeps a linked creation and its mention in one undo even after its input panel synchronizes', async () => {
     const source = node('source');
     vi.mocked(api.getCanvas).mockResolvedValue(snapshot(1, [source], []));

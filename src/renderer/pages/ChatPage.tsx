@@ -11,6 +11,7 @@ import TopRightToolbar from '../components/chat/TopRightToolbar';
 import { collectMessageMatches } from '../lib/highlightText';
 import { useTitleBarSlot } from '../components/layout/titleBarSlots';
 import { dispatchChatDrop } from '../lib/chatDrop';
+import { hasTransferredFiles, transferredFiles } from '../lib/fileTransfer';
 
 // Memoized so MainLayout re-renders (e.g. the right panel opening) don't
 // re-render the whole message list synchronously.
@@ -125,7 +126,7 @@ function ChatPage({
   // The whole conversation is the drop zone, not just the input box.
   const [draggingFiles, setDraggingFiles] = useState(false);
   const dragDepth = useRef(0);
-  const hasFiles = (e: React.DragEvent) => e.dataTransfer.types.includes('Files');
+  const hasFiles = (e: React.DragEvent) => hasTransferredFiles(e.dataTransfer);
 
   return (
     <div
@@ -136,7 +137,7 @@ function ChatPage({
         dragDepth.current += 1;
         setDraggingFiles(true);
       }}
-      onDragOver={(e) => {
+      onDragOverCapture={(e) => {
         if (!hasFiles(e)) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = 'copy';
@@ -146,12 +147,13 @@ function ChatPage({
         dragDepth.current = Math.max(0, dragDepth.current - 1);
         if (dragDepth.current === 0) setDraggingFiles(false);
       }}
-      onDrop={(e) => {
+      onDropCapture={(e) => {
         if (!hasFiles(e)) return;
-        e.preventDefault();
+        e.preventDefault(); e.stopPropagation();
         dragDepth.current = 0;
         setDraggingFiles(false);
-        if (e.dataTransfer.files.length) dispatchChatDrop(sessionId, Array.from(e.dataTransfer.files));
+        const files = transferredFiles(e.dataTransfer);
+        if (files.length) dispatchChatDrop(sessionId, files);
       }}
     >
       {draggingFiles && (

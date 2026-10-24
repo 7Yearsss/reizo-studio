@@ -1859,8 +1859,10 @@ export async function refinePrompt(
 }
 
 export async function importImage(sessionId: string, file: File, at: { x: number; y: number }): Promise<CanvasNode | null> {
+  // Chat paste/drop works before the user ever opens the canvas drawer.
+  await ensureCanvasLoaded(sessionId);
   const id = canvasId(sessionId);
-  if (!id) return null;
+  if (!id) throw new Error('图片附件初始化失败，请重试');
   const buffer = await file.arrayBuffer();
   let binary = '';
   const bytes = new Uint8Array(buffer);
