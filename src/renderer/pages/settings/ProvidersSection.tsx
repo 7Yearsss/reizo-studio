@@ -7,6 +7,7 @@ import { cn } from '../../lib/cn';
 import { toast } from '../../lib/toast';
 import { Input } from '../../components/motion/input';
 import ModelSelect from '../../components/models/ModelSelect';
+import ProviderIcon from '../../components/models/ProviderIcon';
 
 export default function ProvidersSection() {
   const settings = useSettingsStore((s) => s.settings);
@@ -16,24 +17,24 @@ export default function ProvidersSection() {
   const visible = settings.providers.filter((p) => `${p.name} ${p.tag} ${p.model}`.toLowerCase().includes(query.trim().toLowerCase()));
   return (
     <section className="flex h-full min-h-0 flex-col">
-      <header className="mb-5 pr-7">
+      <header className="mb-5">
         <h1 className="text-xl font-semibold tracking-tight">模型</h1>
         <p className="mt-2 text-xs leading-relaxed text-ink-muted">选择供应商，配置密钥和默认对话模型。</p>
       </header>
-      <div className="flex min-h-0 flex-1 gap-5 max-lg:flex-col">
-        <aside aria-label="模型供应商" className="flex w-48 shrink-0 flex-col border-r border-line pr-4 max-lg:w-full max-lg:border-b max-lg:border-r-0 max-lg:pb-3 max-lg:pr-0">
-          <label className="mb-3 flex items-center gap-2 rounded-lg bg-paper-inset px-2.5 py-2 text-ink-muted">
+      <div className="flex min-h-0 flex-1 gap-4 max-lg:flex-col">
+        <aside aria-label="模型供应商" className="flex w-60 shrink-0 flex-col rounded-2xl border border-line bg-paper-raised p-3 xl:w-64 max-lg:w-full max-lg:shrink-0">
+          <label className="mb-3 flex items-center gap-2 rounded-lg border border-line bg-paper px-2.5 py-2 text-ink-muted focus-within:border-accent/40 focus-within:ring-2 focus-within:ring-accent/15">
             <Search size={14} className="shrink-0" />
             <input aria-label="搜索供应商" placeholder="搜索供应商" value={query} onChange={(event) => setQuery(event.target.value)} className="min-w-0 w-full bg-transparent text-xs text-ink outline-none placeholder:text-ink-muted" />
           </label>
-          <p className="mb-2 text-[11px] text-ink-muted">供应商 · {settings.providers.filter((p) => p.hasKey).length} 个已配置</p>
-          <div className="min-h-0 space-y-1 overflow-y-auto max-lg:flex max-lg:gap-1 max-lg:space-y-0 max-lg:overflow-x-auto">
+          <p className="mb-2 px-1 text-[11px] text-ink-muted">供应商 · {settings.providers.filter((p) => p.hasKey).length} 个已配置</p>
+          <div className="min-h-0 space-y-1 overflow-y-auto pr-1 [scrollbar-gutter:stable] max-lg:flex max-lg:gap-2 max-lg:space-y-0 max-lg:overflow-x-auto max-lg:pb-1 max-lg:pr-0">
             {visible.map((provider) => (
-              <button type="button" key={provider.id} aria-pressed={selected?.id === provider.id} onClick={() => setSelectedId(provider.id)} className={cn('flex w-full items-center gap-2 rounded-xl p-2.5 text-left focus-visible:outline-2 focus-visible:outline-accent max-lg:w-44 max-lg:shrink-0', selected?.id === provider.id ? 'bg-paper-inset' : 'hover:bg-paper-inset/60')}>
-                <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-line bg-paper-raised text-xs font-semibold" aria-hidden>{provider.name.slice(0, 1)}</span>
+              <button type="button" key={provider.id} aria-pressed={selected?.id === provider.id} onClick={() => setSelectedId(provider.id)} className={cn('flex min-h-16 w-full items-center gap-3 rounded-xl border p-2.5 text-left focus-visible:outline-2 focus-visible:outline-accent max-lg:w-56 max-lg:shrink-0', selected?.id === provider.id ? 'border-line bg-paper-inset' : 'border-transparent hover:bg-paper-inset/60')}>
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-line bg-paper" aria-hidden><ProviderIcon providerId={provider.id} /></span>
                 <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-1 text-xs font-medium"><span className="truncate">{provider.name}</span>{provider.id === settings.activeProviderId && <span className="shrink-0 rounded bg-success-bg px-1 text-[10px] text-success">默认</span>}</span>
-                  <span className="mt-1 block truncate text-[11px] text-ink-muted">{provider.hasKey ? provider.model : provider.id === 'reizo-account' ? '请登录并刷新账号状态' : '尚未配置密钥'}</span>
+                  <span className="flex items-center gap-1.5 text-[13px] font-medium"><span className="truncate" title={provider.name}>{provider.name}</span>{provider.id === settings.activeProviderId && <span className="shrink-0 rounded bg-success-bg px-1 text-[10px] text-success">默认</span>}</span>
+                  <span className="mt-1 block truncate text-[11px] text-ink-muted" title={provider.hasKey ? provider.model : undefined}>{provider.hasKey ? provider.model : provider.id === 'reizo-account' ? '请登录并刷新账号状态' : '尚未配置密钥'}</span>
                 </span>
               </button>
             ))}
@@ -94,9 +95,12 @@ export function ProviderDetail({ provider, active }: { provider: PublicProvider;
   return (
     <form aria-label={`${provider.name} 配置`} onSubmit={(event) => { event.preventDefault(); void save(); }} className="rounded-2xl border border-line bg-paper-raised p-5 max-sm:p-4">
       <header className="mb-6 flex items-start justify-between gap-3">
-        <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-3">
+          <span aria-hidden className="grid size-10 shrink-0 place-items-center rounded-xl border border-line bg-paper"><ProviderIcon providerId={provider.id} className="size-6" /></span>
+          <div className="min-w-0">
           <h2 className="text-base font-semibold">{provider.name}</h2>
           <span className="mt-1 inline-block text-xs text-ink-muted">{provider.tag}</span>
+          </div>
         </div>
         {active && <span className="flex shrink-0 items-center gap-1 rounded-full bg-success-bg px-2 py-1 text-[11px] text-success"><Check size={12} />默认供应商</span>}
       </header>

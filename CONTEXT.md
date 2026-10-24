@@ -40,6 +40,31 @@ _Avoid_: Resume.
 The immutable result of a turn: `completed`, `interrupted`, or `error`. A turn cannot silently transition from running to terminal without an explicit outcome.
 _Avoid_: Done ("done" is a transport event, not a user-facing outcome).
 
+## Usage records
+
+Usage lists expose reported counters, model/provider identity, task status when
+known, and the originating conversation. A usage report does not prove an entire
+task succeeded. Filters and pagination are applied to the full persisted ledger;
+overview totals use the same filters, independently of how many rows are loaded.
+Keep recorded bills, price-based estimates and unpriced calls distinct. A missing
+price or usage report is not a zero charge. Never add different currencies or
+overlapping token/observed-output counters. Existing price snapshots and invoice
+evidence remain immutable; this view does not automatically synchronize charges.
+
+## Account Wallet
+
+The signed-in account menu offers **钱包与充值**. Wallet balance and recharge
+configuration come from the current Reizo web workspace. Select an amount and
+payment method in the desktop, then open the isolated native cashier for payment.
+Only the website's confirmed order status means credited; browser return does not.
+Retries reuse the same request identity and continuing payment reopens the same
+unpaid order. Pin the workspace reviewed by the user, keep desktop credentials in
+the main process, and do not apply this balance to manual third-party API keys.
+Cashier parameters stay in main and are checked against the original order before
+direct HTTPS POST in a sandboxed window with no desktop preload or account cookies.
+The local usage ledger remains separate from the cloud wallet. See
+`docs/account-wallet.md` for contracts and deployment requirements.
+
 ## Creative Assets
 
 Standard image and video requests run in the conversation. Show a loading card

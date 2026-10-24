@@ -11,6 +11,8 @@ import Meta from '@lobehub/icons/es/Meta/components/Mono';
 import Midjourney from '@lobehub/icons/es/Midjourney/components/Mono';
 import Mistral from '@lobehub/icons/es/Mistral/components/Mono';
 import OpenAI from '@lobehub/icons/es/OpenAI/components/Mono';
+import OpenRouter from '@lobehub/icons/es/OpenRouter/components/Mono';
+import SiliconCloud from '@lobehub/icons/es/SiliconCloud/components/Mono';
 import Qwen from '@lobehub/icons/es/Qwen/components/Mono';
 import Stability from '@lobehub/icons/es/Stability/components/Mono';
 import type { ComponentType } from 'react';
@@ -24,6 +26,8 @@ export type VendorIconComponent = ComponentType<{ size: number; className?: stri
  */
 export const MODEL_VENDOR_ICONS: Record<string, VendorIconComponent> = {
   'openai.com': OpenAI,
+  'openrouter.ai': OpenRouter,
+  'siliconflow.cn': SiliconCloud,
   'x.ai': Grok,
   'anthropic.com': Claude,
   'deepmind.google': Gemini,

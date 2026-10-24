@@ -1,5 +1,6 @@
-import { FolderOpen, Settings2, Sparkles, ChartNoAxesCombined, Shield, Database, Info, Blocks } from 'lucide-react';
+import { FolderOpen, Settings2, Sparkles, ChartNoAxesCombined, Database, Info, Blocks } from 'lucide-react';
 import { motion } from 'motion/react';
+import type { ReactNode } from 'react';
 import { cn } from '../lib/cn';
 import { APP_NAME, APP_VERSION } from '../../shared/constants';
 import type { Appearance, BusyEnterBehavior, PermissionMode, ReasoningEffort } from '../../shared/settings';
@@ -10,7 +11,6 @@ import * as uiStore from '../state/uiStore';
 import { useUiStore } from '../state/useUiStore';
 import { toast } from '../lib/toast';
 import ProvidersSection from './settings/ProvidersSection';
-import { AdminProvidersSection } from './settings/AdminProvidersSection';
 import StorageMaintenanceSection from './settings/StorageMaintenanceSection';
 import UsageCostsSection from './settings/UsageCostsSection';
 import ExtensionsSection from './settings/ExtensionsSection';
@@ -23,13 +23,12 @@ const SECTIONS: { id: SectionId; label: string; icon: typeof Settings2 }[] = [
   { id: 'providers', label: '模型', icon: Sparkles },
   { id: 'extensions', label: '扩展', icon: Blocks },
   { id: 'usage', label: '用量与费用', icon: ChartNoAxesCombined },
-  { id: 'admin', label: '平台管理', icon: Shield },
   { id: 'storage', label: '存储', icon: Database },
   { id: 'about', label: '关于', icon: Info },
 ];
 
 export default function SettingsPage() {
-  const section = useUiStore((state) => state.settingsSection);
+  const section = useUiStore((state) => SECTIONS.some(item => item.id === state.settingsSection) ? state.settingsSection : 'providers');
   const setSection = (next: SectionId) => uiStore.openSettings(next);
 
   return (
@@ -66,12 +65,11 @@ export default function SettingsPage() {
         ))}
         </div>
       </nav>
-      <div className={cn("min-h-0 min-w-0 flex-1 px-6 pb-5 pt-7 max-sm:px-4 max-sm:pt-4", section === 'providers' ? 'overflow-hidden' : 'overflow-y-auto')}>
+      <div className={cn("min-h-0 min-w-0 flex-1 pl-6 pr-16 pb-5 pt-7 max-sm:px-4 max-sm:pt-4", section === 'providers' ? 'overflow-hidden' : 'overflow-y-auto')}>
         {section === 'general' && <GeneralSection />}
         {section === 'providers' && <ProvidersSection />}
         {section === 'extensions' && <ExtensionsSection />}
         {section === 'usage' && <UsageCostsSection onOpenProviders={() => setSection('providers')} />}
-        {section === 'admin' && <AdminProvidersSection onOpenSystemProviders={() => setSection('providers')} />}
         {section === 'storage' && <StorageMaintenanceSection />}
         {section === 'about' && <AboutSection />}
       </div>
@@ -79,19 +77,28 @@ export default function SettingsPage() {
   );
 }
 
+function SettingGroup({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
+  return <section aria-label={title} className="rounded-xl border border-line bg-paper-raised p-4 sm:p-5">
+    <h2 className="text-sm font-medium">{title}</h2>
+    {description ? <p className="mt-2 text-xs leading-relaxed text-ink-muted">{description}</p> : null}
+    <div className="mt-3">{children}</div>
+  </section>;
+}
+
 function GeneralSection() {
   const settings = useSettingsStore((s) => s.settings);
   const folderName = settings.workspacePath?.split(/[/\\]/).filter(Boolean).pop();
 
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-3xl">
       <h1 className="mb-1 text-xl font-semibold tracking-tight">通用</h1>
-      <p className="mb-8 text-sm text-ink-muted">
+      <p className="mb-5 text-sm text-ink-muted">
         外观和工作区。数据保存在本机。全局快捷键 Ctrl/⌘+K 呼出命令面板。
       </p>
 
-      <h2 className="mb-3 text-sm font-medium">外观</h2>
-      <div className="mb-8 flex gap-2">
+      <div className="space-y-4">
+      <SettingGroup title="外观">
+      <div className="flex flex-wrap gap-2">
         {([
           ['system', '跟随系统'],
           ['light', '浅色'],
@@ -119,10 +126,10 @@ function GeneralSection() {
           );
         })}
       </div>
+      </SettingGroup>
 
-      <h2 className="mb-3 text-sm font-medium">权限</h2>
-      <p className="mb-3 text-xs text-ink-muted">写文件和跑命令前要不要先问你。</p>
-      <div className="mb-8 flex flex-wrap gap-2">
+      <SettingGroup title="权限" description="写文件和跑命令前要不要先问你。">
+      <div className="flex flex-wrap gap-2">
         {([
           ['ask', '每次询问'],
           ['workspace', '工作区可写，命令仍询问'],
@@ -150,12 +157,10 @@ function GeneralSection() {
           );
         })}
       </div>
+      </SettingGroup>
 
-      <h2 className="mb-3 text-sm font-medium">电脑操作 (Computer Use)</h2>
-      <p className="mb-3 text-xs text-ink-muted">
-        允许 Agent 截屏并控制这台电脑的鼠标、键盘。仅在需要操作图形界面时使用；每个会话首次操作前会向你确认一次。
-      </p>
-      <div className="mb-8 flex flex-wrap gap-2">
+      <SettingGroup title="电脑操作 (Computer Use)" description="允许 Agent 截屏并控制这台电脑的鼠标、键盘。仅在需要操作图形界面时使用；每个会话首次操作前会向你确认一次。">
+      <div className="flex flex-wrap gap-2">
         {([
           [false, '关闭'],
           [true, '开启'],
@@ -182,12 +187,10 @@ function GeneralSection() {
           );
         })}
       </div>
+      </SettingGroup>
 
-      <h2 className="mb-3 text-sm font-medium">对话</h2>
-      <p className="mb-3 text-xs text-ink-muted">
-        Agent 回复中按 Enter 时：排队等这条回复完，或直接插话进当前这轮（Ctrl+Enter 始终是另一种）。
-      </p>
-      <div className="mb-8 flex flex-wrap gap-2">
+      <SettingGroup title="对话" description="Agent 回复中按 Enter 时：排队等这条回复完，或直接插话进当前这轮（Ctrl+Enter 始终是另一种）。">
+      <div className="flex flex-wrap gap-2">
         {([
           ['queue', '排队发送'],
           ['steer', '直接插话'],
@@ -214,12 +217,10 @@ function GeneralSection() {
           );
         })}
       </div>
+      </SettingGroup>
 
-      <h2 className="mb-3 text-sm font-medium">思考力度</h2>
-      <p className="mb-3 text-xs text-ink-muted">
-        推理模型回答前“想”多少——低档一句话问题 ~3s 出答，高档适合复杂任务但更慢（默认档最慢可达 90s）。
-      </p>
-      <div className="mb-8 flex flex-wrap gap-2">
+      <SettingGroup title="思考力度" description="推理模型回答前“想”多少——低档一句话问题 ~3s 出答，高档适合复杂任务但更慢（默认档最慢可达 90s）。">
+      <div className="flex flex-wrap gap-2">
         {([
           ['low', '低 · 快'],
           ['medium', '中'],
@@ -248,10 +249,11 @@ function GeneralSection() {
           );
         })}
       </div>
+      </SettingGroup>
 
-      <h2 className="mb-3 text-sm font-medium">工作区</h2>
+      <SettingGroup title="工作区">
       <div className="flex items-center gap-2">
-        <div className="flex min-w-0 flex-1 items-center gap-2 rounded-full bg-paper px-3 py-2.5">
+        <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-line bg-paper px-3 py-2.5">
           <FolderOpen size={14} className="shrink-0 text-ink-muted" />
           <span className="truncate text-sm text-ink">{settings.workspacePath ?? '尚未绑定文件夹'}</span>
         </div>
@@ -279,8 +281,10 @@ function GeneralSection() {
           </button>
         )}
       </div>
+      </SettingGroup>
 
       <HarnessLessonsSection />
+      </div>
     </div>
   );
 }

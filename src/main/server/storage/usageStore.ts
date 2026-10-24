@@ -1,7 +1,7 @@
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import type { DbHandle } from '../db/client';
-import { metricUnit, USAGE_METRICS, type PricingSnapshot, type PricingSnapshotInput, type UsageBill, type UsageBillInput, type UsageCategory, type UsageMetric, type UsagePage, type UsageRecord, type UsageSummary } from '../../../shared/usage';
+import { metricUnit, USAGE_METRICS, type PricingSnapshot, type PricingSnapshotInput, type UsageBill, type UsageBillInput, type UsageCategory, type UsageMetric, type UsagePage, type UsageRecord, type UsageSummary, type UsageQuery } from '../../../shared/usage';
 
 interface ExecutionRow {
   id: string; execution_id: string; job_id: string | null; session_id: string | null; canvas_id: string | null; node_id: string | null;
@@ -28,6 +28,29 @@ function parsed<T>(schema: z.ZodType<T>, value: unknown): T {
 // Preserve tiny nonzero estimates and exact integer counters while removing binary float noise.
 const round = (value: number) => Number.isInteger(value) ? value : Number(value.toPrecision(15));
 
+function usageFilter(options: UsageQuery) {
+  const checked = parsed(z.object({ category: z.enum(['llm', 'image', 'video', 'audio', 'local']).optional(),
+    search: z.string().trim().max(200).optional(), from: z.string().datetime().optional(), to: z.string().datetime().optional(),
+    cost: z.enum(['billed', 'estimated', 'unpriced']).optional() }), options);
+  const where = ['1=1']; const args: Array<string | number> = [];
+  if (checked.from && checked.to && Date.parse(checked.from) >= Date.parse(checked.to)) throw new UsageStoreError('开始时间须早于结束时间');
+  if (checked.category) { where.push('e.category = ?'); args.push(checked.category); }
+  if (checked.from) { where.push('e.created_at >= ?'); args.push(Date.parse(checked.from)); }
+  if (checked.to) { where.push('e.created_at < ?'); args.push(Date.parse(checked.to)); }
+  if (checked.search) {
+    where.push(`(instr(lower(e.model || ' ' || e.provider_id || ' ' || COALESCE((SELECT title FROM sessions WHERE id = e.session_id), '')), lower(?)) > 0
+      OR EXISTS (SELECT 1 FROM usage_reports r WHERE r.execution_id = e.execution_id AND instr(lower(COALESCE(r.request_id, '')), lower(?)) > 0))`);
+    args.push(checked.search, checked.search);
+  }
+  if (checked.cost) {
+    where.push("NOT (e.category = 'local' AND e.provider_id = 'local')");
+    const bill = 'EXISTS (SELECT 1 FROM usage_bills b WHERE b.execution_id = e.execution_id)';
+    where.push(checked.cost === 'billed' ? bill : `NOT ${bill}`);
+    if (checked.cost !== 'billed') where.push(`e.estimate_amount IS ${checked.cost === 'estimated' ? 'NOT ' : ''}NULL`);
+  }
+  return { where, args };
+}
+
 /** Pricing snapshots and attached bill evidence are immutable; no defaults or vendor prices are invented. */
 export function createUsageStore(handle: DbHandle) {
   const raw = handle.raw;
@@ -37,6 +60,8 @@ export function createUsageStore(handle: DbHandle) {
     return row ? { id: row.id, executionId: row.execution_id, amount: row.amount, currency: row.currency, source: row.source, reference: row.reference, createdAt: new Date(row.created_at).toISOString() } : undefined;
   };
   const record = (row: ExecutionRow): UsageRecord => {
+    const session = row.session_id ? raw.prepare('SELECT title FROM sessions WHERE id = ?').get(row.session_id) as { title: string } | undefined : undefined;
+    const job = row.job_id ? raw.prepare('SELECT status, error FROM canvas_jobs WHERE id = ?').get(row.job_id) as { status: UsageRecord['jobStatus']; error: string | null } | undefined : undefined;
     const pricing = row.pricing_json ? JSON.parse(row.pricing_json) as PricingSnapshot : undefined;
     const estimate = row.estimate_amount === null ? undefined : { amount: row.estimate_amount, currency: row.estimate_currency, pricingSnapshotId: pricing.id, source: pricing.source };
     const bill = billFor(row.execution_id);
@@ -50,6 +75,7 @@ export function createUsageStore(handle: DbHandle) {
         row.category === 'llm' && !['input_tokens', 'output_tokens'].every((name) => metrics.some((metric) => metric.metric === name)));
     }).length;
     return { id: row.id, executionId: row.execution_id, ...(row.job_id ? { jobId: row.job_id } : {}), ...(row.session_id ? { sessionId: row.session_id } : {}),
+      ...(session ? { sessionTitle: session.title } : {}), ...(job ? { jobStatus: job.status, ...(job.error ? { jobError: job.error } : {}) } : {}),
       ...(row.canvas_id ? { canvasId: row.canvas_id } : {}), ...(row.node_id ? { nodeId: row.node_id } : {}), category: row.category, providerId: row.provider_id, model: row.model,
       createdAt: new Date(row.created_at).toISOString(), metrics: JSON.parse(row.metrics_json), usageState: row.usage_state, reportCount: row.report_count, unknownReportCount: row.unknown_report_count,
       ...(requestIds.length ? { requestIds } : {}), ...(reportedModels.length ? { reportedModels } : {}),
@@ -134,36 +160,43 @@ export function createUsageStore(handle: DbHandle) {
       } catch (error) { raw.exec('ROLLBACK TO SAVEPOINT usage_report'); raw.exec('RELEASE SAVEPOINT usage_report'); throw error; }
     },
     get(executionId: string) { const row = find(executionId); return row ? record(row) : null; },
-    list(options: { jobId?: string; limit?: number; cursor?: string } = {}): UsagePage {
+    list(options: UsageQuery & { jobId?: string; limit?: number; cursor?: string } = {}): UsagePage {
       const limit = options.limit ?? 40;
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new UsageStoreError('用量分页上限为 100');
-      const where = ['1=1']; const args: Array<string | number> = [];
-      if (options.jobId) { where.push('job_id = ?'); args.push(options.jobId); }
+      const { where, args } = usageFilter(options);
+      if (options.jobId) { where.push('e.job_id = ?'); args.push(options.jobId); }
       if (options.cursor) {
         let cursor: [number, string];
         try { cursor = JSON.parse(Buffer.from(options.cursor, 'base64url').toString('utf8')); } catch { throw new UsageStoreError('用量分页游标无效'); }
         if (!Array.isArray(cursor) || !Number.isSafeInteger(cursor[0]) || typeof cursor[1] !== 'string') throw new UsageStoreError('用量分页游标无效');
-        where.push('(created_at < ? OR (created_at = ? AND id < ?))'); args.push(cursor[0], cursor[0], cursor[1]);
+        where.push('(e.created_at < ? OR (e.created_at = ? AND e.id < ?))'); args.push(cursor[0], cursor[0], cursor[1]);
       }
-      const rows = raw.prepare(`SELECT * FROM usage_executions WHERE ${where.join(' AND ')} ORDER BY created_at DESC, id DESC LIMIT ?`).all(...args, limit + 1) as unknown as ExecutionRow[];
+      const rows = raw.prepare(`SELECT e.* FROM usage_executions e WHERE ${where.join(' AND ')} ORDER BY e.created_at DESC, e.id DESC LIMIT ?`).all(...args, limit + 1) as unknown as ExecutionRow[];
       const visible = rows.slice(0, limit); const last = visible.at(-1);
       return { records: visible.map(record), ...(rows.length > limit && last ? { nextCursor: Buffer.from(JSON.stringify([last.created_at, last.id])).toString('base64url') } : {}) };
     },
-    summary(): UsageSummary {
+    summary(options: UsageQuery = {}): UsageSummary {
+      const { where, args } = usageFilter(options);
+      const prefix = `WITH filtered AS (SELECT e.* FROM usage_executions e WHERE ${where.join(' AND ')}) `;
       const supplier = "NOT (category = 'local' AND provider_id = 'local')";
-      const executionCount = (raw.prepare('SELECT COUNT(*) AS count FROM usage_executions').get() as { count: number }).count;
-      const row = raw.prepare(`SELECT COUNT(*) AS executionCount, SUM(usage_state = 'reported') AS reportedCount, SUM(usage_state = 'partial') AS partialCount, SUM(usage_state = 'observed') AS observedCount,
-        SUM(usage_state = 'unknown') AS unknownCount, SUM(NOT EXISTS(SELECT 1 FROM usage_bills b WHERE b.execution_id = e.execution_id)) AS unreconciledCount FROM usage_executions e WHERE ${supplier}`).get() as Record<string, number>;
-      const metricRows = raw.prepare(`SELECT json_extract(m.value, '$.metric') AS metric, json_extract(m.value, '$.unit') AS unit,
+      const executionCount = (raw.prepare(prefix + 'SELECT COUNT(*) AS count FROM filtered').get(...args) as { count: number }).count;
+      const row = raw.prepare(prefix + `SELECT COUNT(*) AS executionCount, SUM(usage_state = 'reported') AS reportedCount, SUM(usage_state = 'partial') AS partialCount, SUM(usage_state = 'observed') AS observedCount,
+        SUM(usage_state = 'unknown') AS unknownCount, SUM(NOT EXISTS(SELECT 1 FROM usage_bills b WHERE b.execution_id = e.execution_id)) AS unreconciledCount,
+        SUM(EXISTS(SELECT 1 FROM usage_bills b WHERE b.execution_id = e.execution_id)) AS billedCount,
+        SUM(estimate_amount IS NOT NULL AND NOT EXISTS(SELECT 1 FROM usage_bills b WHERE b.execution_id = e.execution_id)) AS estimatedOnlyCount,
+        SUM(estimate_amount IS NULL AND NOT EXISTS(SELECT 1 FROM usage_bills b WHERE b.execution_id = e.execution_id)) AS unpricedCount
+        FROM filtered e WHERE ${supplier}`).get(...args) as Record<string, number>;
+      const metricRows = raw.prepare(prefix + `SELECT json_extract(m.value, '$.metric') AS metric, json_extract(m.value, '$.unit') AS unit,
         json_extract(m.value, '$.source') AS source, SUM(json_extract(m.value, '$.quantity')) AS quantity
-        FROM usage_executions, json_each(metrics_json) m WHERE ${supplier} GROUP BY metric, unit, source`).all() as unknown as UsageMetric[];
+        FROM filtered, json_each(metrics_json) m WHERE ${supplier} GROUP BY metric, unit, source`).all(...args) as unknown as UsageMetric[];
       const warnings: string[] = [];
-      const money = (table: 'usage_executions' | 'usage_bills', amount: string, currency: string) => (raw.prepare(`SELECT ${currency} AS currency, SUM(${amount}) AS amount FROM ${table} WHERE ${amount} IS NOT NULL AND execution_id IN (SELECT execution_id FROM usage_executions WHERE ${supplier}) GROUP BY ${currency}`).all() as { currency: string; amount: number }[])
+      const money = (table: 'usage_executions' | 'usage_bills', amount: string, currency: string) => (raw.prepare(prefix + `SELECT ${currency} AS currency, SUM(${amount}) AS amount FROM ${table} WHERE ${amount} IS NOT NULL AND execution_id IN (SELECT execution_id FROM filtered WHERE ${supplier}) GROUP BY ${currency}`).all(...args) as { currency: string; amount: number }[])
         .filter((value) => { const valid = Number.isFinite(value.amount) && Math.abs(value.amount) <= 1e12; if (!valid) warnings.push(`${value.currency} 合计超出安全计算范围，需人工核对`); return valid; }).map((value) => ({ ...value, amount: round(value.amount) }));
       const metrics = metricRows.filter((metric) => { const valid = typeof metric.quantity === 'number' && Number.isFinite(metric.quantity) && metric.quantity <= Number.MAX_SAFE_INTEGER;
         if (!valid) warnings.push('计量合计超出安全计算范围，需人工复核'); return valid; });
       const estimates = money('usage_executions', 'estimate_amount', 'estimate_currency'); const bills = money('usage_bills', 'amount', 'currency');
       return { executionCount, localCount: executionCount - row.executionCount, supplierExecutionCount: row.executionCount, reportedCount: row.reportedCount ?? 0, partialCount: row.partialCount ?? 0, observedCount: row.observedCount ?? 0, unknownCount: row.unknownCount ?? 0,
+        billedCount: row.billedCount ?? 0, estimatedOnlyCount: row.estimatedOnlyCount ?? 0, unpricedCount: row.unpricedCount ?? 0,
         unreconciledCount: row.unreconciledCount ?? 0, metrics, estimates, bills, ...(warnings.length ? { warnings: [...new Set(warnings)] } : {}) };
     },
     prices(): PricingSnapshot[] { return (raw.prepare('SELECT snapshot_json FROM usage_pricing ORDER BY effective_at DESC, created_at DESC').all() as { snapshot_json: string }[]).map((row) => JSON.parse(row.snapshot_json)); },

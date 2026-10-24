@@ -1,7 +1,7 @@
 import * as tabStore from './tabStore';
 
 export type SidebarMode = 'chat' | 'projects' | 'skills' | 'artifacts' | 'automation' | 'settings';
-export type SettingsSection = 'general' | 'providers' | 'extensions' | 'usage' | 'admin' | 'storage' | 'about';
+export type SettingsSection = 'general' | 'providers' | 'extensions' | 'usage' | 'storage' | 'about';
 export type RightPanelTab = 'canvas' | 'video' | 'sheets' | 'documents' | 'presentations' | 'artifacts' | 'files' | 'git' | 'terminal';
 
 export interface UiState {
@@ -146,8 +146,8 @@ export function getSnapshot(): UiState {
   return state;
 }
 
-export function openSettings(section: SettingsSection = 'providers'): void {
-  setState({ settingsOpen: true, settingsSection: section });
+export function openSettings(section: SettingsSection | 'admin' = 'providers'): void {
+  setState({ settingsOpen: true, settingsSection: section === 'admin' ? 'providers' : section });
 }
 
 export function closeSettings(): void {

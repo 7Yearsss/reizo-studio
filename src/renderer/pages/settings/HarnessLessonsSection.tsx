@@ -23,7 +23,7 @@ export default function HarnessLessonsSection() {
   const pending = items.filter((item) => !item.applied);
 
   return (
-    <div className="mt-8">
+    <section aria-label="经验学习" className="rounded-xl border border-line bg-paper-raised p-4 sm:p-5">
       <h2 className="mb-3 text-sm font-medium">经验学习</h2>
       <p className="mb-3 text-xs text-ink-muted">
         从过往对话里反复出现的工具失败中总结经验，采纳后加入 Agent 的提示词，之后每轮对话生效。
@@ -67,6 +67,6 @@ export default function HarnessLessonsSection() {
           ))}
         </ul>
       )}
-    </div>
+    </section>
   );
 }

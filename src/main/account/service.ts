@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import type { AccountModelCredential, AccountState, AccountUser } from '../../shared/account';
 import { parseModelCatalog } from '../../shared/modelCatalog';
+import { AccountWalletClient } from './wallet';
+import type { CashierPurchase } from './cashierPolicy';
 
 export interface AccountCredential { token: string; origin: string; expiresAt: string; user: AccountUser; models?: AccountModelCredential }
 export interface AccountDependencies {
@@ -9,6 +11,7 @@ export interface AccountDependencies {
   read: () => AccountCredential | null;
   write: (credential: AccountCredential | null) => void;
   open: (url: string) => Promise<void>;
+  openCashier?: (purchase: CashierPurchase) => Promise<void>;
   connected: () => void;
   now?: () => number;
   modelSessions?: boolean;
@@ -39,8 +42,14 @@ export class AccountService {
   private starting = false;
   private refreshing: Promise<AccountState> | null = null;
   private now: () => number;
+  readonly wallet: AccountWalletClient;
   constructor(private deps: AccountDependencies) {
     this.now = deps.now ?? Date.now;
+    this.wallet = new AccountWalletClient({ ...deps, openCashier: deps.openCashier ?? (async () => { throw new Error('当前环境不支持内置收银台。'); }), identity: () => {
+      const credential = this.credential;
+      return this.state.status === 'authenticated' && credential && future(credential.expiresAt, this.now())
+        ? { token: credential.token, userId: credential.user.id, generation: this.generation } : null;
+    } });
     this.state = { status: 'signed-out', webOrigin: deps.origin };
     try {
       const saved = deps.read();

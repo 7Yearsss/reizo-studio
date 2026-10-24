@@ -698,8 +698,12 @@ export async function listCanvasDeliveryPlans(canvasId: string): Promise<import(
   return (await (await api(`/api/canvas/${canvasId}/deliveries`)).json()).deliveries;
 }
 
-export async function getUsageSummary(): Promise<import('../shared/usage').UsageSummary> { return (await api('/api/usage/summary')).json(); }
-export async function listUsageRecords(options: { jobId?: string; limit?: number; cursor?: string } = {}): Promise<import('../shared/usage').UsagePage> {
+export async function getUsageSummary(options: import('../shared/usage').UsageQuery = {}): Promise<import('../shared/usage').UsageSummary> {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(options)) if (value !== undefined) query.set(key, String(value));
+  return (await api(`/api/usage/summary?${query}`)).json();
+}
+export async function listUsageRecords(options: import('../shared/usage').UsageQuery & { jobId?: string; limit?: number; cursor?: string } = {}): Promise<import('../shared/usage').UsagePage> {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(options)) if (value !== undefined) query.set(key, String(value));
   return (await api(`/api/usage/records?${query}`)).json();

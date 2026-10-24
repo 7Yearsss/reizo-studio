@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, ChevronRight, ChevronsUpDown, Gauge, Info, LoaderCircle, LogIn, LogOut, Monitor, Moon, Palette, RefreshCw, Settings, Sun, UserRound } from 'lucide-react';
+import { Check, ChevronRight, ChevronsUpDown, Gauge, Info, LoaderCircle, LogIn, LogOut, Monitor, Moon, Palette, RefreshCw, Settings, Sun, UserRound, Wallet } from 'lucide-react';
 import { DropdownMenu as Menu } from 'radix-ui';
 import { APP_VERSION } from '../../../shared/constants';
 import type { AccountState } from '../../../shared/account';
@@ -9,6 +9,7 @@ import { loadSettings, patchSettings } from '../../state/settingsStore';
 import { openSettings } from '../../state/uiStore';
 import { toast } from '../../lib/toast';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
+import AccountWalletPanel from '../account/AccountWalletPanel';
 
 const item = 'flex cursor-default select-none items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] outline-none data-[highlighted]:bg-paper-inset data-[disabled]:pointer-events-none data-[disabled]:opacity-40 [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-ink-muted';
 const panel = 'z-50 overflow-y-auto rounded-2xl border border-line/70 bg-paper-raised p-1.5 text-ink shadow-[0_8px_36px_-10px_rgba(0,0,0,0.28)] outline-none';
@@ -17,7 +18,7 @@ const themes = [{ value: 'light', label: '浅色', icon: Sun }, { value: 'dark',
 export default function AccountControl() {
   const [state, setState] = useState<AccountState | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [dialog, setDialog] = useState<'login' | 'account' | null>(null);
+  const [dialog, setDialog] = useState<'login' | 'account' | 'wallet' | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const previous = useRef<AccountState | null>(null);
@@ -102,7 +103,7 @@ export default function AccountControl() {
   const subtitle = state?.status === 'offline' ? '暂时离线' : state?.models?.ready ? state.models.organizationName || '账号模型已就绪' : user ? user.email || `@${user.username}` : pending ? '在浏览器中继续' : '登录以连接 Reizo 账号';
   const button = 'rounded-lg border border-line px-4 py-2 text-sm hover:bg-paper-inset focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50';
   const avatar = <span aria-hidden className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent/10 text-[11px] font-semibold tracking-wide text-ink">{user ? initials : <UserRound size={16} />}</span>;
-  const showDialog = (value: 'login' | 'account') => { setMenuOpen(false); setError(''); setDialog(value); };
+  const showDialog = (value: 'login' | 'account' | 'wallet') => { setMenuOpen(false); setError(''); setDialog(value); };
   return <>
     <Menu.Root open={menuOpen} onOpenChange={setMenuOpen}>
       <Menu.Trigger asChild>
@@ -117,6 +118,7 @@ export default function AccountControl() {
         {user ? <Menu.Item className={item} onSelect={() => showDialog('account')}><UserRound />账号信息{state?.status === 'offline' && <span className="ml-auto text-xs text-ink-muted">离线</span>}</Menu.Item> :
           <Menu.Item className={item} onSelect={() => showDialog('login')}><LogIn />{pending ? '继续登录' : '登录 Reizo'}</Menu.Item>}
         <Menu.Item className={item} onSelect={() => openSettings('usage')}><Gauge />本机用量</Menu.Item>
+        {user ? <Menu.Item className={item} onSelect={() => showDialog('wallet')}><Wallet />钱包与充值</Menu.Item> : null}
         <Menu.Sub><Menu.SubTrigger className={item}><Palette />外观<span className="ml-auto text-xs text-ink-muted">{themes.find((theme) => theme.value === appearance)?.label}</span><ChevronRight className="!size-3" /></Menu.SubTrigger>
           <Menu.Portal><Menu.SubContent sideOffset={5} collisionPadding={12} className={`${panel} min-w-40`}>
             <Menu.RadioGroup value={appearance} onValueChange={(value) => void changeAppearance(value)}>
@@ -131,9 +133,10 @@ export default function AccountControl() {
       </Menu.Content></Menu.Portal>
     </Menu.Root>
     <Dialog open={dialog !== null} onOpenChange={(open) => { if (!open) setDialog(null); }}>
-      <DialogContent className="rounded-2xl border-line bg-paper-raised text-ink sm:max-w-[400px]" onCloseAutoFocus={(event) => { event.preventDefault(); trigger.current?.focus(); }}>
-        <DialogHeader><DialogTitle>{dialog === 'account' && user ? '账号信息' : '登录 Reizo Studio'}</DialogTitle>
-          <DialogDescription>{dialog === 'account' ? '本机项目保存在当前设备，不会自动同步到账号。' : '使用已有的 Reizo 网页账号，在浏览器中完成登录。'}</DialogDescription></DialogHeader>
+      <DialogContent className={`rounded-2xl border-line bg-paper-raised text-ink ${dialog === 'wallet' ? 'sm:max-w-[560px]' : 'sm:max-w-[400px]'}`} onCloseAutoFocus={(event) => { event.preventDefault(); trigger.current?.focus(); }}>
+        <DialogHeader className="pr-6"><DialogTitle>{dialog === 'wallet' && user ? '钱包与充值' : dialog === 'account' && user ? '账号信息' : '登录 Reizo Studio'}</DialogTitle>
+          <DialogDescription>{dialog === 'wallet' && user ? '选择金额和支付方式，在客户端收银台完成付款。' : dialog === 'account' ? '本机项目保存在当前设备，不会自动同步到账号。' : '使用已有的 Reizo 网页账号，在浏览器中完成登录。'}</DialogDescription></DialogHeader>
+        {dialog === 'wallet' && user ? <AccountWalletPanel key={user.id} /> : <>
         {user ? <div className="flex items-center gap-3 rounded-xl bg-paper-inset p-4">{avatar}<div className="min-w-0"><p className="truncate text-sm font-medium">{name}</p><p className="truncate text-xs text-ink-muted">{user.email || `@${user.username}`}</p></div></div> : pending ?
           <div className="space-y-3"><p className="flex items-center gap-2 text-sm text-ink-muted"><LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" />等待浏览器授权</p><p className="select-all rounded-xl bg-paper-inset p-5 text-center font-mono text-3xl tracking-[0.18em]" aria-label="登录确认码">{state.code}</p><p className="text-xs leading-5 text-ink-muted">在网页中输入上方确认码。授权成功后，此窗口会自动关闭。</p></div> :
           <p className="py-2 text-sm text-ink-muted">点击下方按钮后，将打开系统默认浏览器。</p>}
@@ -144,6 +147,7 @@ export default function AccountControl() {
             <><button disabled={busy} className={button} onClick={() => void action('accountLogout')}>取消登录</button><button disabled={busy} className={button} onClick={() => void action('accountReopen')}>重新打开浏览器</button></> :
             <button disabled={busy || !state} className={`${button} !border-transparent bg-accent text-accent-ink hover:!bg-accent/90`} onClick={() => void action('accountLogin')}>{busy ? '正在打开…' : '使用浏览器登录'}</button>}
         </div>
+        </>}
       </DialogContent>
     </Dialog>
   </>;

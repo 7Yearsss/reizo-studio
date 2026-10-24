@@ -22,12 +22,13 @@ The account now connects Chat Completions text models in the user's current Reiz
 organization. Local projects remain in the device's existing workspace; changing
 accounts does not isolate, upload, or synchronize them. Offline identity must not
 be treated as authorization for cloud actions. Image/video protocol adaptation and
-the account balance UI remain separate work.
+the account wallet use separate adapters. See [Desktop wallet and recharge](account-wallet.md)
+for the account balance and payment integration.
 
 ## Account menu
 
 The bottom-left account control opens an anchored menu instead of an account modal.
-It contains account details/login, local usage, a light/dark/system appearance submenu,
+It contains account details/login, a signed-in wallet/recharge entry, local usage, a light/dark/system appearance submenu,
 settings, about/version and logout. Settings moved out of the top-level sidebar;
 Ctrl+, (Cmd+, on macOS) opens settings even while the sidebar is collapsed. Usage and
 about open their corresponding existing settings sections. Local usage is not a cloud
@@ -63,7 +64,8 @@ Only hashes of desktop login secrets are stored on the server. The separate requ
 the secret token is never exposed to the renderer, URL, model or application logs.
 Active credentials expire after 30 days; there is no refresh token in this version.
 Pending requests are polled every four seconds; active accounts every minute.
-Other web API routes do not yet accept these credentials.
+The wallet adapter also accepts active desktop credentials; other browser-console
+routes continue to require their existing browser authorization.
 
 ## Account model bridge (2026-10-23)
 
