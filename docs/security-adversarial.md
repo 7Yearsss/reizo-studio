@@ -28,6 +28,7 @@
 | 同一步内并发写同一文件 | 有副作用的工具串行执行 | `src/main/server/agent/toolSerializer.test.ts :: runs mutating tools one at a time in issue order` |
 | 模型陷入重复调用循环 | 判定卡住并中止 | `src/main/server/agent/toolLoopGuard.test.ts :: still halts identical calls with identical results` |
 | 持久「始终允许」被用来绕过 computer / 定时任务确认 | 只有 `mcp__*` 工具可被永久允许；computer 与 always-ask 名单忽略该决定，新会话仍询问；存档里混入的这类名字加载时丢弃 | `src/main/server/agent/alwaysAllow.test.ts :: computer and the always-ask tools can never be made permanent` |
+| 工作区被设成包含应用数据目录的文件夹（如用户主目录），Agent 的 write_file / edit_file 改写数据库、密钥、钩子 | 写入前按绝对路径拒绝，覆盖数据目录整棵树；仅限文件写入工具，run_command 不在此守卫内（见下方未覆盖） | `src/main/workspaceWrite.protected.test.ts :: a workspace that contains the data folder cannot write or edit inside it, but its other files still work` |
 
 ## 未覆盖（没有测试，不能标「已覆盖」）
 
@@ -35,3 +36,4 @@
 - 记忆写入（memory_write）目前不强制每次确认——记忆有独立的提取/召回流程，是否纳入「永远要问」名单待评估。
 - 提示注入经网页/文件内容诱导工具调用——需要跨层端到端用例。
 - 子进程在主进程被强杀后的残留——见 #201。
+- 应用数据目录对 run_command（shell）没有写保护：命令可以改任何用户有权限的文件，只能靠审批与「只读自动化」上限兜底。

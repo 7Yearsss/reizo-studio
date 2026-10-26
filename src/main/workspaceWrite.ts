@@ -5,6 +5,16 @@ import path from 'node:path';
 import { nanoid } from 'nanoid';
 import { WRITE_FILE_MAX_BYTES } from '../shared/constants';
 import { resolveInsideWorkspace, toWorkspaceRelative } from './workspacePath';
+import { isProtectedPath, PROTECTED_WRITE_MESSAGE } from '../shared/protectedPaths';
+
+let protectedRoots: string[] = [];
+/** Folders agent write tools must never touch (the app's own data). Set once at startup. */
+export function setWriteProtectedRoots(roots: string[]): void {
+  protectedRoots = roots.filter(Boolean);
+}
+function assertWritable(absolute: string): void {
+  if (isProtectedPath(absolute, protectedRoots)) throw new Error(PROTECTED_WRITE_MESSAGE);
+}
 import { serializeFileMutation } from './server/storage/atomicFile';
 
 export interface WorkspaceFileVersion { expectedHash: string | null; expectedPath: string }
@@ -68,6 +78,7 @@ export async function writeWorkspaceFile(
     throw new Error(`File exceeds ${WRITE_FILE_MAX_BYTES} byte write limit`);
   }
   const absolute = resolveInsideWorkspace(workspaceRoot, relativePath);
+  assertWritable(absolute);
   return serializeFileMutation(absolute, async () => {
     const snapshot = await readWorkspaceFileSnapshot(workspaceRoot, relativePath);
     checkVersion(snapshot, expected);
@@ -94,6 +105,7 @@ export async function editWorkspaceFile(
 ): Promise<{ path: string; replacements: number; before: string; after: string }> {
   if (!oldString) throw new Error('oldString is required');
   const absolute = resolveInsideWorkspace(workspaceRoot, relativePath);
+  assertWritable(absolute);
   return serializeFileMutation(absolute, async () => {
   const snapshot = await readWorkspaceFileSnapshot(workspaceRoot, relativePath);
   checkVersion(snapshot, expected);

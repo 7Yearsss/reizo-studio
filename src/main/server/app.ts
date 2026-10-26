@@ -12,6 +12,7 @@ import { createSettingsStore } from './storage/settingsStore';
 import { createSessionsRouter } from './routes/sessions';
 import { createAutoCompactor } from './agent/compaction';
 import { createStorageRouter } from './routes/storage';
+import { setWriteProtectedRoots } from '../workspaceWrite';
 import { createToolApprovalsRouter } from './routes/toolApprovals';
 import { createDiagnosticsRouter } from './routes/diagnostics';
 import { chatModelCapabilities } from '../../shared/chatModelCapabilities';
@@ -253,6 +254,7 @@ export function createApp(options: CreateAppOptions) {
     ),
   );
   app.route('/api/experts', createExpertsRouter(expertStore));
+  setWriteProtectedRoots([options.dataRoot]);
   app.route('/api/storage', createStorageRouter(options.dataRoot));
   app.route('/api/tool-approvals', createToolApprovalsRouter(options.dataRoot));
   app.route('/api/diagnostics', createDiagnosticsRouter({ dataRoot: options.dataRoot, settingsStore }));
