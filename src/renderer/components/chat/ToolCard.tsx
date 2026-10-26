@@ -2,6 +2,7 @@ import type { ToolCallPart } from '../../../shared/chat';
 import { ToolResult, ToolResultOutput } from '../agents/tool-result';
 import { getResolvedApiOrigin } from '../../api';
 import DiffView from './LazyDiffView';
+import BatchProgress from './BatchProgress';
 import MediaGenerationCard, { isChatMediaTool } from './MediaGenerationCard';
 import DeliverableCard, { deliverableOf } from './DeliverableCard';
 import ReviewProposalCard, { reviewProposalOf } from './ReviewProposalCard';
@@ -10,6 +11,11 @@ import { toolDetail, toolDiffPreview, toolLabel, toolTarget } from './toolDispla
 export default function ToolCard({ part, collapsed = false, sessionId, interrupted = false }: { part: ToolCallPart; collapsed?: boolean; sessionId?: string; interrupted?: boolean }) {
   const running = part.result === undefined && part.error === undefined;
   if (isChatMediaTool(part.name)) return <MediaGenerationCard part={part} sessionId={sessionId} interrupted={interrupted} />;
+
+  if (part.name === 'run_batch') {
+    const count = Array.isArray(part.args?.tasks) ? (part.args.tasks as unknown[]).length : 0;
+    return <BatchProgress id={part.id} tasks={count} />;
+  }
 
   if (part.name === 'computer') {
     let shot = '';

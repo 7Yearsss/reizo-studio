@@ -102,6 +102,13 @@ export interface MemoryEventRecord {
   items: MemoryItem[];
 }
 
+export interface BatchProgressRow {
+  index: number;
+  title: string;
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'stopped';
+  steps: number;
+}
+
 export type ChatStreamEvent =
   | { type: 'text'; delta: string }
   | { type: 'reasoning'; delta: string }
@@ -112,6 +119,8 @@ export type ChatStreamEvent =
   | { type: 'todos'; items: TodoItem[] }
   | { type: 'tool_loop'; tier: 'warn' | 'halt'; reason: string }
   | { type: 'notice'; tone: 'warn' | 'info'; text: string }
+  // Live rows of a parallel batch of sub-tasks (`run_batch`): one per task, replaced wholesale on each change.
+  | { type: 'batch'; id: string; rows: BatchProgressRow[] }
   // Memory activity surfaced to the user: files the agent recalled into this
   // turn, wrote via extraction/tools, or deleted. Rendered inline after the
   // message it follows (matched by createdAt at event time).

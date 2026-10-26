@@ -7,6 +7,7 @@ import * as api from '../api';
 import type { ChatMessage, ReplyActivity, SessionSummary, ToolCallPart } from '../../shared/chat';
 import type {
   AskQuestion,
+  BatchProgressRow,
   ChatStreamEvent,
   FileDiffPreview,
   MemoryEventRecord,
@@ -92,6 +93,8 @@ export interface ChatState {
   todosBySession: Record<string, TodoItem[]>;
   /** Transient "this run may be stuck" notice from the tool-loop guard. */
   loopNoticeBySession: Record<string, string | null>;
+  /** Live rows of `run_batch` calls, by tool-call id. */
+  batchRowsById: Record<string, BatchProgressRow[]>;
   queueBySession: Record<string, QueuedTurn[]>;
   /** Steer messages accepted by the live turn's inbox, waiting for the
    * `user_message` event that confirms injection (renders the real bubble). */
@@ -131,6 +134,7 @@ let state: ChatState = {
   interactionBySession: {},
   todosBySession: {},
   loopNoticeBySession: {},
+  batchRowsById: {},
   queueBySession: {},
   steerPendingBySession: {},
   composerSeedBySession: {},
@@ -1054,6 +1058,9 @@ function makeEventFolder(
             [sessionId]: event.tier === 'halt' ? `已停止：${event.reason}` : `这一轮可能卡住了：${event.reason}`,
           },
         });
+        break;
+      case 'batch':
+        setState({ batchRowsById: { ...state.batchRowsById, [event.id]: event.rows } });
         break;
       case 'notice':
         if (event.tone === 'warn') toast.error(event.text);

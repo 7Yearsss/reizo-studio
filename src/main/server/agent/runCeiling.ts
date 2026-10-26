@@ -9,7 +9,7 @@ export const READ_ONLY_RUN_TOOLS: ReadonlySet<string> = new Set([
   'read_file', 'find_files', 'grep', 'list_dir', 'memory_read',
   'read_canvas', 'read_node', 'read_sheet', 'read_document', 'read_presentation', 'read_delivery_plans',
   'check_sheet', 'check_document', 'check_delivery', 'get_video_models', 'list_assets', 'list_schedules',
-  'todo_write', 'ask_user', 'video_editor_context', 'delegate_research',
+  'todo_write', 'ask_user', 'video_editor_context', 'delegate_research', 'run_batch',
 ]);
 
 /** The permission mode a run may use: the global mode, tightened — never loosened — by the run's ceiling. */

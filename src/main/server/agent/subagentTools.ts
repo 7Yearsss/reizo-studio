@@ -2,6 +2,8 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { isStepCount, tool, ToolLoopAgent, type LanguageModel, type ToolSet } from 'ai';
 import { z } from 'zod';
+import type { ChatStreamEvent } from '../../../shared/stream';
+import { BATCH_MAX_CONCURRENCY, BATCH_MAX_TASKS, formatBatchResult, runBatch } from './batchRunner';
 
 /**
  * `delegate_research`: hand a context-heavy, read-only investigation to a sub-agent with its own
@@ -180,6 +182,71 @@ export function createSubagentTool(options: {
         } finally {
           running -= 1;
         }
+      },
+    }),
+  };
+}
+
+export const BATCH_TOOL_NAME = 'run_batch';
+/** Sub-agent runs one session may start through batches (a runaway loop cannot fan out forever). */
+export const BATCH_DISPATCH_LIMIT = 40;
+
+/**
+ * `run_batch`: split independent, read-only investigations (up to 16) across sub-agents that run in parallel.
+ * Each task is judged by its own heartbeat, so one stuck sub-agent is stopped alone; the rows stream to the UI.
+ */
+export function createBatchTool(options: {
+  getModel: () => LanguageModel;
+  tools: Record<string, unknown>;
+  getProviderOptions?: () => unknown;
+  roles?: SubagentRole[];
+  emit?: (event: ChatStreamEvent) => void;
+}) {
+  let dispatched = 0;
+  return {
+    [BATCH_TOOL_NAME]: tool({
+      description:
+        'Run several independent read-only investigations at the same time, each in its own sub-agent with a fresh context ' +
+        '(for example: summarise each of these 6 documents, check each of these folders). Tasks must not depend on each other and ' +
+        'must be fully self-contained. Returns the status and answer of every task; a task that stalls is stopped on its own. ' +
+        'Not for edits. For one or two lookups use delegate_research or do it yourself.',
+      inputSchema: z.object({
+        tasks: z.array(z.object({
+          title: z.string().min(1).max(60).describe('Short label shown in the progress list.'),
+          task: z.string().min(1).describe('A complete, self-contained task, including what to report back.'),
+          role: z.string().optional().describe('Optional specialist role name.'),
+        })).min(1).max(BATCH_MAX_TASKS),
+        concurrency: z.number().int().min(1).max(BATCH_MAX_CONCURRENCY).optional().describe('How many run at once (default 4).'),
+      }),
+      execute: async ({ tasks, concurrency }, { abortSignal, toolCallId }): Promise<string> => {
+        if (dispatched + tasks.length > BATCH_DISPATCH_LIMIT) {
+          return `Batch refused: this conversation has already started ${dispatched} sub-agent runs and the limit is ${BATCH_DISPATCH_LIMIT}. Do the rest yourself.`;
+        }
+        dispatched += tasks.length;
+        const rows = await runBatch({
+          tasks,
+          concurrency: concurrency ?? 4,
+          signal: abortSignal,
+          onUpdate: (snapshot) => options.emit?.({ type: 'batch', id: toolCallId, rows: snapshot.map(({ index, title, status, steps }) => ({ index, title, status, steps })) }),
+          runOne: async (item, context) => {
+            const matchedRole = item.role ? options.roles?.find((r) => r.name === item.role) : undefined;
+            const activeTools = matchedRole?.tools?.length ? pickReadOnlyTools(options.tools, matchedRole.tools) : options.tools;
+            const agent = new ToolLoopAgent({
+              model: options.getModel(),
+              instructions: matchedRole ? `${INSTRUCTIONS}
+
+Specialist Role (${matchedRole.name}):
+${matchedRole.instructions}` : INSTRUCTIONS,
+              tools: activeTools as ToolSet,
+              stopWhen: isStepCount(SUBAGENT_MAX_STEPS),
+              maxRetries: 1,
+              providerOptions: options.getProviderOptions?.() as never,
+            });
+            const result = await agent.generate({ prompt: item.task, abortSignal: context.signal, onStepFinish: () => context.heartbeat() });
+            return clipSubagentResult(result.text);
+          },
+        });
+        return formatBatchResult(rows);
       },
     }),
   };

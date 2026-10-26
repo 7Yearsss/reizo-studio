@@ -48,7 +48,7 @@ import { CONTINUE_USER_MESSAGE, MAX_AGENT_STEPS, MAX_CONTINUE_PASSES, hitStepCap
 import { appendHookNote, createHookRunner, loadHooks, wrapToolsWithHooks } from './hooks';
 import { connectMcpTools, MCP_TOOL_PREFIX } from './mcpTools';
 import { hasReasoningLeak } from './reasoningLeak';
-import { createSubagentTool, loadSubagentRoles, pickReadOnlyTools } from './subagentTools';
+import { createBatchTool, createSubagentTool, loadSubagentRoles, pickReadOnlyTools } from './subagentTools';
 import { applyAllHarnessProposals } from './harnessEvolution';
 import { loadActiveHarnessRules } from './harnessRules';
 import { recordSkillExperience } from './skillRefiner';
@@ -584,12 +584,21 @@ ${expert.instructions}`
   const subagentRoleDirs = [workspacePath, dataRoot].filter((d): d is string => Boolean(d));
   const subagentRoles = subagentRoleDirs.length ? await loadSubagentRoles(subagentRoleDirs) : [];
   const subagentTools = toolset
-    ? createSubagentTool({
-        getModel: () => model,
-        tools: wrapToolsWithHooks(pickReadOnlyTools(toolset.tools), hookRunner),
-        getProviderOptions: () => providerOptions,
-        roles: subagentRoles,
-      })
+    ? {
+        ...createSubagentTool({
+          getModel: () => model,
+          tools: wrapToolsWithHooks(pickReadOnlyTools(toolset.tools), hookRunner),
+          getProviderOptions: () => providerOptions,
+          roles: subagentRoles,
+        }),
+        ...createBatchTool({
+          getModel: () => model,
+          tools: wrapToolsWithHooks(pickReadOnlyTools(toolset.tools), hookRunner),
+          getProviderOptions: () => providerOptions,
+          roles: subagentRoles,
+          emit: (event) => emit(event),
+        }),
+      }
     : undefined;
   const tools = rawTools || hasMcpTools
     ? applySkillToolPolicy(applySkillToolPolicy(applyRunCeiling(serializeMutatingTools(wrapToolsWithHooks({ ...(rawTools ?? {}), ...(subagentTools ?? {}), ...(mcp?.tools ?? {}) } as NonNullable<typeof rawTools>, hookRunner)), runCeiling), skill?.allowedTools), parseAllowedTools(expert?.allowedTools))
