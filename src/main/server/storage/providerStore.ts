@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
+import { writeTextAtomic } from './atomicFile';
 import path from 'node:path';
 import { safeStorage } from 'electron';
 import {
@@ -78,7 +79,7 @@ export function createProviderStore(root: string) {
 
   async function writeRaw(data: StoredDiskConfig): Promise<void> {
     await mkdir(root, { recursive: true });
-    await writeFile(file, JSON.stringify(data, null, 2), 'utf8');
+    await writeTextAtomic(file, JSON.stringify(data, null, 2));
   }
 
   async function initDefaultsIfNeeded(): Promise<Record<string, ManagedProviderConfig>> {

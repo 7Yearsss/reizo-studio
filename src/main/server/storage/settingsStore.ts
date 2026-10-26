@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
+import { writeTextAtomic } from './atomicFile';
 import path from 'node:path';
 import { safeDecrypt, safeEncrypt } from './providerStore';
 import { PROVIDER_PRESETS } from '../../../shared/providers';
@@ -56,7 +57,7 @@ export function createSettingsStore(root: string, accountModels?: () => AccountM
 
   async function writeRaw(data: DiskSettings): Promise<void> {
     await mkdir(root, { recursive: true });
-    await writeFile(file, JSON.stringify(data, null, 2), 'utf8');
+    await writeTextAtomic(file, JSON.stringify(data, null, 2));
   }
 
   function hydrate(disk: DiskSettings): { settings: LocalSettings; migrated: boolean } {
