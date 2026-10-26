@@ -264,6 +264,13 @@ export async function revokeAlwaysAllowed(name: string): Promise<void> {
   await api(`/api/tool-approvals/${encodeURIComponent(name)}`, { method: 'DELETE' });
 }
 
+export interface BackgroundShellRow { id: string; command: string; running: boolean; exitCode?: number | null; startedAt: number; endedAt?: number }
+
+export async function listBackgroundShells(sessionId: string): Promise<BackgroundShellRow[]> {
+  const res = await api(`/api/sessions/${sessionId}/background`);
+  return ((await res.json()) as { shells?: BackgroundShellRow[] }).shells ?? [];
+}
+
 export async function getDiskSpace(): Promise<{ freeBytes: number | null; totalBytes: number | null }> {
   const res = await api('/api/storage/disk');
   return (await res.json()) as { freeBytes: number | null; totalBytes: number | null };

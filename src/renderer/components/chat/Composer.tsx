@@ -17,6 +17,7 @@ import ModelPicker from './ModelPicker';
 import ContextRing from './ContextRing';
 import MentionMenu, { extractMentionQuery } from './MentionMenu';
 import SessionRefMenu from './SessionRefMenu';
+import BackgroundTasksChip from './BackgroundTasksChip';
 import { isHaltedNotice, LOOP_RECOVERY_MESSAGE } from '../../../shared/loopRecovery';
 import { PLAN_CONFIRM_MESSAGE } from '../../../shared/planMode';
 import { extractSessionQuery, serializeSessionReference } from '../../../shared/sessionReference';
@@ -654,6 +655,7 @@ export default function Composer({
                 <button type="button" onClick={() => chatStore.setPlanMode(sessionId, false)} className="text-[12px] text-ink-muted hover:text-ink">退出</button>
               </div>
             )}
+            {sessionId && <BackgroundTasksChip sessionId={sessionId} />}
             {sessionId && <ComposerDock todos={todos} />}
             {syncingSheet && <p role="status" className="mb-2 text-xs text-ink-muted">正在保存工作区内容…</p>}
             {addingFiles > 0 && <p role="status" className="mb-2 text-xs text-ink-muted">正在添加附件…</p>}

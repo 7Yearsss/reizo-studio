@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { listBackgroundShells } from '../../backgroundShells';
 import { hasSearch, hasTrash, TRASH_RETENTION_MS, type SessionStore } from '../../../shared/chat';
 import type { ArtifactStore } from '../storage/artifactStore';
 import { pendingInteractionKindForSession } from '../agent/permissions';
@@ -42,6 +43,9 @@ export function createSessionsRouter(sessionStore: SessionStore, artifactStore?:
       return c.json({ error: error instanceof Error ? error.message : String(error) }, 502);
     }
   });
+
+  // Commands the agent left running in this conversation (dev servers, watchers), for the status chip.
+  router.get('/:id/background', (c) => c.json({ shells: listBackgroundShells(c.req.param('id')) }));
 
   router.get('/search', async (c) => {
     if (!hasSearch(sessionStore)) return c.json({ hits: [] });
