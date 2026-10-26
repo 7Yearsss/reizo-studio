@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { matchAny, matchText } from '../../../shared/matchText';
 import { File, Folder, ImageIcon, Video, Bot, Wrench } from 'lucide-react';
 import * as api from '../../api';
 import type { DirEntry } from '../../../shared/workspace';
@@ -37,7 +38,7 @@ export default function MentionMenu({
           const q = query.toLowerCase();
           const p = (n.params as Record<string, string>) || {};
           const txt = `${n.title} ${p.prompt || ''} ${p.instruction || ''} ${n.type}`.toLowerCase();
-          return txt.includes(q);
+          return matchText(q, txt);
         })
         .slice(0, 4)
     : [];
@@ -49,7 +50,7 @@ export default function MentionMenu({
       .then((all) => {
         if (cancelled) return;
         const q = query.toLowerCase();
-        setEntries(all.filter((e) => e.relativePath.toLowerCase().includes(q)).slice(0, 10));
+        setEntries(all.filter((e) => matchText(q, e.relativePath)).slice(0, 10));
       })
       .catch(() => {
         if (!cancelled) setEntries([]);
@@ -62,7 +63,7 @@ export default function MentionMenu({
   const matchedSkills = skills
     .filter((s) => {
       const q = query.toLowerCase();
-      return s.id.toLowerCase().includes(q) || s.name.toLowerCase().includes(q) || s.description.includes(query);
+      return matchAny(q, [s.id, s.name, s.description]) > 0;
     })
     .slice(0, 4);
 

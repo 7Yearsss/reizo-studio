@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { matchAny } from '../../../shared/matchText';
 import { motion } from 'motion/react';
 import { Command as CommandIcon, PlusCircle, Settings, Wrench } from 'lucide-react';
 import type { SkillSummary } from '../../state/skillStore';
@@ -64,7 +65,10 @@ export default function SlashPalette({
 }) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const filtered = commands
-    .filter((cmd) => cmd.name.includes(query.toLowerCase()) || cmd.description.includes(query))
+    .map((cmd) => ({ cmd, score: matchAny(query, [cmd.name, cmd.description]) }))
+    .filter((m) => m.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map((m) => m.cmd)
     .slice(0, 10);
 
   useEffect(() => {
