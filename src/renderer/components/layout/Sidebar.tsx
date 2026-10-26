@@ -39,6 +39,7 @@ import {
 import { openGlobalCommandPalette } from './GlobalCommandPalette';
 import { toast } from '../../lib/toast';
 import TrashPanel from './TrashPanel';
+import { useSessionHoverPreview } from './SessionHoverPreview';
 
 /** Delete moves the conversation to the trash; the toast offers an immediate undo instead of a confirm dialog. */
 async function deleteWithUndo(id: string, title: string): Promise<void> {
@@ -244,6 +245,7 @@ export default function Sidebar() {
   });
   const [trashOpen, setTrashOpen] = useState(false);
   const [archivedOpen, setArchivedOpen] = useState(false);
+  const hoverPreview = useSessionHoverPreview();
   const [chatsOpen, setChatsOpen] = useState(() => localStorage.getItem(CHATS_FOLD_KEY) !== '0');
 
   useEffect(() => {
@@ -431,6 +433,7 @@ export default function Sidebar() {
       >
         <button
           type="button"
+          {...hoverPreview.bind(session.id, session.title)}
           onClick={() => {
             uiStore.setMode('chat');
             tabStore.openChatTab(session.id, session.title);
@@ -687,6 +690,7 @@ export default function Sidebar() {
         </div>
       )}
 
+      {hoverPreview.card}
     </aside>
   );
 }
