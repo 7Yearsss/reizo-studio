@@ -173,6 +173,13 @@ export function CommandPalette({
     return () => cancelAnimationFrame(frame);
   }, [open]);
 
+  // Closing hands focus back to whatever had it before the palette opened (usually the composer).
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.activeElement as HTMLElement | null;
+    return () => { if (previous && previous !== document.body && previous.isConnected) previous.focus(); };
+  }, [open]);
+
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") {
       e.preventDefault();

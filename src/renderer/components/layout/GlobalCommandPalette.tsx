@@ -17,10 +17,15 @@ import { useChatStore } from '../../state/useChatStore';
 import { useSkillStore } from '../../state/useSkillStore';
 import { useSettingsStore } from '../../state/useSettingsStore';
 import * as tabStore from '../../state/tabStore';
+import * as settingsStore from '../../state/settingsStore';
 import * as uiStore from '../../state/uiStore';
 import * as api from '../../api';
 import type { DirEntry } from '../../../shared/workspace';
 import type { MessageHit } from '../../../shared/messageSearch';
+import { parseRecent, recordRecent, resolveRecent } from '../../../shared/recentCommands';
+import * as chatStore from '../../state/chatStore';
+import { useTabStore } from '../../state/useTabStore';
+import { Square, SunMoon, History } from 'lucide-react';
 
 export function openGlobalCommandPalette() {
   window.dispatchEvent(new CustomEvent('reizo:open-command-palette'));
@@ -34,9 +39,16 @@ export default function GlobalCommandPalette() {
   const [files, setFiles] = useState<DirEntry[]>([]);
   const [hits, setHits] = useState<MessageHit[]>([]);
   const searchSeq = useRef(0);
+  const activeSessionId = useTabStore((s) => { const t = s.tabs.find((x) => x.id === s.activeTabId); return t?.kind === 'chat' ? t.sessionId : undefined; });
+  const sending = useChatStore((st) => (activeSessionId ? !!st.sendingBySession[activeSessionId] : false));
+  const appearance = useSettingsStore((s) => s.settings.appearance);
+  const [query, setQuery] = useState('');
+  const [recentIds, setRecentIds] = useState<string[]>(() => { try { return parseRecent(JSON.parse(localStorage.getItem('reizo:recent-commands') ?? '[]')); } catch { return []; } });
 
   // Message search: debounced, newest request wins, and the palette skips IME composition before calling this.
-  function searchMessages(query: string) {
+  function searchMessages(nextQuery: string) {
+    setQuery(nextQuery);
+    const query = nextQuery;
     const seq = ++searchSeq.current;
     const trimmed = query.trim();
     if (trimmed.length < 2) { setHits([]); return; }
@@ -118,6 +130,18 @@ export default function GlobalCommandPalette() {
       },
     ];
 
+    if (activeSessionId && sending) {
+      list.push({ id: 'action-stop', label: '停止当前回复', group: '操作', icon: Square, onSelect: () => void chatStore.stopMessage(activeSessionId) });
+    }
+    list.push({
+      id: 'action-theme',
+      label: appearance === 'dark' ? '切换到浅色主题' : '切换到深色主题',
+      group: '操作',
+      keywords: ['主题', 'theme', 'dark', 'light'],
+      icon: SunMoon,
+      onSelect: () => void settingsStore.patchSettings({ appearance: appearance === 'dark' ? 'light' : 'dark' }),
+    });
+
     // 会话列表 (Recent Chats)
     sessions.forEach((session) => {
       list.push({
@@ -177,8 +201,22 @@ export default function GlobalCommandPalette() {
       });
     });
 
-    return list;
-  }, [sessions, skills, files, hits]);
+    // Anything run from here is remembered; with an empty query the last few come first.
+    const remember = (item: CommandItem): CommandItem => ({
+      ...item,
+      onSelect: () => {
+        item.onSelect();
+        setRecentIds((previous) => {
+          const next = recordRecent(previous, item.id);
+          try { localStorage.setItem('reizo:recent-commands', JSON.stringify(next)); } catch { /* per-viewer convenience */ }
+          return next;
+        });
+      },
+    });
+    const all = list.map(remember);
+    const recent = query ? [] : resolveRecent(recentIds, all).map((item) => ({ ...item, id: `recent-${item.id}`, group: '最近使用', icon: item.icon ?? History }));
+    return [...recent, ...all];
+  }, [sessions, skills, files, hits, activeSessionId, sending, appearance, query, recentIds]);
 
   return (
     <CommandPalette
