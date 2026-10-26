@@ -57,6 +57,7 @@ import { createTurnTraceCollector, writeTurnTrace } from './turnTrace';
 import { readWorkspaceMemory } from '../../workspaceMemory';
 import { formatRules, readRuleSources } from './workspaceRules';
 import { createSkillTools } from './skillTools';
+import { observeRetries } from '../../../shared/retryObserver';
 import { messagesForModel } from '../../../shared/compactBoundary';
 import { applyRunCeiling, effectiveRunMode, READ_ONLY_RUN_NOTICE } from './runCeiling';
 import type { RunPermission } from '../../../shared/schedule';
@@ -576,9 +577,9 @@ export async function runChatTurn(options: {
 
   const accounting = options.usageStore ?? canvasStore?.usage;
   const model = createOpenAiModel({ apiKey, modelId, baseUrl,
-    fetch: quotaFetch(canvasStore ? llmSchedulerFor(canvasStore) : standaloneLlmScheduler, providerId,
+    fetch: observeRetries(quotaFetch(canvasStore ? llmSchedulerFor(canvasStore) : standaloneLlmScheduler, providerId,
       accounting ? usageFetch(accounting, { sessionId, providerId, model: modelId, category: 'llm', accepting: canvasStore ? () => !canvasWorkStopped(canvasStore) : undefined }) : undefined, true,
-      () => trace.startModelCall()) });
+      () => trace.startModelCall()), { maxRetries: PROVIDER_MAX_RETRIES, announce: (text) => emit({ type: 'notice', tone: 'info', text }) }) });
   trace.mark('modelReady');
 
   // Reasoning models on gateways can burn 10-90s "thinking" before the first
