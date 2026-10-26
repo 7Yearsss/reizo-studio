@@ -38,6 +38,10 @@ function scope(store: CanvasStore): number {
 const keyFor = (canvasId: string, nodeId: string, store: CanvasStore) => JSON.stringify([scope(store), canvasId, nodeId]);
 const jobKey = (store: CanvasStore, id: string) => JSON.stringify([scope(store), id]);
 
+export function activeVideoJobCount(): number {
+  return [...activeJobs.values()].filter((entry) => !entry.detached).length;
+}
+
 export function isRecoverableVideoJob(job: CanvasJob): boolean {
   if (job.nodeType !== 'video' || job.status !== 'running' || !job.remoteTask?.taskId?.trim()) return false;
   const driver = getVideoDriver(job.remoteTask.driverId);

@@ -711,6 +711,12 @@ export function getAgentSession(sessionId: string): AgentSession {
 }
 
 /** Is any conversation mid-turn right now? Backups and restores wait for quiet. */
+export function liveTurnCount(): number {
+  let count = 0;
+  for (const session of sessions.values()) if (session.running) count += 1;
+  return count;
+}
+
 export function anyTurnLive(): boolean {
   for (const session of sessions.values()) if (session.running) return true;
   return false;

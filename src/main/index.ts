@@ -1,4 +1,7 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, Notification } from 'electron';
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Notification } from 'electron';
+import { describeActiveWork, hasActiveWork } from '../shared/quitConfirm';
+import { liveTurnCount } from './server/agent/session';
+import { activeVideoJobCount } from './server/canvas/videoJobRuntime';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
@@ -186,9 +189,34 @@ app.on('activate', () => {
   }
 });
 
+let quitConfirmed = false;
+let quitDialogOpen = false;
+
 app.on('before-quit', (event) => {
+  if (shuttingDown) { setQuitting(true); return; }
+  // Quitting mid-reply or mid-video throws that work away: ask first. The dialog is async, so hold the quit and
+  // re-issue it from a fresh task once the user decides (re-entering before-quit would leave a windowless process on macOS).
+  const work = { turns: liveTurnCount(), videoJobs: activeVideoJobCount() };
+  if (!quitConfirmed && hasActiveWork(work)) {
+    event.preventDefault();
+    if (quitDialogOpen) return;
+    quitDialogOpen = true;
+    const parent = BrowserWindow.getAllWindows()[0];
+    const options = {
+      type: 'warning' as const,
+      buttons: ['继续运行', '中断并退出'],
+      defaultId: 0,
+      cancelId: 0,
+      message: '还有任务在进行',
+      detail: `${describeActiveWork(work).join('，')}。现在退出会中断它们。`,
+    };
+    void (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options)).then(({ response }) => {
+      quitDialogOpen = false;
+      if (response === 1) { quitConfirmed = true; setTimeout(() => app.quit(), 0); }
+    });
+    return;
+  }
   setQuitting(true);
-  if (shuttingDown) return;
   event.preventDefault();
   // A hung scheduler/server stop must not leave an invisible zombie process.
   const forceExit = setTimeout(() => {
