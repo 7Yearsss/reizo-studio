@@ -9,6 +9,7 @@ import { cn } from '../../lib/cn';
 import { PromptInput } from '../agents/prompt-input';
 import type { PromptEditorHandle } from '../agents/prompt-editor';
 import { renumberCitations } from '../../../shared/promptDraft';
+import { loadDraft, saveDraft } from '../../../shared/composerDraft';
 import ModelPicker from './ModelPicker';
 import MentionMenu, { extractMentionQuery } from './MentionMenu';
 import SlashPalette, { applySlashArgs, buildSlashCommands, extractSlashQuery, type SlashCommand } from './SlashPalette';
@@ -94,7 +95,20 @@ export default function Composer({
   /** A file drag is hovering anywhere over the chat page (ChatPage owns the drop zone). */
   draggingFiles?: boolean;
 }) {
-  const [draft, setDraft] = useState('');
+  const [draft, setDraft] = useState(() => (sessionId ? loadDraft(localStorage, sessionId) : ''));
+  // Unsent text survives restarts and session switches; attachments stay in memory only.
+  const draftSession = useRef(sessionId);
+  useEffect(() => {
+    if (draftSession.current !== sessionId) {
+      draftSession.current = sessionId;
+      setDraft(sessionId ? loadDraft(localStorage, sessionId) : '');
+      return;
+    }
+    if (!sessionId) return;
+    if (!draft) { saveDraft(localStorage, sessionId, ''); return; }
+    const timer = setTimeout(() => saveDraft(localStorage, sessionId, draft), 400);
+    return () => clearTimeout(timer);
+  }, [draft, sessionId]);
   const presentationRef = usePresentationWorkspace((s) => sessionId ? s.references[sessionId] : undefined);
   const rawDocumentRefs = useDocumentWorkspace((s) => sessionId ? s.references[sessionId] : undefined);
   // Picked ranges are numbered across Doc ranges, matching the labels sent with the message.
