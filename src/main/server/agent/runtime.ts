@@ -77,6 +77,7 @@ import {
   RECALL_BUDGET,
 } from '../../memoryJobs';
 import { redactSecrets } from '../../../shared/redactSecrets';
+import { digestSession, parseSessionReferences, wrapSessionContext } from '../../../shared/sessionReference';
 import { buildSkillsTriggerIndex, type Skill } from '../../skills';
 import type { ChatMessage, SessionStore, ToolCallPart } from '../../../shared/chat';
 import type { SettingsStore } from '../storage/settingsStore';
@@ -121,6 +122,19 @@ const STEER_SYSTEM_PREFIX = '(System notice — a watched background canvas job 
 interface CanvasRef {
   id: string;
   region?: { x: number; y: number; w: number; h: number };
+}
+
+/** Read-only digest of the conversations the user pointed at with `#`; deleted or trashed ones degrade to a note. */
+async function buildSessionRefBlock(sessionStore: SessionStore, currentId: string, ids: string[]): Promise<string> {
+  const wanted = ids.filter((id) => id !== currentId);
+  if (wanted.length === 0) return '';
+  const entries = await Promise.all(wanted.map(async (id) => {
+    const found = await sessionStore.get(id).catch((): null => null);
+    if (!found) return { id, missing: true as const };
+    const { text, omitted } = digestSession(found);
+    return { id, title: found.title, text: redactSecrets(text), omitted };
+  }));
+  return wrapSessionContext(entries);
 }
 
 function parseCanvasRefs(mentions: string[]): { refs: CanvasRef[]; paths: string[] } {
@@ -274,7 +288,9 @@ export async function runChatTurn(options: {
   const presentationRefs = parsePresentationReferences(mentions);
   const documentRefs = parseDocumentReferences(presentationRefs.rest);
   const sheetRefs = parseSheetReferences(documentRefs.rest);
-  const { refs: canvasRefs, paths: pathMentions } = parseCanvasRefs(sheetRefs.rest);
+  const sessionRefs = parseSessionReferences(sheetRefs.rest);
+  const { refs: canvasRefs, paths: pathMentions } = parseCanvasRefs(sessionRefs.rest);
+  const sessionRefBlock = await buildSessionRefBlock(sessionStore, sessionId, sessionRefs.ids);
   const canvasRefBlock = buildCanvasRefBlock(canvasStore, sessionId, canvasRefs);
   const sheetRefBlock = await buildSheetContext(artifactStore, sessionId, sheetRefs.refs);
   const documentContext = await buildDocumentContext(artifactStore, sessionId, documentRefs.refs);
@@ -283,6 +299,7 @@ export async function runChatTurn(options: {
   const extraBlocks = [
     pathMentions.length > 0 ? `Referenced workspace paths:\n${pathMentions.map((m) => `- ${m}`).join('\n')}` : '',
     canvasRefBlock,
+    sessionRefBlock,
     sheetRefBlock,
     documentRefs.refs.length ? wrapDocumentContext(documentRefs.refs, documentContext) : '',
     presentationRefs.refs.length ? wrapPresentationContext(presentationRefs.refs, presentationContext) : '',

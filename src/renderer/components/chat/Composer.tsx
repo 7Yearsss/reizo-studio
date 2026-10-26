@@ -16,6 +16,8 @@ import { findPlaceholders } from '../../../shared/promptPlaceholders';
 import ModelPicker from './ModelPicker';
 import ContextRing from './ContextRing';
 import MentionMenu, { extractMentionQuery } from './MentionMenu';
+import SessionRefMenu from './SessionRefMenu';
+import { extractSessionQuery, serializeSessionReference } from '../../../shared/sessionReference';
 import SlashPalette, { applySlashArgs, buildSlashCommands, extractSlashQuery, type SlashCommand } from './SlashPalette';
 import PendingInteraction from './PendingInteraction';
 import QueuePanel from './QueuePanel';
@@ -188,6 +190,10 @@ export default function Composer({
   const hasAttachments = attachments.length > 0 || nodeRefs.length > 0 || unpinnedSelectionNodes.length > 0;
 
   const mentionQuery = extractMentionQuery(draft);
+  const sessionQuery = extractSessionQuery(draft);
+  const allSessions = useChatStore((s) => s.sessions);
+  // Referenced conversations are kept apart from file mentions, which are dropped when the draft has no '@'.
+  const [sessionRefs, setSessionRefs] = useState<Array<{ id: string; title: string }>>([]);
   const slash = extractSlashQuery(draft);
   const slashCommands = buildSlashCommands(skills);
   const activeSkill = skills.find((s) => s.id === skillId);
@@ -237,7 +243,7 @@ export default function Composer({
         : `canvas:${r.id}`,
     );
     return {
-      mentions: [...mentions, ...refMentions, ...selectionMentions, ...(sessionId ? [...sheetMentions(sessionId, 1 + documentReferences(sessionId).filter((r) => r.selection).length), ...documentMentions(sessionId), ...presentationMentions(sessionId)] : [])],
+      mentions: [...mentions, ...sessionRefs.map((r) => serializeSessionReference(r.id)), ...refMentions, ...selectionMentions, ...(sessionId ? [...sheetMentions(sessionId, 1 + documentReferences(sessionId).filter((r) => r.selection).length), ...documentMentions(sessionId), ...presentationMentions(sessionId)] : [])],
       extra: { skillId, attachments, replaceFromId: replaceFromIdRef.current },
     };
   }
@@ -245,6 +251,7 @@ export default function Composer({
   function resetAfterSubmit() {
     setDraft('');
     setMentions([]);
+    setSessionRefs([]);
     // skillId intentionally NOT cleared — a pinned skill applies to the whole session
     setAttachments([]);
     replaceFromIdRef.current = undefined;
@@ -578,6 +585,19 @@ export default function Composer({
             onSendNow={(item) => void chatStore.sendQueuedNow(sessionId, item.id)}
           />
         )}
+        {sessionQuery !== null && mentionQuery === null && (
+          <SessionRefMenu
+            query={sessionQuery}
+            sessions={allSessions}
+            currentId={sessionId}
+            taken={sessionRefs.map((r) => r.id)}
+            onPick={(picked) => {
+              setDraft(draft.replace(/(^|\s)#([^\s#]*)$/, '$1'));
+              setSessionRefs((prev) => [...prev, { id: picked.id, title: picked.title }]);
+              window.setTimeout(focusComposer, 0);
+            }}
+          />
+        )}
         {mentionQuery !== null && (
           <MentionMenu
             query={mentionQuery}
@@ -616,7 +636,7 @@ export default function Composer({
             {sessionId && <ComposerDock todos={todos} />}
             {syncingSheet && <p role="status" className="mb-2 text-xs text-ink-muted">正在保存工作区内容…</p>}
             {addingFiles > 0 && <p role="status" className="mb-2 text-xs text-ink-muted">正在添加附件…</p>}
-            {(attachments.length > 0 || nodeRefs.length > 0 || mentions.length > 0 || unpinnedSelectionNodes.length > 0) && (
+            {(attachments.length > 0 || nodeRefs.length > 0 || mentions.length > 0 || sessionRefs.length > 0 || unpinnedSelectionNodes.length > 0) && (
               <div className={cn("mb-2 flex flex-wrap gap-1.5", compact && "max-h-24 overflow-y-auto pr-0.5")}>
                 {sessionId && unpinnedSelectionNodes.length > 0 && (
                   <div
@@ -692,6 +712,14 @@ export default function Composer({
                     </button>
                   </div>
                 )}
+                {sessionRefs.map((r) => (
+                  <span key={r.id} className="rounded-full bg-paper-inset px-2 py-0.5 text-[11px] text-ink" title="引用对话（只读）">
+                    #{r.title}
+                    <button type="button" className="ml-1 text-ink-muted" onClick={() => setSessionRefs((items) => items.filter((item) => item.id !== r.id))}>
+                      ×
+                    </button>
+                  </span>
+                ))}
                 {mentions.map((m) => (
                   <span key={m} className="rounded-full bg-paper-inset px-2 py-0.5 text-[11px] text-ink">
                     @{m.split(/[/\\]/).pop() || m}
@@ -839,7 +867,7 @@ export default function Composer({
                       : '回复中 — Enter 排队，Ctrl+Enter 插话（本轮生效）'
                     : activeSkill
                       ? `技能 /${activeSkill.id} 生效中 — 直接描述任务，退格或 × 退出`
-                      : '输入消息，/ 调用技能，@ 引用文件…'
+                      : '输入消息，/ 调用技能，@ 引用文件，# 引用对话…'
                 }
                 onKeyDown={(e, { textBeforeCaret }) => {
                   if (isImeComposingEvent(e)) return;
