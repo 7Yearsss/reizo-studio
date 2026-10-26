@@ -117,3 +117,25 @@ describe('workspaceMemoryDir', () => {
     expect(await listMemoryManifest(root)).toEqual([]);
   });
 });
+
+describe('memory age', () => {
+  it('reports when an entry was last updated, and the recall text warns once it is old', async () => {
+    const { mkdtemp, utimes, rm } = await import('node:fs/promises');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const { formatRecalledMemories } = await import('./memoryJobs');
+    const root = await mkdtemp(path.join(os.tmpdir(), 'reizo-memage-'));
+    try {
+      const { fileName } = await writeMemoryEntry(root, { name: 'brand', description: '品牌色', type: 'project', body: '主色 #d9622b' });
+      const fresh = (await readMemoryEntry(root, fileName))!;
+      expect(fresh.updatedAt).toBeTruthy();
+      expect(formatRecalledMemories([fresh])).not.toContain('过时');
+      const old = new Date(Date.now() - 90 * 86_400_000);
+      await utimes(path.join(root, 'memory', fileName), old, old);
+      const stale = (await readMemoryEntry(root, fileName))!;
+      expect(formatRecalledMemories([stale])).toContain('90 天');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});

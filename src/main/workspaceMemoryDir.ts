@@ -21,6 +21,8 @@ export interface MemoryEntry {
   description: string;
   type: MemoryType;
   body: string;
+  /** File modification time; drives the "may be out of date" warning. */
+  updatedAt?: string;
 }
 
 export interface MemoryManifestItem {
@@ -137,7 +139,8 @@ export async function readMemoryEntry(workspaceRoot: string, fileName: string): 
     const { content } = await readWorkspaceText(workspaceRoot, `${MEMORY_DIR}/${fileName}`, 50_000);
     const parsed = parseFrontmatter(content);
     if (!parsed) return null;
-    return { fileName, ...parsed };
+    const updatedAt = await fs.stat(path.join(memoryDirPath(workspaceRoot), fileName)).then((st) => st.mtime.toISOString(), (): undefined => undefined);
+    return { fileName, ...parsed, ...(updatedAt ? { updatedAt } : {}) };
   } catch {
     return null;
   }

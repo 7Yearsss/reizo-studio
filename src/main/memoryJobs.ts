@@ -1,4 +1,5 @@
 import { generateText, type LanguageModel } from 'ai';
+import { staleMemoryNote } from '../shared/memoryAge';
 import type { MemoryItem } from '../shared/stream';
 import {
   deleteMemoryEntry,
@@ -247,7 +248,10 @@ function parseFileList(text: string): string[] {
 
 export function formatRecalledMemories(entries: MemoryEntry[]): string {
   const blocks = entries.map(
-    (e) => `<memory name="${e.name}" type="${e.type}">\n${e.body}\n</memory>`,
+    (e) => {
+      const stale = staleMemoryNote(e.updatedAt);
+      return `<memory name="${e.name}" type="${e.type}">\n${e.body}${stale ? `\n${stale}` : ''}\n</memory>`;
+    },
   );
   return `<relevant_memory>\nThe following saved memories may be relevant. Apply them naturally; do not mention that they were recalled.\n${blocks.join('\n')}\n</relevant_memory>`;
 }

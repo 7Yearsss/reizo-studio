@@ -1,4 +1,5 @@
 import { tool } from 'ai';
+import { staleMemoryNote } from '../../../shared/memoryAge';
 import { z } from 'zod';
 import { READ_FILE_TOOL_MAX_BYTES } from '../../../shared/constants';
 import type { PermissionMode } from '../../../shared/settings';
@@ -332,7 +333,7 @@ function buildTools(options: {
         if (file) {
           const entry = await readMemoryEntry(workspacePath, file);
           return entry
-            ? { path: `memory/${file}`, ...entry }
+            ? { path: `memory/${file}`, ...entry, ...(staleMemoryNote(entry.updatedAt) ? { warning: staleMemoryNote(entry.updatedAt) } : {}) }
             : { error: `No memory file "${file}"` };
         }
         return {
