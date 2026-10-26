@@ -1,14 +1,19 @@
-import { Check, ChevronDown, Search, X } from 'lucide-react';
+import { Check, ChevronDown, Search, Star, X } from 'lucide-react';
 import { useId, useMemo, useState, type KeyboardEvent } from 'react';
 import { modelVendorDomain } from '../../../shared/providers';
 import { groupModels, type ModelOption } from '../../lib/modelCatalog';
 import { cn } from '../../lib/cn';
 import ModelIcon from './ModelIcon';
 
-export default function ModelList({ options, value, onSelect }: {
+export default function ModelList({ options, value, onSelect, favorites = [], recent = [], favoriteValues = [], onToggleFavorite }: {
   options: readonly ModelOption[];
   value?: string;
   onSelect: (option: ModelOption) => void;
+  /** Optional shortlist shown above the vendor groups (not while searching). */
+  favorites?: readonly ModelOption[];
+  recent?: readonly ModelOption[];
+  favoriteValues?: readonly string[];
+  onToggleFavorite?: (option: ModelOption) => void;
 }) {
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -32,6 +37,25 @@ export default function ModelList({ options, value, onSelect }: {
     items[next].scrollIntoView?.({ block: 'nearest' });
   }
 
+  const renderRow = (option: ModelOption, keyPrefix = '') => {
+    const active = option.value === value;
+    const starred = favoriteValues.includes(option.value);
+    return <button key={keyPrefix + option.value} type="button" data-model-navigation data-model-value={option.value} aria-pressed={active} onClick={() => onSelect(option)} title={option.id}
+      className={cn('group/row my-0.5 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left outline-none transition-colors hover:bg-paper-inset/70 focus-visible:bg-paper-inset', active && 'bg-paper-inset')}>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-1.5 text-[12px] leading-5 text-ink"><span className="truncate">{option.name}</span>{option.badge && <span className="shrink-0 rounded bg-paper-inset px-1 text-[10px] text-ink-muted">{option.badge}</span>}</span>
+        {(option.description || option.source) && <span className="mt-0.5 block truncate text-[10px] leading-4 text-ink-muted">{[option.source, option.description].filter(Boolean).join(' · ')}</span>}
+      </span>
+      {onToggleFavorite && (
+        <span role="button" tabIndex={-1} aria-label={starred ? '取消收藏' : '收藏'} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onToggleFavorite(option); }}
+          className={cn('grid size-5 shrink-0 place-items-center rounded text-ink-muted transition-opacity hover:text-ink', starred ? 'opacity-100' : 'opacity-0 group-hover/row:opacity-100')}>
+          <Star size={12} className={cn(starred && 'fill-current')} />
+        </span>
+      )}
+      <span className="grid size-4 shrink-0 place-items-center">{active && <Check size={13} className="text-ink" />}</span>
+    </button>;
+  };
+
   return (
     <div className="flex min-h-0 flex-col" onKeyDown={navigate}>
       <div className="px-3 pb-2 pt-3">
@@ -46,6 +70,12 @@ export default function ModelList({ options, value, onSelect }: {
         <span>{groups.reduce((count, group) => count + group.models.length, 0)} 个模型</span>
       </div>
       <div aria-label="模型列表" className="min-h-0 max-h-[min(340px,45dvh)] overflow-y-auto overscroll-contain px-1.5 pb-2 [scrollbar-gutter:stable]">
+        {!searching && (favorites.length > 0 || recent.length > 0) && (
+          <div className="mb-1 border-b border-line/60 pb-1">
+            {favorites.length > 0 && <><p className="px-2.5 pb-0.5 pt-1 text-[10px] text-ink-muted">收藏</p>{favorites.map((option) => renderRow(option, 'fav-'))}</>}
+            {recent.length > 0 && <><p className="px-2.5 pb-0.5 pt-1 text-[10px] text-ink-muted">最近使用</p>{recent.map((option) => renderRow(option, 'recent-'))}</>}
+          </div>
+        )}
         {groups.map((group) => {
           const open = searching || (expanded[group.id] ?? group.id === defaultGroup);
           const current = group.models.some((option) => option.value === value);
@@ -62,17 +92,7 @@ export default function ModelList({ options, value, onSelect }: {
               <div id={`${id}-${group.id}`} inert={!open} aria-hidden={!open} className={cn('grid transition-[grid-template-rows,opacity] duration-150 motion-reduce:transition-none', open ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0')}>
                 <div className="min-h-0 overflow-hidden">
                   <div className="ml-5 border-l border-line/80 py-0.5 pl-2">
-                    {group.models.map((option) => {
-                      const active = option.value === value;
-                      return <button key={option.value} type="button" data-model-navigation data-model-value={option.value} aria-pressed={active} onClick={() => onSelect(option)} title={option.id}
-                        className={cn('my-0.5 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left outline-none transition-colors hover:bg-paper-inset/70 focus-visible:bg-paper-inset', active && 'bg-paper-inset')}>
-                        <span className="min-w-0 flex-1">
-                          <span className="flex items-center gap-1.5 text-[12px] leading-5 text-ink"><span className="truncate">{option.name}</span>{option.badge && <span className="shrink-0 rounded bg-paper-inset px-1 text-[10px] text-ink-muted">{option.badge}</span>}</span>
-                          {(option.description || option.source) && <span className="mt-0.5 block truncate text-[10px] leading-4 text-ink-muted">{[option.source, option.description].filter(Boolean).join(' · ')}</span>}
-                        </span>
-                        <span className="grid size-4 shrink-0 place-items-center">{active && <Check size={13} className="text-ink" />}</span>
-                      </button>;
-                    })}
+                    {group.models.map((option) => renderRow(option))}
                   </div>
                 </div>
               </div>

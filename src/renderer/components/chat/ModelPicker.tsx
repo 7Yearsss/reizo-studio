@@ -1,5 +1,6 @@
 import { ChevronDown } from 'lucide-react';
 import { useState } from 'react';
+import { EMPTY_SHORTLIST, parseShortlist, recordPick, shortlistOptions, toggleFavorite, type ModelShortlist } from '../../../shared/modelShortlist';
 import { Popover } from 'radix-ui';
 import { useSettingsStore } from '../../state/useSettingsStore';
 import * as settingsStore from '../../state/settingsStore';
@@ -16,10 +17,26 @@ const TABS: { id: PickerTab; label: string }[] = [
   { id: 'text', label: '文本' }, { id: 'image', label: '图像' }, { id: 'video', label: '视频' },
 ];
 
+const SHORTLIST_KEY = 'reizo:model-shortlist';
+function loadShortlist(tab: PickerTab): ModelShortlist {
+  try {
+    return parseShortlist(JSON.parse(localStorage.getItem(SHORTLIST_KEY) ?? '{}')[tab]);
+  } catch {
+    return EMPTY_SHORTLIST;
+  }
+}
+function saveShortlist(tab: PickerTab, list: ModelShortlist): void {
+  try {
+    const all = JSON.parse(localStorage.getItem(SHORTLIST_KEY) ?? '{}');
+    localStorage.setItem(SHORTLIST_KEY, JSON.stringify({ ...all, [tab]: list }));
+  } catch { /* a per-viewer convenience; losing it is fine */ }
+}
+
 export default function ModelPicker({ compact = false }: { compact?: boolean }) {
   const settings = useSettingsStore((s) => s.settings);
   const [tab, setTab] = useState<PickerTab>('text');
   const [open, setOpen] = useState(false);
+  const [shortlists, setShortlists] = useState<Record<PickerTab, ModelShortlist>>(() => ({ text: loadShortlist('text'), image: loadShortlist('image'), video: loadShortlist('video') }));
   const connected = settings.providers.filter((provider) => provider.hasKey);
   const configured = connected.length ? connected : settings.providers.filter((provider) => provider.id === 'custom' || provider.id === 'reizo');
   const active = settings.providers.find((p) => p.id === settings.activeProviderId) ?? configured[0];
@@ -34,10 +51,16 @@ export default function ModelPicker({ compact = false }: { compact?: boolean }) 
   });
   const mediaProvider = mediaCatalogProvider(settings) ?? active;
   const mediaModels = mediaProvider.catalog ? mediaProvider.catalog[tab === 'video' ? 'video' : 'image'] : mediaProvider.id === 'reizo-account' ? [] : tab === 'image' ? CANVAS_IMAGE_MODELS : CANVAS_VIDEO_MODELS;
-  const options = tab === 'text' ? textOptions : mediaModels.map((model) => ({ ...model, value: model.id }));
+  const options: ModelOption[] = tab === 'text' ? textOptions : mediaModels.map((model) => ({ ...model, value: model.id }));
   const selectedValue = tab === 'text' ? JSON.stringify([active.id, active.model || '__custom']) : settings.mediaModels?.[tab];
 
+  function updateShortlist(next: ModelShortlist) {
+    setShortlists((previous) => ({ ...previous, [tab]: next }));
+    saveShortlist(tab, next);
+  }
+
   function pick(option: ModelOption) {
+    updateShortlist(recordPick(shortlists[tab], option.value));
     if (tab === 'text') {
       const selected = textOptions.find((model) => model.value === option.value);
       if (!selected) return;
@@ -67,7 +90,7 @@ export default function ModelPicker({ compact = false }: { compact?: boolean }) 
               {TABS.map((item) => <button key={item.id} type="button" aria-pressed={tab === item.id} onClick={() => setTab(item.id)}
                 className={cn('flex-1 rounded-md px-2 py-1.5 text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/25', tab === item.id ? 'bg-paper-raised font-medium text-ink shadow-sm' : 'text-ink-muted hover:text-ink')}>{item.label}</button>)}
             </div>
-            <ModelList key={tab} options={options} value={selectedValue} onSelect={pick} />
+            <ModelList key={tab} options={options} value={selectedValue} onSelect={pick} {...shortlistOptions(shortlists[tab], options)} favoriteValues={shortlists[tab].favorites} onToggleFavorite={(option) => updateShortlist(toggleFavorite(shortlists[tab], option.value))} />
           </Popover.Content>
         </Popover.Portal>
       </Popover.Root>
