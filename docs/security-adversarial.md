@@ -27,6 +27,7 @@
 | 私钥块进入日志/记录 | 整块脱敏 | `src/shared/redactSecrets.test.ts :: redacts a PEM private key block` |
 | 同一步内并发写同一文件 | 有副作用的工具串行执行 | `src/main/server/agent/toolSerializer.test.ts :: runs mutating tools one at a time in issue order` |
 | 模型陷入重复调用循环 | 判定卡住并中止 | `src/main/server/agent/toolLoopGuard.test.ts :: still halts identical calls with identical results` |
+| 持久「始终允许」被用来绕过 computer / 定时任务确认 | 只有 `mcp__*` 工具可被永久允许；computer 与 always-ask 名单忽略该决定，新会话仍询问；存档里混入的这类名字加载时丢弃 | `src/main/server/agent/alwaysAllow.test.ts :: computer and the always-ask tools can never be made permanent` |
 
 ## 未覆盖（没有测试，不能标「已覆盖」）
 

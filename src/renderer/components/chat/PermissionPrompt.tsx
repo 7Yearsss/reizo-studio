@@ -12,7 +12,7 @@ export default function PermissionPrompt({
   onRespond,
 }: {
   permission: PendingPermission;
-  onRespond: (decision: 'allow' | 'deny' | 'allow-session') => void;
+  onRespond: (decision: 'allow' | 'deny' | 'allow-session' | 'allow-always') => void;
 }) {
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -75,7 +75,7 @@ export default function PermissionPrompt({
   const description = isConfirm
     ? '这类操作会留下长期影响或无法撤回，每一次都需要你确认，没有“本会话都允许”。'
     : mcp
-    ? '这是你配置的第三方 MCP 服务，它返回的内容不受信任。选“本会话都允许”后，这个工具在本会话内不再询问。'
+    ? '这是你配置的第三方 MCP 服务，它返回的内容不受信任。选“本会话都允许”后，这个工具在本会话内不再询问；也可以选“以后一律允许”，之后重启也不再询问。'
     : isComputer
     ? '同意后，本次会话中 Agent 可以截屏并控制鼠标、键盘，直到会话结束。不要让它输入密码等敏感信息。'
     : isCanvasBudget
@@ -85,6 +85,11 @@ export default function PermissionPrompt({
   return (
     <div className="rise-in space-y-2">
       {preview ? <DiffView preview={preview} /> : null}
+      {mcp && (
+        <button type="button" onClick={() => onRespond('allow-always')} className="px-1 text-xs text-ink-muted underline-offset-2 hover:text-ink hover:underline">
+          以后一律允许这个工具（可在设置里撤销）
+        </button>
+      )}
       <ToolApproval
         tool={permission.name}
         title={title}

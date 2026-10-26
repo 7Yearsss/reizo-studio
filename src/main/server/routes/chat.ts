@@ -22,7 +22,7 @@ import type { ProviderStore } from '../storage/providerStore';
 import type { MemoryEventsStore } from '../storage/memoryEventsStore';
 import type { ScheduleStore } from '../storage/scheduleStore';
 
-const DECISIONS = new Set<PermissionDecision>(['allow', 'deny', 'allow-session']);
+const DECISIONS = new Set<PermissionDecision>(['allow', 'deny', 'allow-session', 'allow-always']);
 
 export function createChatRouter(
   sessionStore: SessionStore,

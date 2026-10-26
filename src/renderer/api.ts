@@ -248,6 +248,15 @@ export async function getDiagnosticsBundle(): Promise<unknown> {
   return res.json();
 }
 
+export async function listAlwaysAllowed(): Promise<string[]> {
+  const res = await api('/api/tool-approvals');
+  return ((await res.json()) as { tools?: string[] }).tools ?? [];
+}
+
+export async function revokeAlwaysAllowed(name: string): Promise<void> {
+  await api(`/api/tool-approvals/${encodeURIComponent(name)}`, { method: 'DELETE' });
+}
+
 export async function getDiskSpace(): Promise<{ freeBytes: number | null; totalBytes: number | null }> {
   const res = await api('/api/storage/disk');
   return (await res.json()) as { freeBytes: number | null; totalBytes: number | null };
@@ -385,7 +394,7 @@ export async function drainSteers(
 export async function answerPermission(
   sessionId: string,
   id: string,
-  decision: 'allow' | 'deny' | 'allow-session',
+  decision: 'allow' | 'deny' | 'allow-session' | 'allow-always',
 ): Promise<void> {
   await api(`/api/sessions/${sessionId}/permissions`, {
     method: 'POST',

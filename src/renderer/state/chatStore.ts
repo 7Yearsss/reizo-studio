@@ -1469,7 +1469,7 @@ export async function stopMessage(sessionId: string): Promise<void> {
 
 export async function answerPermission(
   sessionId: string,
-  decision: 'allow' | 'deny' | 'allow-session',
+  decision: 'allow' | 'deny' | 'allow-session' | 'allow-always',
 ): Promise<void> {
   const pending = state.interactionBySession[sessionId];
   if (!pending || pending.kind !== 'permission') return;

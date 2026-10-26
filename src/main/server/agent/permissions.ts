@@ -2,7 +2,7 @@ import type { PermissionMode } from '../../../shared/settings';
 import { CANVAS_BUDGET_TOOL } from '../../../shared/stream';
 import type { AskQuestion, ChatStreamEvent, FileDiffPreview } from '../../../shared/stream';
 
-export type PermissionDecision = 'allow' | 'deny' | 'allow-session';
+export type PermissionDecision = 'allow' | 'deny' | 'allow-session' | 'allow-always';
 
 const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'personal_memory_write', 'personal_memory_delete', 'http_fetch', 'web_search']);
 const SHELL_TOOLS = new Set(['run_command']);
@@ -184,6 +184,40 @@ export interface ResolvedInteraction {
 }
 
 const sessionAllow = new Map<string, Set<string>>();
+
+/**
+ * Third-party MCP tools the user chose to allow for good ("allow-always"). Only MCP tools qualify: control tools and
+ * the always-ask tools can never be standing grants. The set lives in memory and is mirrored to disk through the
+ * callback the server installs at startup, so it survives a restart and can be revoked from settings.
+ */
+const persistentAllow = new Set<string>();
+let persistAllowChange: ((names: string[]) => void) | null = null;
+
+export function canAllowAlways(name: string): boolean {
+  return name.startsWith('mcp__') && !CONTROL_TOOLS.has(name) && !ALWAYS_ASK_TOOLS.has(name);
+}
+
+export function configurePersistentAllow(initial: string[], onChange: (names: string[]) => void): void {
+  persistentAllow.clear();
+  for (const name of initial) if (canAllowAlways(name)) persistentAllow.add(name);
+  persistAllowChange = onChange;
+}
+
+export function listPersistentAllow(): string[] {
+  return [...persistentAllow].sort();
+}
+
+export function revokePersistentAllow(name: string): boolean {
+  const removed = persistentAllow.delete(name);
+  if (removed) persistAllowChange?.(listPersistentAllow());
+  return removed;
+}
+
+function rememberAlwaysAllow(name: string): void {
+  if (!canAllowAlways(name) || persistentAllow.has(name)) return;
+  persistentAllow.add(name);
+  persistAllowChange?.(listPersistentAllow());
+}
 const sinks = new Map<string, (event: ChatStreamEvent) => void>();
 /**
  * Sessions with no user on the other end (scheduled/heartbeat turns). Any
@@ -303,6 +337,7 @@ export async function requestPermission(options: {
 }): Promise<boolean> {
   const { sessionId, toolCallId, name, args, mode, preview } = options;
   if (!ALWAYS_ASK_TOOLS.has(name) && sessionAllow.get(sessionId)?.has(name)) return true;
+  if (canAllowAlways(name) && persistentAllow.has(name)) return true;
   if (!needsApproval(mode, name)) return true;
   if (name === 'run_command' && typeof args.command === 'string' && isReadOnlyShellCommand(args.command)) {
     return true;
@@ -532,8 +567,18 @@ export function answerPermission(toolCallId: string, decision: PermissionDecisio
     }
     if (visibleInteraction.get(sessionId) === toolCallId) visibleInteraction.delete(sessionId);
     console.info(`[chat] permission answered session=${sessionId} id=${toolCallId} decision=${decision}`);
-    if (decision === 'allow-session' && ALWAYS_ASK_TOOLS.has(item.name)) {
+    if (decision === 'allow-always' && !canAllowAlways(item.name)) {
+      item.decision = 'allow-session'; // not eligible to be permanent; treat as a session grant
+      if (ALWAYS_ASK_TOOLS.has(item.name)) item.decision = 'allow';
+      else rememberSessionAllow(sessionId, item.name);
+    } else if (decision === 'allow-session' && ALWAYS_ASK_TOOLS.has(item.name)) {
       item.decision = 'allow'; // never a standing grant for these
+    } else if (decision === 'allow-always') {
+      rememberAlwaysAllow(item.name);
+      rememberSessionAllow(sessionId, item.name);
+      for (const other of list) {
+        if (other.kind === 'permission' && other.name === item.name && other.decision === undefined) other.decision = 'allow-session';
+      }
     } else if (decision === 'allow-session') {
       rememberSessionAllow(sessionId, item.name);
       // Parallel prompts for the same tool are covered by the same grant.
@@ -641,6 +686,8 @@ export function consumeInteractions(sessionId: string): ResolvedInteraction[] {
 /** Test-only: drop in-memory permission state between cases. */
 export function resetPermissionsForTests(): void {
   sessionAllow.clear();
+  persistentAllow.clear();
+  persistAllowChange = null;
   sinks.clear();
   headlessSessions.clear();
   visibleInteraction.clear();

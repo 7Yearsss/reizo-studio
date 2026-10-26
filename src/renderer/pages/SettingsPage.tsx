@@ -17,6 +17,7 @@ import BackupSection from './settings/BackupSection';
 import DiagnosticsSection from './settings/DiagnosticsSection';
 import UsageCostsSection from './settings/UsageCostsSection';
 import ExtensionsSection from './settings/ExtensionsSection';
+import AlwaysAllowedTools from './settings/AlwaysAllowedTools';
 import MemorySection from './settings/MemorySection';
 import ExpertsSection from './settings/ExpertsSection';
 import HarnessLessonsSection from './settings/HarnessLessonsSection';
@@ -77,7 +78,7 @@ export default function SettingsPage() {
         {section === 'providers' && <ProvidersSection />}
         {section === 'memory' && <MemorySection />}
         {section === 'experts' && <ExpertsSection />}
-        {section === 'extensions' && <ExtensionsSection />}
+        {section === 'extensions' && <><ExtensionsSection /><AlwaysAllowedTools /></>}
         {section === 'usage' && <UsageCostsSection onOpenProviders={() => setSection('providers')} />}
         {section === 'storage' && <><BackupSection /><StorageMaintenanceSection /><DiagnosticsSection /></>}
         {section === 'about' && <AboutSection />}
