@@ -243,6 +243,13 @@ export async function renameSession(id: string, title: string): Promise<void> {
 }
 
 
+export interface SelfCheckResult { id: string; label: string; status: 'ok' | 'warn' | 'fail'; detail: string; ms?: number }
+
+export async function runSelfCheck(): Promise<{ status: 'ok' | 'warn' | 'fail'; results: SelfCheckResult[] }> {
+  const res = await api('/api/diagnostics/check');
+  return res.json();
+}
+
 export async function getDiagnosticsBundle(): Promise<unknown> {
   const res = await api('/api/diagnostics/bundle');
   return res.json();

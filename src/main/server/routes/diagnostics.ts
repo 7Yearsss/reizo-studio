@@ -1,6 +1,10 @@
 import { Hono } from 'hono';
 import path from 'node:path';
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { readdir, readFile, rm, stat, statfs, writeFile } from 'node:fs/promises';
+import { diskLevel, formatBytes } from '../../../shared/diskSpace';
+import { judgeProviderProbe, overallStatus, type CheckResult } from '../../../shared/healthCheck';
+import { resolveSettingsModel } from '../providerResolver';
+import { loadSkills } from '../../skills';
 import { scrubValue } from '../../../shared/diagnosticScrub';
 import type { SettingsStore } from '../storage/settingsStore';
 
@@ -26,8 +30,75 @@ async function recentTraces(dataRoot: string): Promise<unknown[]> {
  * A support bundle the user can read and then send: versions, settings and recent turn traces. Everything passes
  * through the scrubber (secret field names, secret-shaped values, inline images); there is no switch to turn that off.
  */
-export function createDiagnosticsRouter(options: { dataRoot: string; settingsStore: SettingsStore }) {
+async function probeProvider(settingsStore: SettingsStore): Promise<CheckResult> {
+  let resolved: ReturnType<typeof resolveSettingsModel>;
+  try {
+    resolved = resolveSettingsModel(await settingsStore.get(), { category: 'llm' });
+  } catch (error) {
+    return { id: 'provider', label: '模型服务', status: 'fail', detail: error instanceof Error ? error.message : '还没有配置可用的模型服务' };
+  }
+  const started = Date.now();
+  try {
+    const res = await fetch(`${resolved.baseUrl.replace(/\/+$/, '')}/models`, {
+      headers: { authorization: `Bearer ${resolved.apiKey}` },
+      signal: AbortSignal.timeout(8000),
+    });
+    const text = res.ok ? '' : await res.text().catch(() => '');
+    return judgeProviderProbe(resolved.providerId, { status: res.status, error: text.slice(0, 500), ms: Date.now() - started });
+  } catch (error) {
+    return judgeProviderProbe(resolved.providerId, { error: error instanceof Error ? error.message : String(error), ms: Date.now() - started });
+  }
+}
+
+async function checkDataDir(dataRoot: string): Promise<CheckResult[]> {
+  const out: CheckResult[] = [];
+  const probe = path.join(dataRoot, `.write-check-${process.pid}`);
+  try {
+    await writeFile(probe, 'ok');
+    await rm(probe, { force: true });
+    out.push({ id: 'data-dir', label: '数据目录', status: 'ok', detail: '可以写入' });
+  } catch (error) {
+    out.push({ id: 'data-dir', label: '数据目录', status: 'fail', detail: `无法写入数据目录：${error instanceof Error ? error.message : String(error)}` });
+  }
+  try {
+    const stats = await statfs(dataRoot);
+    const free = Number(stats.bavail) * Number(stats.bsize);
+    const level = diskLevel(free);
+    out.push({ id: 'disk', label: '磁盘空间', status: level === 'ok' ? 'ok' : level === 'low' ? 'warn' : 'fail', detail: `剩余 ${formatBytes(free)}` });
+  } catch { /* an unreadable disk is not worth a row */ }
+  return out;
+}
+
+async function checkMcp(dataRoot: string): Promise<CheckResult> {
+  try {
+    const raw = await readFile(path.join(dataRoot, 'mcp.json'), 'utf8');
+    const parsed = JSON.parse(raw) as { mcpServers?: Record<string, unknown> };
+    const count = Object.keys(parsed.mcpServers ?? {}).length;
+    return { id: 'mcp', label: '外部工具（MCP）', status: 'ok', detail: count ? `已配置 ${count} 个服务（未逐个连接，可在设置里点「测试」）` : '没有配置' };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { id: 'mcp', label: '外部工具（MCP）', status: 'ok', detail: '没有配置' };
+    return { id: 'mcp', label: '外部工具（MCP）', status: 'fail', detail: 'mcp.json 不是有效的 JSON，外部工具不会加载' };
+  }
+}
+
+export function createDiagnosticsRouter(options: { dataRoot: string; settingsStore: SettingsStore; skillsDirs?: string[] }) {
   const router = new Hono();
+
+  // One-click self-check: each row says what was tested and what to do about a failure.
+  router.get('/check', async (c) => {
+    const results: CheckResult[] = [];
+    results.push(...await checkDataDir(options.dataRoot));
+    results.push(await probeProvider(options.settingsStore));
+    results.push(await checkMcp(options.dataRoot));
+    try {
+      const skills = await loadSkills(options.skillsDirs ?? []);
+      results.push({ id: 'skills', label: '技能', status: 'ok', detail: `已加载 ${skills.length} 个` });
+    } catch (error) {
+      results.push({ id: 'skills', label: '技能', status: 'fail', detail: `技能目录读取失败：${error instanceof Error ? error.message : String(error)}` });
+    }
+    return c.json({ status: overallStatus(results), results });
+  });
+
   router.get('/bundle', async (c) => {
     const settings = await options.settingsStore.getPublic();
     const bundle = {

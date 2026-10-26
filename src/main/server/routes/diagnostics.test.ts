@@ -35,4 +35,16 @@ describe('diagnostics bundle', () => {
     const body = (await (await router.request('/bundle')).json()) as { traces: unknown[] };
     expect(body.traces).toEqual([]);
   });
+  it('self-check reports a writable data folder, a broken mcp.json and a missing provider key as separate rows', async () => {
+    await writeFile(path.join(root, 'mcp.json'), '{ not json');
+    const router = createDiagnosticsRouter({ dataRoot: root, settingsStore: { get: async () => ({ activeProviderId: 'openai', providers: {} }) } as never, skillsDirs: [] });
+    const body = (await (await router.request('/check')).json()) as { status: string; results: Array<{ id: string; status: string; detail: string }> };
+    const byId = Object.fromEntries(body.results.map((r) => [r.id, r]));
+    expect(byId['data-dir'].status).toBe('ok');
+    expect(byId.mcp.status).toBe('fail');
+    expect(byId.provider.status).toBe('fail');
+    expect(byId.provider.detail).toContain('API Key');
+    expect(byId.skills.status).toBe('ok');
+    expect(body.status).toBe('fail');
+  });
 });

@@ -257,7 +257,7 @@ export function createApp(options: CreateAppOptions) {
   setWriteProtectedRoots([options.dataRoot]);
   app.route('/api/storage', createStorageRouter(options.dataRoot));
   app.route('/api/tool-approvals', createToolApprovalsRouter(options.dataRoot));
-  app.route('/api/diagnostics', createDiagnosticsRouter({ dataRoot: options.dataRoot, settingsStore }));
+  app.route('/api/diagnostics', createDiagnosticsRouter({ dataRoot: options.dataRoot, settingsStore, skillsDirs }));
   if (options.db) app.route('/api/backups', createBackupRouter({ dataRoot: options.dataRoot, db: options.db }));
   app.route('/api/memory', createMemoryRouter(memoryEventsStore, settingsStore, options.dataRoot));
   app.route('/api/sessions', createSessionArtifactsRouter(artifactStore, sessionStore));
