@@ -13,6 +13,7 @@ import { loadDraft, saveDraft } from '../../../shared/composerDraft';
 import { pastedTextFileName, shouldAttachPastedText } from '../../../shared/pastedText';
 import { findPlaceholders } from '../../../shared/promptPlaceholders';
 import ModelPicker from './ModelPicker';
+import ContextRing from './ContextRing';
 import MentionMenu, { extractMentionQuery } from './MentionMenu';
 import SlashPalette, { applySlashArgs, buildSlashCommands, extractSlashQuery, type SlashCommand } from './SlashPalette';
 import PendingInteraction from './PendingInteraction';
@@ -472,6 +473,7 @@ export default function Composer({
       void compactSession(sessionId).then(
         (result) => {
           toast.dismiss(progress);
+          window.dispatchEvent(new Event('reizo:context-changed'));
           if (result.compacted) toast.success('已压缩较早的对话', '模型之后只看摘要和最近一轮；完整记录仍在这里');
           else toast.info(result.reason === 'empty_summary' ? '没有生成有效摘要，未改动' : '对话还很短，无需压缩');
         },
@@ -831,6 +833,7 @@ export default function Composer({
                 leadingAction={
                   <div className="flex min-w-0 shrink items-center gap-1">
                     <ModelPicker compact={compact} />
+                    <ContextRing sessionId={sessionId} sending={sending} />
                     {compact ? (
                       <SelectField
                         ariaLabel="权限模式"

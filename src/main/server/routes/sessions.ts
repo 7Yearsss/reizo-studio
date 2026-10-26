@@ -3,7 +3,8 @@ import { hasTrash, TRASH_RETENTION_MS, type SessionStore } from '../../../shared
 import type { ArtifactStore } from '../storage/artifactStore';
 import { pendingInteractionKindForSession } from '../agent/permissions';
 import { isSessionTurnLive } from '../agent/session';
-import { compactSession, type RewriteText } from '../agent/compaction';
+import { compactSession, estimateSessionTokens, type RewriteText } from '../agent/compaction';
+import { compactLevel, DEFAULT_CONTEXT_WINDOW_TOKENS } from '../../../shared/autoCompact';
 import { closeSessionMcp } from '../agent/mcpTools';
 import { buildSessionExport, sessionToMarkdown } from '../../../shared/sessionExport';
 
@@ -17,6 +18,15 @@ export function createSessionsRouter(sessionStore: SessionStore, artifactStore?:
       .then(async (ids) => { if (artifactStore) for (const id of ids) await artifactStore.removeBySession(id); })
       .catch((error) => console.warn('[sessions] trash purge failed', error));
   }
+
+  // How full the model's context is (an estimate of what the next request would carry).
+  router.get('/:id/context', async (c) => {
+    const session = await sessionStore.get(c.req.param('id'));
+    if (!session) return c.json({ error: 'Session not found' }, 404);
+    const usedTokens = estimateSessionTokens(session.messages);
+    const windowTokens = DEFAULT_CONTEXT_WINDOW_TOKENS;
+    return c.json({ usedTokens, windowTokens, ratio: usedTokens / windowTokens, level: compactLevel(usedTokens, windowTokens) });
+  });
 
   // /compact: replace the older part of the conversation with a model-written summary (the transcript stays).
   router.post('/:id/compact', async (c) => {

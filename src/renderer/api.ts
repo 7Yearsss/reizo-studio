@@ -1201,3 +1201,9 @@ export interface CompactResult { compacted: boolean; summarized: number; reason?
 export async function compactSession(sessionId: string): Promise<CompactResult> {
   return (await api(`/api/sessions/${sessionId}/compact`, { method: 'POST' })).json();
 }
+
+export interface ContextUsage { usedTokens: number; windowTokens: number; ratio: number; level: 'ok' | 'warn' | 'compact' | 'urgent' }
+
+export async function getContextUsage(sessionId: string): Promise<ContextUsage> {
+  return (await api(`/api/sessions/${sessionId}/context`)).json();
+}
