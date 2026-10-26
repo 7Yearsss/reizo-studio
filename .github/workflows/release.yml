@@ -4,6 +4,11 @@ on:
   # Manual only: run from the Actions tab (or `gh workflow run release.yml`)
   # to build and publish installers for all three platforms.
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish installers to the public downloads repository
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -16,10 +21,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # - os: windows-latest
-          #   name: windows
+          - os: windows-latest
+            name: windows-x64
+            arch: x64
           - os: macos-latest
-            name: macos
+            name: macos-arm64
+            arch: arm64
+          - os: macos-15-intel
+            name: macos-x64
+            arch: x64
           # - os: ubuntu-latest
           #   name: linux
 
@@ -52,7 +62,7 @@ jobs:
       - name: Build installers
         env:
           NODE_OPTIONS: --max-old-space-size=6144
-        run: npm run make
+        run: npm run make -- --arch=${{ matrix.arch }}
 
       - name: Verify extracted macOS app signature
         if: runner.os == 'macOS'
@@ -64,11 +74,12 @@ jobs:
           name: release-${{ matrix.name }}
           path: out/make/**
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 14
 
   release:
     name: Publish GitHub Release
     needs: build
+    if: ${{ inputs.publish }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

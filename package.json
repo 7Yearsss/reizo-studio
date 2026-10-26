@@ -1,7 +1,7 @@
 {
   "name": "reizo-studio",
   "productName": "Reizo Studio",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local-first desktop agent for Reizo.",
   "main": ".vite/build/index.js",
   "private": true,
