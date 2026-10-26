@@ -1,6 +1,7 @@
-import { app, BrowserWindow, nativeTheme } from 'electron';
+import { app, BrowserWindow, nativeTheme, screen } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
+import { parseSavedWindowState, resolveWindowBounds, type SavedWindowState } from '../shared/windowBounds';
 
 let mainWindow: BrowserWindow | null = null;
 let quitting = false;
@@ -29,6 +30,48 @@ export function getAppIcon(): string | undefined {
   return undefined;
 }
 
+const WINDOW_MIN = { width: 900, height: 600 };
+
+function windowStateFile(): string {
+  return path.join(app.getPath('userData'), 'window-state.json');
+}
+
+function readWindowState(): SavedWindowState | null {
+  try {
+    return parseSavedWindowState(JSON.parse(fs.readFileSync(windowStateFile(), 'utf8')));
+  } catch {
+    return null;
+  }
+}
+
+/** Remember where the window was (and whether it was maximized) so a restart puts it back. Best effort. */
+function trackWindowState(win: BrowserWindow): void {
+  let timer: NodeJS.Timeout | null = null;
+  const save = () => {
+    timer = null;
+    if (win.isDestroyed() || win.isMinimized() || win.isFullScreen()) return;
+    // A maximized window reports the maximized rectangle; keep the last normal bounds underneath it instead.
+    const bounds = win.isMaximized() ? win.getNormalBounds() : win.getBounds();
+    try {
+      fs.writeFileSync(windowStateFile(), JSON.stringify({ ...bounds, maximized: win.isMaximized() }));
+    } catch {
+      /* losing the position is not worth surfacing */
+    }
+  };
+  const schedule = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(save, 400);
+  };
+  win.on('resize', schedule);
+  win.on('move', schedule);
+  win.on('maximize', schedule);
+  win.on('unmaximize', schedule);
+  win.on('close', () => {
+    if (timer) clearTimeout(timer);
+    save();
+  });
+}
+
 export function createMainWindow(): BrowserWindow {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.show();
@@ -39,11 +82,18 @@ export function createMainWindow(): BrowserWindow {
   const isMac = process.platform === 'darwin';
   const iconPath = getAppIcon();
 
+  const restored = resolveWindowBounds(
+    readWindowState(),
+    screen.getAllDisplays().map((d) => d.workArea),
+    screen.getPrimaryDisplay().workArea,
+    { width: 1280, height: 840 },
+    WINDOW_MIN,
+  );
+
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 840,
-    minWidth: 900,
-    minHeight: 600,
+    ...restored.bounds,
+    minWidth: WINDOW_MIN.width,
+    minHeight: WINDOW_MIN.height,
     show: false,
     frame: isMac,
     icon: iconPath,
@@ -58,6 +108,9 @@ export function createMainWindow(): BrowserWindow {
       sandbox: true,
     },
   });
+
+  if (restored.maximized) mainWindow.maximize();
+  trackWindowState(mainWindow);
 
   if (iconPath && process.platform === 'win32') {
     mainWindow.setIcon(iconPath);
