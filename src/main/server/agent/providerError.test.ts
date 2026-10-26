@@ -67,3 +67,21 @@ describe('classifyProviderError', () => {
     expect(classifyProviderError(new Error('Step timeout of 120000ms exceeded')).kind).toBe('timeout');
   });
 });
+
+describe('formatProviderError — errors people can act on', () => {
+  it('a region-blocked 403 does not tell the user to check their key', () => {
+    const text = formatProviderError({ statusCode: 403, message: 'forbidden', data: { error: { message: 'unsupported_country_region_territory' } } });
+    expect(text).toContain('地区');
+    expect(text).toContain('不是密钥');
+    expect(text).not.toContain('请检查 API 密钥');
+  });
+  it('a plain 401 still points at the key, a 402 at the balance, a 404 at the model', () => {
+    expect(formatProviderError({ statusCode: 401, message: 'Incorrect API key provided' })).toContain('密钥');
+    expect(formatProviderError({ statusCode: 402, message: 'payment required' })).toContain('余额');
+    expect(formatProviderError({ statusCode: 404, message: 'The model `x` does not exist' })).toContain('找不到这个模型');
+  });
+  it('classifies the new kinds as not retryable', () => {
+    expect(classifyProviderError({ statusCode: 403, data: { error: { message: 'unsupported_country_region_territory' } } })).toMatchObject({ kind: 'region_blocked', retryable: false });
+    expect(classifyProviderError({ statusCode: 400, message: "maximum context length is 128000 tokens" }).kind).toBe('context_too_long');
+  });
+});

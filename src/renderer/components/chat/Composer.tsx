@@ -11,6 +11,7 @@ import type { PromptEditorHandle } from '../agents/prompt-editor';
 import { renumberCitations } from '../../../shared/promptDraft';
 import { loadDraft, saveDraft } from '../../../shared/composerDraft';
 import { pastedTextFileName, shouldAttachPastedText } from '../../../shared/pastedText';
+import { turnErrorFromMessage } from '../../../shared/turnError';
 import { findPlaceholders } from '../../../shared/promptPlaceholders';
 import ModelPicker from './ModelPicker';
 import ContextRing from './ContextRing';
@@ -465,6 +466,22 @@ export default function Composer({
     return () => window.removeEventListener('reizo:focus-composer', onFocus);
   }, [sessionId, focusComposer]);
 
+  /** The one fix this failure points at (open the model settings, compact, …); retry stays as its own button. */
+  const failure = turnErrorFromMessage(turnError);
+  const errorAction = failure && !sending
+    ? ((): { label: string; run: () => void } | null => {
+        switch (failure.action) {
+          case 'open_providers': return { label: '去设置', run: () => uiStore.openSettings('providers') };
+          case 'switch_model': return { label: '换模型', run: () => uiStore.openSettings('providers') };
+          case 'compact_session':
+            return sessionId
+              ? { label: '压缩对话', run: () => { void compactSession(sessionId).then(() => { window.dispatchEvent(new Event('reizo:context-changed')); toast.success('已压缩较早的对话，可以重试了'); }, () => toast.error('压缩失败')); } }
+              : null;
+          default: return null;
+        }
+      })()
+    : null;
+
   function pickSlash(command: SlashCommand, args: string) {
     if (command.id === 'compact') {
       setDraft('');
@@ -520,6 +537,15 @@ export default function Composer({
         {!sending && turnOutcome === 'error' && turnError && (
           <div className="mb-2 flex items-center gap-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[13px] text-ink" role="alert">
             <span className="flex-1">回复失败：{turnError}</span>
+            {errorAction ? (
+              <button
+                type="button"
+                onClick={errorAction.run}
+                className="inline-flex items-center gap-1 rounded-full bg-ink px-2.5 py-1 text-[12px] text-paper-raised transition-opacity hover:opacity-85"
+              >
+                {errorAction.label}
+              </button>
+            ) : null}
             {onRetryTurn && (
               <button
                 type="button"

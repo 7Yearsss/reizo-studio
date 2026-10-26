@@ -3,6 +3,25 @@
  * Gateways such as new-api often wrap a Cloudflare 524 as `{ message: "openai_error" }`.
  */
 
+import { classifyTurnError, presentTurnError, type TurnErrorKind } from '../../../shared/turnError';
+
+/** Kinds whose wording comes from the shared presenter (they used to all read "check your API key"). */
+const PRESENTED: ReadonlySet<TurnErrorKind> = new Set(['region_blocked', 'auth', 'quota', 'forbidden', 'model_not_found', 'content_filtered', 'context_too_long', 'payload_too_large']);
+
+/** Everything the provider said, wherever the SDK put it, so classification sees the real reason behind a generic message. */
+function providerText(error: unknown): string {
+  const rec = isRecord(error) ? error : undefined;
+  const nested = nestedError(error);
+  return [
+    error instanceof Error ? error.message : '',
+    typeof rec?.message === 'string' ? rec.message : '',
+    typeof nested?.message === 'string' ? nested.message : '',
+    typeof nested?.code === 'string' ? nested.code : '',
+    typeof rec?.responseBody === 'string' ? rec.responseBody : '',
+    typeof error === 'string' ? error : '',
+  ].join(' ');
+}
+
 const OPAQUE = new Set(['openai_error', 'bad_response_status_code', 'internal_error', 'error', '']);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -43,8 +62,10 @@ export function formatProviderError(error: unknown): string {
     return `上游超时（HTTP ${status}）。网关在等待模型输出时断开了${retryHint}。`;
   }
   if (status === 429) return '请求过于频繁（HTTP 429）。请稍后再试。';
-  if (status === 401 || status === 403) {
-    return `模型服务拒绝了请求（HTTP ${status}）。请检查 API 密钥。`;
+  const presented = classifyTurnError({ status, message: providerText(error) });
+  if (PRESENTED.has(presented)) {
+    const shown = presentTurnError({ status, message: providerText(error) });
+    return `${shown.title}${status ? `（HTTP ${status}）` : ''}。${shown.hint}`;
   }
   if (status === 502 || status === 503) {
     return `上游暂时不可用（HTTP ${status}）${retryHint}。`;
@@ -59,6 +80,7 @@ export function formatProviderError(error: unknown): string {
 }
 
 export type ProviderErrorKind =
+  | TurnErrorKind
   | 'timeout'
   | 'rate_limited'
   | 'capacity'
@@ -98,6 +120,10 @@ export function classifyProviderError(error: unknown): ProviderErrorInfo {
   ).toLowerCase();
   const message = formatProviderError(error);
 
+  const presented = classifyTurnError({ status, message: providerText(error) });
+  if (PRESENTED.has(presented)) {
+    return { kind: presented, retryable: false, alreadyRetriedBySdk: false, message };
+  }
   if (status === 401 || status === 403 || /api key|unauthorized|invalid authentication/.test(raw)) {
     return { kind: 'auth', retryable: false, alreadyRetriedBySdk: false, message };
   }
