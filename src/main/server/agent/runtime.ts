@@ -57,6 +57,7 @@ import { createTurnTraceCollector, writeTurnTrace } from './turnTrace';
 import { readWorkspaceMemory } from '../../workspaceMemory';
 import { formatRules, readRuleSources } from './workspaceRules';
 import { createSkillTools } from './skillTools';
+import { applySkillToolPolicy } from './skillToolFilter';
 import { observeRetries } from '../../../shared/retryObserver';
 import { messagesForModel } from '../../../shared/compactBoundary';
 import { applyRunCeiling, effectiveRunMode, READ_ONLY_RUN_NOTICE } from './runCeiling';
@@ -572,7 +573,7 @@ export async function runChatTurn(options: {
       })
     : undefined;
   const tools = rawTools || hasMcpTools
-    ? applyRunCeiling(serializeMutatingTools(wrapToolsWithHooks({ ...(rawTools ?? {}), ...(subagentTools ?? {}), ...(mcp?.tools ?? {}) } as NonNullable<typeof rawTools>, hookRunner)), runCeiling)
+    ? applySkillToolPolicy(applyRunCeiling(serializeMutatingTools(wrapToolsWithHooks({ ...(rawTools ?? {}), ...(subagentTools ?? {}), ...(mcp?.tools ?? {}) } as NonNullable<typeof rawTools>, hookRunner)), runCeiling), skill?.allowedTools)
     : undefined;
 
   const accounting = options.usageStore ?? canvasStore?.usage;
@@ -613,13 +614,15 @@ export async function runChatTurn(options: {
   const initialSnap = initialCanvas && canvasStore ? canvasStore.getSnapshot(initialCanvas.id) : null;
   if (initialSnap) lastSeenNodeCount = initialSnap.nodes.length;
 
+  // A skill may set its own step limit (`max-turns`); otherwise the global one applies.
+  const stepLimit = skill?.maxTurns ?? MAX_AGENT_STEPS;
   const buildStream = (messages: ModelMessage[], signal: AbortSignal) =>
     streamText({
       model,
       instructions: mcp?.warnings?.length ? `${instructions}\n\n[MCP Notice]\n${mcp.warnings.map((w) => `- ${w}`).join('\n')}` : instructions,
       messages: compactModelMessages(messages),
       tools,
-      stopWhen: tools ? isStepCount(MAX_AGENT_STEPS) : undefined,
+      stopWhen: tools ? isStepCount(stepLimit) : undefined,
       maxRetries: PROVIDER_MAX_RETRIES,
       timeout: PROVIDER_TIMEOUT,
       providerOptions,
@@ -868,7 +871,7 @@ export async function runChatTurn(options: {
     },
     onContinuePass: async ({ getAssistant, finishReason, passIndex, signal }) => {
       if (hitStepCap(finishReason)) {
-        emit({ type: 'notice', tone: 'warn', text: `本轮已达到 ${MAX_AGENT_STEPS} 步上限而停止，任务可能未完成。回复「继续」可从断点接着做。` });
+        emit({ type: 'notice', tone: 'warn', text: `本轮已达到 ${stepLimit} 步上限而停止，任务可能未完成。回复「继续」可从断点接着做。` });
       }
       if (passIndex >= MAX_CONTINUE_PASSES) return null;
       const snap = getAssistant();

@@ -1,4 +1,5 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
+import { parseAllowedTools } from '../shared/skillToolPolicy';
 import path from 'node:path';
 import { skillContractSchema, type SkillContract } from '../shared/skillContract';
 
@@ -19,6 +20,10 @@ export interface Skill {
   doNotTrigger?: string;
   /** `disable-auto-invoke: true` — only the user may start it. */
   autoInvoke?: boolean;
+  /** `allowed-tools:` — the only tools (and command/path scopes) this skill may use while it runs. */
+  allowedTools?: import('../shared/skillToolPolicy').ToolRule[];
+  /** `max-turns:` — step limit for a turn that runs this skill (default is the global limit). */
+  maxTurns?: number;
   source: 'bundled' | 'user';
   /** Directory the skill file lives in — used to serve `skill-asset:` URLs. */
   dir: string;
@@ -97,7 +102,7 @@ export function buildSkillsTriggerIndex(skills: Skill[], maxChars = 7_000): stri
   ].join('\n');
 }
 
-function parseFrontmatter(raw: string): { name?: string; description?: string; prompt?: string; cover?: string; category?: string; trigger?: string; doNotTrigger?: string; disableAutoInvoke?: boolean; body: string } {
+function parseFrontmatter(raw: string): { name?: string; description?: string; prompt?: string; cover?: string; category?: string; trigger?: string; doNotTrigger?: string; disableAutoInvoke?: boolean; allowedTools?: string; maxTurns?: string; body: string } {
   if (!raw.startsWith('---')) return { body: raw.trim() };
   const end = raw.indexOf('\n---', 3);
   if (end < 0) return { body: raw.trim() };
@@ -109,7 +114,7 @@ function parseFrontmatter(raw: string): { name?: string; description?: string; p
     if (idx < 0) continue;
     fields[line.slice(0, idx).trim()] = line.slice(idx + 1).trim().replace(/^["']|["']$/g, '');
   }
-  return { name: fields.name, description: fields.description, prompt: fields.prompt, cover: fields.cover, category: fields.category, trigger: fields.trigger, doNotTrigger: fields['do-not-trigger'], disableAutoInvoke: /^true$/i.test(fields['disable-auto-invoke'] ?? ''), body };
+  return { name: fields.name, description: fields.description, prompt: fields.prompt, cover: fields.cover, category: fields.category, trigger: fields.trigger, doNotTrigger: fields['do-not-trigger'], disableAutoInvoke: /^true$/i.test(fields['disable-auto-invoke'] ?? ''), allowedTools: fields['allowed-tools'], maxTurns: fields['max-turns'], body };
 }
 
 async function loadSkillFile(file: string, source: Skill['source']): Promise<Skill | null> {
@@ -143,6 +148,8 @@ async function loadSkillFile(file: string, source: Skill['source']): Promise<Ski
       ...(parsed.trigger ? { trigger: parsed.trigger } : {}),
       ...(parsed.doNotTrigger ? { doNotTrigger: parsed.doNotTrigger } : {}),
       autoInvoke: !parsed.disableAutoInvoke,
+      ...(parseAllowedTools(parsed.allowedTools) ? { allowedTools: parseAllowedTools(parsed.allowedTools) } : {}),
+      ...(Number.isInteger(Number(parsed.maxTurns)) && Number(parsed.maxTurns) > 0 ? { maxTurns: Number(parsed.maxTurns) } : {}),
       body: parsed.body,
       source,
       dir: path.dirname(file),

@@ -41,3 +41,14 @@ describe('skill auto-invocation catalog', () => {
     expect((await run('nope')).ok).toBe(false);
   });
 });
+
+describe('skill tool limits', () => {
+  it('parses allowed-tools and max-turns from the bundled skills', async () => {
+    const skills = await loadSkills([dir]);
+    const commit = skills.find((s) => s.id === 'commit-message')!;
+    expect(commit.allowedTools).toContainEqual({ name: 'run_command', argPattern: 'git diff*' });
+    expect(commit.allowedTools?.some((r) => r.argPattern === 'git *')).toBe(false); // no blanket git: no push/commit/reset
+    expect(commit.allowedTools?.some((r) => r.name === 'write_file')).toBe(false);
+    expect(skills.find((s) => s.id === 'social-pack')!.allowedTools).toBeUndefined();
+  });
+});

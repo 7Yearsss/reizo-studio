@@ -3,6 +3,7 @@ name: review-code
 description: Review the bound workspace for bugs, regressions, and missing tests.
 trigger: 用户要求审查/评审一段代码或一次改动
 do-not-trigger: 只是问代码规范或编程建议
+allowed-tools: run_command(git diff*), run_command(git status*), run_command(git log*), run_command(git show*), read_file, grep, find_files, list_dir
 category: dev
 ---
 

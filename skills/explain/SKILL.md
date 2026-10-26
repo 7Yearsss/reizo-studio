@@ -3,6 +3,7 @@ name: explain
 description: Explain how a file, function, or flow in the workspace actually works.
 trigger: 用户要求解释某段代码、文件或概念的工作原理
 do-not-trigger: 用户只是闲聊或问别的问题
+allowed-tools: read_file, grep, find_files, list_dir
 category: dev
 ---
 
