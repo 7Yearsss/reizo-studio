@@ -1,5 +1,7 @@
+import { version } from '../../package.json';
+
 export const APP_NAME = 'Reizo Studio';
-export const APP_VERSION = '0.1.0';
+export const APP_VERSION = version;
 
 // Base port the local API server tries first. If it's taken, the server
 // walks forward until it finds a free one — see main/server/listen.ts.
