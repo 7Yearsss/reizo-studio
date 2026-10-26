@@ -14,6 +14,8 @@ import logoUrl from '../../assets/logo.png';
 import { useUiStore } from '../../state/useUiStore';
 import { useTabStore } from '../../state/useTabStore';
 import * as uiStore from '../../state/uiStore';
+import * as tabStore from '../../state/tabStore';
+import { tabIndexForShortcut } from '../../../shared/tabShortcut';
 import {
   goBack,
   goForward,
@@ -68,6 +70,15 @@ export default function CustomTitleBar() {
       if ((e.metaKey || e.ctrlKey) && (e.key === 'b' || e.key === 'B')) {
         e.preventDefault();
         uiStore.toggleSidebar();
+        return;
+      }
+
+      const { tabs } = tabStore.getSnapshot();
+      const tabIndex = tabIndexForShortcut(e, tabs.length);
+      if (tabIndex !== null) {
+        e.preventDefault();
+        uiStore.setMode('chat');
+        tabStore.selectTab(tabs[tabIndex].id);
         return;
       }
 
