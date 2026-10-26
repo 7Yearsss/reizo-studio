@@ -11,6 +11,7 @@ import { createFileSessionStore } from './storage/fileSessionStore';
 import { createSettingsStore } from './storage/settingsStore';
 import { createSessionsRouter } from './routes/sessions';
 import { createAutoCompactor } from './agent/compaction';
+import { createStorageRouter } from './routes/storage';
 import { chatModelCapabilities } from '../../shared/chatModelCapabilities';
 import { createChatRouter } from './routes/chat';
 import { createSettingsRouter } from './routes/settings';
@@ -250,6 +251,7 @@ export function createApp(options: CreateAppOptions) {
     ),
   );
   app.route('/api/experts', createExpertsRouter(expertStore));
+  app.route('/api/storage', createStorageRouter(options.dataRoot));
   if (options.db) app.route('/api/backups', createBackupRouter({ dataRoot: options.dataRoot, db: options.db }));
   app.route('/api/memory', createMemoryRouter(memoryEventsStore, settingsStore, options.dataRoot));
   app.route('/api/sessions', createSessionArtifactsRouter(artifactStore, sessionStore));

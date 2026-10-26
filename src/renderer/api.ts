@@ -243,6 +243,11 @@ export async function renameSession(id: string, title: string): Promise<void> {
 }
 
 
+export async function getDiskSpace(): Promise<{ freeBytes: number | null; totalBytes: number | null }> {
+  const res = await api('/api/storage/disk');
+  return (await res.json()) as { freeBytes: number | null; totalBytes: number | null };
+}
+
 export async function searchMessages(query: string): Promise<MessageHit[]> {
   const res = await api(`/api/sessions/search?q=${encodeURIComponent(query)}`);
   const data = (await res.json()) as { hits?: MessageHit[] };

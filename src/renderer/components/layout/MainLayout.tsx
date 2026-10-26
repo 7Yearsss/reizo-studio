@@ -12,6 +12,7 @@ import ChatPage from '../../pages/ChatPage';
 import { lazyWithRetry } from '../../lib/lazyWithRetry';
 import ToastContainer from '../ui/ToastContainer';
 import GlobalCommandPalette from './GlobalCommandPalette';
+import DiskSpaceMonitor from './DiskSpaceMonitor';
 import SettingsDialog from './SettingsDialog';
 
 // Keep the creative workspace ready; secondary modes load their editors only
@@ -44,6 +45,7 @@ export default function MainLayout() {
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-paper text-ink">
       <CustomTitleBar />
+      <DiskSpaceMonitor />
       <div className="flex min-h-0 flex-1">
         <Sidebar />
         <main
