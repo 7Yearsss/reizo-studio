@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Notification } from 'electron';
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Notification, powerMonitor, powerSaveBlocker } from 'electron';
 import { describeActiveWork, hasActiveWork } from '../shared/quitConfirm';
 import { liveTurnCount } from './server/agent/session';
 import { activeVideoJobCount } from './server/canvas/videoJobRuntime';
@@ -60,6 +60,7 @@ let dbHandle: DbHandle | null = null;
 let freezeTurnMarkers: (() => void) | null = null;
 let stopAutoBackup: (() => void) | null = null;
 let stopScheduler: (() => Promise<void>) | null = null;
+let tickScheduler: (() => void) | null = null;
 let shuttingDown = false;
 let stopAccount: (() => void) | null = null;
 // Recovery assumes exclusive ownership of this data directory.
@@ -107,7 +108,17 @@ async function bootstrap(): Promise<void> {
   });
   stopAutoBackup = startAutoBackup(dataRoot, () => dbHandle);
   ipcMain.handle(IPC.APP_RELAUNCH, () => { app.relaunch(); app.quit(); });
-  stopScheduler = startScheduler({ dataRoot, scheduleStore, settingsStore, skillsDirs, sessionStore, usageStore: createUsageStore(dbHandle) });
+  const scheduler = startScheduler({ dataRoot, scheduleStore, settingsStore, skillsDirs, sessionStore, usageStore: createUsageStore(dbHandle) });
+  stopScheduler = scheduler;
+  tickScheduler = scheduler.tickNow;
+  // Keep the machine awake while a reply or video is being produced, and look for missed schedules as soon as it wakes.
+  let sleepBlock: number | null = null;
+  setInterval(() => {
+    const busy = hasActiveWork({ turns: liveTurnCount(), videoJobs: activeVideoJobCount() });
+    if (busy && sleepBlock === null) sleepBlock = powerSaveBlocker.start('prevent-app-suspension');
+    else if (!busy && sleepBlock !== null) { powerSaveBlocker.stop(sleepBlock); sleepBlock = null; }
+  }, 15_000).unref();
+  powerMonitor.on('resume', () => tickScheduler?.());
 
   ipcMain.handle(IPC.GET_API_ORIGIN, () => runningServer?.origin);
   ipcMain.handle(IPC.EXPORT_PDF, async (_e, html: string) => {

@@ -32,7 +32,7 @@ export function startScheduler(options: {
   skillsDirs: string[];
   sessionStore: SessionStore;
   usageStore?: UsageStore;
-}): (() => Promise<void>) & { ready: Promise<void> } {
+}): (() => Promise<void>) & { ready: Promise<void>; /** Check for due schedules right now (after the machine wakes, timers can be late). */ tickNow: () => void } {
   const sessionStore = options.sessionStore;
   /** Schedules currently mid-fire — one stuck run can never starve the rest. */
   const inflight = new Set<string>();
@@ -120,5 +120,5 @@ export function startScheduler(options: {
     for (const sessionId of liveSessions) abortChatTurn(sessionId);
     stopped = ready.catch((): void => undefined).then(async () => { await options.scheduleStore.interruptActive('应用退出时执行尚未确认，已暂停；请先查看关联会话，再手动决定是否重试'); });
     return stopped;
-  }, { ready });
+  }, { ready, tickNow: () => { void tick().catch(() => console.warn('[scheduler] schedules could not be read')); } });
 }
