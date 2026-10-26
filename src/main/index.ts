@@ -13,6 +13,8 @@ import { createUsageStore } from './server/storage/usageStore';
 import { createThoughtStore } from './server/storage/thoughtStore';
 import { createMainWindow, getAppIcon, setQuitting } from './window';
 import { stopAllComputerControl } from './computerUse';
+import { applyPendingRestore } from './server/backup/backup';
+import { startAutoBackup } from './autoBackup';
 import { initComputerStopOverlay } from './computerUse/stopOverlay';
 import { registerWindowIpc } from './windowIpc';
 import { registerWorkspaceIpc } from './workspaceIpc';
@@ -53,6 +55,7 @@ if (process.env.REIZO_DEV_NO_SANDBOX === '1') {
 let runningServer: RunningServer | null = null;
 let dbHandle: DbHandle | null = null;
 let freezeTurnMarkers: (() => void) | null = null;
+let stopAutoBackup: (() => void) | null = null;
 let stopScheduler: (() => Promise<void>) | null = null;
 let shuttingDown = false;
 let stopAccount: (() => void) | null = null;
@@ -73,6 +76,9 @@ async function bootstrap(): Promise<void> {
   if (app.isPackaged) process.env.REIZO_VIDEO_EDITOR_RUNTIME = path.join(process.resourcesPath, 'video-editor', 'runtime.json');
   const dataRoot = path.join(app.getPath('userData'), 'data');
   mkdirSync(dataRoot, { recursive: true });
+  // A restore queued by the user is applied here, before any store or the database touches the data folder. One interrupted by a crash is rolled back.
+  const restore = await applyPendingRestore(dataRoot);
+  if (restore.status !== 'none') console.log('[main] restore:', restore.status, 'error' in restore ? restore.error : '');
   const account = createDesktopAccountService(dataRoot);
   const settingsStore = createSettingsStore(dataRoot, () => account.modelCredential());
   const scheduleStore = createScheduleStore(dataRoot);
@@ -96,6 +102,8 @@ async function bootstrap(): Promise<void> {
     db: dbHandle,
     devServerOrigin: devServerOrigin(),
   });
+  stopAutoBackup = startAutoBackup(dataRoot, () => dbHandle);
+  ipcMain.handle(IPC.APP_RELAUNCH, () => { app.relaunch(); app.quit(); });
   stopScheduler = startScheduler({ dataRoot, scheduleStore, settingsStore, skillsDirs, sessionStore, usageStore: createUsageStore(dbHandle) });
 
   ipcMain.handle(IPC.GET_API_ORIGIN, () => runningServer?.origin);
@@ -139,6 +147,8 @@ async function shutdown(): Promise<void> {
   runningServer?.stopCanvasJobs();
   await stopScheduler?.().catch((error) => console.warn('[main] schedule interruption could not be persisted; records were retained', error));
   stopScheduler = null;
+  stopAutoBackup?.();
+  stopAutoBackup = null;
   globalShortcut.unregisterAll();
   await Promise.race([
     drainMemoryJobs(),

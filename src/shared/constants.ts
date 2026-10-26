@@ -47,6 +47,7 @@ export const IPC = {
   HOOKS_SAVE: 'reizo:hooks-save',
   PLUGIN_INSTALL: 'reizo:plugin-install',
   PLUGIN_PREVIEW: 'reizo:plugin-preview',
+  APP_RELAUNCH: 'reizo:app-relaunch',
   PLUGIN_SET_CONFIG: 'reizo:plugin-set-config',
   PLUGIN_INSTALL_CONFIRMED: 'reizo:plugin-install-confirmed',
   PLUGIN_SET_ENABLED: 'reizo:plugin-set-enabled',

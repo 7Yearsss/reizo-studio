@@ -710,6 +710,12 @@ export function getAgentSession(sessionId: string): AgentSession {
   return session;
 }
 
+/** Is any conversation mid-turn right now? Backups and restores wait for quiet. */
+export function anyTurnLive(): boolean {
+  for (const session of sessions.values()) if (session.running) return true;
+  return false;
+}
+
 /** True while a turn for this session is in flight (including suspended on an interaction). */
 export function isSessionTurnLive(sessionId: string): boolean {
   return sessions.get(sessionId)?.running ?? false;

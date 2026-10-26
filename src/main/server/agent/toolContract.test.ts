@@ -35,7 +35,7 @@ function contract(tools: Record<string, unknown>): Record<string, { description:
   return out;
 }
 
-const none = () => undefined;
+const none = (): void => undefined;
 const skill = { id: 'demo', name: 'Demo', description: 'd', body: 'b', source: 'bundled', dir: '.', autoInvoke: true } as unknown as Skill;
 const stub = {} as never;
 

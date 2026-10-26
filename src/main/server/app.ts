@@ -45,6 +45,7 @@ import { createPublicProvidersRouter } from './routes/publicProviders';
 import { createMemoryEventsStore } from './storage/memoryEventsStore';
 import { createMemoryRouter } from './routes/memory';
 import { createExpertsRouter } from './routes/experts';
+import { createBackupRouter } from './routes/backups';
 import { createExpertStore } from './storage/expertStore';
 import { createWebSearchStore } from './storage/webSearchStore';
 import { recoverCanvasJobs } from './canvas/recoverJobs';
@@ -248,6 +249,7 @@ export function createApp(options: CreateAppOptions) {
     ),
   );
   app.route('/api/experts', createExpertsRouter(expertStore));
+  if (options.db) app.route('/api/backups', createBackupRouter({ dataRoot: options.dataRoot, db: options.db }));
   app.route('/api/memory', createMemoryRouter(memoryEventsStore, settingsStore, options.dataRoot));
   app.route('/api/sessions', createSessionArtifactsRouter(artifactStore, sessionStore));
   app.route('/api/artifacts', createArtifactsRouter(artifactStore));

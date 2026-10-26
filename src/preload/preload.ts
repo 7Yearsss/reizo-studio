@@ -68,6 +68,7 @@ contextBridge.exposeInMainWorld('reizo', {
   resetMcpBaseline: (serverName?: string): Promise<void> => ipcRenderer.invoke(IPC.MCP_RESET_BASELINE, serverName),
   listHooks: (): Promise<HookEntry[]> => ipcRenderer.invoke(IPC.HOOKS_LIST),
   saveHooks: (entries: HookEntry[]): Promise<void> => ipcRenderer.invoke(IPC.HOOKS_SAVE, entries),
+  relaunchApp: (): Promise<void> => ipcRenderer.invoke(IPC.APP_RELAUNCH),
   installPlugin: (): Promise<PluginSummary | null> => ipcRenderer.invoke(IPC.PLUGIN_INSTALL),
   setPluginConfig: (id: string, name: string, value: string | null): Promise<void> => ipcRenderer.invoke(IPC.PLUGIN_SET_CONFIG, id, name, value),
   previewPlugin: (): Promise<PluginPreview | null> => ipcRenderer.invoke(IPC.PLUGIN_PREVIEW),

@@ -1250,3 +1250,23 @@ export async function getWebSearchSettings(): Promise<WebSearchSettings> {
 export async function saveWebSearchSettings(input: { provider: string; baseUrl?: string; apiKey?: string }): Promise<void> {
   await api('/api/settings/web-search', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
 }
+
+export interface BackupSettings { enabled: boolean; intervalHours: number; keep: number }
+export interface BackupItem { name: string; createdAt: string; bytes: number; files: number }
+export interface BackupList { backups: BackupItem[]; settings: BackupSettings }
+
+export async function listBackups(): Promise<BackupList> {
+  return (await api('/api/backups')).json();
+}
+
+export async function createBackup(): Promise<BackupItem> {
+  return ((await (await api('/api/backups', { method: 'POST' })).json()) as { backup: BackupItem }).backup;
+}
+
+export async function restoreBackup(name: string): Promise<void> {
+  await api(`/api/backups/${encodeURIComponent(name)}/restore`, { method: 'POST' });
+}
+
+export async function saveBackupSettings(patch: Partial<BackupSettings>): Promise<void> {
+  await api('/api/backups/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(patch) });
+}
