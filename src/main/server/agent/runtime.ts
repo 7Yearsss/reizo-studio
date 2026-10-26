@@ -38,6 +38,7 @@ import type { CanvasImageParams } from '../../../shared/canvas';
 import { startAgentTurn, abortChatTurn } from './session';
 import { drainSteerInbox } from './steerInbox';
 import { createToolLoopGuard, hashResult } from './toolLoopGuard';
+import { serializeMutatingTools } from './toolSerializer';
 import { createCanvasBudget } from './canvasBudget';
 import { inlineCanvasRefImages } from './canvasRefImages';
 import { consumeInteractions, waitForInteractions } from './permissions';
@@ -551,7 +552,7 @@ export async function runChatTurn(options: {
       })
     : undefined;
   const tools = rawTools || hasMcpTools
-    ? wrapToolsWithHooks({ ...(rawTools ?? {}), ...(subagentTools ?? {}), ...(mcp?.tools ?? {}) } as NonNullable<typeof rawTools>, hookRunner)
+    ? serializeMutatingTools(wrapToolsWithHooks({ ...(rawTools ?? {}), ...(subagentTools ?? {}), ...(mcp?.tools ?? {}) } as NonNullable<typeof rawTools>, hookRunner))
     : undefined;
 
   const accounting = options.usageStore ?? canvasStore?.usage;

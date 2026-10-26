@@ -124,7 +124,7 @@ export const DEFAULT_TOOL_LOOP_THRESHOLDS: ToolLoopThresholds = {
   toolWindow: 20,
 };
 
-const MUTATING_TOOL_NAMES = new Set([
+export const MUTATING_TOOL_NAMES = new Set([
   'write_file',
   'edit_file',
   'run_command',
