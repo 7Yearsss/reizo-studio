@@ -18,3 +18,23 @@ describe('tabIndexForShortcut', () => {
     expect(tabIndexForShortcut(ev({ ctrlKey: false }), 3)).toBeNull();
   });
 });
+
+import { shortcutDigitForTab } from './tabShortcut';
+
+describe('shortcutDigitForTab', () => {
+  it('numbers the first eight tabs and gives 9 to the last when there are more', () => {
+    expect([0, 1, 2].map((i) => shortcutDigitForTab(i, 3))).toEqual([1, 2, 3]);
+    expect(shortcutDigitForTab(7, 8)).toBe(8);
+    expect(shortcutDigitForTab(8, 12)).toBeNull();
+    expect(shortcutDigitForTab(11, 12)).toBe(9);
+  });
+  it('matches what Ctrl+digit actually selects', () => {
+    for (const count of [1, 3, 8, 10]) {
+      for (let i = 0; i < count; i += 1) {
+        const digit = shortcutDigitForTab(i, count);
+        if (digit === null) continue;
+        expect(tabIndexForShortcut({ key: String(digit), ctrlKey: true, metaKey: false, altKey: false, shiftKey: false }, count)).toBe(i);
+      }
+    }
+  });
+});

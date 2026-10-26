@@ -15,6 +15,8 @@ import {
   ContextMenuSeparator,
 } from '../motion/context-menu';
 import { toast } from '../../lib/toast';
+import { useModifierHeld } from '../../lib/hooks/use-modifier-held';
+import { shortcutDigitForTab } from '../../../shared/tabShortcut';
 
 export default function TabBar() {
   const tabs = useTabStore((s) => s.tabs);
@@ -22,6 +24,10 @@ export default function TabBar() {
   const mode = useUiStore((s) => s.mode);
   const interactionBySession = useChatStore((s) => s.interactionBySession);
   const sessions = useChatStore((s) => s.sessions);
+
+  // Hold Ctrl/Cmd for a moment and each tab shows the digit that jumps to it.
+  const held = useModifierHeld();
+  const digitOf = (tab: (typeof tabs)[number]): number | null => shortcutDigitForTab(tabs.indexOf(tab), tabs.length);
 
   // Same rule as the sidebar: live interaction wins, else the persisted marker.
   const pendingKindFor = (sessionId?: string): 'ask' | 'permission' | null => {
@@ -62,6 +68,9 @@ export default function TabBar() {
                     )}
                     <MessageSquare size={12} className="relative z-10 shrink-0 opacity-70" />
                     <span className="relative z-10 flex-1 truncate text-left">{tab.title}</span>
+                    {held && digitOf(tab) !== null && (
+                      <span className="relative z-10 shrink-0 rounded bg-ink px-1.5 text-[10px] font-medium leading-4 text-paper-raised" aria-hidden>{digitOf(tab)}</span>
+                    )}
                     {pendingKind && (
                       <span
                         className="relative z-10 shrink-0 rounded-full bg-[var(--peach)] px-1.5 py-0.5 text-[10px] font-medium leading-none text-[var(--peach-ink)]"

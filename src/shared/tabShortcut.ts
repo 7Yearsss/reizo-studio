@@ -20,3 +20,12 @@ export function tabIndexForShortcut(e: ShortcutKeyEvent, tabCount: number): numb
   if (n === 9) return tabCount - 1;
   return n <= tabCount ? n - 1 : null;
 }
+
+/** The digit shown on tab `index` while the modifier is held: 1–8 for the first eight, 9 for the last tab (never both). */
+export function shortcutDigitForTab(index: number, tabCount: number): number | null {
+  if (index === tabCount - 1 && tabCount > 8) return 9;
+  return index < 8 ? index + 1 : null;
+}
+
+/** How long the modifier must be held before the numbers appear, so a quick Ctrl+C never flashes them. */
+export const SHORTCUT_HINT_DELAY_MS = 400;
