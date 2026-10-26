@@ -20,6 +20,8 @@ export default function MentionMenu({
   onPick,
   onPickNode,
   onPickSkill,
+  onPickExpert,
+  expertsEnabled = false,
 }: {
   query: string;
   sessionId?: string;
@@ -27,7 +29,18 @@ export default function MentionMenu({
   onPickNode?: (node: CanvasNode) => void;
   /** Pick a skill by @-mention — pins it to the session (not a file mention). */
   onPickSkill?: (skill: SkillSummary) => void;
+  /** Hand the whole message to a saved expert: only offered when the @ starts the message. */
+  onPickExpert?: (expert: api.ExpertItem) => void;
+  expertsEnabled?: boolean;
 }) {
+  const [experts, setExperts] = useState<api.ExpertItem[]>([]);
+  useEffect(() => {
+    if (!expertsEnabled) return;
+    let cancelled = false;
+    void api.listExperts().then((list) => { if (!cancelled) setExperts(list); }, (): void => undefined);
+    return () => { cancelled = true; };
+  }, [expertsEnabled]);
+  const matchedExperts = expertsEnabled ? experts.filter((e) => matchAny(query, [e.name, ...e.aliases, e.description]) > 0).slice(0, 4) : [];
   const [entries, setEntries] = useState<DirEntry[]>([]);
   const skills = useSkillStore().skills;
   const storeNodes = useCanvasStoreEq((s) => (sessionId ? s.nodesBySession[sessionId] : undefined) ?? canvasStore.EMPTY_NODES, sameNodesIgnoringGeometry);
@@ -67,10 +80,28 @@ export default function MentionMenu({
     })
     .slice(0, 4);
 
-  if (entries.length === 0 && matchedNodes.length === 0 && matchedSkills.length === 0) return null;
+  if (entries.length === 0 && matchedNodes.length === 0 && matchedSkills.length === 0 && matchedExperts.length === 0) return null;
 
   return (
     <div className="pop-in absolute right-0 bottom-full left-0 mb-2 overflow-hidden rounded-2xl border border-line bg-paper-raised shadow-[0_8px_30px_rgba(28,22,18,0.08)] z-50">
+      {matchedExperts.length > 0 ? (
+        <div className="border-b border-line bg-paper-inset/30 py-1">
+          <div className="px-3 py-0.5 text-[11px] font-semibold text-ink-muted">专家</div>
+          {matchedExperts.map((expert) => (
+            <button
+              key={expert.id}
+              type="button"
+              onClick={() => onPickExpert?.(expert)}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-ink hover:bg-paper-inset"
+            >
+              <Bot size={13} className="shrink-0 text-accent" />
+              <span className="shrink-0 font-medium text-ink">@{expert.name}</span>
+              <span className="truncate text-ink-muted text-[11px]">{expert.description}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       {matchedSkills.length > 0 ? (
         <div className="border-b border-line bg-paper-inset/30 py-1">
           <div className="px-3 py-0.5 text-[11px] font-semibold text-ink-muted">技能</div>

@@ -571,6 +571,11 @@ export default function Composer({
               setDraft(replaced);
               setMentions((m) => (m.includes(path) ? m : [...m, path]));
             }}
+            expertsEnabled={draft.trimStart() === `@${mentionQuery}`}
+            onPickExpert={(expert) => {
+              setDraft(`@${expert.name} `);
+              window.setTimeout(focusComposer, 0);
+            }}
             onPickSkill={(skill) => {
               setDraft(draft.replace(/@([^\s@]*)$/, ''));
               setSkillId(skill.id);

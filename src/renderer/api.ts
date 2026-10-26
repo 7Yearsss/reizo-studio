@@ -1226,3 +1226,17 @@ export async function deleteMemory(file: string, scope: 'personal' | 'workspace'
 export async function clearMemory(scope: 'personal' | 'workspace'): Promise<void> {
   await api(`/api/memory?scope=${scope}`, { method: 'DELETE' });
 }
+
+export interface ExpertItem { id: string; name: string; aliases: string[]; description: string; instructions: string; providerId?: string; model?: string; allowedTools?: string; maxTurns?: number }
+
+export async function listExperts(): Promise<ExpertItem[]> {
+  return ((await (await api('/api/experts')).json()) as { experts?: ExpertItem[] }).experts ?? [];
+}
+
+export async function saveExpert(input: Omit<ExpertItem, 'id'>): Promise<ExpertItem> {
+  return ((await (await api('/api/experts', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })).json()) as { expert: ExpertItem }).expert;
+}
+
+export async function deleteExpert(id: string): Promise<void> {
+  await api(`/api/experts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
