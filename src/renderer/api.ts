@@ -271,6 +271,23 @@ export async function listBackgroundShells(sessionId: string): Promise<Backgroun
   return ((await res.json()) as { shells?: BackgroundShellRow[] }).shells ?? [];
 }
 
+export interface NetworkSettings { mode: 'direct' | 'system' | 'custom'; url?: string; bypass?: string }
+
+export async function getNetworkSettings(): Promise<{ settings: NetworkSettings; effective: string | null }> {
+  const res = await api('/api/network');
+  return res.json();
+}
+
+export async function saveNetworkSettings(settings: NetworkSettings): Promise<{ settings: NetworkSettings; effective: string | null; error?: string }> {
+  const res = await api('/api/network', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(settings) });
+  return res.json();
+}
+
+export async function testNetwork(): Promise<{ ok: boolean; ms: number; detail: string }> {
+  const res = await api('/api/network/test', { method: 'POST' });
+  return res.json();
+}
+
 export async function getDiskSpace(): Promise<{ freeBytes: number | null; totalBytes: number | null }> {
   const res = await api('/api/storage/disk');
   return (await res.json()) as { freeBytes: number | null; totalBytes: number | null };

@@ -2,6 +2,7 @@ import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { RUN_COMMAND_MAX_BUFFER, RUN_COMMAND_TIMEOUT_MS } from '../shared/constants';
 import { plainTextTerminalEnv, stripTerminalControlSequences } from '../shared/terminalOutput';
+import { currentProxyEnv } from './proxy';
 
 const clean = (s: string): string => stripTerminalControlSequences(s);
 
@@ -36,6 +37,7 @@ export async function runWorkspaceCommand(cwd: string, command: string): Promise
         GIT_TERMINAL_PROMPT: '0',
         PAGER: 'cat',
         ...plainTextTerminalEnv(),
+        ...currentProxyEnv(),
       },
     });
     return {

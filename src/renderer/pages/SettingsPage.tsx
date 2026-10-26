@@ -1,4 +1,4 @@
-import { Bot, Brain, FolderOpen, Settings2, Sparkles, ChartNoAxesCombined, Database, Info, Blocks } from 'lucide-react';
+import { Bot, Brain, FolderOpen, Settings2, Sparkles, ChartNoAxesCombined, Database, Info, Blocks, Globe } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { cn } from '../lib/cn';
@@ -15,6 +15,7 @@ import ProvidersSection from './settings/ProvidersSection';
 import StorageMaintenanceSection from './settings/StorageMaintenanceSection';
 import BackupSection from './settings/BackupSection';
 import DiagnosticsSection from './settings/DiagnosticsSection';
+import NetworkSection from './settings/NetworkSection';
 import UsageCostsSection from './settings/UsageCostsSection';
 import ExtensionsSection from './settings/ExtensionsSection';
 import AlwaysAllowedTools from './settings/AlwaysAllowedTools';
@@ -31,6 +32,7 @@ const SECTIONS: { id: SectionId; label: string; icon: typeof Settings2 }[] = [
   { id: 'experts', label: '专家', icon: Bot },
   { id: 'extensions', label: '扩展', icon: Blocks },
   { id: 'usage', label: '用量与费用', icon: ChartNoAxesCombined },
+  { id: 'network', label: '网络', icon: Globe },
   { id: 'storage', label: '存储', icon: Database },
   { id: 'about', label: '关于', icon: Info },
 ];
@@ -76,6 +78,7 @@ export default function SettingsPage() {
       <div className={cn("min-h-0 min-w-0 flex-1 pl-6 pr-16 pb-5 pt-7 max-sm:px-4 max-sm:pt-4", section === 'providers' ? 'overflow-hidden' : 'overflow-y-auto')}>
         {section === 'general' && <GeneralSection />}
         {section === 'providers' && <ProvidersSection />}
+        {section === 'network' && <NetworkSection />}
         {section === 'memory' && <MemorySection />}
         {section === 'experts' && <ExpertsSection />}
         {section === 'extensions' && <><ExtensionsSection /><AlwaysAllowedTools /></>}

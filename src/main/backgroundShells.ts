@@ -2,6 +2,7 @@ import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { nanoid } from 'nanoid';
 import { plainTextTerminalEnv, stripTerminalControlSequences } from '../shared/terminalOutput';
 import { guardChildCommand } from './server/agent/childGuard';
+import { currentProxyEnv } from './proxy';
 
 /**
  * Long-running commands the agent starts and then keeps working around (a dev server, a watcher, a long build).
@@ -62,7 +63,7 @@ export function startBackgroundShell(options: { sessionId: string; cwd: string; 
 
   const guarded = guardChildCommand(
     { command, args: [], shell: true },
-    { baseEnv: { PATH: process.env.PATH, HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE, LANG: process.env.LANG, PATHEXT: process.env.PATHEXT, COMSPEC: process.env.COMSPEC, SystemRoot: process.env.SystemRoot, GIT_PAGER: 'cat', GIT_TERMINAL_PROMPT: '0', PAGER: 'cat', ...plainTextTerminalEnv() } },
+    { baseEnv: { PATH: process.env.PATH, HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE, LANG: process.env.LANG, PATHEXT: process.env.PATHEXT, COMSPEC: process.env.COMSPEC, SystemRoot: process.env.SystemRoot, GIT_PAGER: 'cat', GIT_TERMINAL_PROMPT: '0', PAGER: 'cat', ...plainTextTerminalEnv(), ...currentProxyEnv() } },
   );
   const child = spawn(guarded.command, guarded.args, { cwd: options.cwd, env: guarded.env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   const shell: Shell = { id: `bg-${nanoid(6)}`, sessionId: options.sessionId, command, cwd: options.cwd, startedAt: Date.now(), child, dropped: 0, buffer: '' };
