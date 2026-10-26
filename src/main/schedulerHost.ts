@@ -66,6 +66,8 @@ export function startScheduler(options: {
         scheduleStore: options.scheduleStore,
         dataRoot: options.dataRoot,
         usageStore: options.usageStore,
+        // Saved before the ceiling existed → workspace; "inherit" is the explicit opt-in to the global mode.
+        runCeiling: (schedule.runPermission ?? 'workspace') === 'inherit' ? undefined : (schedule.runPermission ?? 'workspace'),
       });
       if (stopping) { abortChatTurn(session.id); throw new ScheduledRunInterruptedError('应用正在退出，执行已中断，结果尚未确认'); }
       if (!response.ok) {

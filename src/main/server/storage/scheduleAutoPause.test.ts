@@ -69,4 +69,11 @@ describe('schedule auto-pause', () => {
     expect(runs[0].executionId).toBe(`exec-${MAX_RUN_HISTORY + 2}-succeeded`);
     expect(runs[0].outcome).toBe('succeeded');
   });
+
+  it('new automations default to the read-only ceiling; bad values are rejected', async () => {
+    const store = createScheduleStore(root);
+    expect((await store.create({ name: 'a', prompt: 'x', intervalMs: 60_000 })).runPermission).toBe('readonly');
+    expect((await store.create({ name: 'b', prompt: 'x', intervalMs: 60_000, runPermission: 'inherit' })).runPermission).toBe('inherit');
+    await expect(store.create({ name: 'c', prompt: 'x', intervalMs: 60_000, runPermission: 'root' as never })).rejects.toThrow('权限档无效');
+  });
 });

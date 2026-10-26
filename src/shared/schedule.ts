@@ -9,6 +9,12 @@ export const SCHEDULE_PRESETS = [
 /** A recurring automation that fails this many runs in a row is paused instead of burning cost. */
 export const MAX_CONSECUTIVE_FAILURES = 3;
 
+/**
+ * The most an unattended run may do, whatever the global permission mode is. It can only tighten:
+ * `readonly` (read and analyse), `workspace` (also write inside the workspace), `inherit` (the global mode).
+ */
+export type RunPermission = 'readonly' | 'workspace' | 'inherit';
+
 /** How many past runs a schedule remembers. */
 export const MAX_RUN_HISTORY = 20;
 
@@ -23,6 +29,8 @@ export interface ScheduleRun {
 }
 
 export interface Schedule {
+  /** Unattended-run ceiling. New automations default to read-only; schedules saved before this existed run as `workspace`. */
+  runPermission?: RunPermission;
   /** When set, runs fall on this wall-clock time instead of every `intervalMs`. */
   cadence?: ScheduleCadence;
   /** Most recent first, capped at MAX_RUN_HISTORY. */

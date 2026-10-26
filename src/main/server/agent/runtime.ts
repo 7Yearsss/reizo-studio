@@ -56,6 +56,8 @@ import { loadPluginContributions } from '../plugins/pluginStore';
 import { createTurnTraceCollector, writeTurnTrace } from './turnTrace';
 import { readWorkspaceMemory } from '../../workspaceMemory';
 import { formatRules, readRuleSources } from './workspaceRules';
+import { applyRunCeiling, effectiveRunMode, READ_ONLY_RUN_NOTICE } from './runCeiling';
+import type { RunPermission } from '../../../shared/schedule';
 import type { MemoryEntry } from '../../workspaceMemoryDir';
 import {
   formatRecalledMemories,
@@ -207,6 +209,8 @@ export async function runChatTurn(options: {
   dataRoot?: string;
   memoryEventsStore?: MemoryEventsStore;
   scheduleStore?: import('../storage/scheduleStore').ScheduleStore;
+  /** Unattended-run ceiling (automations). Only ever tightens the global permission mode and toolset. */
+  runCeiling?: RunPermission;
 }): Promise<Response> {
   const {
     sessionStore,
@@ -225,6 +229,7 @@ export async function runChatTurn(options: {
     dataRoot,
     memoryEventsStore,
     scheduleStore,
+    runCeiling,
   } = options;
 
   const turnOriginAt = Date.now();
@@ -316,6 +321,7 @@ export async function runChatTurn(options: {
   }
 
   const workspacePath = settings.workspacePath;
+  const runPermissionMode = effectiveRunMode(settings.permissionMode, runCeiling);
   const memory = workspacePath ? await readWorkspaceMemory(workspacePath) : '';
   const standingRules = formatRules(await readRuleSources({ workspacePath, userRulesDir: dataRoot }));
   let projectInstructions = '';
@@ -405,6 +411,7 @@ export async function runChatTurn(options: {
       : '',
     projectInstructions ? `Project "${projectName}" working rules:\n${projectInstructions}` : '',
     standingRules,
+    runCeiling === 'readonly' ? READ_ONLY_RUN_NOTICE : '',
   ].filter(Boolean);
   const instructions = systemParts.join('\n\n');
 
@@ -451,7 +458,7 @@ export async function runChatTurn(options: {
     ? createWorkspaceTools({
         sessionId,
         workspacePath,
-        permissionMode: settings.permissionMode,
+        permissionMode: runPermissionMode,
         emit: (event) => {
           emit(event);
           // Tool-path memory writes/deletes persist to the activity log the
@@ -504,7 +511,7 @@ export async function runChatTurn(options: {
       ? createComputerTools({
           sessionId,
           dataRoot,
-          permissionMode: settings.permissionMode,
+          permissionMode: runPermissionMode,
           emit: (event) => emit(event),
         })
       : undefined;
@@ -515,7 +522,7 @@ export async function runChatTurn(options: {
 
   // Automations live outside any workspace — the agent can always schedule
   // recurring or one-shot follow-up work (paseo-style heartbeat).
-  const scheduleTools = scheduleStore ? createScheduleTools({ scheduleStore, sessionId, permissionMode: settings.permissionMode }) : undefined;
+  const scheduleTools = scheduleStore ? createScheduleTools({ scheduleStore, sessionId, permissionMode: runPermissionMode }) : undefined;
 
   let currentPresentationRefs = regenerate ? splitPresentationContext(userMessage?.content ?? '').refs : presentationRefs.refs;
   let currentDocumentRefs = regenerate ? splitDocumentContext(userMessage?.content ?? '').refs : documentRefs.refs;
@@ -540,7 +547,7 @@ export async function runChatTurn(options: {
         }
       : undefined;
   // MCP servers (user-level mcp.json): their tools join the set behind approval; clients are pooled per-session.
-  const mcp = dataRoot ? await connectMcpTools({ dataRoot, sessionId, permissionMode: settings.permissionMode, extraServers: pluginPack.mcpServers }) : undefined;
+  const mcp = dataRoot && runCeiling !== 'readonly' ? await connectMcpTools({ dataRoot, sessionId, permissionMode: runPermissionMode, extraServers: pluginPack.mcpServers }) : undefined;
   trace.mark('mcpConnected');
   const hasMcpTools = mcp !== undefined && Object.keys(mcp.tools).length > 0;
   // Read-only research sub-agent: only the read tools, hook-wrapped like the main agent's. `model` is built below, hence the getters.
@@ -555,7 +562,7 @@ export async function runChatTurn(options: {
       })
     : undefined;
   const tools = rawTools || hasMcpTools
-    ? serializeMutatingTools(wrapToolsWithHooks({ ...(rawTools ?? {}), ...(subagentTools ?? {}), ...(mcp?.tools ?? {}) } as NonNullable<typeof rawTools>, hookRunner))
+    ? applyRunCeiling(serializeMutatingTools(wrapToolsWithHooks({ ...(rawTools ?? {}), ...(subagentTools ?? {}), ...(mcp?.tools ?? {}) } as NonNullable<typeof rawTools>, hookRunner)), runCeiling)
     : undefined;
 
   const accounting = options.usageStore ?? canvasStore?.usage;

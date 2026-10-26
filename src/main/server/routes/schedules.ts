@@ -41,6 +41,7 @@ export function createSchedulesRouter(scheduleStore: ScheduleStore, thoughtStore
       skillId: typeof body.skillId === 'string' ? body.skillId : undefined,
       once: body.once === true,
       cadence: body.cadence,
+      runPermission: body.runPermission,
       operationId: body.operationId,
     }); } catch (error) { if (error instanceof ScheduleValidationError) return c.json({ error: error.message }, error.status); throw error; }
     return c.json({ schedule }, 201);

@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { nanoid } from 'nanoid';
-import { MAX_CONSECUTIVE_FAILURES, MAX_RUN_HISTORY, isValidCadence, nextCadenceRun, type ScheduleCadence, type Schedule, type SchedulePatch, type ScheduleRun } from '../../../shared/schedule';
+import { MAX_CONSECUTIVE_FAILURES, MAX_RUN_HISTORY, isValidCadence, nextCadenceRun, type RunPermission, type ScheduleCadence, type Schedule, type SchedulePatch, type ScheduleRun } from '../../../shared/schedule';
 import { serializeFileMutation, writeTextAtomic } from './atomicFile';
 
 interface Receipt { operationId: string; kind: 'create' | 'run'; fingerprint: string; scheduleId: string }
@@ -65,11 +65,12 @@ export function createScheduleStore(root: string) {
   }
   return {
     async list(): Promise<Schedule[]> { return (await readDisk()).schedules; },
-    async create(input: { name: string; prompt: string; intervalMs: number; skillId?: string; once?: boolean; operationId?: string; cadence?: ScheduleCadence }): Promise<Schedule> {
+    async create(input: { name: string; prompt: string; intervalMs: number; skillId?: string; once?: boolean; operationId?: string; cadence?: ScheduleCadence; runPermission?: RunPermission }): Promise<Schedule> {
+      if (input.runPermission !== undefined && !['readonly', 'workspace', 'inherit'].includes(input.runPermission)) throw new ScheduleValidationError('自动化权限档无效');
       validateScheduleInterval(input.intervalMs);
       if (input.cadence !== undefined && !isValidCadence(input.cadence)) throw new ScheduleValidationError('自动化运行时间无效');
       const id = input.operationId ?? nanoid(); operationId(id);
-      const values = { name: input.name.trim() || input.prompt.slice(0, 40), prompt: input.prompt, intervalMs: input.intervalMs, skillId: input.skillId, once: input.once === true || undefined, cadence: input.cadence };
+      const values = { name: input.name.trim() || input.prompt.slice(0, 40), prompt: input.prompt, intervalMs: input.intervalMs, skillId: input.skillId, once: input.once === true || undefined, cadence: input.cadence, runPermission: input.runPermission ?? 'readonly' };
       const hash = fingerprint(values);
       return mutate(async (disk) => {
         const previous = replay(disk, id, 'create', hash); if (previous) return previous;
