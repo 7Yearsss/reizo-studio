@@ -46,6 +46,20 @@ describe('schedule auto-pause', () => {
     expect(resumed.autoPausedAt).toBeUndefined();
   });
 
+  it('a cadence schedule lands on the wall-clock time, before and after a run', async () => {
+    const store = createScheduleStore(root);
+    const s = await store.create({ name: 'standup', prompt: 'x', intervalMs: 24 * 3_600_000, cadence: { kind: 'weekdays', hour: 9, minute: 30 } });
+    const next = new Date(s.nextRunAt);
+    expect(next.getTime()).toBeGreaterThan(Date.now());
+    expect([next.getHours(), next.getMinutes()]).toEqual([9, 30]);
+    expect([0, 6]).not.toContain(next.getDay());
+    await run(store, s.id, 0, 'succeeded');
+    const after = new Date((await store.list())[0].nextRunAt);
+    expect([after.getHours(), after.getMinutes()]).toEqual([9, 30]);
+    expect([0, 6]).not.toContain(after.getDay());
+    await expect(store.create({ name: 'bad', prompt: 'x', intervalMs: 24 * 3_600_000, cadence: { kind: 'weekly', hour: 9, minute: 0 } })).rejects.toThrow('运行时间无效');
+  });
+
   it('keeps a capped run history, newest first', async () => {
     const store = createScheduleStore(root);
     const s = await store.create({ name: 'history', prompt: 'x', intervalMs: 60_000 });

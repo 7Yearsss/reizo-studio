@@ -23,6 +23,8 @@ export interface ScheduleRun {
 }
 
 export interface Schedule {
+  /** When set, runs fall on this wall-clock time instead of every `intervalMs`. */
+  cadence?: ScheduleCadence;
   /** Most recent first, capped at MAX_RUN_HISTORY. */
   runs?: ScheduleRun[];
   id: string;
@@ -65,4 +67,45 @@ export interface SchedulePatch {
   intervalMs?: number;
   enabled?: boolean;
   nextRunAt?: string;
+}
+
+/** Wall-clock cadence in the user's local time: "weekdays at 09:00". Overrides the fixed interval for when the next run falls. */
+export interface ScheduleCadence {
+  kind: 'daily' | 'weekdays' | 'weekly';
+  hour: number;
+  minute: number;
+  /** 0 = Sunday … 6 = Saturday; only for `weekly`. */
+  dayOfWeek?: number;
+}
+
+export function isValidCadence(value: unknown): value is ScheduleCadence {
+  if (!value || typeof value !== 'object') return false;
+  const c = value as Partial<ScheduleCadence>;
+  if (c.kind !== 'daily' && c.kind !== 'weekdays' && c.kind !== 'weekly') return false;
+  if (!Number.isInteger(c.hour) || c.hour! < 0 || c.hour! > 23) return false;
+  if (!Number.isInteger(c.minute) || c.minute! < 0 || c.minute! > 59) return false;
+  if (c.kind === 'weekly') return Number.isInteger(c.dayOfWeek) && c.dayOfWeek! >= 0 && c.dayOfWeek! <= 6;
+  return c.dayOfWeek === undefined;
+}
+
+/** The first run strictly after `after`, in local time. */
+export function nextCadenceRun(cadence: ScheduleCadence, after: Date): Date {
+  for (let offset = 0; offset <= 8; offset++) {
+    const candidate = new Date(after.getFullYear(), after.getMonth(), after.getDate() + offset, cadence.hour, cadence.minute, 0, 0);
+    if (candidate.getTime() <= after.getTime()) continue;
+    const day = candidate.getDay();
+    if (cadence.kind === 'weekdays' && (day === 0 || day === 6)) continue;
+    if (cadence.kind === 'weekly' && day !== cadence.dayOfWeek) continue;
+    return candidate;
+  }
+  throw new Error('invalid cadence');
+}
+
+const DAY_NAMES = ['日', '一', '二', '三', '四', '五', '六'];
+
+export function describeCadence(cadence: ScheduleCadence): string {
+  const time = `${String(cadence.hour).padStart(2, '0')}:${String(cadence.minute).padStart(2, '0')}`;
+  if (cadence.kind === 'daily') return `每天 ${time}`;
+  if (cadence.kind === 'weekdays') return `工作日 ${time}`;
+  return `每周${DAY_NAMES[cadence.dayOfWeek ?? 0]} ${time}`;
 }

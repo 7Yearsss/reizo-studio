@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { nanoid } from 'nanoid';
-import { MAX_CONSECUTIVE_FAILURES, MAX_RUN_HISTORY, type Schedule, type SchedulePatch, type ScheduleRun } from '../../../shared/schedule';
+import { MAX_CONSECUTIVE_FAILURES, MAX_RUN_HISTORY, isValidCadence, nextCadenceRun, type ScheduleCadence, type Schedule, type SchedulePatch, type ScheduleRun } from '../../../shared/schedule';
 import { serializeFileMutation, writeTextAtomic } from './atomicFile';
 
 interface Receipt { operationId: string; kind: 'create' | 'run'; fingerprint: string; scheduleId: string }
@@ -44,7 +44,7 @@ export function createScheduleStore(root: string) {
     current.lastRunAt = new Date(now).toISOString();
     let interval = current.intervalMs;
     try { validateScheduleInterval(interval); } catch { interval = MIN_SCHEDULE_INTERVAL_MS; }
-    current.nextRunAt = new Date(now + interval).toISOString();
+    current.nextRunAt = (current.cadence ? nextCadenceRun(current.cadence, new Date(now)) : new Date(now + interval)).toISOString();
     current.lastError = error; current.lastOutcome = outcome; current.runCount += 1;
     if (executionId) current.lastExecutionId = executionId;
     if (current.activeExecution?.sessionId) current.lastSessionId = current.activeExecution.sessionId;
@@ -65,15 +65,16 @@ export function createScheduleStore(root: string) {
   }
   return {
     async list(): Promise<Schedule[]> { return (await readDisk()).schedules; },
-    async create(input: { name: string; prompt: string; intervalMs: number; skillId?: string; once?: boolean; operationId?: string }): Promise<Schedule> {
+    async create(input: { name: string; prompt: string; intervalMs: number; skillId?: string; once?: boolean; operationId?: string; cadence?: ScheduleCadence }): Promise<Schedule> {
       validateScheduleInterval(input.intervalMs);
+      if (input.cadence !== undefined && !isValidCadence(input.cadence)) throw new ScheduleValidationError('自动化运行时间无效');
       const id = input.operationId ?? nanoid(); operationId(id);
-      const values = { name: input.name.trim() || input.prompt.slice(0, 40), prompt: input.prompt, intervalMs: input.intervalMs, skillId: input.skillId, once: input.once === true || undefined };
+      const values = { name: input.name.trim() || input.prompt.slice(0, 40), prompt: input.prompt, intervalMs: input.intervalMs, skillId: input.skillId, once: input.once === true || undefined, cadence: input.cadence };
       const hash = fingerprint(values);
       return mutate(async (disk) => {
         const previous = replay(disk, id, 'create', hash); if (previous) return previous;
         const now = Date.now();
-        const schedule: Schedule = { ...values, id: nanoid(), createOperationId: id, enabled: true, lastRunAt: null, nextRunAt: new Date(now + input.intervalMs).toISOString(), lastError: null, runCount: 0, createdAt: new Date(now).toISOString() };
+        const schedule: Schedule = { ...values, id: nanoid(), createOperationId: id, enabled: true, lastRunAt: null, nextRunAt: (input.cadence ? nextCadenceRun(input.cadence, new Date(now)) : new Date(now + input.intervalMs)).toISOString(), lastError: null, runCount: 0, createdAt: new Date(now).toISOString() };
         disk.schedules.unshift(schedule); disk.receipts.push({ operationId: id, kind: 'create', fingerprint: hash, scheduleId: schedule.id });
         await write(disk); return schedule;
       });
@@ -93,7 +94,7 @@ export function createScheduleStore(root: string) {
           current.enabled = patch.enabled;
           if (patch.enabled) { current.consecutiveFailures = 0; delete current.autoPausedAt; }
           if (!patch.enabled) delete current.pendingRun;
-          else if (patch.nextRunAt === undefined && !current.activeExecution) current.nextRunAt = new Date(Date.now() + current.intervalMs).toISOString();
+          else if (patch.nextRunAt === undefined && !current.activeExecution) current.nextRunAt = (current.cadence ? nextCadenceRun(current.cadence, new Date()) : new Date(Date.now() + current.intervalMs)).toISOString();
         }
         if (patch.nextRunAt) current.nextRunAt = patch.nextRunAt;
         await write(disk); return current;

@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { SCHEDULE_PRESETS } from '../../../shared/schedule';
+import { SCHEDULE_PRESETS, isValidCadence } from '../../../shared/schedule';
 import { ScheduleValidationError, validateScheduleInterval, type ScheduleStore } from '../storage/scheduleStore';
 import type { ThoughtStore } from '../storage/thoughtStore';
 
@@ -32,6 +32,7 @@ export function createSchedulesRouter(scheduleStore: ScheduleStore, thoughtStore
     const intervalMs: unknown = body.intervalMs === undefined ? 60 * 60 * 1000 : body.intervalMs;
     try { validateScheduleInterval(intervalMs); }
     catch (error) { if (error instanceof ScheduleValidationError) return c.json({ error: error.message }, 400); throw error; }
+    if (body.cadence !== undefined && !isValidCadence(body.cadence)) return c.json({ error: '运行时间无效' }, 400);
     let schedule;
     try { schedule = await scheduleStore.create({
       name: typeof body.name === 'string' ? body.name : body.prompt.slice(0, 40),
@@ -39,6 +40,7 @@ export function createSchedulesRouter(scheduleStore: ScheduleStore, thoughtStore
       intervalMs,
       skillId: typeof body.skillId === 'string' ? body.skillId : undefined,
       once: body.once === true,
+      cadence: body.cadence,
       operationId: body.operationId,
     }); } catch (error) { if (error instanceof ScheduleValidationError) return c.json({ error: error.message }, error.status); throw error; }
     return c.json({ schedule }, 201);

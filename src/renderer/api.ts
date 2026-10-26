@@ -450,6 +450,7 @@ export async function createSchedule(input: {
   intervalMs: number;
   skillId?: string;
   once?: boolean;
+  cadence?: import('../shared/schedule').ScheduleCadence;
   operationId?: string;
 }): Promise<Schedule> {
   const res = await api('/api/schedules', {
