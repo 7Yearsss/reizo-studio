@@ -5,6 +5,7 @@ import { Experimental_StdioMCPTransport as StdioMCPTransport } from '@ai-sdk/mcp
 import { detectToolDrift, fingerprintTools } from 'ai';
 import type { PermissionMode } from '../../../shared/settings';
 import { ApprovalRequiredError, requestPermission } from './permissions';
+import { guardChildCommand } from './childGuard';
 
 /**
  * MCP servers as extra tools. Configured in the user-level `<dataRoot>/mcp.json` (never from a
@@ -111,8 +112,10 @@ export interface ConnectOptions {
 
 function defaultCreateClient(server: McpServerConfig): Promise<MCPClient> {
   if (server.kind === 'stdio') {
+    const guarded = guardChildCommand({ command: server.command, args: server.args, env: server.env });
     return createMCPClient({
-      transport: new StdioMCPTransport({ command: server.command, args: server.args, env: server.env, cwd: server.cwd }),
+      // Started under a guard so a crash or force-kill of the app cannot leave the server running.
+      transport: new StdioMCPTransport({ command: guarded.command, args: guarded.args, env: guarded.env, cwd: server.cwd }),
     });
   }
   return createMCPClient({ transport: { type: server.kind, url: server.url, headers: server.headers } });
