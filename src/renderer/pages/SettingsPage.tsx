@@ -14,6 +14,7 @@ import { toast } from '../lib/toast';
 import ProvidersSection from './settings/ProvidersSection';
 import StorageMaintenanceSection from './settings/StorageMaintenanceSection';
 import BackupSection from './settings/BackupSection';
+import DiagnosticsSection from './settings/DiagnosticsSection';
 import UsageCostsSection from './settings/UsageCostsSection';
 import ExtensionsSection from './settings/ExtensionsSection';
 import MemorySection from './settings/MemorySection';
@@ -78,7 +79,7 @@ export default function SettingsPage() {
         {section === 'experts' && <ExpertsSection />}
         {section === 'extensions' && <ExtensionsSection />}
         {section === 'usage' && <UsageCostsSection onOpenProviders={() => setSection('providers')} />}
-        {section === 'storage' && <><BackupSection /><StorageMaintenanceSection /></>}
+        {section === 'storage' && <><BackupSection /><StorageMaintenanceSection /><DiagnosticsSection /></>}
         {section === 'about' && <AboutSection />}
       </div>
     </div>
