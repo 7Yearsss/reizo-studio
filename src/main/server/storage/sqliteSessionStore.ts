@@ -11,8 +11,10 @@ import type {
   ToolCallPart,
   TurnRuntimeStore,
   SessionTrashStore,
+  SessionSearchStore,
 } from '../../../shared/chat';
 import type { TurnOutcome } from '../../../shared/stream';
+import { likePattern, makeSnippet, searchTerms } from '../../../shared/messageSearch';
 import type { DbHandle } from '../db/client';
 
 const PREVIEW_CHARS = 500;
@@ -161,7 +163,7 @@ function toMessage(row: MessageRowRaw): ChatMessage {
  * has no `transaction()`. Per-session serialization guards concurrent turns
  * doing read-modify-write on the same session.
  */
-export function createSqliteSessionStore(handle: DbHandle): SessionStore & TurnRuntimeStore & SessionTrashStore {
+export function createSqliteSessionStore(handle: DbHandle): SessionStore & TurnRuntimeStore & SessionTrashStore & SessionSearchStore {
   const raw: DatabaseSync = handle.raw;
   let turnMarkersFrozen = false;
 
@@ -363,6 +365,28 @@ export function createSqliteSessionStore(handle: DbHandle): SessionStore & TurnR
         const result = raw.prepare('UPDATE sessions SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL').run(id);
         return Number(result.changes) > 0;
       });
+    },
+
+    async searchMessages(query: string, limit = 30) {
+      const terms = searchTerms(query);
+      if (terms.length === 0) return [];
+      const where = terms.map(() => "m.content LIKE ? ESCAPE '\\'").join(' AND ');
+      const rows = raw
+        .prepare(
+          `SELECT m.id AS id, m.session_id AS session_id, m.role AS role, m.content AS content, m.created_at AS created_at, s.title AS title
+             FROM messages m JOIN sessions s ON s.id = m.session_id
+            WHERE s.deleted_at IS NULL AND m.rewind_at IS NULL AND m.role IN ('user', 'assistant') AND ${where}
+            ORDER BY m.created_at DESC LIMIT ?`,
+        )
+        .all(...terms.map(likePattern), Math.min(Math.max(limit, 1), 100)) as unknown as Array<{ id: string; session_id: string; role: 'user' | 'assistant'; content: string; created_at: number; title: string }>;
+      return rows.map((row) => ({
+        sessionId: row.session_id,
+        title: row.title,
+        messageId: row.id,
+        role: row.role,
+        snippet: makeSnippet(row.content, terms),
+        at: new Date(row.created_at).toISOString(),
+      }));
     },
 
     async listDeleted() {

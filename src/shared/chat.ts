@@ -1,4 +1,5 @@
 import type { TurnOutcome } from './stream';
+import type { MessageHit } from './messageSearch';
 
 /**
  * Chat wire types — the contract shared by the Hono server, the agent
@@ -133,6 +134,15 @@ export interface SessionTrashStore {
   listDeleted(): Promise<Array<SessionSummary & { deletedAt: string }>>;
   /** Hard-delete sessions trashed before `olderThanMs`; returns their ids. */
   purgeExpired(olderThanMs: number): Promise<string[]>;
+}
+
+/** Optional cross-session message search (SQLite store). */
+export interface SessionSearchStore {
+  searchMessages(query: string, limit?: number): Promise<MessageHit[]>;
+}
+
+export function hasSearch(store: SessionStore): store is SessionStore & SessionSearchStore {
+  return typeof (store as Partial<SessionSearchStore>).searchMessages === 'function';
 }
 
 export function hasTrash(store: SessionStore): store is SessionStore & SessionTrashStore {

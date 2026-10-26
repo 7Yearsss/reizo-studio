@@ -28,6 +28,8 @@ export type CommandItem = {
   keywords?: string[];
   icon?: LucideIcon;
   badge?: ReactNode;
+  /** Already matched by the caller (e.g. a server-side message search): skip the fuzzy label filter. */
+  matched?: boolean;
   onSelect: () => void;
 };
 
@@ -39,6 +41,8 @@ export interface CommandPaletteProps {
   emptyMessage?: string;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /** Fires with the typed text, but never while an IME is composing (pinyin in progress). */
+  onQueryChange?: (query: string) => void;
 }
 
 function fuzzyMatch(needle: string, hay: string) {
@@ -69,6 +73,7 @@ export function CommandPalette({
   emptyMessage = "No results found.",
   open: controlledOpen,
   onOpenChange,
+  onQueryChange,
 }: CommandPaletteProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const controlled = controlledOpen !== undefined;
@@ -126,6 +131,7 @@ export function CommandPalette({
   const filtered = useMemo(() => {
     if (!query) return items;
     return items.filter((it) => {
+      if (it.matched) return true;
       const haystacks = [it.label, it.group ?? "", ...(it.keywords ?? [])];
       return haystacks.some((h) => fuzzyMatch(query, h));
     });
@@ -260,7 +266,11 @@ export function CommandPalette({
                   <input
                     ref={inputRef}
                     value={query}
-                    onChange={(e) => setQuery(e.target.value)}
+                    onChange={(e) => {
+                      setQuery(e.target.value);
+                      if (!(e.nativeEvent as InputEvent).isComposing) onQueryChange?.(e.target.value);
+                    }}
+                    onCompositionEnd={(e) => onQueryChange?.((e.target as HTMLInputElement).value)}
                     placeholder={placeholder}
                     role="combobox"
                     // The field only exists while the palette is open.

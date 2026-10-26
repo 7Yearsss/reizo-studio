@@ -1,4 +1,5 @@
 import type { Session, SessionSummary } from '../shared/chat';
+import type { MessageHit } from '../shared/messageSearch';
 import type { EditorImportJob, EditorImportResult, VideoEditorWorkspace } from '../shared/videoEditor';
 import type { EditorActivity, EditorContext, EditorObservation } from '../shared/videoEditorContext';
 
@@ -241,6 +242,12 @@ export async function renameSession(id: string, title: string): Promise<void> {
   });
 }
 
+
+export async function searchMessages(query: string): Promise<MessageHit[]> {
+  const res = await api(`/api/sessions/search?q=${encodeURIComponent(query)}`);
+  const data = (await res.json()) as { hits?: MessageHit[] };
+  return data.hits ?? [];
+}
 
 export async function deleteSession(id: string): Promise<void> {
   await api(`/api/sessions/${id}`, { method: 'DELETE' });

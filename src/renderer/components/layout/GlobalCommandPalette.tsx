@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import {
   FolderTree,
   GitBranch,
@@ -20,6 +20,7 @@ import * as tabStore from '../../state/tabStore';
 import * as uiStore from '../../state/uiStore';
 import * as api from '../../api';
 import type { DirEntry } from '../../../shared/workspace';
+import type { MessageHit } from '../../../shared/messageSearch';
 
 export function openGlobalCommandPalette() {
   window.dispatchEvent(new CustomEvent('reizo:open-command-palette'));
@@ -31,6 +32,19 @@ export default function GlobalCommandPalette() {
   const skills = useSkillStore().skills;
   const workspacePath = useSettingsStore((s) => s.settings.workspacePath);
   const [files, setFiles] = useState<DirEntry[]>([]);
+  const [hits, setHits] = useState<MessageHit[]>([]);
+  const searchSeq = useRef(0);
+
+  // Message search: debounced, newest request wins, and the palette skips IME composition before calling this.
+  function searchMessages(query: string) {
+    const seq = ++searchSeq.current;
+    const trimmed = query.trim();
+    if (trimmed.length < 2) { setHits([]); return; }
+    window.setTimeout(() => {
+      if (seq !== searchSeq.current) return;
+      void api.searchMessages(trimmed).then((found) => { if (seq === searchSeq.current) setHits(found); }, () => { if (seq === searchSeq.current) setHits([]); });
+    }, 200);
+  }
 
   useEffect(() => {
     const handleOpen = () => setOpen(true);
@@ -148,17 +162,33 @@ export default function GlobalCommandPalette() {
       });
     });
 
+    hits.forEach((hit) => {
+      list.push({
+        id: `msg-${hit.messageId}`,
+        label: hit.snippet,
+        group: '消息',
+        hint: hit.title,
+        icon: MessageSquare,
+        matched: true,
+        onSelect: () => {
+          uiStore.setMode('chat');
+          tabStore.openChatTab(hit.sessionId, hit.title);
+        },
+      });
+    });
+
     return list;
-  }, [sessions, skills, files]);
+  }, [sessions, skills, files, hits]);
 
   return (
     <CommandPalette
       items={items}
       shortcut="k"
-      placeholder="输入搜索会话、文件、技能或操作…"
+      placeholder="搜索会话、消息内容、文件、技能或操作…"
       emptyMessage="未找到匹配项"
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={(next) => { setOpen(next); if (!next) { searchSeq.current += 1; setHits([]); } }}
+      onQueryChange={searchMessages}
     />
   );
 }

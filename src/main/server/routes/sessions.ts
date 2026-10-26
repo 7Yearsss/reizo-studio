@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { hasTrash, TRASH_RETENTION_MS, type SessionStore } from '../../../shared/chat';
+import { hasSearch, hasTrash, TRASH_RETENTION_MS, type SessionStore } from '../../../shared/chat';
 import type { ArtifactStore } from '../storage/artifactStore';
 import { pendingInteractionKindForSession } from '../agent/permissions';
 import { isSessionTurnLive } from '../agent/session';
@@ -39,6 +39,11 @@ export function createSessionsRouter(sessionStore: SessionStore, artifactStore?:
     } catch (error) {
       return c.json({ error: error instanceof Error ? error.message : String(error) }, 502);
     }
+  });
+
+  router.get('/search', async (c) => {
+    if (!hasSearch(sessionStore)) return c.json({ hits: [] });
+    return c.json({ hits: await sessionStore.searchMessages(c.req.query('q') ?? '', 30) });
   });
 
   router.get('/trash', async (c) => {
