@@ -525,6 +525,7 @@ export default function Composer({
   return (
     <div
       ref={overlayRef}
+      data-ui="chat.composer"
       className={cn(
         'pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-paper via-paper to-paper-a0',
         compact ? 'px-3 pb-3 pt-8' : 'px-6 pb-6 pt-16',

@@ -100,7 +100,7 @@ export default function CustomTitleBar() {
   }, []);
 
   return (
-    <header className="titlebar flex h-10 shrink-0 items-center bg-paper select-none">
+    <header data-ui="app.titlebar" className="titlebar flex h-10 shrink-0 items-center bg-paper select-none">
       {/* Claude-style top-left toolbar: Logo, Sidebar toggle, Quick search, Back/Forward */}
       <div
         className={cn(

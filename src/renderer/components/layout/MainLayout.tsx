@@ -1,6 +1,6 @@
 import { cn } from '../../lib/cn';
 import { AnimatePresence } from 'motion/react';
-import { Suspense } from 'react';
+import { Suspense, useEffect } from 'react';
 import CustomTitleBar from './CustomTitleBar';
 import Sidebar from './Sidebar';
 import RightPanel from '../workspace/RightPanel';
@@ -13,6 +13,7 @@ import { lazyWithRetry } from '../../lib/lazyWithRetry';
 import ToastContainer from '../ui/ToastContainer';
 import GlobalCommandPalette from './GlobalCommandPalette';
 import DiskSpaceMonitor from './DiskSpaceMonitor';
+import { applyStoredCustomCss } from '../../lib/customCss';
 import SettingsDialog from './SettingsDialog';
 
 // Keep the creative workspace ready; secondary modes load their editors only
@@ -38,6 +39,7 @@ export default function MainLayout() {
   const mode = useUiStore((s) => s.mode);
   const rightPanelTab = useUiStore((s) => s.rightPanelTab);
   const rightPanelMaximized = useUiStore((s) => s.rightPanelMaximized);
+  useEffect(() => { applyStoredCustomCss(); }, []);
   const isChatView = mode === 'chat' || mode === 'projects';
   const showRight = isChatView && rightPanelTab !== null && (rightPanelTab !== 'canvas' || activeTab?.kind === 'chat');
   const isRightMaximized = showRight && rightPanelMaximized;

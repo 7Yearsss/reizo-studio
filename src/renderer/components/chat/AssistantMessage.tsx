@@ -60,7 +60,7 @@ export default function AssistantMessage({
     return file ? [file] : [];
   }), [parts]);
   return (
-    <div className={`anim-msg group space-y-3 ${currentMatch ? 'chat-search-current' : ''}`}>
+    <div data-ui="chat.message chat.message.assistant" className={`anim-msg group space-y-3 ${currentMatch ? 'chat-search-current' : ''}`}>
       <WorkGroupCard
         sessionId={sessionId}
         reasoning={reasoning}
@@ -76,7 +76,7 @@ export default function AssistantMessage({
       <AskAnswers parts={parts} />
       {sessionId ? <GeneratedMediaStrip parts={parts} sessionId={sessionId} /> : null}
       {content ? (
-        <div data-slot="message-content" className="markdown chat-prose text-ink">
+        <div data-slot="message-content" data-ui="part:message-content" className="markdown chat-prose text-ink">
           <MarkdownContent content={content} streaming={streaming} generatedFiles={generatedFiles} />
           {streaming ? <StreamingCaret /> : null}
         </div>

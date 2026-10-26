@@ -497,6 +497,7 @@ export default function Sidebar() {
   return (
     <aside
       ref={asideRef}
+      data-ui="app.sidebar"
       className={cn(
         'relative flex h-full shrink-0 flex-col overflow-hidden border-r border-[var(--sidebar-line)] bg-sidebar',
         isDragging

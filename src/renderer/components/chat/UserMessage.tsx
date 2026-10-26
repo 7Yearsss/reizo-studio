@@ -60,6 +60,7 @@ export default function UserMessage({
 
   return (
     <div
+      data-ui="chat.message chat.message.user"
       className={`anim-msg group flex justify-end ${currentMatch ? 'chat-search-current' : ''}`}
     >
       <div className="min-w-0 max-w-[85%] sm:max-w-[78%]">

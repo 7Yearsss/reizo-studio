@@ -15,6 +15,7 @@ import ProvidersSection from './settings/ProvidersSection';
 import StorageMaintenanceSection from './settings/StorageMaintenanceSection';
 import BackupSection from './settings/BackupSection';
 import DiagnosticsSection from './settings/DiagnosticsSection';
+import { applyCustomCss, getStoredCustomCss } from '../lib/customCss';
 import NetworkSection from './settings/NetworkSection';
 import UsageCostsSection from './settings/UsageCostsSection';
 import ExtensionsSection from './settings/ExtensionsSection';
@@ -163,6 +164,31 @@ function WebSearchEditor() {
   );
 }
 
+function CustomCssGroup() {
+  const [css, setCss] = useState(getStoredCustomCss());
+  const [notice, setNotice] = useState('');
+  function apply(next: string) {
+    const removed = applyCustomCss(next);
+    setNotice(removed.length ? '已应用；@import 已被忽略（不加载外部样式）' : next.trim() ? '已应用' : '已清除');
+  }
+  return (
+    <SettingGroup title="自定义 CSS" description="用 CSS 微调外观，立即生效。样式钩子：[data-ui~='chat.message']、chat.message.user、chat.message.assistant、chat.composer、app.sidebar、app.titlebar、part:message-content。自定义样式优先于应用样式，不需要 !important。">
+      <textarea
+        value={css}
+        onChange={(e) => setCss(e.target.value)}
+        spellCheck={false}
+        placeholder={"[data-ui~='chat.message'] { max-width: none; }"}
+        className="h-32 w-full rounded-lg bg-paper-inset p-3 font-mono text-xs text-ink outline-none"
+      />
+      <div className="mt-2 flex items-center gap-3">
+        <button onClick={() => apply(css)} className="rounded-full bg-ink px-4 py-1.5 text-sm text-paper-raised">应用</button>
+        <button onClick={() => { setCss(''); apply(''); }} className="rounded-full bg-paper-inset px-4 py-1.5 text-sm text-ink">清除</button>
+        {notice && <span className="text-xs text-ink-muted">{notice}</span>}
+      </div>
+    </SettingGroup>
+  );
+}
+
 function GeneralSection() {
   const settings = useSettingsStore((s) => s.settings);
   const folderName = settings.workspacePath?.split(/[/\\]/).filter(Boolean).pop();
@@ -244,6 +270,8 @@ function GeneralSection() {
         })}
       </div>
       </SettingGroup>
+
+      <CustomCssGroup />
 
       <SettingGroup title="电脑操作 (Computer Use)" description="允许 Agent 截屏并控制这台电脑的鼠标、键盘。仅在需要操作图形界面时使用；每个会话首次操作前会向你确认一次。">
       <div className="flex flex-wrap gap-2">
