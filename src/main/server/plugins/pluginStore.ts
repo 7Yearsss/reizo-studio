@@ -4,6 +4,8 @@ import path from 'node:path';
 import type { PluginPreview, PluginSummary } from '../../../shared/plugins';
 import { parseHooksConfigDetailed, type HookSpec } from '../agent/hooks';
 import { parseMcpConfig, type McpServerConfig } from '../agent/mcpTools';
+import { findConfigNames, hasUnresolvedConfig, isConfigName, substituteConfig } from '../../../shared/pluginConfig';
+import { safeDecrypt, safeEncrypt } from '../storage/providerStore';
 
 /**
  * Extension packs: a folder with skills, MCP servers and hooks, in the Claude Code / Codex layout
@@ -105,6 +107,7 @@ export async function inspectPluginDir(dir: string): Promise<Inspection | null> 
     if (typeof mcpField === 'string' && !mcpPath) warnings.push('The manifest points "mcpServers" outside the plugin folder; ignored.');
     if (mcpPath) { try { mcpRaw = await readFile(mcpPath, 'utf8'); } catch { /* none */ } }
   }
+  const requiredConfig = new Set<string>(mcpRaw ? findConfigNames(mcpRaw) : []);
   let mcpServers: McpServerConfig[] = [];
   if (mcpRaw) {
     const substituted = mcpRaw.replace(ROOT_VARS, () => root.replace(/\\/g, '/'));
@@ -125,6 +128,7 @@ export async function inspectPluginDir(dir: string): Promise<Inspection | null> 
     if (typeof hooksField === 'string' && !hooksPath) warnings.push('The manifest points "hooks" outside the plugin folder; ignored.');
     if (hooksPath) { try { hooksRaw = await readFile(hooksPath, 'utf8'); } catch { /* none */ } }
   }
+  if (hooksRaw) for (const name of findConfigNames(hooksRaw)) requiredConfig.add(name);
   let hooks: HookSpec[] = [];
   if (hooksRaw) {
     const parsed = parseHooksConfigDetailed(hooksRaw.replace(ROOT_VARS, () => root.replace(/\\/g, '/')));
@@ -143,9 +147,58 @@ export async function inspectPluginDir(dir: string): Promise<Inspection | null> 
       mcpServers: mcpServers.map((s) => ({ name: s.name, kind: s.kind, target: describeTarget(s) })),
       hooks: hooks.map((h) => ({ event: h.event, ...(h.matcher ? { matcher: h.matcher } : {}), command: h.command })),
       warnings,
+      ...(requiredConfig.size ? { config: [...requiredConfig].sort().map((name) => ({ name, set: false })) } : {}),
     },
     contributions: { skillsDirs, mcpServers, hooks },
   };
+}
+
+const secretsFile = (dataRoot: string) => path.join(dataRoot, 'plugin-secrets.json');
+
+/** { pluginId: { NAME: encrypted value } } — encrypted with the OS key store, kept apart from every other file. */
+async function readSecrets(dataRoot: string): Promise<Record<string, Record<string, string>>> {
+  const parsed = await readJson(secretsFile(dataRoot));
+  return parsed && typeof parsed === 'object' ? (parsed as Record<string, Record<string, string>>) : {};
+}
+
+async function writeSecrets(dataRoot: string, secrets: Record<string, Record<string, string>>): Promise<void> {
+  await mkdir(dataRoot, { recursive: true });
+  await writeFile(secretsFile(dataRoot), JSON.stringify(secrets, null, 2), { encoding: 'utf8', mode: 0o600 });
+}
+
+/** Save (or, with null/empty, remove) one credential a pack asked for. */
+export async function setPluginConfig(dataRoot: string, id: string, name: string, value: string | null): Promise<void> {
+  assertPluginId(id);
+  if (!isConfigName(name)) throw new Error('Invalid credential name');
+  if (!(await exists(path.join(pluginsDir(dataRoot), id)))) throw new Error(`没有安装扩展包 ${id}`);
+  const secrets = await readSecrets(dataRoot);
+  const mine = { ...(secrets[id] ?? {}) };
+  if (value && value.trim()) mine[name] = safeEncrypt(value.trim());
+  else delete mine[name];
+  if (Object.keys(mine).length) secrets[id] = mine; else delete secrets[id];
+  await writeSecrets(dataRoot, secrets);
+}
+
+async function configValues(dataRoot: string, id: string): Promise<Record<string, string>> {
+  const mine = (await readSecrets(dataRoot))[id] ?? {};
+  const values: Record<string, string> = {};
+  for (const [name, encrypted] of Object.entries(mine)) {
+    const plain = safeDecrypt(encrypted);
+    if (plain) values[name] = plain;
+  }
+  return values;
+}
+
+/** Fill a pack's placeholders in memory. Anything still unresolved means the pack is not fully configured. */
+function fillServers(servers: McpServerConfig[], values: Record<string, string>): { ready: McpServerConfig[]; skipped: string[] } {
+  const ready: McpServerConfig[] = [];
+  const skipped: string[] = [];
+  for (const server of servers) {
+    const filled = JSON.parse(substituteConfig(JSON.stringify(server), values)) as McpServerConfig;
+    if (hasUnresolvedConfig(JSON.stringify(filled))) skipped.push(server.name);
+    else ready.push(filled);
+  }
+  return { ready, skipped };
 }
 
 /** Where a pack came from and what it contained when installed — the basis for "update available". */
@@ -225,7 +278,9 @@ export async function listPlugins(dataRoot: string): Promise<PluginSummary[]> {
     if (!inspection) continue;
     const id = path.basename(dir);
     const updateAvailable = installed[id] ? await sourceChanged(installed[id]) : false;
-    result.push({ ...inspection.summary, id, enabled: enabled.has(id), ...(updateAvailable ? { updateAvailable: true } : {}) });
+    const values = inspection.summary.config ? await configValues(dataRoot, id) : {};
+    const config = inspection.summary.config?.map((c) => ({ name: c.name, set: Object.hasOwn(values, c.name) }));
+    result.push({ ...inspection.summary, ...(config ? { config } : {}), id, enabled: enabled.has(id), ...(updateAvailable ? { updateAvailable: true } : {}) });
   }
   return result.sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -279,6 +334,8 @@ export async function setPluginEnabled(dataRoot: string, id: string, on: boolean
 export async function uninstallPlugin(dataRoot: string, id: string): Promise<void> {
   assertPluginId(id);
   await rm(path.join(pluginsDir(dataRoot), id), { recursive: true, force: true });
+  const secrets = await readSecrets(dataRoot);
+  if (delete secrets[id]) await writeSecrets(dataRoot, secrets);
   const state = await readState(dataRoot);
   const wasEnabled = state.enabled.delete(id);
   const hadRecord = delete state.installed[id];
@@ -301,8 +358,14 @@ export async function loadPluginContributions(dataRoot: string | undefined): Pro
     const inspection = await inspectPluginDir(dir);
     if (!inspection) continue;
     total.skillsDirs.push(...inspection.contributions.skillsDirs);
-    total.mcpServers.push(...inspection.contributions.mcpServers);
-    total.hooks.push(...inspection.contributions.hooks);
+    const id = path.basename(dir);
+    const values = inspection.summary.config ? await configValues(dataRoot, id) : {};
+    const { ready, skipped } = fillServers(inspection.contributions.mcpServers, values);
+    if (skipped.length) console.warn(`[plugins] ${id}: MCP server(s) ${skipped.join(', ')} not started — credentials are not filled in`);
+    total.mcpServers.push(...ready);
+    total.hooks.push(...inspection.contributions.hooks
+      .map((hook) => ({ ...hook, command: substituteConfig(hook.command, values) }))
+      .filter((hook) => !hasUnresolvedConfig(hook.command)));
   }
   return total;
 }

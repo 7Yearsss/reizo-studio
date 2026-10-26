@@ -28,7 +28,43 @@ function Summary({ pack }: { pack: PluginSummary }) {
   return <>{parts.length ? parts.join(' · ') : '没有可用内容'}</>;
 }
 
-function PackCard({ pack, busy, onToggle, onRemove }: { pack: PluginSummary; busy: boolean; onToggle: () => void; onRemove: () => void }) {
+/** Password boxes for the credentials a pack asks for. The saved value is never shown again. */
+function PackCredentials({ pack, onSaved }: { pack: PluginSummary; onSaved: () => void }) {
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
+  if (!pack.config?.length) return null;
+  const save = async (name: string) => {
+    setError(null);
+    try {
+      await window.reizo?.setPluginConfig?.(pack.id, name, values[name] ?? '');
+      setValues((current) => ({ ...current, [name]: '' }));
+      onSaved();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  };
+  return (
+    <div className="mt-3 space-y-1.5 border-t border-line pt-3">
+      <p className="text-xs text-ink-muted">需要的凭据（加密保存在本机，不写进扩展包）</p>
+      {pack.config.map((item) => (
+        <div key={item.name} className="flex items-center gap-2">
+          <span className="w-32 shrink-0 truncate text-xs text-ink" title={item.name}>{item.name}</span>
+          <input
+            type="password"
+            aria-label={item.name}
+            value={values[item.name] ?? ''}
+            onChange={(e) => setValues((current) => ({ ...current, [item.name]: e.target.value }))}
+            placeholder={item.set ? '已保存（输入新值覆盖）' : '尚未填写'}
+            className="min-w-0 flex-1 rounded-lg bg-paper-inset px-2 py-1 text-xs text-ink outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+          <button type="button" disabled={!(values[item.name] ?? '').trim()} onClick={() => void save(item.name)} className="rounded-full bg-ink px-2.5 py-1 text-[11px] text-paper-raised disabled:opacity-40">保存</button>
+          {item.set ? <button type="button" onClick={() => { setValues((c) => ({ ...c, [item.name]: '' })); void window.reizo?.setPluginConfig?.(pack.id, item.name, null).then(onSaved); }} className="text-[11px] text-ink-muted hover:text-danger">清除</button> : null}
+        </div>
+      ))}
+      {error ? <p className="text-xs text-danger">{error}</p> : null}
+    </div>
+  );
+}
+
+function PackCard({ pack, busy, onToggle, onRemove, onChanged }: { pack: PluginSummary; busy: boolean; onToggle: () => void; onRemove: () => void; onChanged: () => void }) {
   const hasDetails = pack.mcpServers.length > 0 || pack.hooks.length > 0 || pack.warnings.length > 0;
   return (
     <div className="rounded-2xl border border-line bg-paper-raised p-4">
@@ -58,6 +94,7 @@ function PackCard({ pack, busy, onToggle, onRemove }: { pack: PluginSummary; bus
           </button>
         </div>
       </div>
+      <PackCredentials pack={pack} onSaved={onChanged} />
       {hasDetails ? (
         <details className="mt-3 text-xs text-ink-muted">
           <summary className="cursor-pointer select-none hover:text-ink">查看它会运行什么</summary>
@@ -143,6 +180,7 @@ export default function ExtensionPacksSection() {
               key={pack.id}
               pack={pack}
               busy={busyId !== null}
+              onChanged={() => void refresh()}
               onToggle={() => {
                 if (!pack.enabled) {
                   const text = enableConfirmText(pack);

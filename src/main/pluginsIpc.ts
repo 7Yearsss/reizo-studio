@@ -14,7 +14,7 @@ import type {
 } from '../shared/extensionConfig';
 import { checkNodeEnvironment, readHookEntries, readMcpEntries, testMcpEntry, writeHookEntries, writeMcpEntries } from './server/plugins/extensionConfig';
 import { fetchPluginCatalog, installCatalogPlugin, searchMcpRegistry } from './server/plugins/catalog';
-import { installPlugin, listPlugins, previewPlugin, setPluginEnabled, syncPluginSkillsDirs, uninstallPlugin } from './server/plugins/pluginStore';
+import { installPlugin, listPlugins, previewPlugin, setPluginConfig, setPluginEnabled, syncPluginSkillsDirs, uninstallPlugin } from './server/plugins/pluginStore';
 import { resetMcpBaseline } from './server/agent/mcpTools';
 import {
   connectDingTalkIntegration,
@@ -72,6 +72,11 @@ export function registerPluginIpc(dataRoot: string, skillsDirs: string[]): void 
     const installed = await installPlugin(dataRoot, result.filePaths[0]);
     await syncPluginSkillsDirs(dataRoot, skillsDirs);
     return installed;
+  });
+
+  // A credential the pack asked for (`${config.NAME}`): stored encrypted, never returned.
+  ipcMain.handle(IPC.PLUGIN_SET_CONFIG, async (_event, id: string, name: string, value: string | null) => {
+    await setPluginConfig(dataRoot, id, name, typeof value === 'string' ? value : null);
   });
 
   // Step 1: pick a folder and describe what it would install — nothing is copied or started.

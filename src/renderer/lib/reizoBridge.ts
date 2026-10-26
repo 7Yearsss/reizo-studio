@@ -69,6 +69,7 @@ export function ensureReizoBridge(): ReizoBridge {
     listHooks: async () => [],
     saveHooks: async () => {},
     installPlugin: async () => null,
+    setPluginConfig: async () => {},
     previewPlugin: async () => null,
     installPreviewedPlugin: async () => { throw new Error('not available in the browser'); },
     setPluginEnabled: async () => {},

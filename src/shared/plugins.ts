@@ -27,6 +27,8 @@ export interface PluginSummary {
   warnings: string[];
   /** The folder it was imported from has changed since (compared by content, so an unchanged version number still shows). */
   updateAvailable?: boolean;
+  /** Credentials the pack asks for (`${config.NAME}`) and whether the user has supplied each; values are never exposed. */
+  config?: Array<{ name: string; set: boolean }>;
 }
 
 /** What importing a folder would install — shown to the user BEFORE anything is copied or started. */

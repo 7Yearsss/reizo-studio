@@ -14,6 +14,7 @@ export function previewConfirmText(preview: PluginPreview): string {
   lines.push(summary.skills.length ? `• ${summary.skills.length} 个技能：${summary.skills.slice(0, 8).join('、')}${summary.skills.length > 8 ? '…' : ''}` : '• 没有技能');
   for (const server of summary.mcpServers) lines.push(`• ${server.kind === 'stdio' ? '启动本地程序' : '连接外部服务'}：${server.target}`);
   for (const hook of summary.hooks) lines.push(`• 在工具调用${hook.event === 'PreToolUse' ? '前' : '后'}运行命令${hook.matcher ? `（${hook.matcher}）` : ''}：${hook.command}`);
+  if (summary.config?.length) lines.push(`• 需要你填写凭据：${summary.config.map((c) => c.name).join('、')}（导入后在卡片里填写，加密保存在本机，不会写进扩展包或任何配置文件）`);
   for (const warning of summary.warnings) lines.push(`• 注意：${warning}`);
   lines.push('', '以上程序和命令要等你启用后才会运行。只导入你信任的来源。继续导入吗？');
   return lines.join('\n');
