@@ -1311,6 +1311,26 @@ exports[`tool contract snapshots > workspace tools 1`] = `
       ],
     },
   },
+  "read_background": {
+    "description": "Read the output a background command has produced since your last read. Pass the id from run_command and the nextOffset you got last time (0 the first time).",
+    "input": {
+      "properties": {
+        "id": {
+          "description": "Background command id.",
+          "type": "string",
+        },
+        "since": {
+          "description": "Offset returned as nextOffset by the previous read.",
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+      },
+      "required": [
+        "id",
+      ],
+    },
+  },
   "read_file": {
     "description": "Read a UTF-8 text file from the bound workspace. Only works for text files (code, markdown, json, etc.). CANNOT read binary files (images, audio, video, zip). Do not call read_file on images — canvas/image outputs are already rendered to the user. Path is relative to the workspace root.",
     "input": {
@@ -1326,9 +1346,13 @@ exports[`tool contract snapshots > workspace tools 1`] = `
     },
   },
   "run_command": {
-    "description": "Run a shell command with the workspace as cwd. Ask the user first. Do not use for interactive programs.",
+    "description": "Run a shell command with the workspace as cwd. Ask the user first. Do not use for interactive programs. Set background:true for a process that keeps running (a dev server, a watcher): it returns an id at once, then use read_background to see new output and stop_background to end it.",
     "input": {
       "properties": {
+        "background": {
+          "description": "Start it and return immediately instead of waiting for it to finish.",
+          "type": "boolean",
+        },
         "command": {
           "description": "Shell command to run.",
           "type": "string",
@@ -1336,6 +1360,20 @@ exports[`tool contract snapshots > workspace tools 1`] = `
       },
       "required": [
         "command",
+      ],
+    },
+  },
+  "stop_background": {
+    "description": "Stop a background command you started.",
+    "input": {
+      "properties": {
+        "id": {
+          "description": "Background command id.",
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
       ],
     },
   },

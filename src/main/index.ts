@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Notification, powerMonitor, powerSaveBlocker } from 'electron';
 import { describeActiveWork, hasActiveWork } from '../shared/quitConfirm';
 import { liveTurnCount } from './server/agent/session';
+import { stopAllBackgroundShells } from './backgroundShells';
 import { activeVideoJobCount } from './server/canvas/videoJobRuntime';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -153,6 +154,7 @@ async function shutdown(): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   stopAccount?.();
+  stopAllBackgroundShells();
   // Synchronously, before any awaits: stop the server's shutdown path from
   // stamping a normal `last_turn_ended_at` over a turn that was really
   // interrupted by this quit.

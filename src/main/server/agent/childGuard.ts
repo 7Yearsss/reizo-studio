@@ -9,7 +9,7 @@ const GUARD_SOURCE = `
 const { spawn, spawnSync } = require('node:child_process');
 const parentPid = Number(process.argv[1]);
 const [command, ...args] = process.argv.slice(2);
-const child = spawn(command, args, { stdio: 'inherit', env: process.env, windowsHide: true });
+const child = spawn(command, args, { stdio: 'inherit', env: process.env, windowsHide: true, shell: process.env.REIZO_GUARD_SHELL === '1' });
 function killTree() {
   if (!child.pid) return;
   try {
@@ -41,7 +41,7 @@ export interface GuardedSpawn {
  * packaged app that is Electron itself, which acts as plain Node when ELECTRON_RUN_AS_NODE is set.
  */
 export function guardChildCommand(
-  spec: { command: string; args: string[]; env?: Record<string, string> },
+  spec: { command: string; args: string[]; env?: Record<string, string>; /** Run `command` as a complete shell command line. */ shell?: boolean },
   options: { parentPid?: number; execPath?: string; baseEnv?: Record<string, string | undefined> } = {},
 ): GuardedSpawn {
   const base: Record<string, string> = {};
@@ -50,6 +50,6 @@ export function guardChildCommand(
   return {
     command: options.execPath ?? process.execPath,
     args: ['-e', GUARD_SOURCE, String(options.parentPid ?? process.pid), spec.command, ...spec.args],
-    env: { ...base, ...(spec.env ?? {}), ELECTRON_RUN_AS_NODE: '1' },
+    env: { ...base, ...(spec.env ?? {}), ELECTRON_RUN_AS_NODE: '1', ...(spec.shell ? { REIZO_GUARD_SHELL: '1' } : {}) },
   };
 }

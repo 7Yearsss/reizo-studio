@@ -29,6 +29,7 @@ import {
   writeWorkspaceFile,
 } from '../../workspaceWrite';
 import { runWorkspaceCommand } from '../../workspaceShell';
+import { listBackgroundShells, readBackgroundShell, startBackgroundShell, stopBackgroundShell } from '../../backgroundShells';
 import { ApprovalRequiredError, registerPendingAsk, requestPermission } from './permissions';
 
 /** Apply the same substitution `editWorkspaceFile` would, for a pre-write preview. */
@@ -111,6 +112,7 @@ export function createWorkspaceTools(options: {
     try {
       switch (name) {
         case 'run_command':
+          if (args.background === true) return { result: JSON.stringify({ started: true, ...startBackgroundShell({ sessionId: options.sessionId, cwd: workspacePath, command: String(args.command ?? '') }) }) };
           return { result: JSON.stringify(await runWorkspaceCommand(workspacePath, String(args.command ?? ''))) };
         case 'write_file': {
           const path = String(args.path ?? '');
@@ -306,14 +308,29 @@ function buildTools(options: {
       },
     }),
     run_command: tool({
-      description: 'Run a shell command with the workspace as cwd. Ask the user first. Do not use for interactive programs.',
+      description: 'Run a shell command with the workspace as cwd. Ask the user first. Do not use for interactive programs. Set background:true for a process that keeps running (a dev server, a watcher): it returns an id at once, then use read_background to see new output and stop_background to end it.',
       inputSchema: z.object({
         command: z.string().describe('Shell command to run.'),
+        background: z.boolean().optional().describe('Start it and return immediately instead of waiting for it to finish.'),
       }),
       execute: async (input, toolOptions) => {
         await approve(sessionId, 'run_command', input, permissionMode, toolOptions);
+        if (input.background === true) return { started: true, ...startBackgroundShell({ sessionId, cwd: workspacePath, command: input.command }) };
         return runWorkspaceCommand(workspacePath, input.command);
       },
+    }),
+    read_background: tool({
+      description: 'Read the output a background command has produced since your last read. Pass the id from run_command and the nextOffset you got last time (0 the first time).',
+      inputSchema: z.object({
+        id: z.string().describe('Background command id.'),
+        since: z.number().int().min(0).optional().describe('Offset returned as nextOffset by the previous read.'),
+      }),
+      execute: async ({ id, since }) => readBackgroundShell(id, sessionId, since ?? 0) ?? { error: `No background command "${id}" in this conversation. Running: ${listBackgroundShells(sessionId).map((s) => s.id).join(', ') || 'none'}` },
+    }),
+    stop_background: tool({
+      description: 'Stop a background command you started.',
+      inputSchema: z.object({ id: z.string().describe('Background command id.') }),
+      execute: async ({ id }) => (stopBackgroundShell(id, sessionId) ? { ok: true, id } : { error: `No background command "${id}" in this conversation` }),
     }),
     grep: tool({
       description: 'Search workspace text files for a regex or substring. Returns path, line number, and matching line.',
