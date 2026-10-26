@@ -2,6 +2,11 @@ import { useMemo, useState, useCallback, type ReactNode } from 'react';
 import type { PluggableList } from 'unified';
 import { Streamdown, defaultRemarkPlugins } from 'streamdown';
 import { code } from '@streamdown/code';
+import { createMathPlugin } from '@streamdown/math';
+import 'katex/dist/katex.min.css';
+
+// $x$ inline and $x$ block; models and users write both.
+const math = createMathPlugin({ singleDollarTextMath: true });
 import { Check, Copy } from 'lucide-react';
 import { normalizeMarkdownFences } from '../../lib/markdown/normalizeMarkdownFences';
 import { stripThinkTags } from '../../lib/markdown/stripThinkTags';
@@ -24,6 +29,7 @@ const MARKDOWN_COMPONENTS = {
 
 const STREAMDOWN_PLUGINS = {
   code,
+  math,
   renderers: [{ language: ['mermaid', 'mmd'], component: MermaidStreamBlock }],
 };
 const STREAMDOWN_CONTROLS = {

@@ -4,6 +4,7 @@
 @import '@xyflow/react/dist/style.css';
 @source "../../node_modules/streamdown/dist/*.js";
 @source "../../node_modules/@streamdown/code/dist/*.js";
+@source "../../node_modules/@streamdown/math/dist/*.js";
 
 /*
  * The page stays a light sheet in dark mode, like Word: imported documents carry
