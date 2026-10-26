@@ -37,7 +37,7 @@ import type { CanvasStore } from '../storage/canvasStore';
 import type { CanvasImageParams } from '../../../shared/canvas';
 import { startAgentTurn, abortChatTurn } from './session';
 import { drainSteerInbox } from './steerInbox';
-import { createToolLoopGuard } from './toolLoopGuard';
+import { createToolLoopGuard, hashResult } from './toolLoopGuard';
 import { createCanvasBudget } from './canvasBudget';
 import { inlineCanvasRefImages } from './canvasRefImages';
 import { consumeInteractions, waitForInteractions } from './permissions';
@@ -711,6 +711,7 @@ export async function runChatTurn(options: {
             args: event.args,
             ok: event.error === undefined,
             error: event.error !== undefined ? String(event.error) : undefined,
+            resultHash: event.error === undefined ? hashResult(event.result) : undefined,
           });
           if (verdict && verdict.tier !== 'ok') {
             send({ type: 'tool_loop', tier: verdict.tier, reason: verdict.reason });

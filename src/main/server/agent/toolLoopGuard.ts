@@ -38,6 +38,11 @@ export interface ToolOutcome {
   error?: string;
   /** Did this call change state (write/edit/run/mutate)? Defaults by name. */
   mutating?: boolean;
+  /**
+   * Hash of the result (see `hashResult`). Successful repeats only count as a
+   * loop when the result is also unchanged — polling a changing job is progress.
+   */
+  resultHash?: string;
 }
 
 export interface ToolLoopVerdict {
@@ -136,6 +141,21 @@ function isMutating(o: ToolOutcome): boolean {
   return o.mutating ?? MUTATING_TOOL_NAMES.has(o.name);
 }
 
+/** FNV-1a over the serialized result; only the hash is kept, never the content. */
+export function hashResult(value: unknown): string {
+  let text: string;
+  try { text = typeof value === 'string' ? value : JSON.stringify(value) ?? ''; } catch { text = String(value); }
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(16);
+}
+
+/** Call signature plus, for successes, the result hash — so identical calls with changing results differ. */
+function fingerprint(o: ToolOutcome): string {
+  const sig = toolSignature(o.name, o.args);
+  return o.ok && o.resultHash ? `${sig}#${o.resultHash}` : sig;
+}
+
 /** Stable-ish signature: tool name + shallow arg keys + short scalar values. */
 export function toolSignature(name: string, args: Record<string, unknown>): string {
   const parts: string[] = [];
@@ -184,10 +204,13 @@ export function inspectToolStream(
   const sigErrors = new Map<string, number>();
   let consecutiveIdentical = 0;
   let lastSig = '';
+  let lastPrint = '';
 
   for (const o of outcomes) {
     const sig = toolSignature(o.name, o.args);
-    consecutiveIdentical = sig === lastSig ? consecutiveIdentical + 1 : 1;
+    const print = fingerprint(o);
+    consecutiveIdentical = print === lastPrint ? consecutiveIdentical + 1 : 1;
+    lastPrint = print;
     lastSig = sig;
     if (o.ok) {
       consecutiveErrors = 0;
@@ -237,7 +260,7 @@ export function inspectToolStream(
   for (const spec of DIVERSITY_WINDOWS) {
     const slice = outcomes.slice(-spec.window);
     if (slice.length < spec.minPresent) continue;
-    const distinct = new Set(slice.map((o) => toolSignature(o.name, o.args))).size;
+    const distinct = new Set(slice.map(fingerprint)).size;
     if (distinct <= spec.maxDistinct) {
       const tier: ToolLoopVerdict['tier'] = slice.length >= spec.haltAt ? 'halt' : 'warn';
       return { tier, reason: `${spec.label}：最近 ${slice.length} 次调用只有 ${distinct} 种` };

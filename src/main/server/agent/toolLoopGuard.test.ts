@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  hashResult,
   classifyToolError,
   createToolLoopGuard,
   inspectToolStream,
@@ -178,5 +179,29 @@ describe('createToolLoopGuard', () => {
     expect(guard.record(err('e'))).toBeNull();
     const halt = guard.record(err('f'));
     expect(halt?.tier).toBe('halt');
+  });
+});
+
+describe('result-aware repeat detection', () => {
+  const poll = (resultHash?: string) => ({ name: 'job_status', args: { id: 'j1' }, ok: true, resultHash });
+
+  it('does not halt polling whose result keeps changing', () => {
+    const outcomes = Array.from({ length: 14 }, (_, i) => poll(`h${i}`));
+    expect(inspectToolStream(outcomes).tier).toBe('ok');
+  });
+
+  it('still halts identical calls with identical results', () => {
+    const outcomes = Array.from({ length: 6 }, () => poll('same'));
+    expect(inspectToolStream(outcomes).tier).toBe('halt');
+  });
+
+  it('keeps old behaviour when no hash is provided', () => {
+    const outcomes = Array.from({ length: 6 }, () => poll());
+    expect(inspectToolStream(outcomes).tier).toBe('halt');
+  });
+
+  it('hashResult is stable and content-sensitive', () => {
+    expect(hashResult({ a: 1 })).toBe(hashResult({ a: 1 }));
+    expect(hashResult({ a: 1 })).not.toBe(hashResult({ a: 2 }));
   });
 });
