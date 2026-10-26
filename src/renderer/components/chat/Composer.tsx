@@ -21,7 +21,7 @@ import SelectField from '../ui/SelectField';
 import { useSettingsStore } from '../../state/useSettingsStore';
 import { useSkillStore } from '../../state/useSkillStore';
 import { useChatStore } from '../../state/useChatStore';
-import { useCanvasStore } from '../../state/useCanvasStore';
+import { useCanvasStore, useCanvasStoreEq, sameNodesIgnoringGeometry } from '../../state/useCanvasStore';
 import * as settingsStore from '../../state/settingsStore';
 import * as chatStore from '../../state/chatStore';
 import * as canvasStore from '../../state/canvasStore';
@@ -157,7 +157,7 @@ export default function Composer({
   );
   const nodeRefs = useChatStore((s) => (sessionId ? s.nodeRefsBySession[sessionId] : undefined)) ?? [];
   const selectedNodeIds = useCanvasStore((s) => (sessionId ? s.selectedNodeIdsBySession[sessionId] : undefined)) ?? canvasStore.EMPTY_SELECTED_IDS;
-  const canvasNodes = useCanvasStore((s) => (sessionId ? s.nodesBySession[sessionId] : undefined)) ?? canvasStore.EMPTY_NODES;
+  const canvasNodes = useCanvasStoreEq((s) => (sessionId ? s.nodesBySession[sessionId] : undefined), sameNodesIgnoringGeometry) ?? canvasStore.EMPTY_NODES;
 
   const activeSelectedNodes = useMemo(() => {
     if (!selectedNodeIds.length || !canvasNodes.length) return [];

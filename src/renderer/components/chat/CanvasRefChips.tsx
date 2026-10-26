@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import { useCanvasStore } from '../../state/useCanvasStore';
+import { useCanvasStoreEq, sameNodeIgnoringGeometry, sameNodesIgnoringGeometry } from '../../state/useCanvasStore';
 import * as canvasStore from '../../state/canvasStore';
 import * as uiStore from '../../state/uiStore';
 import { useAssetUrl } from '../canvas/useAssetUrl';
@@ -18,9 +18,9 @@ export function splitCanvasRefs(content: string): { text: string; nodeIds: strin
 }
 
 function RefChip({ nodeId, sessionId }: { nodeId: string; sessionId?: string }) {
-  const node = useCanvasStore((s) =>
+  const node = useCanvasStoreEq((s) =>
     (s.nodesBySession[sessionId ?? ''] ?? []).find((n) => n.id === nodeId),
-  );
+  sameNodeIgnoringGeometry);
   const url = useAssetUrl(node?.output?.assets?.[0]);
   return (
     <button
@@ -44,7 +44,7 @@ function RefChip({ nodeId, sessionId }: { nodeId: string; sessionId?: string }) 
 }
 
 export default function CanvasRefChips({ nodeIds, sessionId }: { nodeIds: string[]; sessionId?: string }) {
-  const nodes = useCanvasStore((s) => s.nodesBySession[sessionId ?? '']);
+  const nodes = useCanvasStoreEq((s) => s.nodesBySession[sessionId ?? ''], sameNodesIgnoringGeometry);
   // Load canvas data lazily so chips in history resolve their thumbnails.
   const missing = useMemo(
     () => nodeIds.filter((id) => !(nodes ?? []).some((n) => n.id === id)),

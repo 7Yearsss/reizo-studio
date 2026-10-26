@@ -56,7 +56,7 @@ import {
 } from 'lucide-react';
 import * as canvasStore from '../../state/canvasStore';
 import * as chatStore from '../../state/chatStore';
-import { useCanvasStore } from '../../state/useCanvasStore';
+import { useCanvasStore, useCanvasStoreEq, sameNodesIgnoringGeometry } from '../../state/useCanvasStore';
 import { useChatStore } from '../../state/useChatStore';
 import { cn } from '../../lib/cn';
 import { setCanvasInteracting } from '../../lib/canvasInteraction';
@@ -267,7 +267,14 @@ export function computeEdgeZIndex(
 
 function CanvasInner({ sessionId }: { sessionId: string }) {
   const autoFocus = useContext(CanvasAutoFocusContext);
-  const storeNodes = useCanvasStore((s) => s.nodesBySession[sessionId] ?? canvasStore.EMPTY_NODES);
+  const isDraggingRef = useRef(false);
+  // React Flow owns node positions during a drag, so geometry-only store updates
+  // would re-render the whole panel on every frame for nothing. The first update
+  // after the drag ends (setIsInteracting) picks the committed positions up.
+  const storeNodes = useCanvasStoreEq(
+    (s) => s.nodesBySession[sessionId] ?? canvasStore.EMPTY_NODES,
+    (previous, next) => isDraggingRef.current && sameNodesIgnoringGeometry(previous, next),
+  );
   const storeEdges = useCanvasStore((s) => s.edgesBySession[sessionId] ?? canvasStore.EMPTY_EDGES);
   const loaded = useCanvasStore((s) => s.loadedBySession[sessionId] ?? false);
   const graphRun = useCanvasStore((s) => s.graphRunBySession[sessionId]);
@@ -550,7 +557,6 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     return () => clearTimeout(t);
   }, [agentMarkedIds, markTick]);
 
-  const isDraggingRef = useRef(false);
   const isPanningRef = useRef(false);
   // Inertia pan: sample viewport positions while panning, glide with decay on release.
   const panSamplesRef = useRef<{ t: number; x: number; y: number; z: number }[]>([]);

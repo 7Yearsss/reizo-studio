@@ -27,7 +27,12 @@ vi.mock('../state/chatStore', () => ({
 vi.mock('../state/canvasStore', () => ({
   importImage: mocks.importImage, getSnapshot: () => ({ nodesBySession: {} }), EMPTY_SELECTED_IDS: [], EMPTY_NODES: [],
 }));
-vi.mock('../state/useCanvasStore', () => ({ useCanvasStore: (select: Function) => select({ selectedNodeIdsBySession: {}, nodesBySession: {} }) }));
+vi.mock('../state/useCanvasStore', () => ({
+  useCanvasStore: (select: Function) => select({ selectedNodeIdsBySession: {}, nodesBySession: {} }),
+  useCanvasStoreEq: (select: Function) => select({ selectedNodeIdsBySession: {}, nodesBySession: {} }),
+  sameNodeIgnoringGeometry: () => true,
+  sameNodesIgnoringGeometry: () => true,
+}));
 vi.mock('../state/useSettingsStore', () => ({ useSettingsStore: (select: Function) => select({ settings: { workspacePath: null, permissionMode: 'ask', busyEnter: 'queue' } }) }));
 vi.mock('../state/useSkillStore', () => ({ useSkillStore: () => ({ skills: [] as unknown[] }) }));
 vi.mock('../state/useUiStore', () => ({ useUiStore: (select: Function) => select({ mode: 'chat', canvasOpen: false }) }));

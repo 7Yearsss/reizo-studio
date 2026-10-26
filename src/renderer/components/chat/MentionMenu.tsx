@@ -3,7 +3,7 @@ import { File, Folder, ImageIcon, Video, Bot, Wrench } from 'lucide-react';
 import * as api from '../../api';
 import type { DirEntry } from '../../../shared/workspace';
 import type { CanvasNode } from '../../../shared/canvas';
-import { useCanvasStore } from '../../state/useCanvasStore';
+import { useCanvasStoreEq, sameNodesIgnoringGeometry } from '../../state/useCanvasStore';
 import { useSkillStore } from '../../state/useSkillStore';
 import type { SkillSummary } from '../../state/skillStore';
 import * as canvasStore from '../../state/canvasStore';
@@ -29,7 +29,7 @@ export default function MentionMenu({
 }) {
   const [entries, setEntries] = useState<DirEntry[]>([]);
   const skills = useSkillStore().skills;
-  const storeNodes = useCanvasStore((s) => (sessionId ? s.nodesBySession[sessionId] : undefined) ?? canvasStore.EMPTY_NODES);
+  const storeNodes = useCanvasStoreEq((s) => (sessionId ? s.nodesBySession[sessionId] : undefined) ?? canvasStore.EMPTY_NODES, sameNodesIgnoringGeometry);
 
   const matchedNodes = sessionId
     ? storeNodes

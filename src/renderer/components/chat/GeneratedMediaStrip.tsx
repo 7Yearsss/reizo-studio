@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react';
 import type { ToolCallPart } from '../../../shared/chat';
 import type { CanvasNode } from '../../../shared/canvas';
 import { trailEntryFromTool } from '../../../shared/agentTrail';
-import { useCanvasStore } from '../../state/useCanvasStore';
+import { useCanvasStoreEq, sameNodesIgnoringGeometry } from '../../state/useCanvasStore';
 import * as canvasStore from '../../state/canvasStore';
 import MediaGenerationCard from './MediaGenerationCard';
 
@@ -23,7 +23,7 @@ export default function GeneratedMediaStrip({
     }
     return ids;
   }, [parts]);
-  const nodes = useCanvasStore((s) => s.nodesBySession[sessionId]);
+  const nodes = useCanvasStoreEq((s) => s.nodesBySession[sessionId], sameNodesIgnoringGeometry);
   // The canvas panel usually already opened the stream during the run; fetch
   // a snapshot lazily so history still shows thumbnails when it never did.
   // Snapshot-only: a live stream per mounted tab would exhaust the socket pool.
