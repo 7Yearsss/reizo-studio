@@ -9,6 +9,7 @@ import { toast } from '../../lib/toast';
 import { Input } from '../../components/motion/input';
 import ModelSelect from '../../components/models/ModelSelect';
 import ProviderIcon from '../../components/models/ProviderIcon';
+import LocalModelsBlock from './LocalModelsBlock';
 
 export default function ProvidersSection() {
   const settings = useSettingsStore((s) => s.settings);
@@ -22,6 +23,7 @@ export default function ProvidersSection() {
         <h1 className="text-xl font-semibold tracking-tight">模型</h1>
         <p className="mt-2 text-xs leading-relaxed text-ink-muted">选择供应商，配置密钥和默认对话模型。</p>
       </header>
+      <LocalModelsBlock />
       <div className="flex min-h-0 flex-1 gap-4 max-lg:flex-col">
         <aside aria-label="模型供应商" className="flex w-60 shrink-0 flex-col rounded-2xl border border-line bg-paper-raised p-3 xl:w-64 max-lg:w-full max-lg:shrink-0">
           <label className="mb-3 flex items-center gap-2 rounded-lg border border-line bg-paper px-2.5 py-2 text-ink-muted focus-within:border-accent/40 focus-within:ring-2 focus-within:ring-accent/15">

@@ -315,6 +315,16 @@ export async function exportSession(sessionId: string, format: 'json' | 'md', de
   return res.json();
 }
 
+export async function discoverLocalModels(): Promise<import('../shared/localModels').LocalDiscovery[]> {
+  const res = await api('/api/local-models');
+  return ((await res.json()) as { servers?: import('../shared/localModels').LocalDiscovery[] }).servers ?? [];
+}
+
+export async function connectLocalModel(providerId: string, model?: string): Promise<{ providerId: string; model: string }> {
+  const res = await api('/api/local-models/connect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ providerId, model }) });
+  return res.json();
+}
+
 export async function getDiskSpace(): Promise<{ freeBytes: number | null; totalBytes: number | null }> {
   const res = await api('/api/storage/disk');
   return (await res.json()) as { freeBytes: number | null; totalBytes: number | null };
