@@ -55,6 +55,7 @@ import { recordSkillExperience } from './skillRefiner';
 import { loadPluginContributions } from '../plugins/pluginStore';
 import { createTurnTraceCollector, writeTurnTrace } from './turnTrace';
 import { readWorkspaceMemory } from '../../workspaceMemory';
+import { formatRules, readRuleSources } from './workspaceRules';
 import type { MemoryEntry } from '../../workspaceMemoryDir';
 import {
   formatRecalledMemories,
@@ -316,6 +317,7 @@ export async function runChatTurn(options: {
 
   const workspacePath = settings.workspacePath;
   const memory = workspacePath ? await readWorkspaceMemory(workspacePath) : '';
+  const standingRules = formatRules(await readRuleSources({ workspacePath, userRulesDir: dataRoot }));
   let projectInstructions = '';
   let projectName = '';
   if (projectStore && session.projectId) {
@@ -402,6 +404,7 @@ export async function runChatTurn(options: {
         'If this skill declares a "提问"/"Questions" section, collect each missing input through `ask_user` question cards (concrete options + free text) before producing output — never ask those questions as plain chat text. Ask each question at most once; an input the user already answered is never re-asked.'
       : '',
     projectInstructions ? `Project "${projectName}" working rules:\n${projectInstructions}` : '',
+    standingRules,
   ].filter(Boolean);
   const instructions = systemParts.join('\n\n');
 
