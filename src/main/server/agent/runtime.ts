@@ -57,6 +57,8 @@ import { createTurnTraceCollector, writeTurnTrace } from './turnTrace';
 import { readWorkspaceMemory } from '../../workspaceMemory';
 import { formatRules, readRuleSources } from './workspaceRules';
 import { createSkillTools } from './skillTools';
+import { createAttachmentTools } from './attachmentTools';
+import { inlineAttachment } from '../../../shared/attachmentText';
 import { createWebTools, HTTP_FETCH_TOOL, WEB_SEARCH_TOOL } from './webTools';
 import { createWebSearchStore } from '../storage/webSearchStore';
 import type { ExpertAgent } from '../../../shared/expertAgent';
@@ -307,7 +309,7 @@ export async function runChatTurn(options: {
       ? attachments
           .map(
             (file) =>
-              `Attached file ${file.name}:\n\`\`\`\n${redactSecrets(file.content.slice(0, 20_000))}\n\`\`\``,
+              `Attached file ${file.name}:\n\`\`\`\n${redactSecrets(inlineAttachment(file.name, file.content))}\n\`\`\``,
           )
           .join('\n\n')
       : '',
@@ -594,6 +596,7 @@ ${expert.instructions}`
           ...(personalMemoryTools ? personalMemoryTools.tools : {}),
           ...(webTools ? webTools.tools : {}),
           ...(skill ? {} : createSkillTools({ skills: availableSkills })),
+          ...(artifactStore ? createAttachmentTools({ sessionId, artifacts: artifactStore }) : {}),
           ...(skill?.contract && canvasStore && dataRoot ? createDeliveryTools({ skill, canvasStore, sessionId, dataRoot, artifactStore }) : {}),
         }
       : undefined;

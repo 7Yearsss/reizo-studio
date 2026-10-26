@@ -883,6 +883,37 @@ exports[`tool contract snapshots > presentations 1`] = `
 }
 `;
 
+exports[`tool contract snapshots > read_attachment 1`] = `
+{
+  "read_attachment": {
+    "description": "Read more of a file the user attached to this conversation when its text was cut off ("[已截断 …]"). Pass the attachment name and the offset to continue from; returns one page and the next offset.",
+    "input": {
+      "properties": {
+        "length": {
+          "description": "Characters to read (default 20000, at most 40000).",
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer",
+        },
+        "name": {
+          "description": "The attachment file name.",
+          "type": "string",
+        },
+        "offset": {
+          "description": "Character offset to start from (default 0).",
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+      },
+      "required": [
+        "name",
+      ],
+    },
+  },
+}
+`;
+
 exports[`tool contract snapshots > sub-agents 1`] = `
 {
   "delegate_research": {

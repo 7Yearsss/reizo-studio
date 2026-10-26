@@ -12,6 +12,7 @@ import { createComputerTools } from './computerTools';
 import { createDocumentTools } from './documentTools';
 import { createPresentationTools } from './presentationTools';
 import { createFileTools } from './fileTools';
+import { createAttachmentTools } from './attachmentTools';
 
 /**
  * Regression guard for what the model sees: every tool's name, description and input contract. Changing a
@@ -48,6 +49,7 @@ describe('tool contract snapshots', () => {
   it('automations', () => expect(contract(createScheduleTools({ scheduleStore: stub, sessionId: 's' }))).toMatchSnapshot());
   it('web', () => expect(contract(createWebTools({ sessionId: 's', permissionMode: 'ask' }).tools)).toMatchSnapshot());
   it('personal memory', () => expect(contract(createPersonalMemoryTools({ sessionId: 's', dataRoot: os.tmpdir(), permissionMode: 'ask', emit: none }).tools)).toMatchSnapshot());
+  it('read_attachment', () => expect(contract(createAttachmentTools({ sessionId: 's', artifacts: stub }))).toMatchSnapshot());
   it('use_skill', () => expect(contract(createSkillTools({ skills: [skill] }))).toMatchSnapshot());
   it('sub-agents', () => {
     const opts = { getModel: () => stub, tools: {} };
