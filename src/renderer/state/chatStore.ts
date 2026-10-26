@@ -30,7 +30,8 @@ import { flushSheetEdits, selectWorkbook, restoreSheetReferences, refreshSheetRe
 import { splitSheetContext } from '../../shared/sheetReferences';
 import { recordRecentSkill } from './skillStore';
 import { appendTerminalLine } from './terminalStore';
-import { notifyNeedsInput } from '../lib/notify';
+import { notifyNeedsInput, notifyTurnDone } from '../lib/notify';
+import { shouldNotifyTurnDone, turnDoneNotice } from '../../shared/turnNotice';
 import { toast } from '../lib/toast';
 
 export interface PendingPermission {
@@ -1164,7 +1165,12 @@ function makeEventFolder(
           },
         });
         break;
-      case 'done':
+      case 'done': {
+        const startedAt = state.turnStartedAtBySession[sessionId];
+        if (shouldNotifyTurnDone({ hidden: typeof document !== 'undefined' && document.hidden, durationMs: startedAt ? Date.now() - startedAt : undefined, outcome: event.outcome })) {
+          const notice = turnDoneNotice(state.sessions.find((s) => s.id === sessionId)?.title ?? '', event.outcome);
+          notifyTurnDone(notice.title, notice.body);
+        }
         getReveal(sessionId).flush();
         getReasoningReveal(sessionId).flush();
         finishThinkingActivity(acc);
@@ -1180,6 +1186,7 @@ function makeEventFolder(
             : {}),
         });
         break;
+      }
     }
   };
 }

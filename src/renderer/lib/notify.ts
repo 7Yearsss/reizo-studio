@@ -42,6 +42,28 @@ export function notifyJobDone(title: string, body: string): void {
   }
 }
 
+/** A finished (or failed) long reply while the window is out of sight. */
+export function notifyTurnDone(title: string, body: string): void {
+  try {
+    if (typeof Notification === 'undefined') return;
+    if (Notification.permission !== 'granted') {
+      primeNotifications();
+      return;
+    }
+    const n = new Notification(title, { body, tag: 'reizo-turn-done', icon: logoUrl });
+    n.onclick = () => {
+      try {
+        window.focus();
+        n.close();
+      } catch {
+        /* ignore */
+      }
+    };
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
  * Fire an OS notification when the agent suspends on a question/approval while
  * the app isn't focused — otherwise a pending card sits invisible until the
