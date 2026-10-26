@@ -1,5 +1,6 @@
-import { RotateCcw } from 'lucide-react';
-import { useMemo } from 'react';
+import { RotateCcw, Square, Volume2 } from 'lucide-react';
+import { useMemo, useSyncExternalStore } from 'react';
+import { isSpeechSupported, speakingKey, subscribeSpeech, toggleSpeaking } from '../../lib/speech';
 import type { ReasoningSegment, ReplyActivity, ToolCallPart } from '../../../shared/chat';
 import type { TurnOutcome } from '../../../shared/stream';
 import MarkdownContent, { CopyButton } from './MarkdownContent';
@@ -100,6 +101,7 @@ export default function AssistantMessage({
               text={content}
               className="inline-flex items-center gap-1 text-[11px] text-ink-muted hover:text-ink cursor-pointer"
             />
+            {content && isSpeechSupported() && <SpeakButton text={content} />}
             {canRetry && (
               <button
                 type="button"
@@ -115,6 +117,22 @@ export default function AssistantMessage({
         </div>
       )}
     </div>
+  );
+}
+
+/** Read the reply aloud / stop. Only one reply plays at a time. */
+function SpeakButton({ text }: { text: string }) {
+  const key = `${text.length}:${text.slice(0, 40)}`;
+  const playing = useSyncExternalStore(subscribeSpeech, () => speakingKey() === key);
+  return (
+    <button
+      type="button"
+      onClick={() => toggleSpeaking(key, text)}
+      className="inline-flex items-center gap-1 text-[11px] text-ink-muted hover:text-ink cursor-pointer"
+    >
+      {playing ? <Square size={11} /> : <Volume2 size={11} />}
+      {playing ? '停止朗读' : '朗读'}
+    </button>
   );
 }
 
