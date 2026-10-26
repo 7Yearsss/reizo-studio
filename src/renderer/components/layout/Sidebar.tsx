@@ -33,6 +33,23 @@ import {
 } from '../motion/context-menu';
 import { openGlobalCommandPalette } from './GlobalCommandPalette';
 import { toast } from '../../lib/toast';
+import TrashPanel from './TrashPanel';
+
+/** Delete moves the conversation to the trash; the toast offers an immediate undo instead of a confirm dialog. */
+async function deleteWithUndo(id: string, title: string): Promise<void> {
+  try {
+    await chatStore.deleteSession(id);
+  } catch {
+    toast.error('无法删除', '会话正在运行，请先停止');
+    return;
+  }
+  toast.show({
+    title: `已删除「${title}」`,
+    status: 'info',
+    duration: 6000,
+    action: { label: '撤销', onClick: () => void chatStore.restoreSession(id) },
+  });
+}
 import Tooltip from '../ui/Tooltip';
 
 const COLLAPSE_KEY = 'reizo:sidebar-collapsed';
@@ -127,8 +144,7 @@ function SessionContextMenu({
         <ContextMenuItem
           tone="destructive"
           onSelect={() => {
-            void chatStore.deleteSession(session.id);
-            toast.info(`已删除会话「${session.title}」`);
+            void deleteWithUndo(session.id, session.title);
           }}
         >
           <span className="flex items-center gap-2">
@@ -173,6 +189,7 @@ export default function Sidebar() {
       return [];
     }
   });
+  const [trashOpen, setTrashOpen] = useState(false);
   const [chatsOpen, setChatsOpen] = useState(() => localStorage.getItem(CHATS_FOLD_KEY) !== '0');
 
   useEffect(() => {
@@ -403,8 +420,7 @@ export default function Sidebar() {
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              void chatStore.deleteSession(session.id);
-              toast.info(`已删除会话「${session.title}」`);
+              void deleteWithUndo(session.id, session.title);
             }}
             className="mt-0.5 shrink-0 self-start rounded p-1 text-ink-muted opacity-0 transition-opacity duration-[140ms] hover:bg-paper hover:text-danger group-hover:opacity-100"
             aria-label="删除会话"
@@ -564,6 +580,14 @@ export default function Sidebar() {
             )}
           </nav>
         )}
+      </div>
+
+      <div className="shrink-0">
+        <button type="button" onClick={() => setTrashOpen((v) => !v)} className={foldRow} aria-expanded={trashOpen}>
+          <ChevronRight size={14} className={cn('shrink-0 transition-transform duration-150 ease-[var(--ease-out)] motion-reduce:transition-none', trashOpen && 'rotate-90')} />
+          最近删除
+        </button>
+        {trashOpen && <div className="max-h-40 overflow-y-auto"><TrashPanel /></div>}
       </div>
 
       <div className="mt-3 shrink-0 border-t border-[var(--sidebar-line)] pt-3">

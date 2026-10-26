@@ -246,6 +246,22 @@ export async function deleteSession(id: string): Promise<void> {
   await api(`/api/sessions/${id}`, { method: 'DELETE' });
 }
 
+export interface TrashedSession extends SessionSummary { deletedAt: string }
+
+export async function listTrashedSessions(): Promise<{ sessions: TrashedSession[]; retentionDays: number }> {
+  const res = await api('/api/sessions/trash');
+  const data = (await res.json()) as { sessions?: TrashedSession[]; retentionDays?: number };
+  return { sessions: data.sessions ?? [], retentionDays: data.retentionDays ?? 30 };
+}
+
+export async function restoreSession(id: string): Promise<void> {
+  await api(`/api/sessions/${id}/restore`, { method: 'POST' });
+}
+
+export async function deleteSessionPermanently(id: string): Promise<void> {
+  await api(`/api/sessions/${id}?permanent=1`, { method: 'DELETE' });
+}
+
 export async function truncateSessionMessages(id: string, truncateAfterId: string): Promise<Session> {
   const res = await api(`/api/sessions/${id}/messages`, {
     method: 'PATCH',

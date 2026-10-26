@@ -10,6 +10,7 @@ import type {
   SessionSummary,
   ToolCallPart,
   TurnRuntimeStore,
+  SessionTrashStore,
 } from '../../../shared/chat';
 import type { TurnOutcome } from '../../../shared/stream';
 import type { DbHandle } from '../db/client';
@@ -156,7 +157,7 @@ function toMessage(row: MessageRowRaw): ChatMessage {
  * has no `transaction()`. Per-session serialization guards concurrent turns
  * doing read-modify-write on the same session.
  */
-export function createSqliteSessionStore(handle: DbHandle): SessionStore & TurnRuntimeStore {
+export function createSqliteSessionStore(handle: DbHandle): SessionStore & TurnRuntimeStore & SessionTrashStore {
   const raw: DatabaseSync = handle.raw;
   let turnMarkersFrozen = false;
 

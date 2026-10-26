@@ -332,6 +332,11 @@ export async function renameSession(id: string, title: string): Promise<void> {
   tabStore.renameChatTab(id, title);
 }
 
+export async function restoreSession(id: string): Promise<void> {
+  await api.restoreSession(id);
+  await loadSessions();
+}
+
 export async function deleteSession(id: string): Promise<void> {
   await api.deleteSession(id);
   const { [id]: _removedMessages, ...messagesBySession } = state.messagesBySession;
