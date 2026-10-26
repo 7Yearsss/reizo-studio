@@ -1296,6 +1296,16 @@ export async function createBackup(): Promise<BackupItem> {
   return ((await (await api('/api/backups', { method: 'POST' })).json()) as { backup: BackupItem }).backup;
 }
 
+/** Where the browser can download a backup as one zip (a plain link, so the file streams to disk). */
+export async function backupZipUrl(name: string): Promise<string> {
+  return `${await apiOrigin()}/api/backups/${encodeURIComponent(name)}/export`;
+}
+
+export async function importBackupZip(file: File): Promise<string> {
+  const res = await api('/api/backups/import', { method: 'POST', headers: { 'content-type': 'application/zip' }, body: file });
+  return ((await res.json()) as { name: string }).name;
+}
+
 export async function restoreBackup(name: string): Promise<void> {
   await api(`/api/backups/${encodeURIComponent(name)}/restore`, { method: 'POST' });
 }

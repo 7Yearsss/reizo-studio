@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ArchiveRestore, HardDriveDownload } from 'lucide-react';
+import { ArchiveRestore, Download, HardDriveDownload, Upload } from 'lucide-react';
 import * as api from '../../api';
 import { toast } from '../../lib/toast';
 
@@ -31,6 +31,21 @@ export default function BackupSection() {
     catch (error) { toast.error('无法恢复', error instanceof Error ? error.message : undefined); }
   }
 
+  async function exportZip(name: string) {
+    const link = document.createElement('a');
+    link.href = await api.backupZipUrl(name);
+    link.download = `${name}.zip`;
+    link.click();
+  }
+
+  async function importZip(file: File | undefined) {
+    if (!file) return;
+    setBusy(true);
+    try { await api.importBackupZip(file); toast.success('已导入备份', '在下面的列表里选择"恢复"即可'); load(); }
+    catch (error) { toast.error('导入失败', error instanceof Error ? error.message : undefined); }
+    finally { setBusy(false); }
+  }
+
   const settings = data?.settings;
   const update = (patch: Partial<api.BackupSettings>): void => void api.saveBackupSettings(patch).then(load, (): void => { toast.error('保存失败'); });
 
@@ -41,6 +56,10 @@ export default function BackupSection() {
 
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <button type="button" onClick={() => void backupNow()} disabled={busy} className="rounded-full bg-ink px-4 py-1.5 text-sm text-paper-raised disabled:opacity-50">{busy ? '备份中…' : '立即备份'}</button>
+        <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-paper-inset px-3 py-1.5 text-sm text-ink hover:bg-paper-inset/70">
+          <Upload size={14} /> 导入压缩包
+          <input type="file" accept=".zip,application/zip" className="hidden" onChange={(e) => { void importZip(e.target.files?.[0]); e.target.value = ''; }} />
+        </label>
         {settings ? (
           <label className="inline-flex items-center gap-2 text-sm text-ink-muted">
             <input type="checkbox" checked={settings.enabled} onChange={(e) => update({ enabled: e.target.checked })} />
@@ -70,6 +89,7 @@ export default function BackupSection() {
           <li key={backup.name} className="flex items-center gap-3 rounded-xl border border-line bg-paper-raised px-3 py-2 text-sm">
             <span className="flex-1 text-ink">{new Date(backup.createdAt).toLocaleString()}</span>
             <span className="text-xs text-ink-muted">{size(backup.bytes)}</span>
+            <button type="button" aria-label="导出为压缩包" title="导出为一个 zip 文件，可带到另一台电脑导入" onClick={() => void exportZip(backup.name)} className="rounded-full p-1 text-ink-muted hover:text-ink"><Download size={14} /></button>
             <button type="button" onClick={() => void restore(backup.name, backup.createdAt)} className="rounded-full px-3 py-1 text-xs text-ink-muted hover:text-ink">恢复</button>
           </li>
         ))}

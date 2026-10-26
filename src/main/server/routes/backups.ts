@@ -4,6 +4,12 @@ import { readFile } from 'node:fs/promises';
 import type { DbHandle } from '../db/client';
 import { writeTextAtomic } from '../storage/atomicFile';
 import { anyTurnLive } from '../agent/session';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import { BackupZipError, exportBackupZip, importBackupZip } from '../backup/backupZip';
 import { BackupBusyError, backupsDirOf, createBackup, listBackups, pruneBackups, stageRestore, verifyBackup } from '../backup/backup';
 
 export interface BackupSettings { enabled: boolean; intervalHours: number; keep: number }
@@ -64,6 +70,44 @@ export function createBackupRouter(options: { dataRoot: string; db: DbHandle }) 
     };
     await writeTextAtomic(settingsFile(options.dataRoot), JSON.stringify(next));
     return c.json({ settings: await readBackupSettings(options.dataRoot) });
+  });
+
+  // One backup as a single .zip (to move to another machine). Built in a temp folder, streamed, then removed.
+  router.get('/:name/export', async (c) => {
+    const name = c.req.param('name');
+    if (name !== path.basename(name)) return c.json({ error: 'Invalid backup name' }, 400);
+    const verdict = await verifyBackup(path.join(dir, name));
+    if (!verdict.ok) return c.json({ error: verdict.reason }, 400);
+    const tmp = await mkdtemp(path.join(os.tmpdir(), 'reizo-export-'));
+    const file = path.join(tmp, `${name}.zip`);
+    try {
+      await exportBackupZip(path.join(dir, name), file);
+    } catch (error) {
+      await rm(tmp, { recursive: true, force: true });
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 500);
+    }
+    const stream = createReadStream(file);
+    const cleanup = () => { void rm(tmp, { recursive: true, force: true }); };
+    stream.on('close', cleanup);
+    return new Response(Readable.toWeb(stream) as ReadableStream, {
+      headers: { 'content-type': 'application/zip', 'content-disposition': `attachment; filename="${name}.zip"` },
+    });
+  });
+
+  // A zip made by the export above (or another machine's). It becomes an ordinary entry in the list once it verifies.
+  router.post('/import', async (c) => {
+    if (!c.req.raw.body) return c.json({ error: '没有收到文件' }, 400);
+    const tmp = await mkdtemp(path.join(os.tmpdir(), 'reizo-import-'));
+    try {
+      const file = path.join(tmp, 'upload.zip');
+      await pipeline(Readable.fromWeb(c.req.raw.body as never), createWriteStream(file));
+      const name = await importBackupZip(file, dir);
+      return c.json({ name }, 201);
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, error instanceof BackupZipError ? 400 : 500);
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
   });
 
   // Queue a restore: the data is swapped at the next start, before the database opens. Nothing changes now.
