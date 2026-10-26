@@ -474,16 +474,30 @@ export default function Sidebar() {
       </nav>
 
       <div className="mt-7 flex min-h-0 flex-1 flex-col overflow-hidden">
-        <button type="button" onClick={toggleChatsOpen} className={cn(foldRow, 'w-full')} aria-expanded={chatsOpen}>
-          <ChevronRight
-            size={14}
-            className={cn(
-              'shrink-0 transition-transform duration-150 ease-[var(--ease-out)] motion-reduce:transition-none',
-              chatsOpen && 'rotate-90',
-            )}
-          />
-          对话
-        </button>
+        <div className="flex items-center gap-1">
+          <button type="button" onClick={toggleChatsOpen} className={cn(foldRow, 'flex-1')} aria-expanded={chatsOpen}>
+            <ChevronRight
+              size={14}
+              className={cn(
+                'shrink-0 transition-transform duration-150 ease-[var(--ease-out)] motion-reduce:transition-none',
+                chatsOpen && 'rotate-90',
+              )}
+            />
+            对话
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              uiStore.setMode('chat');
+              tabStore.newLauncherTab();
+            }}
+            title="开启新对话"
+            aria-label="开启新对话"
+            className="mr-1 inline-flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-muted outline-none transition-colors hover:bg-[var(--sidebar-hover)] hover:text-ink focus-visible:inset-ring-2 focus-visible:inset-ring-ink/30"
+          >
+            <Plus size={14} />
+          </button>
+        </div>
         {chatsOpen && (
           <nav className="anim-fade min-h-0 flex-1 space-y-0.5 overflow-y-auto px-1 pb-2">
             {folderGroups.groups.length === 0 && folderGroups.loose.length === 0 && !q && (

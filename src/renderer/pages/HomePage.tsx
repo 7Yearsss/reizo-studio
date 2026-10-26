@@ -11,7 +11,7 @@ import MentionMenu, { extractMentionQuery } from '../components/chat/MentionMenu
 import TopRightToolbar from '../components/chat/TopRightToolbar';
 import * as chatStore from '../state/chatStore';
 import * as canvasStore from '../state/canvasStore';
-import { getCanvasNodeThumbnail } from '../components/canvas/canvasThumbnail';
+import { hasTransferredFiles, isImageFile, transferredFiles } from '../lib/fileTransfer';
 import * as tabStore from '../state/tabStore';
 import * as settingsStore from '../state/settingsStore';
 import * as uiStore from '../state/uiStore';
@@ -37,7 +37,7 @@ export default function HomePage({ active = true }: { active?: boolean }) {
   const hasAnyKey = useSettingsStore((s) => s.settings.providers.some((p) => p.hasKey));
 
   function fileThumb(file: File): string | undefined {
-    if (!file.type.startsWith('image/')) return undefined;
+    if (!isImageFile(file)) return undefined;
     let url = fileThumbs.current.get(file);
     if (!url) {
       url = URL.createObjectURL(file);
@@ -55,11 +55,8 @@ export default function HomePage({ active = true }: { active?: boolean }) {
   }, []);
 
   function addDroppedFiles(files: FileList | File[]) {
-    const next = [...droppedFiles];
-    for (const file of Array.from(files)) {
-      if (!next.includes(file)) next.push(file);
-    }
-    setDroppedFiles(next);
+    const incoming = Array.from(files);
+    setDroppedFiles(previous => [...previous, ...incoming.filter(file => !previous.includes(file))]);
   }
 
   function removeDroppedFile(file: File) {
@@ -80,33 +77,21 @@ export default function HomePage({ active = true }: { active?: boolean }) {
       const session = await chatStore.createSession(text.slice(0, 60) || '新会话');
       const guideSkillId = selectedGuideTool?.skillId;
       if (guideSkillId) chatStore.setSessionSkill(session.id, guideSkillId);
-      uiStore.setMode('chat');
-      tabStore.openChatTab(session.id, session.title, true);
       // Mirror the session composer's drop semantics: images land on this
       // session's canvas as nodes + an @-ref chip; text-like files ride along
       // as message attachments.
       const attachments: { name: string; content: string }[] = [];
+      const imageMentions: string[] = [];
       for (const file of files) {
-        if (file.type.startsWith('image/')) {
-          try {
-            const nodes = canvasStore.getSnapshot().nodesBySession[session.id] ?? [];
-            const right = nodes.reduce((m, n) => Math.max(m, n.x + n.w), 0);
-            const node = await canvasStore.importImage(session.id, file, {
-              x: (right || 0) + 40,
-              y: 60,
-            });
-            if (node) {
-              const p = (node.params as Record<string, unknown>) ?? {};
-              chatStore.addNodeRef(session.id, {
-                id: node.id,
-                label: (node.title || file.name).toString().slice(0, 24),
-                type: 'image',
-                thumbnail: getCanvasNodeThumbnail(node) ?? (p.imageUrl as string | undefined),
-              });
-            }
-          } catch {
-            /* image import failed — skip this file */
-          }
+        if (isImageFile(file)) {
+          const nodes = canvasStore.getSnapshot().nodesBySession[session.id] ?? [];
+          const right = nodes.reduce((m, n) => Math.max(m, n.x + n.w), 0);
+          const node = await canvasStore.importImage(session.id, file, {
+            x: (right || 0) + 40,
+            y: 60,
+          });
+          if (!node) throw new Error(`未能添加图片「${file.name}」，请重试`);
+          imageMentions.push(`canvas:${node.id}`);
           continue;
         }
         try {
@@ -119,7 +104,9 @@ export default function HomePage({ active = true }: { active?: boolean }) {
         }
       }
       const message = text.trim() || (files.length ? '看下这些素材' : text);
-      void chatStore.sendMessage(session.id, message, mentions, {
+      uiStore.setMode('chat');
+      tabStore.openChatTab(session.id, session.title, true);
+      void chatStore.sendMessage(session.id, message, [...mentions, ...imageMentions], {
         ...(guideSkillId ? { skillId: guideSkillId } : {}),
         ...extra,
         attachments: attachments.length ? attachments : undefined,
@@ -206,11 +193,17 @@ export default function HomePage({ active = true }: { active?: boolean }) {
           )}
           <div
             className={draggingFiles ? 'rounded-3xl ring-2 ring-accent/60' : undefined}
-            onDragOver={(e) => {
-              if (e.dataTransfer.types.includes('Files')) e.preventDefault();
+            onPasteCapture={(e) => {
+              const files = transferredFiles(e.clipboardData);
+              if (!files.length) return;
+              e.preventDefault(); e.stopPropagation();
+              if (!creating) addDroppedFiles(files);
+            }}
+            onDragOverCapture={(e) => {
+              if (hasTransferredFiles(e.dataTransfer)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }
             }}
             onDragEnter={(e) => {
-              if (e.dataTransfer.types.includes('Files')) {
+              if (hasTransferredFiles(e.dataTransfer)) {
                 dragDepth.current += 1;
                 setDraggingFiles(true);
               }
@@ -219,11 +212,13 @@ export default function HomePage({ active = true }: { active?: boolean }) {
               dragDepth.current = Math.max(0, dragDepth.current - 1);
               if (dragDepth.current === 0) setDraggingFiles(false);
             }}
-            onDrop={(e) => {
-              e.preventDefault();
+            onDropCapture={(e) => {
+              if (!hasTransferredFiles(e.dataTransfer)) return;
+              e.preventDefault(); e.stopPropagation();
               dragDepth.current = 0;
               setDraggingFiles(false);
-              if (e.dataTransfer.files.length && !creating) addDroppedFiles(e.dataTransfer.files);
+              const files = transferredFiles(e.dataTransfer);
+              if (files.length && !creating) addDroppedFiles(files);
             }}
           >
           <PromptCard
@@ -286,7 +281,7 @@ export default function HomePage({ active = true }: { active?: boolean }) {
           )}
           {!hasAnyKey && (
             <p className="mt-4 text-center text-xs text-ink-muted">
-              还没有 API Key。
+              登录 Reizo 即可连接账号模型，也可配置自己的 API Key。
               <button
                 type="button"
                 onClick={() => uiStore.setMode('settings')}

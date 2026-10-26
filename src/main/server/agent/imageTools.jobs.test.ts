@@ -7,14 +7,19 @@ import { createSqliteSessionStore } from '../storage/sqliteSessionStore';
 import { createCanvasStore } from '../storage/canvasStore';
 import type { CanvasNodeOutput } from '../../../shared/canvas';
 import type { SettingsStore } from '../storage/settingsStore';
+import type { LocalSettings } from '../../../shared/settings';
 import { nodeJobsFor } from '../canvas/nodeJobs';
 import { canvasAssetsDir, startImageNode } from '../canvas/imageExecutor';
 import { stopCanvasWork } from '../canvas/workLifecycle';
 import { createCanvasApplication } from '../canvas/application';
 
 const generate = vi.hoisted(() => vi.fn());
+const providerConfig = vi.hoisted(() => vi.fn());
 vi.mock('ai', async (original) => ({ ...await original<typeof import('ai')>(), generateImage: generate }));
-vi.mock('./provider/openai', () => ({ createOpenAiProvider: () => ({ image: (id: string) => ({ id }) }) }));
+vi.mock('./provider/openai', () => ({ createOpenAiProvider: (config: unknown) => {
+  providerConfig(config);
+  return { image: (id: string) => ({ id }) };
+} }));
 import { createImageTools } from './imageTools';
 
 const image = { images: [{ uint8Array: new Uint8Array([1, 2, 3]), mediaType: 'image/png' }] };
@@ -25,16 +30,16 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-beforeEach(() => generate.mockReset());
+beforeEach(() => { generate.mockReset(); providerConfig.mockReset(); });
 afterEach(async () => { vi.restoreAllMocks(); for (const cleanup of cleanups.splice(0)) await cleanup(); });
 
-async function fixture() {
+async function fixture(currentSettings?: SettingsStore) {
   const handle = openDb(':memory:');
   const sessions = createSqliteSessionStore(handle);
   const canvasStore = createCanvasStore(handle);
   const session = await sessions.create('inline images', null, null);
   const dataRoot = await mkdtemp(path.join(os.tmpdir(), 'reizo-inline-jobs-'));
-  const settingsStore = { get: async () => ({ activeProviderId: 'openai', providers: { openai: { apiKey: 'fake', baseUrl: 'https://example.test/v1' } } }) } as unknown as SettingsStore;
+  const settingsStore = currentSettings ?? { get: async () => ({ activeProviderId: 'openai', providers: { openai: { apiKey: 'fake', baseUrl: 'https://example.test/v1' } } }) } as unknown as SettingsStore;
   const options = { settingsStore, dataRoot, sessionId: session.id, canvasStore };
   let closed = false;
   const close = () => { handle.close(); closed = true; };
@@ -50,6 +55,40 @@ type InlineResult = { ok: boolean; jobId?: string; imageUrl?: string; prompt?: s
 type EditResult = { ok: boolean; id?: string; jobId?: string; error?: string };
 
 describe('session image tools use durable jobs', () => {
+  it('submits an automatic chat image with account media credentials while text uses a separate manual key', async () => {
+    const account = { activeProviderId: 'reizo', mediaModels: {}, providers: {
+      reizo: { apiKey: 'text-only-key', baseUrl: 'https://gateway.example/v1', model: 'gpt-6-astra' },
+      'reizo-account': { apiKey: 'account-image-key', baseUrl: 'https://gateway.example/v1' },
+    }, accountCatalog: { text: [], video: [], image: [{ id: 'gpt-image-2', name: 'GPT Image', protocol: 'openai-image' }] } } as unknown as LocalSettings;
+    const { tools, canvasStore } = await fixture({ get: async () => account } as SettingsStore);
+    generate.mockResolvedValue(image);
+    const execute = tools.generate_image.execute as (input: { prompt: string; size: string }, context: { toolCallId: string }) => Promise<InlineResult>;
+    const receipt = await execute({ prompt: 'rainy city', size: '1792x1024' }, { toolCallId: 'account-image' });
+    expect(receipt.ok).toBe(true);
+    expect(canvasStore.jobs.get(receipt.jobId)).toMatchObject({ providerId: 'reizo-account', model: 'gpt-image-2', status: 'succeeded' });
+    expect(providerConfig).toHaveBeenCalledWith(expect.objectContaining({ apiKey: 'account-image-key', retryTransport: false }));
+    expect(generate).toHaveBeenCalledOnce();
+    expect(account.activeProviderId).toBe('reizo');
+  });
+
+  it('hands a long image render back to chat as a durable receipt before the provider stream deadline', async () => {
+    const { canvasStore, tools } = await fixture();
+    const pending = deferred<typeof image>();
+    generate.mockReturnValue(pending.promise);
+    const execute = tools.generate_image.execute as (input: { prompt: string; size: string }, context: { toolCallId: string }) => Promise<InlineResult & { canvasId: string; nodeId: string; status: string }>;
+    vi.useFakeTimers();
+    try {
+      const running = execute({ prompt: 'slow image', size: '1024x1024' }, { toolCallId: 'slow-image' });
+      await vi.advanceTimersByTimeAsync(120_000);
+      const receipt = await running;
+      expect(receipt).toMatchObject({ ok: true, status: 'running' });
+      expect(receipt.canvasId).toBeTruthy(); expect(receipt.nodeId).toBeTruthy();
+      vi.useRealTimers();
+      pending.resolve(image);
+      await vi.waitFor(() => expect(canvasStore.jobs.get(receipt.jobId!)?.status).toBe('succeeded'));
+      expect(generate).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); }
+  });
   it('keeps inline output fields and legacy image sizes while persisting a reusable session asset', async () => {
     const { canvasStore, sessionId, tools } = await fixture();
     generate.mockResolvedValue(image);

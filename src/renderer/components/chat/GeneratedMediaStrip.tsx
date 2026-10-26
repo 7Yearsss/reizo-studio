@@ -4,33 +4,9 @@ import type { CanvasNode } from '../../../shared/canvas';
 import { trailEntryFromTool } from '../../../shared/agentTrail';
 import { useCanvasStore } from '../../state/useCanvasStore';
 import * as canvasStore from '../../state/canvasStore';
-import * as uiStore from '../../state/uiStore';
-import { useAssetUrl } from '../canvas/useAssetUrl';
+import MediaGenerationCard from './MediaGenerationCard';
 
-function MediaThumb({ node, onClick }: { node: CanvasNode; onClick: () => void }) {
-  const url = useAssetUrl(node.output?.assets?.[0]);
-  if (!url) return null;
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={node.title}
-      className="h-24 w-24 shrink-0 overflow-hidden rounded-lg border border-line bg-paper-inset transition-transform hover:scale-[1.03]"
-    >
-      {node.type === 'video' ? (
-        <video src={`${url}#t=0.001`} muted playsInline preload="metadata" className="h-full w-full object-cover" />
-      ) : (
-        <img src={url} alt={node.title} className="h-full w-full object-cover" />
-      )}
-    </button>
-  );
-}
-
-/**
- * Thumbnails of media nodes the agent produced during this message — the
- * canvas is where they live, but the chat should show *that* something was
- * generated. Clicking one spotlights the node on the canvas.
- */
+/** Canvas workflows also deliver playable previews in the conversation. */
 export default function GeneratedMediaStrip({
   parts,
   sessionId,
@@ -60,7 +36,7 @@ export default function GeneratedMediaStrip({
         .map((id) => (nodes ?? []).find((n) => n.id === id))
         .filter(
           (n): n is CanvasNode =>
-            !!n && (n.type === 'image' || n.type === 'video') && !!n.output?.assets?.length,
+            !!n && (n.type === 'image' || n.type === 'video') && n.runState !== 'idle',
         ),
     [nodeIds, nodes],
   );
@@ -70,12 +46,14 @@ export default function GeneratedMediaStrip({
   return (
     <div className="flex flex-wrap gap-2">
       {mediaNodes.map((node) => (
-        <MediaThumb
+        <MediaGenerationCard
           key={node.id}
-          node={node}
-          onClick={() => {
-            uiStore.setRightPanelTab('canvas');
-            canvasStore.focusNode(sessionId, node.id);
+          sessionId={sessionId}
+          part={{ type: 'tool', id: node.id, name: node.type === 'video' ? 'generate_video' : 'generate_image',
+            args: node.params as Record<string, unknown>,
+            result: JSON.stringify({ nodeId: node.id, canvasId: node.canvasId,
+              status: node.runState, error: node.output?.error,
+              ...(node.runState === 'done' ? { output: node.output } : {}) }),
           }}
         />
       ))}

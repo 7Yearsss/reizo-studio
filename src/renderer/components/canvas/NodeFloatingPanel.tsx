@@ -15,6 +15,8 @@ import * as canvasStore from '../../state/canvasStore';
 import NodePanelViewport from './NodePanelViewport';
 import NodePanelSelect from './NodePanelSelect';
 import type { CanvasInputSource } from '../../state/canvasInputSources';
+import { useSettingsStore } from '../../state/useSettingsStore';
+import { mediaCatalogProvider } from '../../lib/modelCatalog';
 
 const CONFIGURED_MODEL = '__configured_model__';
 
@@ -30,7 +32,7 @@ export interface NodeFloatingPanelProps {
   candidates: CanvasNode[];
   upstreamSources: UpstreamSourceItem[];
   running: boolean;
-  onRun: () => void;
+  onRun: () => void | Promise<void>;
   nodeType?: 'image' | 'video' | 'audio' | 'note';
   autoFocus?: boolean;
   // Audio specific controls
@@ -49,7 +51,6 @@ export interface NodeFloatingPanelProps {
   onModelChange?: (model: string) => void;
   variationsCount?: 1 | 2 | 4;
   onVariationsCountChange?: (count: 1 | 2 | 4) => void;
-  estimatedCost?: number;
   // Video specific controls
   ratio?: '16:9' | '9:16' | '1:1';
   onRatioChange?: (ratio: '16:9' | '9:16' | '1:1') => void;
@@ -67,6 +68,9 @@ function NodeFloatingPanel(props: NodeFloatingPanelProps) {
   // Hiding the body while dragging must not reset a paid request already in flight.
   const [refining, setRefining] = useState(false);
   const refiningRef = useRef(false);
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   useEffect(() => {
     if (!visible || dragging) { setReady(false); return; }
     const timer = setTimeout(() => setReady(true), 100);
@@ -82,14 +86,30 @@ function NodeFloatingPanel(props: NodeFloatingPanelProps) {
     } catch (cause) { toast.error(cause instanceof Error ? cause.message : '提示词润色失败'); }
     finally { refiningRef.current = false; setRefining(false); }
   };
-  return ready && visible && !dragging ? <NodePanelBody {...props} refining={refining} onRefine={refine} /> : null;
+  const run = async () => {
+    if (submittingRef.current || props.running) return;
+    submittingRef.current = true;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await props.onRun();
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : '生成请求失败，请重试';
+      setSubmitError(message);
+      toast.error(message);
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
+  };
+  return ready && visible && !dragging ? <NodePanelBody {...props} running={props.running || submitting} onRun={run} submitError={submitError} submitting={submitting} refining={refining} onRefine={refine} /> : null;
 }
 
 function NodePanelBody({ sessionId, node, prompt, onPromptChange, onPromptCommit, candidates, upstreamSources, running, onRun,
   nodeType = 'image', autoFocus = false, audioProvider, onAudioProviderChange, audioProviders, audioVoice, onAudioVoiceChange,
   audioVoices, onAgentExpand, size = '1024x1024', onSizeChange, model, onModelChange, variationsCount = 1,
-  onVariationsCountChange, estimatedCost = 5, ratio = '16:9', onRatioChange, duration = '5s', onDurationChange,
-  camera, onCameraChange, refining, onRefine }: NodeFloatingPanelProps & { refining: boolean; onRefine: () => Promise<void> }) {
+  onVariationsCountChange, ratio = '16:9', onRatioChange, duration = '5s', onDurationChange,
+  camera, onCameraChange, refining, onRefine, submitError, submitting }: NodeFloatingPanelProps & { refining: boolean; onRefine: () => Promise<void>; submitError: string | null; submitting: boolean }) {
   const areaRef = useRef<MentionTextAreaHandle>(null);
   const lastSyncedPrompt = useRef(prompt);
   const [boundary, setBoundary] = useState<HTMLDivElement | null>(null);
@@ -98,10 +118,19 @@ function NodePanelBody({ sessionId, node, prompt, onPromptChange, onPromptCommit
   const isAudio = nodeType === 'audio';
   const isNote = nodeType === 'note';
   const isImage = !isVideo && !isAudio && !isNote;
+  const settings = useSettingsStore(state => state.settings);
+  const active = settings.providers.find(provider => provider.id === settings.activeProviderId);
+  const mediaProvider = isVideo || isImage ? mediaCatalogProvider(settings) : active;
+  const account = mediaProvider?.id === 'reizo-account';
+  const videoSupport = account ? mediaProvider.catalog?.video.find(item => item.id === (model || settings.mediaModels?.video))?.video : undefined;
+  const durationOptions = [{ value: '5s', label: '5 秒' }, { value: '10s', label: '10 秒' }].filter(item => !account || videoSupport?.minSeconds && videoSupport.maxSeconds && Number.parseInt(item.value) >= videoSupport.minSeconds && Number.parseInt(item.value) <= videoSupport.maxSeconds);
+  const ratioOptions = [{ value: '16:9', label: '横屏 16:9' }, { value: '9:16', label: '竖屏 9:16' }, { value: '1:1', label: '方形 1:1' }].filter(item => !account || videoSupport?.aspectRatios?.includes(item.value));
   const typeLabel = isNote ? '文本与提示词' : isVideo ? '视频' : isAudio ? '音频' : '图片';
   const currentModel = model || CONFIGURED_MODEL;
-  const models = isVideo ? CANVAS_VIDEO_MODELS : CANVAS_IMAGE_MODELS;
-  const modelOptions = [{ value: CONFIGURED_MODEL, label: '沿用设置' }, ...models.map((item) => ({ value: item.id, label: item.name }))];
+  const models = mediaProvider?.catalog ? mediaProvider.catalog[isVideo ? 'video' : 'image'] : account ? [] : isVideo ? CANVAS_VIDEO_MODELS : CANVAS_IMAGE_MODELS;
+  const configuredModel = settings.mediaModels?.[isVideo ? 'video' : 'image'];
+  const defaultModelName = models.find(item => item.id === configuredModel)?.name;
+  const modelOptions = [{ value: CONFIGURED_MODEL, label: defaultModelName ? `默认 · ${defaultModelName}` : '沿用设置' }, ...models.map((item) => ({ value: item.id, label: item.name }))];
   const providerValue = audioProvider || audioProviders?.find((item) => item.isDefault)?.id || audioProviders?.[0]?.id || '';
   const candidateMap = useMemo(() => new Map(candidates.map((candidate) => [candidate.id, candidate])), [candidates]);
   const refs = useMemo(() => canvasStore.composerRefIds(node).map((id) => candidateMap.get(id) || canvasStore.nodeById(sessionId, id)).filter((item): item is CanvasNode => Boolean(item)), [node, candidateMap, sessionId]);
@@ -110,7 +139,6 @@ function NodePanelBody({ sessionId, node, prompt, onPromptChange, onPromptCommit
   const hasFrame = upstreamSources.some((item) => item.handleId === 'start_frame' || item.sourceType === 'image' && isVideo);
   const canGenerate = Boolean(prompt.trim() || hasPrompt || isVideo && hasFrame);
   const placeholder = hasPrompt ? '已接入上游文本，可在此补充创作要求…' : hasFrame ? '已接入首帧，描述动态与运镜…' : isNote ? '输入提示词、分镜剧本或旁白，输入 @ 引用节点…' : isVideo ? '描述主体动作与镜头运动，输入 @ 引用节点…' : isAudio ? '描述音色、配乐或旁白，输入 @ 引用节点…' : '描述主体、构图与光影，输入 @ 引用节点…';
-  const cost = isNote ? 'Agent' : (isAudio ? 3 : estimatedCost) * (isVideo || isAudio ? 1 : variationsCount);
   useEffect(() => {
     canvasStore.setMentionComposer(sessionId, node.id, (source) => areaRef.current?.insertMentionNode(source));
   }, [sessionId, node.id]);
@@ -139,9 +167,10 @@ function NodePanelBody({ sessionId, node, prompt, onPromptChange, onPromptCommit
     <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-3">
       <div className="mb-2 flex items-center gap-2 overflow-x-auto pb-1">
         {refs.map((reference) => <RefChip key={reference.id} node={reference} disabled={running} onInsert={() => areaRef.current?.insertMentionNode(reference)} onRemove={() => { void canvasStore.removeComposerRef(sessionId, node.id, reference.id).catch((cause) => toast.error(cause instanceof Error ? cause.message : '移除参考失败')); }} />)}
-        <Button type="button" variant="ghost" size="sm" disabled={running} onClick={() => canvasStore.startPickingCanvasRefs(sessionId, node.id)}><Plus data-icon="inline-start" />参考</Button>
+        {!isVideo || !account || videoSupport?.startFrame ? <Button type="button" variant="ghost" size="sm" disabled={running} onClick={() => canvasStore.startPickingCanvasRefs(sessionId, node.id)}><Plus data-icon="inline-start" />参考</Button> : null}
       </div>
       {upstreamSources.length ? <p className="mb-2 text-[11px] leading-5 text-muted-foreground">已接入：{upstreamSources.map((source) => source.sourceTitle).join('、')}</p> : null}
+      {node.runState === 'error' && node.output?.error ? <p role="alert" className="mb-2 rounded-lg bg-danger/10 px-2.5 py-2 text-xs leading-5 text-danger">{node.output.error}</p> : null}
       <FieldGroup className="gap-3">
         <Field className="gap-1.5">
           <FieldLabel>提示词</FieldLabel>
@@ -156,8 +185,9 @@ function NodePanelBody({ sessionId, node, prompt, onPromptChange, onPromptCommit
         </Field>
         {paramsOpen ? <Field className="gap-2">
           <FieldLabel>生成参数</FieldLabel>
-          {isVideo && onDurationChange ? <PanelChoices label="视频时长" value={duration} options={[{ value: '5s', label: '5 秒' }, { value: '10s', label: '10 秒' }]} disabled={running} onChange={(value) => onDurationChange(value as '5s' | '10s')} /> : null}
-          {isVideo && onCameraChange ? <div className="flex items-center gap-2 text-xs"><span className="text-muted-foreground">运镜</span><CameraDial value={camera} onChange={onCameraChange} portalBoundary={boundary} restoreInputFocus={() => areaRef.current?.focus()} disabled={running} /></div> : null}
+          {isVideo && onDurationChange && durationOptions.length ? <PanelChoices label="视频时长" value={duration} options={durationOptions} disabled={running} onChange={(value) => onDurationChange(value as '5s' | '10s')} /> : null}
+          {isVideo && account && !durationOptions.length ? <p className="text-xs text-muted-foreground">时长与画幅使用模型默认值</p> : null}
+          {isVideo && onCameraChange && (!account || videoSupport?.camera) ? <div className="flex items-center gap-2 text-xs"><span className="text-muted-foreground">运镜</span><CameraDial value={camera} onChange={onCameraChange} portalBoundary={boundary} restoreInputFocus={() => areaRef.current?.focus()} disabled={running} /></div> : null}
           {isAudio && audioVoices?.length && onAudioVoiceChange ? <NodePanelSelect label="音色" value={audioVoice || audioVoices[0].id} options={audioVoices.map((voice) => ({ value: voice.id, label: voice.tag ? `${voice.name} (${voice.tag})` : voice.name }))} onChange={onAudioVoiceChange} disabled={running} boundary={boundary} /> : null}
           {isImage && onVariationsCountChange ? <PanelChoices label="变体数量" value={String(variationsCount)} options={[1, 2, 4].map((count) => ({ value: String(count), label: `${count} 张` }))} onChange={(value) => onVariationsCountChange(Number(value) as 1 | 2 | 4)} disabled={running} /> : null}
         </Field> : null}
@@ -169,19 +199,20 @@ function NodePanelBody({ sessionId, node, prompt, onPromptChange, onPromptCommit
         {isAudio && audioProviders?.length && onAudioProviderChange ? <NodePanelSelect label="音频供应商" value={providerValue} options={audioProviders.map((provider) => ({ value: provider.id, label: provider.name }))} onChange={onAudioProviderChange} disabled={running} boundary={boundary} /> : null}
         {!isNote && !isAudio && onModelChange ? <NodePanelSelect label="生成模型" value={currentModel} options={modelOptions} onChange={(value) => onModelChange(value === CONFIGURED_MODEL ? '' : value)} disabled={running} boundary={boundary} /> : null}
         {!isNote && !isAudio && !onModelChange ? <span className="max-w-44 truncate text-xs text-muted-foreground">{modelOptions.find((item) => item.value === currentModel)?.label || currentModel}</span> : null}
-        {isVideo && onRatioChange ? <NodePanelSelect label="画幅比例" value={ratio} options={[{ value: '16:9', label: '横屏 16:9' }, { value: '9:16', label: '竖屏 9:16' }, { value: '1:1', label: '方形 1:1' }]} onChange={(value) => onRatioChange(value as '16:9' | '9:16' | '1:1')} disabled={running} boundary={boundary} /> : null}
+        {isVideo && onRatioChange && ratioOptions.length ? <NodePanelSelect label="画幅比例" value={ratio} options={ratioOptions} onChange={(value) => onRatioChange(value as '16:9' | '9:16' | '1:1')} disabled={running} boundary={boundary} /> : null}
         {isImage && onSizeChange ? <NodePanelSelect label="图片尺寸" value={size} options={[{ value: '1024x1024', label: '方形 1:1' }, { value: '1024x1536', label: '竖幅 2:3' }, { value: '1536x1024', label: '横幅 3:2' }]} onChange={(value) => onSizeChange(value as '1024x1024' | '1024x1536' | '1536x1024')} disabled={running} boundary={boundary} /> : null}
         {isImage && onVariationsCountChange ? <NodePanelSelect label="变体数量" value={String(variationsCount)} options={[1, 2, 4].map((count) => ({ value: String(count), label: `${count} 张` }))} onChange={(value) => onVariationsCountChange(Number(value) as 1 | 2 | 4)} disabled={running} boundary={boundary} /> : null}
         {!isNote ? <Button type="button" variant={paramsOpen ? 'secondary' : 'ghost'} size="icon-sm" aria-label="生成参数" aria-expanded={paramsOpen} disabled={running} onClick={() => setParamsOpen((open) => !open)}><SlidersHorizontal /></Button> : null}
       </div>
       <div className="flex items-center gap-2">
         {(isImage || isVideo) ? <Button type="button" variant="ghost" size="sm" disabled={refining || running || !prompt.trim()} onClick={() => { void onRefine(); }}>{refining ? <Loader2 data-icon="inline-start" className="animate-spin motion-reduce:animate-none" /> : <Sparkles data-icon="inline-start" />}{refining ? '润色中' : '润色'}</Button> : null}
-        <Button type="button" size="sm" disabled={running || !canGenerate} onClick={isNote && onAgentExpand ? onAgentExpand : onRun} title={isNote ? 'AI 扩写剧本与提示词' : `生成${typeLabel}`}>
+        <Button type="button" size="sm" disabled={running || !canGenerate} onClick={isNote && onAgentExpand ? onAgentExpand : () => { void onRun(); }} title={isNote ? 'AI 扩写剧本与提示词' : account ? `生成${typeLabel}，费用按模型实际用量从账号余额结算` : `生成${typeLabel}`}>
           {running ? <Loader2 data-icon="inline-start" className="animate-spin motion-reduce:animate-none" /> : isNote ? <Bot data-icon="inline-start" /> : <Sparkles data-icon="inline-start" />}
-          {running ? '生成中' : isNote ? '扩写' : isImage && variationsCount > 1 ? `生成 ${variationsCount} 张` : '生成'}{!isNote ? <span aria-label={`画布算力点估算 ${cost} 点`} className="tabular-nums">{cost} 点</span> : null}
+          {submitting ? '提交中' : running ? '生成中' : isNote ? '扩写' : isImage && variationsCount > 1 ? `生成 ${variationsCount} 张` : '生成'}
         </Button>
       </div>
     </footer>
+    {submitError ? <p role="alert" className="px-3 pb-3 text-xs text-destructive">{submitError}</p> : null}
   </NodePanelViewport>;
 }
 

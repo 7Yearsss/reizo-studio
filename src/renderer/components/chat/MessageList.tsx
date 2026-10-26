@@ -125,8 +125,8 @@ export default function MessageList({
         navigationLabel="消息导航"
         className="absolute inset-0"
         viewportRef={viewportRef}
-        viewportClassName={compact ? 'px-3.5 pt-12' : 'px-8 pt-12'}
-        contentClassName="mx-auto max-w-3xl space-y-8"
+        viewportClassName={compact ? 'px-3.5 pt-10' : 'px-5 pt-10 sm:px-8'}
+        contentClassName="mx-auto max-w-3xl space-y-9"
         viewportProps={{
           style: {
             paddingBottom: (bottomInset ?? (compact ? 144 : 176)) + 12,

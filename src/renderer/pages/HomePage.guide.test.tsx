@@ -4,14 +4,14 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import HomePage from './HomePage';
 
-const mocks = vi.hoisted(() => ({ create: vi.fn(), send: vi.fn(), setSkill: vi.fn(), openTab: vi.fn() }));
+const mocks = vi.hoisted(() => ({ create: vi.fn(), send: vi.fn(), setSkill: vi.fn(), openTab: vi.fn(), importImage: vi.fn() }));
 vi.mock('../components/layout/titleBarSlots', () => ({ useTitleBarSlot: (): null => null }));
 vi.mock('../components/home/HomeWelcome', () => ({ default: () => <h1>欢迎创作</h1> }));
 vi.mock('../components/chat/ModelPicker', () => ({ default: (): null => null }));
 vi.mock('../components/chat/TopRightToolbar', () => ({ default: (): null => null }));
 vi.mock('../components/chat/MentionMenu', () => ({ default: (): null => null, extractMentionQuery: (): null => null }));
 vi.mock('../components/canvas/canvasThumbnail', () => ({ getCanvasNodeThumbnail: vi.fn() }));
-vi.mock('../state/canvasStore', () => ({}));
+vi.mock('../state/canvasStore', () => ({ importImage: mocks.importImage, getSnapshot: () => ({ nodesBySession: {} }) }));
 vi.mock('../state/chatStore', () => ({ createSession: mocks.create, sendMessage: mocks.send, setSessionSkill: mocks.setSkill }));
 vi.mock('../state/tabStore', () => ({ openChatTab: mocks.openTab }));
 vi.mock('../state/uiStore', () => ({ setMode: vi.fn() }));
@@ -25,6 +25,8 @@ beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('ResizeObserver', class { observe = vi.fn(); unobserve = vi.fn(); disconnect = vi.fn(); });
   vi.clearAllMocks(); mocks.create.mockResolvedValue({ id: 'session-1', title: '旅行视频' });
+  mocks.importImage.mockResolvedValue({ id: 'uploaded', title: 'screenshot.png', params: {} });
+  vi.stubGlobal('URL', class extends URL { static createObjectURL = vi.fn(() => 'blob:preview'); static revokeObjectURL = vi.fn(); });
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   await act(async () => root.render(<HomePage />));
 });
@@ -51,4 +53,29 @@ it('removes a selected skill without deleting the draft or using it on send', as
   await click('发送');
   expect(mocks.setSkill).not.toHaveBeenCalled();
   expect(mocks.send.mock.calls[0][3]).not.toHaveProperty('skillId');
+});
+
+it.each(['paste', 'drop'])('accepts a clipboard screenshot via %s and sends its actual image reference', async (kind) => {
+  const file = new File(['image bytes'], 'screenshot.png', { type: 'image/png' });
+  const event = new Event(kind, { bubbles: true, cancelable: true });
+  const transfer = { types: ['Files'], files: kind === 'drop' ? [file] : [], items: [{ kind: 'file', type: file.type, getAsFile: () => file }] };
+  Object.defineProperty(event, kind === 'drop' ? 'dataTransfer' : 'clipboardData', { value: transfer });
+  await act(async () => { host.querySelector('textarea')!.dispatchEvent(event); });
+  expect(host.querySelector('img[src="blob:preview"]')).not.toBeNull();
+  await click('发送');
+  expect(mocks.importImage).toHaveBeenCalledWith('session-1', file, expect.anything());
+  expect(mocks.send.mock.calls[0][2]).toContain('canvas:uploaded');
+});
+
+it('retains the homepage attachment and shows the error when image import fails', async () => {
+  mocks.importImage.mockRejectedValue(new Error('图片上传失败'));
+  const file = new File(['pixels'], 'screenshot.png', { type: 'image/png' });
+  const event = new Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'clipboardData', { value: { files: [file] } });
+  await act(async () => { host.querySelector('textarea')!.dispatchEvent(event); });
+  await click('发送');
+  expect(host.textContent).toContain('图片上传失败');
+  expect(host.querySelector('img[src="blob:preview"]')).not.toBeNull();
+  expect(mocks.send).not.toHaveBeenCalled();
+  expect(mocks.openTab).not.toHaveBeenCalled();
 });

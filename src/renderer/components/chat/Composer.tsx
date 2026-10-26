@@ -38,6 +38,7 @@ import * as uiStore from '../../state/uiStore';
 import { Button } from '../ui/button';
 import { toast } from '../../lib/toast';
 import { CHAT_DROP_FILES_EVENT } from '../../lib/chatDrop';
+import { isImageFile, transferredFiles } from '../../lib/fileTransfer';
 
 const MODE_LABEL: Record<PermissionMode, string> = {
   ask: '每次询问',
@@ -126,6 +127,8 @@ export default function Composer({
   const [mentions, setMentions] = useState<string[]>([]);
   const [localSkillId, setLocalSkillId] = useState<string | undefined>();
   const [attachments, setAttachments] = useState<{ name: string; content: string }[]>([]);
+  const [addingFiles, setAddingFiles] = useState(0);
+  const addingFilesRef = useRef(0);
   const replaceFromIdRef = useRef<string | undefined>(undefined);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const workspacePath = useSettingsStore((s) => s.settings.workspacePath);
@@ -164,6 +167,7 @@ export default function Composer({
   const unpinnedSelectionNodes = useMemo(() => {
     return activeSelectedNodes.filter((n) => !nodeRefs.some((r) => r.id === n.id));
   }, [activeSelectedNodes, nodeRefs]);
+  const hasAttachments = attachments.length > 0 || nodeRefs.length > 0 || unpinnedSelectionNodes.length > 0;
 
   const mentionQuery = extractMentionQuery(draft);
   const slash = extractSlashQuery(draft);
@@ -235,7 +239,7 @@ export default function Composer({
   }
 
   async function submit() {
-    if (!draft.trim() || disabled || preparing.current) return;
+    if ((!draft.trim() && !hasAttachments) || disabled || preparing.current || addingFilesRef.current > 0) return;
     preparing.current = true;
     setSyncingSheet(true);
     try {
@@ -244,9 +248,9 @@ export default function Composer({
     // Busy-Enter lane: while a turn runs, Enter follows the user's preference —
     // queue (default, next turn) or steer (inject into the live turn).
     if (sessionId && sending && !interaction && busyEnter === 'steer') {
-      void chatStore.steerNow(sessionId, draft, allMentions, extra);
+      void chatStore.steerNow(sessionId, draft.trim() || '看下这些素材', allMentions, extra);
     } else {
-      onSend(draft, allMentions, extra);
+      onSend(draft.trim() || '看下这些素材', allMentions, extra);
     }
     resetAfterSubmit();
     } catch (error) { toast.error(error instanceof Error ? error.message : '表格同步失败'); }
@@ -255,7 +259,7 @@ export default function Composer({
 
   /** Ctrl/Cmd+Enter while a turn is live — the opposite of the busyEnter lane. */
   async function submitNow() {
-    if (!draft.trim() || disabled || !sessionId || preparing.current) return;
+    if ((!draft.trim() && !hasAttachments) || disabled || !sessionId || preparing.current || addingFilesRef.current > 0) return;
     preparing.current = true;
     setSyncingSheet(true);
     try {
@@ -263,9 +267,9 @@ export default function Composer({
     const { mentions: allMentions, extra } = buildSubmitPayload();
     if (busyEnter === 'steer') {
       // Opposite lane = queue it like a normal send-while-busy.
-      onSend(draft, allMentions, extra);
+      onSend(draft.trim() || '看下这些素材', allMentions, extra);
     } else {
-      void chatStore.steerNow(sessionId, draft, allMentions, extra);
+      void chatStore.steerNow(sessionId, draft.trim() || '看下这些素材', allMentions, extra);
     }
     resetAfterSubmit();
     } catch (error) { toast.error(error instanceof Error ? error.message : '表格同步失败'); }
@@ -302,7 +306,11 @@ export default function Composer({
   }, [draft]);
 
   async function addDroppedFiles(files: FileList | File[]) {
-    const next = [...attachments];
+    if (disabled) return;
+    addingFilesRef.current += 1;
+    setAddingFiles(addingFilesRef.current);
+    const next: { name: string; content: string }[] = [];
+    try {
     for (const file of Array.from(files)) {
       if (/\.pptx$|\.reizo-ppt\.json$/i.test(file.name)) {
         try {
@@ -342,11 +350,12 @@ export default function Composer({
       }
       // Images land on this session's canvas as a node and get @-referenced in
       // the draft — the composer text path can't carry binaries.
-      if (sessionId && file.type.startsWith('image/')) {
+      if (sessionId && isImageFile(file)) {
         try {
           const nodes = canvasStore.getSnapshot().nodesBySession[sessionId] ?? [];
           const right = nodes.reduce((m, n) => Math.max(m, n.x + n.w), 0);
           const node = await canvasStore.importImage(sessionId, file, { x: (right || 0) + 40, y: 60 });
+          if (!node) throw new Error(`未能添加图片「${file.name}」，请重试`);
           if (node) {
             const p = (node.params as Record<string, unknown>) ?? {};
             chatStore.addNodeRef(sessionId, {
@@ -356,9 +365,7 @@ export default function Composer({
               thumbnail: getCanvasNodeThumbnail(node) ?? (p.imageUrl as string | undefined),
             });
           }
-        } catch {
-          /* import failed — nothing to attach */
-        }
+        } catch (error) { toast.error(error instanceof Error ? error.message : `图片「${file.name}」添加失败`); }
         continue;
       }
       try {
@@ -370,7 +377,8 @@ export default function Composer({
         }
       }
     }
-    setAttachments(next);
+    if (next.length) setAttachments(previous => [...previous, ...next]);
+    } finally { addingFilesRef.current -= 1; setAddingFiles(addingFilesRef.current); }
   }
 
   // ChatPage owns the drop zone (the whole conversation, not just this box) and
@@ -443,7 +451,13 @@ export default function Composer({
         compact ? 'px-3 pb-3 pt-8' : 'px-6 pb-6 pt-16',
       )}
     >
-      <div ref={composerBodyRef} className="pointer-events-auto relative mx-auto max-w-3xl">
+      <div ref={composerBodyRef} className="pointer-events-auto relative mx-auto max-w-3xl"
+        onPasteCapture={(event) => {
+          const files = transferredFiles(event.clipboardData);
+          if (!files.length) return;
+          event.preventDefault(); event.stopPropagation();
+          void addDroppedFiles(files);
+        }}>
         {!sending && turnOutcome === 'error' && turnError && (
           <div className="mb-2 flex items-center gap-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[13px] text-ink" role="alert">
             <span className="flex-1">回复失败：{turnError}</span>
@@ -511,6 +525,7 @@ export default function Composer({
         <div className="relative">
             {sessionId && <ComposerDock todos={todos} />}
             {syncingSheet && <p role="status" className="mb-2 text-xs text-ink-muted">正在保存工作区内容…</p>}
+            {addingFiles > 0 && <p role="status" className="mb-2 text-xs text-ink-muted">正在添加附件…</p>}
             {(attachments.length > 0 || nodeRefs.length > 0 || mentions.length > 0 || unpinnedSelectionNodes.length > 0) && (
               <div className={cn("mb-2 flex flex-wrap gap-1.5", compact && "max-h-24 overflow-y-auto pr-0.5")}>
                 {sessionId && unpinnedSelectionNodes.length > 0 && (
@@ -714,6 +729,7 @@ export default function Composer({
                 editorRef={editorRef}
                 onValueChange={setDraft}
                 onSubmit={() => submit()}
+                allowEmptySubmit={hasAttachments}
                 loading={Boolean(sending && !interaction)}
                 onStop={sending ? onStop : undefined}
                 onSendNow={() => submitNow()}
@@ -723,7 +739,7 @@ export default function Composer({
                     ? 'Enter 插话（本轮生效）· Ctrl+Enter 排队'
                     : 'Enter 排队 · Ctrl+Enter 插话（本轮生效）'
                 }
-                disabled={disabled || syncingSheet}
+                disabled={disabled || syncingSheet || addingFiles > 0}
                 autoFocus={autoFocus}
                 minRows={2}
                 placeholder={

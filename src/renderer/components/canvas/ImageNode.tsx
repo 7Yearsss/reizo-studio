@@ -3,7 +3,6 @@ import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Loader2, Play, Sparkles, ImageIcon, X, FileUp, Bot, Upload, RotateCcw } from 'lucide-react';
 import type { CanvasImageParams, CanvasNode } from '../../../shared/canvas';
 import { editNodeTitle, type ImageEditKind } from '../../../shared/canvasImageEdit';
-import { estimateNodeCost } from '../../../shared/canvasPricing';
 import * as canvasStore from '../../state/canvasStore';
 import { canvasInputSources, indexedCanvasNode } from '../../state/canvasInputSources';
 import * as chatStore from '../../state/chatStore';
@@ -397,7 +396,7 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
     const freshNode = canvasStore.nodeById(sessionId, node.id);
     const freshParams = (freshNode?.params as Record<string, unknown>) ?? {};
     const updatedParams = { ...freshParams, prompt, count: variationsCount };
-    void canvasStore
+    return canvasStore
       .updateNodeParams(sessionId, node.id, updatedParams)
       .then(() => canvasStore.runNode(sessionId, node.id));
   };
@@ -798,7 +797,6 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
         }}
         variationsCount={variationsCount}
         onVariationsCountChange={setVariationsCount}
-        estimatedCost={estimateNodeCost(node)}
       />
       )}
 

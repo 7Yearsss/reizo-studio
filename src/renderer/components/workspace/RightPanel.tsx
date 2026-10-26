@@ -10,12 +10,13 @@ import TerminalPanel from './TerminalPanel';
 import Tooltip from '../ui/Tooltip';
 import CanvasSkeleton from '../canvas/CanvasSkeleton';
 import { lazyWithRetry } from '../../lib/lazyWithRetry';
+import { createDeferredView } from '../DeferredView';
 import { setPanelResizing } from '../../lib/panelResize';
 import CanvasPerformanceProbe from '../canvas/CanvasPerformanceProbe';
 
 // Heavy panels are code-split so the drawer shell never waits on their bundle.
 const CanvasPanel = lazyWithRetry(() => import('../canvas/CanvasPanel'));
-const ArtifactPanel = lazyWithRetry(() => import('./ArtifactPanel'));
+const ArtifactPanel = createDeferredView<{ sessionId: string }>(() => import('./ArtifactPanel'), { label: '会话作品' });
 const SheetPanel = lazyWithRetry(() => import('./SheetPanel'));
 const DocumentPanel = lazyWithRetry(() => import('./DocumentPanel'));
 const PresentationPanel = lazyWithRetry(() => import('./PresentationPanel'));

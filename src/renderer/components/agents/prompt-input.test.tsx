@@ -47,3 +47,13 @@ it('shows only stop for an empty running draft and restores send when idle', asy
   expect(host.querySelector('[aria-label="Stop generating"]')).toBeNull();
   expect(control('Send prompt').disabled).toBe(false);
 });
+
+it('allows an attachment-only message while keeping an ordinary empty draft disabled', async () => {
+  const submit = vi.fn();
+  await act(async () => root.render(<PromptInput value="" allowEmptySubmit onSubmit={submit} />));
+  expect(control('Send prompt').disabled).toBe(false);
+  await act(async () => control('Send prompt').click());
+  expect(submit).toHaveBeenCalledWith('', undefined);
+  await act(async () => root.render(<PromptInput value="" onSubmit={submit} />));
+  expect(control('Send prompt').disabled).toBe(true);
+});

@@ -1,5 +1,5 @@
 import type { CanvasNode, CanvasNodeOutput } from '../../../shared/canvas';
-import type { CanvasJob, CanvasJobFinish, CanvasJobTerminalStatus } from '../../../shared/canvasJobs';
+import type { CanvasJob, CanvasJobFinish, CanvasJobTerminalStatus, CanvasJobObservation } from '../../../shared/canvasJobs';
 import type { CanvasStore } from '../storage/canvasStore';
 import type { SettingsStore } from '../storage/settingsStore';
 import type { ProviderStore } from '../storage/providerStore';
@@ -21,6 +21,7 @@ interface ActiveJob {
   controller: AbortController; signal: AbortSignal; detached: boolean; polling: boolean; timer?: ReturnType<typeof setInterval>;
   releasePermit?: () => void; unlisten: () => void; completion: Promise<void>; submitted: Promise<void>;
   resolveCompletion: () => void; resolveSubmitted: () => void;
+  observation?: CanvasJobObservation;
 }
 export interface VideoJobSubmission extends NodeJobSubmission { submitted: Promise<void> }
 export interface VideoRuntimeOptions { canvasStore: CanvasStore; settingsStore: SettingsStore; dataRoot: string; providerStore?: ProviderStore }
@@ -44,6 +45,10 @@ export function isRecoverableVideoJob(job: CanvasJob): boolean {
 }
 export function getActiveJob(canvasId: string, nodeId: string, store?: CanvasStore): ActiveJob | undefined {
   return store ? activeJobs.get(keyFor(canvasId, nodeId, store)) : [...activeJobs.values()].reverse().find((entry) => entry.canvasId === canvasId && entry.nodeId === nodeId);
+}
+
+export function videoJobObservation(store: CanvasStore, id: string): CanvasJobObservation | undefined {
+  return byId.get(jobKey(store, id))?.observation;
 }
 
 function detach(entry: ActiveJob): void {
@@ -177,7 +182,10 @@ function launch(entry: ActiveJob, options: VideoRuntimeOptions, loadParams?: (si
       const settings = await settingsStore.get();
       if (!isCurrent(entry)) return;
       const requested = (entry.job.input.request as { providerId?: string } | undefined)?.providerId;
-      const resolved = await resolveVideoExecution(settings, { driverId: entry.driverId, providerId: requested, submittedProviderId: entry.job.providerId,
+      const resolved = entry.job.remoteTask ? {
+        driver: getVideoDriver(entry.job.remoteTask.driverId), providerId: entry.job.providerId || requested || entry.driverId,
+        model: entry.job.model || '', credentials: { signal: entry.signal },
+      } : await resolveVideoExecution(settings, { driverId: entry.driverId, providerId: requested, submittedProviderId: entry.job.providerId,
         params: entry.job.input.params as unknown as VideoGenerateParams, signal: entry.signal, autoProvider: entry.job.input.autoProvider === true }, options.providerStore);
       if (!isCurrent(entry)) return;
       const { driver, providerId, credentials: credentialOptions } = resolved;
@@ -185,9 +193,11 @@ function launch(entry: ActiveJob, options: VideoRuntimeOptions, loadParams?: (si
       entry.releasePermit = await generationSchedulerFor(store).acquire(providerId, entry.signal);
       if (!isCurrent(entry)) return;
       if (!entry.job.remoteTask) {
+        if (!store.jobs.setProvider(entry.job.id, { providerId, model: resolved.model })) return;
         const params = loadParams ? await loadParams(entry.signal) : entry.job.input.params as unknown as VideoGenerateParams;
         if (!isCurrent(entry)) return;
         const submittedParams = { ...params, model: resolved.model };
+        driver.validateRequest?.(submittedParams, credentialOptions);
         if (!store.jobs.markSubmitted(entry.job.id, { providerId, model: resolved.model })) {
           if (isCurrent(entry)) fail('视频提交状态不确定，未重新提交。', 'interrupted');
           return;
@@ -205,23 +215,43 @@ function launch(entry: ActiveJob, options: VideoRuntimeOptions, loadParams?: (si
       entry.resolveSubmitted();
       const remote = entry.job.remoteTask;
       let queryFailures = 0;
+      let nextPollAt = 0;
       const poll = async () => {
-        if (!isCurrent(entry) || entry.polling) return;
+        if (!isCurrent(entry) || entry.polling || Date.now() < nextPollAt) return;
         entry.polling = true;
         let staged: StagedCanvasAssets | undefined;
         try {
-          const result = await driver.poll(remote.taskId, { ...credentialOptions, context: remote.context });
-          if (!canvasWorkStopped(store) && result.usage && result.status === 'succeed') store.usage.setReport(`job:${entry.job.id}`, 'video', providerUsageMetrics(result.usage));
+          // Account leases can rotate while a video spends tens of minutes in an upstream queue.
+          const currentSettings = await settingsStore.get();
+          if (!isCurrent(entry)) return;
+          if (entry.job.providerId === 'reizo-account' && !currentSettings.providers?.['reizo-account']?.apiKey) {
+            throw new VideoPollError('账号凭据暂不可用，等待恢复查询', true);
+          }
+          const current = await resolveVideoExecution(currentSettings, { driverId: remote.driverId, submittedProviderId: entry.job.providerId,
+            providerId: requested, params: { ...entry.job.input.params as unknown as VideoGenerateParams, model: entry.job.model },
+            signal: entry.signal, polling: true }, options.providerStore);
+          if (!isCurrent(entry)) return;
+          if (current.driver.id !== driver.id) throw new VideoPollError('视频供应商已变化，无法安全查询原任务', false);
+          const result = await driver.poll(remote.taskId, { ...current.credentials, context: remote.context });
+          if (!canvasWorkStopped(store) && result.usage && result.status === 'succeed') {
+            const usageJobId = typeof entry.job.input.queryRecoveryUsageJobId === 'string' ? entry.job.input.queryRecoveryUsageJobId : entry.job.id;
+            if (store.usage.get(`job:${usageJobId}`)) store.usage.setReport(`job:${usageJobId}`, 'video', providerUsageMetrics(result.usage));
+          }
           if (!isCurrent(entry)) return;
           if (result.status === 'failed') { fail(result.error || 'Video generation failed'); return; }
           if (result.status !== 'succeed') {
-            if (Date.now() - Date.parse(entry.job.submittedAt || entry.job.createdAt) > 10 * 60 * 1_000) { fail('视频查询超过 10 分钟，请检查供应商后手动重试。', 'interrupted'); return; }
-            const output = { ...(store.getNode(entry.canvasId, entry.nodeId)?.output ?? {}), progress: Math.max(10, Math.min(98, result.progress ?? 30)) };
+            const progress = typeof result.progress === 'number' && Number.isFinite(result.progress) ? Math.max(0, Math.min(100, result.progress)) : undefined;
+            entry.observation = { status: result.status === 'pending' ? 'queued' : 'processing',
+              ...(progress !== undefined ? { progress } : {}), observedAt: new Date().toISOString() };
+            const output = { ...(store.getNode(entry.canvasId, entry.nodeId)?.output ?? {}), progress: Math.max(10, Math.min(98, progress ?? 30)) };
             const updated = store.updateNode(entry.canvasId, entry.nodeId, { runState: 'running', output });
             if (updated) getCanvasChannel(entry.canvasId).broadcast(updated.rev, { type: 'node_output', id: entry.nodeId, output, runState: 'running', operationId: entry.operationId });
             queryFailures = 0;
+            const age = Date.now() - Date.parse(entry.job.submittedAt || entry.job.createdAt);
+            nextPollAt = Date.now() + (age >= 10 * 60_000 ? 30_000 : age >= 60_000 ? 10_000 : 2500);
             return;
           }
+          entry.observation = { status: 'downloading', observedAt: new Date().toISOString() };
           let videoBuffer = result.videoBuffer;
           if (!videoBuffer && result.videoUrl) {
             const response = await fetch(result.videoUrl, { signal: entry.signal });
@@ -251,7 +281,12 @@ function launch(entry: ActiveJob, options: VideoRuntimeOptions, loadParams?: (si
           if (!isCurrent(entry)) return;
           queryFailures += 1;
           const retryable = error instanceof VideoPollError ? error.retryable : error instanceof TypeError;
-          if (!retryable || queryFailures >= 5 || Date.now() - Date.parse(entry.job.submittedAt || entry.job.createdAt) > 10 * 60 * 1_000) fail(error, 'interrupted');
+          if (!retryable) fail(error, 'interrupted');
+          else {
+            entry.observation = { status: 'reconnecting', observedAt: new Date().toISOString(),
+              ...(entry.observation?.progress !== undefined ? { progress: entry.observation.progress } : {}) };
+            nextPollAt = Date.now() + Math.min(60_000, 2500 * 2 ** Math.min(queryFailures - 1, 5));
+          }
         } finally {
           await staged?.discard();
           entry.polling = false;
@@ -308,4 +343,47 @@ export function resumeVideoJobs(options: VideoRuntimeOptions): VideoJobSubmissio
     launch(entry, options);
     return { job, completion: entry.completion, submitted: entry.submitted };
   });
+}
+
+/** Follow only explicit query recoveries, never a later paid generation on the same node. */
+export function latestVideoQueryJob(store: CanvasStore, original: CanvasJob): CanvasJob {
+  let job = original;
+  for (let i = 0; i < 32; i += 1) {
+    const next = store.jobs.findByOperationId(job.canvasId, `video-query:${job.id}`);
+    if (!next || next.input.queryRecoveryOf !== job.id || next.nodeId !== original.nodeId) break;
+    job = next;
+  }
+  return job;
+}
+
+/** Query an existing remote handle without reopening terminal history or calling submit(). */
+export function recoverVideoJob(options: VideoRuntimeOptions, original: CanvasJob): VideoJobSubmission {
+  const store = options.canvasStore;
+  if (canvasWorkStopped(store)) throw new NodeJobsClosedError();
+  const previous = latestVideoQueryJob(store, original);
+  if (previous.id !== original.id && ['queued', 'running', 'succeeded'].includes(previous.status)) {
+    const active = byId.get(jobKey(store, previous.id));
+    return { job: previous, completion: active?.completion ?? Promise.resolve(), submitted: active?.submitted ?? Promise.resolve() };
+  }
+  if (previous.status !== 'interrupted' || !isRecoverableVideoJob({ ...previous, status: 'running' })) {
+    throw new CanvasJobStoreError('此任务没有可继续查询的视频编号', 409);
+  }
+  if (store.jobs.current(previous.canvasId, previous.nodeId)?.id !== previous.id) throw new CanvasJobStoreError('此任务已被新的执行替代', 409);
+  const job = store.transaction(() => {
+    const next = store.jobs.enqueue({ canvasId: previous.canvasId, nodeId: previous.nodeId, nodeType: 'video',
+      operationId: `video-query:${previous.id}`, input: { ...previous.input, queryRecoveryOf: previous.id,
+        queryRecoverySubmittedAt: previous.input.queryRecoverySubmittedAt ?? previous.submittedAt ?? previous.createdAt,
+        queryRecoveryUsageJobId: previous.input.queryRecoveryUsageJobId ?? previous.id },
+      providerId: previous.providerId, model: previous.model, inputHash: previous.inputHash });
+    // No new billable submission or usage event: this receipt owns only a GET recovery.
+    store.jobs.markSubmitted(next.id);
+    store.jobs.recordRemoteTask(next.id, previous.remoteTask);
+    const output = { ...(store.getNode(next.canvasId, next.nodeId)?.output ?? {}) };
+    delete output.error;
+    store.updateNode(next.canvasId, next.nodeId, { runState: 'running', output });
+    return store.jobs.get(next.id);
+  });
+  const entry = attach(job, options);
+  launch(entry, options);
+  return { job, completion: entry.completion, submitted: entry.submitted };
 }

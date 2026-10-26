@@ -12,11 +12,15 @@ import path from 'node:path';
 
 const config: ForgeConfig = {
   hooks: {
-    generateAssets: async (_config, platform, arch) => {
+    generateAssets: async (_config) => {
       execFileSync(process.execPath, ['scripts/prepare-voice-runtime.mjs'], { stdio: 'inherit', windowsHide: true });
       const resources = _config.packagerConfig?.extraResource;
       const extraResource = [...(Array.isArray(resources) ? resources : resources ? [resources] : []), path.resolve('.cache/voice-runtime')];
       _config.packagerConfig = { ..._config.packagerConfig, extraResource };
+    },
+    // Forge also runs generateAssets during `start`. Build video resources only
+    // when packaging; development uses the existing editor runtime on demand.
+    prePackage: async (_config, platform, arch) => {
       // The bundled editor runtime is Windows x64 only; other targets ship without the video editor panel.
       if (platform !== 'win32' || arch !== 'x64') return;
       // CI has no prebuilt editor runtime; ship without the editor panel instead of failing.
@@ -25,6 +29,8 @@ const config: ForgeConfig = {
       const packaged = JSON.parse(readFileSync('.cache/openchatcut-package.json', 'utf8')) as { directory: string };
       const relative = path.relative(path.resolve('.cache/package-resources'), packaged.directory);
       if (!relative || relative.startsWith('..') || path.isAbsolute(relative) || path.basename(packaged.directory) !== 'video-editor') throw new Error('Invalid packaged editor resource path');
+      const resources = _config.packagerConfig?.extraResource;
+      const extraResource = Array.isArray(resources) ? resources : resources ? [resources] : [];
       _config.packagerConfig = { ..._config.packagerConfig, extraResource: [...extraResource, packaged.directory] };
     },
   },

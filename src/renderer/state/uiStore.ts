@@ -1,7 +1,7 @@
 import * as tabStore from './tabStore';
 
 export type SidebarMode = 'chat' | 'projects' | 'skills' | 'artifacts' | 'automation' | 'settings';
-export type SettingsSection = 'general' | 'providers' | 'extensions' | 'usage' | 'admin' | 'storage' | 'about';
+export type SettingsSection = 'general' | 'providers' | 'extensions' | 'usage' | 'storage' | 'about';
 export type RightPanelTab = 'canvas' | 'video' | 'sheets' | 'documents' | 'presentations' | 'artifacts' | 'files' | 'git' | 'terminal';
 
 export interface UiState {
@@ -23,6 +23,7 @@ const PROJECT_KEY = 'reizo:selected-project';
 const ARTIFACTS_KEY = 'reizo:artifacts-open';
 const CANVAS_KEY = 'reizo:canvas-open';
 const RIGHT_WIDTH_KEY = 'reizo:right-panel-width';
+const ARTIFACT_WIDTH_KEY = 'reizo:artifact-panel-width';
 const RIGHT_TAB_KEY = 'reizo:right-panel-tab';
 const SIDEBAR_COLLAPSED_KEY = 'reizo:sidebar-collapsed';
 const SIDEBAR_WIDTH_KEY = 'reizo:sidebar-width';
@@ -34,6 +35,7 @@ export const SIDEBAR_COLLAPSE_THRESHOLD = 110;
 
 export const RIGHT_PANEL_MIN = 320;
 export const RIGHT_PANEL_DEFAULT = 480;
+export const ARTIFACT_PANEL_DEFAULT = 320;
 export const CHAT_PANEL_MIN = 300;
 
 export function getRightPanelMax(): number {
@@ -54,10 +56,12 @@ function readMode(): SidebarMode {
   return 'chat';
 }
 
-function readRightWidth(): number {
-  if (typeof localStorage === 'undefined') return RIGHT_PANEL_DEFAULT;
-  const raw = Number(localStorage.getItem(RIGHT_WIDTH_KEY));
-  if (!Number.isFinite(raw) || raw <= 0) return RIGHT_PANEL_DEFAULT;
+function readRightWidth(tab: RightPanelTab | null): number {
+  const defaultWidth = tab === 'artifacts' ? ARTIFACT_PANEL_DEFAULT : RIGHT_PANEL_DEFAULT;
+  const key = tab === 'artifacts' ? ARTIFACT_WIDTH_KEY : RIGHT_WIDTH_KEY;
+  if (typeof localStorage === 'undefined') return defaultWidth;
+  const raw = Number(localStorage.getItem(key));
+  if (!Number.isFinite(raw) || raw <= 0) return defaultWidth;
   return Math.max(RIGHT_PANEL_MIN, raw);
 }
 
@@ -94,7 +98,7 @@ let state: UiState = {
   artifactsOpen: initialTab === 'artifacts',
   canvasOpen: initialTab === 'canvas',
   rightPanelTab: initialTab,
-  rightPanelWidth: readRightWidth(),
+  rightPanelWidth: readRightWidth(initialTab),
   rightPanelMaximized: false,
   sidebarCollapsed: readSidebarCollapsed(),
   sidebarWidth: readSidebarWidth(),
@@ -120,7 +124,10 @@ function setState(patch: Partial<UiState>): void {
         if (state.rightPanelTab) localStorage.setItem(RIGHT_TAB_KEY, state.rightPanelTab);
         else localStorage.removeItem(RIGHT_TAB_KEY);
       }
-      if ('rightPanelWidth' in patch) localStorage.setItem(RIGHT_WIDTH_KEY, String(state.rightPanelWidth));
+      if ('rightPanelWidth' in patch) {
+        const key = state.rightPanelTab === 'artifacts' ? ARTIFACT_WIDTH_KEY : RIGHT_WIDTH_KEY;
+        localStorage.setItem(key, String(state.rightPanelWidth));
+      }
       if ('sidebarCollapsed' in patch) localStorage.setItem(SIDEBAR_COLLAPSED_KEY, state.sidebarCollapsed ? '1' : '0');
       if ('sidebarWidth' in patch) localStorage.setItem(SIDEBAR_WIDTH_KEY, String(state.sidebarWidth));
     } catch {
@@ -139,8 +146,8 @@ export function getSnapshot(): UiState {
   return state;
 }
 
-export function openSettings(section: SettingsSection = 'providers'): void {
-  setState({ settingsOpen: true, settingsSection: section });
+export function openSettings(section: SettingsSection | 'admin' = 'providers'): void {
+  setState({ settingsOpen: true, settingsSection: section === 'admin' ? 'providers' : section });
 }
 
 export function closeSettings(): void {
@@ -158,10 +165,14 @@ export function selectProject(id: string | null): void {
 
 export function setRightPanelTab(tab: RightPanelTab | null): void {
   if (state.rightPanelTab === tab) return;
+  // The compact artifact list must not inherit a canvas/editor's wide layout.
+  // Keep a user's explicit artifact resize separate from the editor preference.
+  const changesWidthGroup = (state.rightPanelTab === 'artifacts') !== (tab === 'artifacts');
   setState({
     rightPanelTab: tab,
     canvasOpen: tab === 'canvas',
     artifactsOpen: tab === 'artifacts',
+    ...(changesWidthGroup ? { rightPanelWidth: readRightWidth(tab), rightPanelMaximized: false } : {}),
   });
 }
 

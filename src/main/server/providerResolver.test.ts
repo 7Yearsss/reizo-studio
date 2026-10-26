@@ -4,6 +4,45 @@ import type { ManagedProviderConfig } from '../../shared/providerRegistry';
 import type { ProviderStore } from './storage/providerStore';
 import { resolveSettingsModel, resolveVideoExecution } from './providerResolver';
 
+it('keeps account image routing independent of a manual text-only gateway key', () => {
+  const settings = { activeProviderId: 'reizo', mediaModels: {}, providers: {
+    reizo: { apiKey: 'text-key', baseUrl: 'https://gateway.example/v1', model: 'gpt-6-astra' },
+    'reizo-account': { apiKey: 'image-account-key', baseUrl: 'https://gateway.example/v1', model: 'account-chat' },
+  }, accountCatalog: { text: [], video: [], image: [
+    { id: 'gemini-image', name: 'Gemini', protocol: 'openai-chat-image' },
+    { id: 'gpt-image-2', name: 'GPT Image', protocol: 'openai-image' },
+  ] } } as unknown as LocalSettings;
+  expect(resolveSettingsModel(settings, { category: 'image' })).toMatchObject({ providerId: 'reizo-account', apiKey: 'image-account-key', modelId: 'gpt-image-2', protocol: 'openai-image' });
+  expect(resolveSettingsModel(settings, { category: 'llm' })).toMatchObject({ providerId: 'reizo', apiKey: 'text-key' });
+  expect(resolveSettingsModel(settings, { category: 'image', providerId: 'reizo' })).toMatchObject({ providerId: 'reizo', apiKey: 'text-key' });
+  expect(resolveSettingsModel(settings, { category: 'image', model: 'manual-only-image' })).toMatchObject({ providerId: 'reizo', modelId: 'manual-only-image' });
+  settings.accountCatalog.image = settings.accountCatalog.image.filter(model => model.id !== 'gpt-image-2');
+  expect(resolveSettingsModel(settings, { category: 'image' })).toMatchObject({ providerId: 'reizo-account', modelId: 'gemini-image', protocol: 'openai-chat-image' });
+  expect(settings.activeProviderId).toBe('reizo');
+  expect(settings.mediaModels).toEqual({});
+});
+
+it('allows GET recovery of an accepted account video after it is hidden while still rejecting new submissions', async () => {
+  const settings = { providers: { 'reizo-account': { apiKey: 'rotated-key', baseUrl: 'https://gateway.example/v1' } },
+    accountCatalog: { text: [], image: [], video: [] } } as unknown as LocalSettings;
+  const request = { driverId: 'new-api', submittedProviderId: 'reizo-account', params: { prompt: 'saved', model: 'hidden-video' } };
+  await expect(resolveVideoExecution(settings, request)).rejects.toThrow('权限');
+  expect(await resolveVideoExecution(settings, { ...request, polling: true })).toMatchObject({ model: 'hidden-video', credentials: { apiKey: 'rotated-key' } });
+});
+
+it('uses the account catalog for video and image routing and rejects unavailable models', async () => {
+  const settings = { activeProviderId: 'reizo-account', providers: { 'reizo-account': { apiKey: 'fixture-key', baseUrl: 'https://gateway.example/v1', model: 'chat' } }, mediaModels: { video: 'wan3.0-video', image: 'nano-banana-2.1' },
+    accountCatalog: { text: [], image: [{ id: 'nano-banana-2.1', name: 'nano', protocol: 'openai-chat-image' }], video: [{ id: 'wan3.0-video', name: 'wan', protocol: 'openai-video', video: { startFrame: false, endFrame: false, reference: false, camera: false } }] } } as unknown as LocalSettings;
+  expect(await resolveVideoExecution(settings, { driverId: 'mock', autoProvider: true, params: { prompt: 'fixture' } })).toMatchObject({ driver: { id: 'new-api' }, providerId: 'reizo-account', model: 'wan3.0-video', credentials: { apiKey: 'fixture-key' } });
+  expect(resolveSettingsModel(settings, { category: 'image' })).toMatchObject({ modelId: 'nano-banana-2.1', protocol: 'openai-chat-image' });
+  await expect(resolveVideoExecution(settings, { driverId: 'mock', autoProvider: true, params: { prompt: 'fixture', model: 'not-authorized' } })).rejects.toThrow('权限');
+  expect(() => resolveSettingsModel(settings, { category: 'image', model: 'not-authorized' })).toThrow('权限');
+  settings.activeProviderId = 'openai';
+  expect(await resolveVideoExecution(settings, { driverId: 'mock', autoProvider: true, params: { prompt: 'fixture', model: 'wan3.0-video' } })).toMatchObject({ providerId: 'reizo-account', model: 'wan3.0-video' });
+  expect(await resolveVideoExecution(settings, { driverId: 'mock', autoProvider: true, params: { prompt: 'fixture' } })).toMatchObject({ providerId: 'reizo-account', model: 'wan3.0-video' });
+  expect(await resolveVideoExecution(settings, { driverId: 'new-api', submittedProviderId: 'reizo-account', params: { prompt: 'fixture', model: 'wan3.0-video' } })).toMatchObject({ providerId: 'reizo-account' });
+});
+
 it('resolves configured managed video identities and exact FAL models without changing legacy defaults or paid providers', async () => {
   const settings = { activeProviderId: 'openai', providers: { reizo: { apiKey: 'fixture-only', model: 'chat', baseUrl: 'https://fixture.invalid/v1' } }, mediaModels: {} } as unknown as LocalSettings;
   expect(resolveSettingsModel(settings, { category: 'image' })).toMatchObject({ providerId: 'reizo', modelId: 'gpt-image-2' });

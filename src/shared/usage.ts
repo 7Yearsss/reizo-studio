@@ -34,6 +34,9 @@ export interface UsageRecord {
   executionId: string;
   jobId?: string;
   sessionId?: string;
+  sessionTitle?: string;
+  jobStatus?: import('./canvasJobs').CanvasJobStatus;
+  jobError?: string;
   canvasId?: string;
   nodeId?: string;
   category: UsageCategory;
@@ -63,12 +66,22 @@ export interface UsageSummary {
   observedCount: number;
   unknownCount: number;
   unreconciledCount: number;
+  billedCount?: number;
+  estimatedOnlyCount?: number;
+  unpricedCount?: number;
   metrics: UsageMetric[];
   estimates: Array<{ currency: string; amount: number }>;
   bills: Array<{ currency: string; amount: number }>;
   warnings?: string[];
 }
 export interface UsagePage { records: UsageRecord[]; nextCursor?: string }
+export interface UsageQuery {
+  category?: UsageCategory;
+  search?: string;
+  from?: string;
+  to?: string;
+  cost?: 'billed' | 'estimated' | 'unpriced';
+}
 export function metricUnit(metric: UsageMetricName): UsageMetric['unit'] {
   return metric.endsWith('_tokens') ? 'token' : metric === 'images' ? 'image' : metric === 'characters' ? 'character' : 'second';
 }

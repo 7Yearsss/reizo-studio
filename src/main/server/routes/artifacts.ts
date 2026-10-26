@@ -104,6 +104,23 @@ export function createArtifactsRouter(artifactStore: ArtifactStore) {
     return c.json({ versions: artifactStore.listVersions(c.req.param('id')) });
   });
 
+  router.get('/:id/download', async (c) => {
+    const version = c.req.query('v');
+    if (version && (!Number.isSafeInteger(Number(version)) || Number(version) < 1)) return c.json({ error: 'Invalid version' }, 400);
+    const artifact = await artifactStore.get(c.req.param('id'), version ? Number(version) : undefined);
+    if (!artifact) return c.json({ error: 'File not found' }, 404);
+    if (!['text', 'markdown', 'html', 'json', 'code'].includes(artifact.kind)) return c.json({ error: '请使用该类型作品的专用导出功能' }, 415);
+    const filename = artifact.name.replace(/[\x00-\x1f\x7f<>:"/\\|?*]/g, '_');
+    const ascii = filename.replace(/[^\x20-\x7e]/g, '_') || 'download.txt';
+    const encoded = encodeURIComponent(filename).replace(/['()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+    return c.body(artifact.content, 200, {
+      'Content-Type': `${artifact.mimeType}; charset=utf-8`,
+      'Content-Disposition': `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`,
+      'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store',
+      'Content-Security-Policy': "sandbox; default-src 'none'",
+    });
+  });
+
   router.get('/:id/raw', async (c) => {
     const id = c.req.param('id');
     const meta = artifactStore.getMeta(id);

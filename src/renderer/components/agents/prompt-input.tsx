@@ -69,6 +69,8 @@ export interface PromptInputProps extends Omit<
   onEmptySendNow?: () => void;
   /** Tooltip tail for the send button while a run is live (describes the Ctrl+Enter lane). */
   busySendTitle?: string;
+  /** Attachments can be sent without an accompanying text draft. */
+  allowEmptySubmit?: boolean;
   minRows?: number;
   maxRows?: number;
   leadingAction?: ReactNode;
@@ -95,6 +97,7 @@ export function PromptInput({
   onSendNow,
   onEmptySendNow,
   busySendTitle,
+  allowEmptySubmit = false,
   minRows = 2,
   maxRows = 8,
   leadingAction,
@@ -124,7 +127,7 @@ export function PromptInput({
   const currentModel = models.find(
     (option) => option.value === currentModelValue,
   );
-  const hasDraft = Boolean(currentValue.trim());
+  const hasDraft = Boolean(currentValue.trim()) || allowEmptySubmit;
   const canSubmit = hasDraft && !disabled;
   // Keep one persistent stop control in the footer; a draft gets its own send button.
   const showStop = loading || Boolean(onStop);
@@ -141,11 +144,11 @@ export function PromptInput({
 
   const fire = (sendNow: boolean) => {
     const prompt = currentValue.trim();
-    if (sendNow && !prompt && loading && !disabled) {
+    if (sendNow && !prompt && !allowEmptySubmit && loading && !disabled) {
       onEmptySendNow?.();
       return;
     }
-    if (!prompt || disabled) return;
+    if ((!prompt && !allowEmptySubmit) || disabled) return;
 
     if (sendNow && loading && onSendNow) {
       onSendNow(prompt, currentModelValue);

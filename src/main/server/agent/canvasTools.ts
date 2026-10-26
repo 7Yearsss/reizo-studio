@@ -30,7 +30,7 @@ import { CANVAS_BUDGET_ALLOW_BATCH, type CanvasBudget } from './canvasBudget';
 import { ApprovalRequiredError, CANVAS_BUDGET_TOOL, requestBudgetCheckpoint } from './permissions';
 import type { CanvasNode } from '../../../shared/canvas';
 
-function nodeBrief(node: CanvasNode) {
+function nodeBrief(node: CanvasNode, job?: CanvasJob) {
   const params = node.params as Record<string, unknown>;
   return {
     id: node.id,
@@ -50,6 +50,10 @@ function nodeBrief(node: CanvasNode) {
     activeAssetIndex: node.output?.activeAssetIndex ?? 0,
     versionCount: node.output?.assets?.length ?? 0,
     error: node.output?.error,
+    model: job?.model ?? (typeof params.model === 'string' ? params.model : undefined),
+    providerId: job?.providerId,
+    jobStatus: job?.status,
+    remoteTaskId: job?.remoteTask?.taskId,
   };
 }
 
@@ -261,6 +265,11 @@ export function createCanvasTools(options: {
 
   const jobOutcome = async (submission: NodeJobSubmission, wait: boolean | undefined, timeoutMs: number | undefined,
     replayed: boolean, repeatNote?: string) => {
+    if (wait === false && submission.job.nodeType === 'video' && 'submitted' in submission) {
+      // Local admission is not an upstream receipt. Allow preparation/validation
+      // to settle before the agent describes a video request as submitted.
+      await waitForWork(submission.submitted as Promise<void>, Math.min(waitBudget(timeoutMs), 15_000), canvasWorkSignal(canvasStore));
+    }
     if (wait !== false && !isCanvasJobTerminal(submission.job.status)) {
       await waitForWork(submission.completion, waitBudget(timeoutMs), canvasWorkSignal(canvasStore));
     }
@@ -283,6 +292,9 @@ export function createCanvasTools(options: {
       ok: pending || job.status === 'succeeded', id: job.nodeId,
       status: pending ? 'running' : job.status === 'succeeded' ? 'done' : 'error',
       jobId: job.id, jobStatus: job.status, error,
+      ...(job.nodeType === 'video' ? { providerId: job.providerId, model: job.model, remoteTaskId: job.remoteTask?.taskId,
+        submissionStatus: job.remoteTask ? 'submitted' : job.submittedAt ? 'unconfirmed' : 'not_submitted',
+        submissionNote: job.remoteTask ? '网关已接收视频任务；生成完成前请勿再次提交。' : job.submittedAt ? '提交结果尚未确认，不能声称已在上游排队。' : '尚未提交到视频网关，请检查任务状态和错误。' } : {}),
       ...(job.result ? { output: job.result } : {}),
       ...(note ? { note } : {}),
     };
@@ -847,7 +859,7 @@ export function createCanvasTools(options: {
         if (!canvas) return { nodes: [], edges: [] };
         const snap = canvasStore.getSnapshot(canvas.id);
         return {
-          nodes: (snap?.nodes ?? []).map(nodeBrief),
+            nodes: (snap?.nodes ?? []).map(node => nodeBrief(node, canvasStore.jobs.current(canvas.id, node.id))),
           edges: (snap?.edges ?? []).map((e) => ({ source: e.sourceId, target: e.targetId })),
         };
       },
@@ -859,7 +871,7 @@ export function createCanvasTools(options: {
       execute: async ({ id }) => {
         const canvas = canvasStore.findCanvasBySession(sessionId);
         const node = canvas ? canvasStore.getNode(canvas.id, id) : null;
-        return node ? nodeBrief(node) : { error: `No canvas node "${id}"` };
+        return node ? nodeBrief(node, canvasStore.jobs.current(node.canvasId, node.id)) : { error: `No canvas node "${id}"` };
       },
     }),
 

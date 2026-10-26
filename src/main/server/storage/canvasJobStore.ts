@@ -218,6 +218,14 @@ export function createCanvasJobStore(handle: DbHandle, transaction: Transaction)
 
     isCurrent,
 
+    setProvider(id: string, info: { providerId: string; model: string }): boolean {
+      return transaction(() => {
+        if (!isCurrent(id)) return false;
+        return raw.prepare("UPDATE canvas_jobs SET provider_id = ?, model = ? WHERE id = ? AND status = 'queued'")
+          .run(info.providerId, info.model, id).changes === 1;
+      });
+    },
+
     markSubmitted(id: string, info: { providerId?: string; model?: string } = {}): boolean {
       return transaction(() => {
         if (!isCurrent(id)) return false;

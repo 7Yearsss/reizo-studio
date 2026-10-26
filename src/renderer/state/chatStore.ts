@@ -928,6 +928,16 @@ function makeEventFolder(
         break;
       }
       case 'tool': {
+        if (event.name === 'generate_file' && event.result && !event.error) {
+          try {
+            const result = JSON.parse(event.result) as { ok?: boolean; artifactId?: string };
+            if (result.ok && typeof result.artifactId === 'string') {
+              void artifactStore.openArtifact(sessionId, result.artifactId).then(opened => {
+                if (opened) uiStore.setRightPanelTabForSession(sessionId, 'artifacts');
+              });
+            }
+          } catch { /* Incomplete tool output does not open a phantom file. */ }
+        }
         if ((event.name === 'generate_presentation' || event.name === 'propose_presentation_edits') && event.result) {
           try { const result = JSON.parse(event.result) as { ok?: boolean; artifactId?: string };
             if (result.ok && result.artifactId) { selectPresentation(sessionId, result.artifactId); refreshPresentationReviews(result.artifactId); uiStore.setRightPanelTabForSession(sessionId, 'presentations'); void artifactStore.loadSessionArtifacts(sessionId); }

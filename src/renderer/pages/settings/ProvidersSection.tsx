@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Check, KeyRound, Search, ShieldCheck } from 'lucide-react';
 import type { PublicProvider } from '../../../shared/settings';
 import { useSettingsStore } from '../../state/useSettingsStore';
@@ -6,6 +6,8 @@ import * as settingsStore from '../../state/settingsStore';
 import { cn } from '../../lib/cn';
 import { toast } from '../../lib/toast';
 import { Input } from '../../components/motion/input';
+import ModelSelect from '../../components/models/ModelSelect';
+import ProviderIcon from '../../components/models/ProviderIcon';
 
 export default function ProvidersSection() {
   const settings = useSettingsStore((s) => s.settings);
@@ -15,24 +17,24 @@ export default function ProvidersSection() {
   const visible = settings.providers.filter((p) => `${p.name} ${p.tag} ${p.model}`.toLowerCase().includes(query.trim().toLowerCase()));
   return (
     <section className="flex h-full min-h-0 flex-col">
-      <header className="mb-5 pr-7">
+      <header className="mb-5">
         <h1 className="text-xl font-semibold tracking-tight">模型</h1>
         <p className="mt-2 text-xs leading-relaxed text-ink-muted">选择供应商，配置密钥和默认对话模型。</p>
       </header>
-      <div className="flex min-h-0 flex-1 gap-5 max-lg:flex-col">
-        <aside aria-label="模型供应商" className="flex w-48 shrink-0 flex-col border-r border-line pr-4 max-lg:w-full max-lg:border-b max-lg:border-r-0 max-lg:pb-3 max-lg:pr-0">
-          <label className="mb-3 flex items-center gap-2 rounded-lg bg-paper-inset px-2.5 py-2 text-ink-muted">
+      <div className="flex min-h-0 flex-1 gap-4 max-lg:flex-col">
+        <aside aria-label="模型供应商" className="flex w-60 shrink-0 flex-col rounded-2xl border border-line bg-paper-raised p-3 xl:w-64 max-lg:w-full max-lg:shrink-0">
+          <label className="mb-3 flex items-center gap-2 rounded-lg border border-line bg-paper px-2.5 py-2 text-ink-muted focus-within:border-accent/40 focus-within:ring-2 focus-within:ring-accent/15">
             <Search size={14} className="shrink-0" />
             <input aria-label="搜索供应商" placeholder="搜索供应商" value={query} onChange={(event) => setQuery(event.target.value)} className="min-w-0 w-full bg-transparent text-xs text-ink outline-none placeholder:text-ink-muted" />
           </label>
-          <p className="mb-2 text-[11px] text-ink-muted">供应商 · {settings.providers.filter((p) => p.hasKey).length} 个已配置</p>
-          <div className="min-h-0 space-y-1 overflow-y-auto max-lg:flex max-lg:gap-1 max-lg:space-y-0 max-lg:overflow-x-auto">
+          <p className="mb-2 px-1 text-[11px] text-ink-muted">供应商 · {settings.providers.filter((p) => p.hasKey).length} 个已配置</p>
+          <div className="min-h-0 space-y-1 overflow-y-auto pr-1 [scrollbar-gutter:stable] max-lg:flex max-lg:gap-2 max-lg:space-y-0 max-lg:overflow-x-auto max-lg:pb-1 max-lg:pr-0">
             {visible.map((provider) => (
-              <button type="button" key={provider.id} aria-pressed={selected?.id === provider.id} onClick={() => setSelectedId(provider.id)} className={cn('flex w-full items-center gap-2 rounded-xl p-2.5 text-left focus-visible:outline-2 focus-visible:outline-accent max-lg:w-44 max-lg:shrink-0', selected?.id === provider.id ? 'bg-paper-inset' : 'hover:bg-paper-inset/60')}>
-                <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-line bg-paper-raised text-xs font-semibold" aria-hidden>{provider.name.slice(0, 1)}</span>
+              <button type="button" key={provider.id} aria-pressed={selected?.id === provider.id} onClick={() => setSelectedId(provider.id)} className={cn('flex min-h-16 w-full items-center gap-3 rounded-xl border p-2.5 text-left focus-visible:outline-2 focus-visible:outline-accent max-lg:w-56 max-lg:shrink-0', selected?.id === provider.id ? 'border-line bg-paper-inset' : 'border-transparent hover:bg-paper-inset/60')}>
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-line bg-paper" aria-hidden><ProviderIcon providerId={provider.id} /></span>
                 <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-1 text-xs font-medium"><span className="truncate">{provider.name}</span>{provider.id === settings.activeProviderId && <span className="shrink-0 rounded bg-success-bg px-1 text-[10px] text-success">默认</span>}</span>
-                  <span className="mt-1 block truncate text-[11px] text-ink-muted">{provider.hasKey ? provider.model : '尚未配置密钥'}</span>
+                  <span className="flex items-center gap-1.5 text-[13px] font-medium"><span className="truncate" title={provider.name}>{provider.name}</span>{provider.id === settings.activeProviderId && <span className="shrink-0 rounded bg-success-bg px-1 text-[10px] text-success">默认</span>}</span>
+                  <span className="mt-1 block truncate text-[11px] text-ink-muted" title={provider.hasKey ? provider.model : undefined}>{provider.hasKey ? provider.model : provider.id === 'reizo-account' ? '请登录并刷新账号状态' : '尚未配置密钥'}</span>
                 </span>
               </button>
             ))}
@@ -54,6 +56,7 @@ export default function ProvidersSection() {
 }
 
 export function ProviderDetail({ provider, active }: { provider: PublicProvider; active: boolean }) {
+  const accountProvider = provider.id === 'reizo-account';
   const [keyInput, setKeyInput] = useState('');
   const [editingKey, setEditingKey] = useState(!provider.hasKey);
   const [baseUrl, setBaseUrl] = useState(provider.baseUrl);
@@ -63,6 +66,7 @@ export function ProviderDetail({ provider, active }: { provider: PublicProvider;
   const [error, setError] = useState('');
   const dirty = Boolean(keyInput.trim()) || model !== provider.model || (provider.allowCustomBaseUrl && baseUrl !== provider.baseUrl);
   const canSave = Boolean(model.trim()) && (provider.hasKey || Boolean(keyInput.trim()) || Boolean(provider.allowCustomBaseUrl)) && (!provider.allowCustomBaseUrl || Boolean(baseUrl.trim()));
+  useEffect(() => { if (accountProvider) setModel(provider.model); }, [accountProvider, provider.model]);
 
   async function save() {
     if (pending.current || !canSave) return;
@@ -91,15 +95,18 @@ export function ProviderDetail({ provider, active }: { provider: PublicProvider;
   return (
     <form aria-label={`${provider.name} 配置`} onSubmit={(event) => { event.preventDefault(); void save(); }} className="rounded-2xl border border-line bg-paper-raised p-5 max-sm:p-4">
       <header className="mb-6 flex items-start justify-between gap-3">
-        <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-3">
+          <span aria-hidden className="grid size-10 shrink-0 place-items-center rounded-xl border border-line bg-paper"><ProviderIcon providerId={provider.id} className="size-6" /></span>
+          <div className="min-w-0">
           <h2 className="text-base font-semibold">{provider.name}</h2>
           <span className="mt-1 inline-block text-xs text-ink-muted">{provider.tag}</span>
+          </div>
         </div>
         {active && <span className="flex shrink-0 items-center gap-1 rounded-full bg-success-bg px-2 py-1 text-[11px] text-success"><Check size={12} />默认供应商</span>}
       </header>
       {provider.description && <p className="mb-5 text-xs leading-relaxed text-ink-muted">{provider.description}</p>}
       <fieldset disabled={busy} className="min-w-0 space-y-5 disabled:opacity-60">
-        <div>
+        {accountProvider ? <p role="status" className="rounded-xl bg-paper-inset p-3 text-xs leading-relaxed text-ink-muted">{provider.hasKey ? '已连接当前工作区，模型凭据由账号自动管理。' : '请从左下角登录 Reizo，再在账号信息中刷新状态，无需填写 API Key。'}</p> : <div>
           <div className="mb-2 flex items-center justify-between text-xs">
             <span className="font-medium">API 密钥</span>
             {provider.hasKey && <span className="text-success">已配置</span>}
@@ -113,20 +120,15 @@ export function ProviderDetail({ provider, active }: { provider: PublicProvider;
             <button type="button" onClick={() => { setEditingKey(!editingKey); setKeyInput(''); }} className="text-ink-muted hover:text-ink">{editingKey ? '取消更换' : '更换密钥'}</button>
             <button type="button" onClick={() => void removeKey()} className="text-danger hover:opacity-80">移除密钥</button>
           </div>}
-        </div>
+        </div>}
         {provider.allowCustomBaseUrl && <Input label="服务地址（Base URL）" value={baseUrl} onChange={setBaseUrl} placeholder="https://api.example.com/v1" className="w-full text-sm" />}
         <div className="rounded-xl bg-paper-inset/60 p-4">
           {provider.allowCustomBaseUrl ? <Input label="默认模型 ID" value={model} onChange={setModel} placeholder="例如 deepseek-chat" className="w-full text-sm" /> : (
-            <label className="block text-xs font-medium">默认对话模型
-              <select value={model} onChange={(event) => setModel(event.target.value)} className="mt-2 w-full min-w-0 rounded-lg border border-line bg-paper-raised px-3 py-2.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent">
-                {!provider.models.some((item) => item.id === model) && <option value={model}>{model || '请选择模型'}</option>}
-                {provider.models.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-              </select>
-            </label>
+            <div className="text-xs font-medium"><span>默认对话模型</span><ModelSelect models={provider.models} value={model} onChange={setModel} disabled={busy} /></div>
           )}
           <p className="mt-3 text-[11px] leading-relaxed text-ink-muted">保存后用作默认对话模型，也可在输入框中切换。</p>
         </div>
-        <div className="flex items-start gap-2 text-[11px] leading-relaxed text-ink-muted"><ShieldCheck size={14} className="mt-0.5 shrink-0" /><span>密钥经系统级加密后仅保存在本机。</span></div>
+        <div className="flex items-start gap-2 text-[11px] leading-relaxed text-ink-muted"><ShieldCheck size={14} className="mt-0.5 shrink-0" /><span>{accountProvider ? '退出登录后，本机停止使用账号模型；再次登录会重新验证权限。' : '密钥经系统级加密后仅保存在本机。'}</span></div>
         {error && <p role="alert" className="text-xs text-danger">{error}</p>}
         <button type="submit" disabled={!canSave || busy || (active && !dirty)} className="w-full rounded-full bg-ink px-4 py-2.5 text-sm font-medium text-paper-raised hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-40">
           {busy ? '正在保存…' : active && !dirty ? '已是默认配置' : '保存并使用'}

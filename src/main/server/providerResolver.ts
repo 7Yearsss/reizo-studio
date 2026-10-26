@@ -20,8 +20,18 @@ export function resolveSettingsModel(settings: LocalSettings, request: {
   category: 'image' | 'llm'; providerId?: string; model?: string; draft?: boolean;
 }) {
   const explicit = supplied(request.providerId, 'Provider');
+  const requestedModel = supplied(request.model, '模型');
   let providerId = explicit ?? clean(settings.activeProviderId) ?? 'openai';
+  const selectedImage = request.draft ? clean(settings.mediaModels?.draft) : requestedModel ?? clean(settings.mediaModels?.image);
+  const accountImages = settings.accountCatalog?.image ?? [];
+  // Automatic media uses its account catalog, independently of the text conversation's key.
+  // Explicit providers and models exclusive to a manually configured provider stay pinned.
+  if (request.category === 'image' && !explicit && clean(settings.providers?.['reizo-account']?.apiKey) &&
+      accountImages.length && (!selectedImage || accountImages.some(model => model.id === selectedImage))) {
+    providerId = 'reizo-account';
+  }
   let stored = settings.providers?.[providerId];
+  if (providerId === 'reizo-account' && !clean(stored?.apiKey)) throw new ProviderResolutionError('请先登录 Reizo 并刷新账号模型状态。');
   // Preserve the existing implicit image fallback; an explicit provider never silently changes.
   if (request.category === 'image' && !explicit && !clean(stored?.apiKey)) {
     for (const id of ['reizo', 'openai']) if (id !== providerId && clean(settings.providers?.[id]?.apiKey)) {
@@ -37,12 +47,17 @@ export function resolveSettingsModel(settings: LocalSettings, request: {
   let official = false;
   try { const url = new URL(baseUrl); official = url.hostname === 'api.openai.com'; if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) throw new Error(); }
   catch { throw new ProviderResolutionError('Provider Base URL 无效'); }
-  const requestedModel = supplied(request.model, '模型');
+  const defaultImageModel = providerId === 'reizo-account'
+    ? (request.draft ? accountImages.find(model => model.id === DEFAULT_DRAFT_IMAGE_MODEL)?.id : undefined) ??
+      accountImages.find(model => model.id === 'gpt-image-2')?.id ?? accountImages[0]?.id
+    : request.draft ? DEFAULT_DRAFT_IMAGE_MODEL : official ? 'dall-e-3' : 'gpt-image-2';
   const model = request.category === 'image'
-    ? request.draft ? clean(settings.mediaModels?.draft) ?? DEFAULT_DRAFT_IMAGE_MODEL : requestedModel ?? clean(settings.mediaModels?.image) ?? (official ? 'dall-e-3' : 'gpt-image-2')
+    ? selectedImage ?? defaultImageModel
     : requestedModel ?? clean(stored.model) ?? clean(preset.defaultModel);
   if (!model) throw new ProviderResolutionError('Provider is missing a base URL or model id.');
-  return { providerId, modelId: model, apiKey: stored.apiKey.trim(), baseUrl };
+  const catalogModel = providerId === 'reizo-account' ? settings.accountCatalog?.[request.category === 'image' ? 'image' : 'text'].find(item => item.id === model) : undefined;
+  if (providerId === 'reizo-account' && settings.accountCatalog && !catalogModel) throw new ProviderResolutionError('当前账号没有此模型权限，请重新选择模型。');
+  return { providerId, modelId: model, apiKey: stored.apiKey.trim(), baseUrl, protocol: catalogModel?.protocol };
 }
 
 export async function resolveManagedProvider(store: ProviderStore, category: ProviderCategory, providerId?: string) {
@@ -90,8 +105,26 @@ export function resolveVideoProvider(settings: LocalSettings, request: {
 }
 
 export async function resolveVideoExecution(settings: LocalSettings, request: {
-  driverId: string; providerId?: string; submittedProviderId?: string; params: VideoGenerateParams; signal?: AbortSignal; autoProvider?: boolean;
+  driverId: string; providerId?: string; submittedProviderId?: string; params: VideoGenerateParams; signal?: AbortSignal; autoProvider?: boolean; polling?: boolean;
 }, store?: ProviderStore) {
+  const selectedVideoModel = clean(request.params.model) ?? clean(settings.mediaModels?.video) ?? settings.accountCatalog?.video[0]?.id;
+  const automaticAccountVideo = request.autoProvider && !request.providerId &&
+    Boolean(settings.providers?.['reizo-account']?.apiKey && settings.accountCatalog?.video.some(model => model.id === selectedVideoModel));
+  const useAccount = request.submittedProviderId === 'reizo-account' || !request.submittedProviderId &&
+    (request.providerId === 'reizo-account' || request.autoProvider && settings.activeProviderId === 'reizo-account' || automaticAccountVideo);
+  if (useAccount) {
+    const stored = settings.providers?.['reizo-account'];
+    if (!stored?.apiKey) throw new ProviderResolutionError('请先登录 Reizo 并刷新账号模型状态。');
+    const id = supplied(request.params.model, '视频模型') ?? clean(settings.mediaModels?.video) ?? settings.accountCatalog?.video[0]?.id;
+    if (!id) throw new ProviderResolutionError('视频任务缺少模型编号，请刷新模型列表后重新选择。');
+    const model = settings.accountCatalog?.video.find(model => model.id === id);
+    // A hidden model must not orphan an already accepted task. The gateway still authorizes every GET.
+    const queryingAcceptedTask = request.polling && request.submittedProviderId === 'reizo-account' && request.driverId === 'new-api' && id;
+    if (!model?.video && !queryingAcceptedTask) throw new ProviderResolutionError('当前账号没有此视频模型权限，请刷新模型列表后重新选择。');
+    return { driver: getVideoDriver('new-api'), providerId: 'reizo-account', model: id,
+      params: { ...request.params, model: id },
+      credentials: { apiKey: stored.apiKey, baseUrl: stored.baseUrl, videoSupport: model?.video, signal: request.signal } as VideoDriverOptions };
+  }
   let managedId = request.submittedProviderId;
   const legacyDriver = getVideoDriver(request.driverId);
   if (!managedId && legacyDriver.id !== request.driverId) managedId = request.driverId;

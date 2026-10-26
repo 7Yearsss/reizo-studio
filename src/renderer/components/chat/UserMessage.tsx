@@ -62,10 +62,10 @@ export default function UserMessage({
     <div
       className={`anim-msg group flex justify-end ${currentMatch ? 'chat-search-current' : ''}`}
     >
-      <div className="max-w-[75%]">
+      <div className="min-w-0 max-w-[85%] sm:max-w-[78%]">
         <div
           data-slot="message-content"
-          className="whitespace-pre-wrap rounded-[18px] bg-paper-inset px-4 py-2.5 text-[15px] leading-relaxed text-ink"
+          className="chat-user-bubble whitespace-pre-wrap"
         >
           <HighlightedText text={text} query={searchQuery} />
         </div>

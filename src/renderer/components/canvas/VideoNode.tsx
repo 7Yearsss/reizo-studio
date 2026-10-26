@@ -4,7 +4,6 @@ import { AntiZoomScale } from './AntiZoomScale';
 import { Download, FolderPlus, Loader2, Play, Video, Camera, Sparkles, RotateCw, X, Bot, Upload } from 'lucide-react';
 import type { CanvasVideoParams } from '../../../shared/canvas';
 import { getVideoModelCapabilities } from '../../../shared/canvas';
-import { estimateNodeCost } from '../../../shared/canvasPricing';
 
 import * as canvasStore from '../../state/canvasStore';
 import { useCanvasStore } from '../../state/useCanvasStore';
@@ -170,11 +169,11 @@ function VideoNode({ id, data, selected }: NodeProps) {
     const freshNode = canvasStore.nodeById(sessionId, node.id);
     const freshParams = (freshNode?.params as Record<string, unknown>) ?? {};
     if (prompt !== freshParams.prompt) {
-      void canvasStore
+      return canvasStore
         .updateNodeParams(sessionId, node.id, { ...freshParams, prompt })
         .then(() => canvasStore.runNode(sessionId, node.id));
     } else {
-      void canvasStore.runNode(sessionId, node.id);
+      return canvasStore.runNode(sessionId, node.id);
     }
   };
 
@@ -574,7 +573,6 @@ function VideoNode({ id, data, selected }: NodeProps) {
         onCameraChange={(cam) => {
           void canvasStore.updateNodeParams(sessionId, node.id, { ...params, camera: cam });
         }}
-        estimatedCost={estimateNodeCost(node)}
       />
     </div>
   );

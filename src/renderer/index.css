@@ -1,5 +1,6 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
+@import '@fontsource-variable/noto-sans-sc';
 @import '@xyflow/react/dist/style.css';
 @source "../../node_modules/streamdown/dist/*.js";
 @source "../../node_modules/@streamdown/code/dist/*.js";
@@ -81,6 +82,9 @@
   --success: #1a7f4b;
   --success-bg: #e3f3ea;
   --danger: #c43128;
+  --link: #245cbd;
+  --chat-user-bg: #1c1d1e;
+  --chat-user-ink: #ffffff;
 
   /* Zero-alpha `--paper` for gradient masks. `transparent` interpolates
      through black in WebKit and leaves a dirty edge. */
@@ -140,6 +144,9 @@
   --success: #5ad08a;
   --success-bg: #12301f;
   --danger: #ff7b72;
+  --link: #8ab4ff;
+  --chat-user-bg: #ededee;
+  --chat-user-ink: #1c1d1e;
 
   --paper-a0: rgb(15 16 17 / 0);
   --shadow-outline: 0 0 0 1px rgba(255, 255, 255, 0.08);
@@ -168,6 +175,7 @@
 }
 
 @theme {
+  --font-sans: 'Segoe UI Variable Text', 'Segoe UI', 'Noto Sans SC Variable', 'Microsoft YaHei', 'PingFang SC', sans-serif;
   --color-paper: var(--paper);
   --color-paper-a0: var(--paper-a0);
   --color-paper-raised: var(--paper-raised);
@@ -207,14 +215,9 @@ body,
 }
 
 body {
-  font-family:
-    'Segoe UI',
-    'Microsoft YaHei UI',
-    'Microsoft YaHei',
-    'PingFang SC',
-    -apple-system,
-    BlinkMacSystemFont,
-    sans-serif;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
   background: var(--paper);
   color: var(--ink);
   user-select: none;
@@ -305,6 +308,58 @@ pre,
   border-radius: 999px;
 }
 
+.chat-prose {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+
+.chat-user-bubble {
+  background: var(--chat-user-bg);
+  color: var(--chat-user-ink);
+  border-radius: 20px;
+  padding: 11px 17px;
+  font-size: 15px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.markdown strong, .markdown b {
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.markdown a, .chat-file-link {
+  color: var(--link);
+  font-weight: 500;
+  text-decoration: none;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.markdown a:hover, .chat-file-link:hover { text-decoration: underline; }
+.markdown a:focus-visible, .chat-file-link:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+.markdown blockquote {
+  margin: 1em 0;
+  border-left: 3px solid var(--line);
+  padding: .15em 0 .15em 1.1em;
+  color: var(--ink-muted);
+  font-style: normal;
+}
+.markdown hr { margin: 1.5em 0; border-color: var(--line); }
+.markdown ul { list-style-type: disc; }
+.markdown ol { list-style-type: decimal; }
+.markdown li { margin: .25em 0; }
+.markdown li > p { margin: .25em 0; }
+.markdown > :first-child,
+.markdown [data-streamdown] > :first-child { margin-top: 0; }
+
 .markdown h1,
 .markdown h2,
 .markdown h3 {
@@ -322,7 +377,7 @@ pre,
 }
 
 .markdown p {
-  margin: 0 0 0.6em;
+  margin: 0 0 0.9em;
 }
 
 .markdown p:last-child {
@@ -385,6 +440,11 @@ pre,
   padding: 10px 12px;
 }
 
+/* The app switches themes with a class, independently of the OS color scheme. */
+:root.dark .markdown [data-streamdown='code-block-body'] span[style*='--shiki-dark'] {
+  color: var(--shiki-dark);
+}
+
 .markdown [data-streamdown='code-block'] pre {
   margin: 0;
   padding: 0;
@@ -418,7 +478,9 @@ pre,
 
 .markdown ul,
 .markdown ol {
-  padding-left: 1.4em;
+  padding-left: 1.5em;
+  list-style-position: outside;
+  margin: .8em 0;
 }
 
 @keyframes fade-in {

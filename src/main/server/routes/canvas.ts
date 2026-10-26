@@ -20,7 +20,7 @@ import { canvasWorkSignal, canvasWorkStopped } from '../canvas/workLifecycle';
 import type { CanvasJob } from '../../../shared/canvasJobs';
 import { isCanvasRunning, runGraph, stopCanvasRun } from '../canvas/graphExecutor';
 import { nodeJobsFor } from '../canvas/nodeJobs';
-import { cancelVideoJob } from '../canvas/asyncJobManager';
+import { cancelVideoJob, recoverVideoJob, latestVideoQueryJob, videoJobObservation } from '../canvas/asyncJobManager';
 import { isImportedMedia } from '../../../shared/canvasGraph';
 import { startAgentNode } from '../canvas/agentExecutor';
 import { startComposition } from '../canvas/composition';
@@ -260,7 +260,16 @@ export function createCanvasRouter(
   router.get('/:canvasId/jobs/:jobId', (c) => {
     const job = canvasStore.jobs.get(c.req.param('jobId'));
     if (!job || job.canvasId !== c.req.param('canvasId')) return c.json({ error: 'Job not found' }, 404);
-    return c.json({ job });
+    const latest = latestVideoQueryJob(canvasStore, job);
+    const observed = { ...latest, observation: videoJobObservation(canvasStore, latest.id) };
+    return c.json({ job: latest.id === job.id ? observed : job, ...(latest.id !== job.id ? { recoveryJob: observed } : {}) });
+  });
+
+  router.post('/:canvasId/jobs/:jobId/query', (c) => {
+    const job = canvasStore.jobs.get(c.req.param('jobId'));
+    if (!job || job.canvasId !== c.req.param('canvasId')) return c.json({ error: 'Job not found' }, 404);
+    const recovered = recoverVideoJob({ canvasStore, settingsStore, dataRoot, providerStore }, job);
+    return c.json({ job: recovered.job }, 202);
   });
 
   router.get('/:canvasId/deliveries', (c) => {

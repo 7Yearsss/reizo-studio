@@ -1,12 +1,13 @@
-import { Quote, RotateCcw } from 'lucide-react';
+import { RotateCcw } from 'lucide-react';
+import { useMemo } from 'react';
 import type { ReasoningSegment, ReplyActivity, ToolCallPart } from '../../../shared/chat';
 import type { TurnOutcome } from '../../../shared/stream';
 import MarkdownContent, { CopyButton } from './MarkdownContent';
 import WorkGroupCard from './WorkGroupCard';
 import AskAnswers from './AskAnswers';
 import GeneratedMediaStrip from './GeneratedMediaStrip';
-import * as chatStore from '../../state/chatStore';
-import { toast } from '../../lib/toast';
+import ProducedFiles from './ProducedFiles';
+import { deliverableOf } from './DeliverableCard';
 
 function StreamingCaret() {
   return (
@@ -14,42 +15,6 @@ function StreamingCaret() {
       className="ml-0.5 inline-block h-[0.95em] w-[2px] translate-y-0.5 animate-pulse rounded-sm bg-accent align-text-bottom"
       aria-hidden
     />
-  );
-}
-
-function QuoteButton({
-  sessionId,
-  content,
-  className,
-}: {
-  sessionId?: string;
-  content: string;
-  className?: string;
-}) {
-  const handleQuote = () => {
-    if (!sessionId || !content) return;
-    const selection = window.getSelection()?.toString().trim();
-    const quoteText = selection && content.includes(selection) ? selection : content;
-    const cleanQuote = quoteText
-      .split('\n')
-      .map((line) => `> ${line}`)
-      .join('\n');
-    chatStore.seedComposer(sessionId, `${cleanQuote}\n\n`);
-    toast.success('已引用至输入框');
-  };
-
-  if (!sessionId || !content) return null;
-
-  return (
-    <button
-      type="button"
-      onClick={handleQuote}
-      className={className}
-      title="引用回复内容（若选中文本则仅引用所选片段）"
-    >
-      <Quote size={11} />
-      <span>引用</span>
-    </button>
   );
 }
 
@@ -85,9 +50,14 @@ export default function AssistantMessage({
   turnOutcome?: TurnOutcome | null;
 }) {
   const proposedEdits = parts?.some((part) => /^propose_.*_edits$/.test(part.name)) ?? false;
+  const generatedFiles = useMemo(() => (parts ?? []).flatMap(part => {
+    const file = part.name === 'generate_file' ? deliverableOf(part) : null;
+    return file ? [file] : [];
+  }), [parts]);
   return (
     <div className={`anim-msg group space-y-3 ${currentMatch ? 'chat-search-current' : ''}`}>
       <WorkGroupCard
+        sessionId={sessionId}
         reasoning={reasoning}
         reasoningSegments={reasoningSegments}
         reasoningStreaming={reasoningStreaming}
@@ -101,18 +71,19 @@ export default function AssistantMessage({
       <AskAnswers parts={parts} />
       {sessionId ? <GeneratedMediaStrip parts={parts} sessionId={sessionId} /> : null}
       {content ? (
-        <div data-slot="message-content" className="markdown text-[15px] leading-[1.75] text-ink">
-          <MarkdownContent content={content} streaming={streaming} />
+        <div data-slot="message-content" className="markdown chat-prose text-ink">
+          <MarkdownContent content={content} streaming={streaming} generatedFiles={generatedFiles} />
           {streaming ? <StreamingCaret /> : null}
         </div>
       ) : streaming && !parts?.length && !activities?.length && !reasoning && !reasoningStreaming ? (
-        <div className="markdown text-[15px] leading-[1.75] text-ink">
+        <div className="markdown chat-prose text-ink">
           <span className="inline-flex items-center gap-2 text-ink-muted">
             <StreamingCaret />
             <span className="text-[12px]">正在回复</span>
           </span>
         </div>
       ) : null}
+      <ProducedFiles parts={parts} />
       {(Boolean(content) || (parts?.length ?? 0) > 0) && !streaming && (
         <div className="flex items-center gap-3">
           {turnOutcome === 'interrupted' ? (
@@ -127,11 +98,6 @@ export default function AssistantMessage({
           <div className="flex gap-3 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
             <CopyButton
               text={content}
-              className="inline-flex items-center gap-1 text-[11px] text-ink-muted hover:text-ink cursor-pointer"
-            />
-            <QuoteButton
-              sessionId={sessionId}
-              content={content}
               className="inline-flex items-center gap-1 text-[11px] text-ink-muted hover:text-ink cursor-pointer"
             />
             {canRetry && (

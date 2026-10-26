@@ -8,10 +8,13 @@ import { toolAction, toolLabel, toolTarget } from './toolDisplay';
 
 /** Tools whose full card (with its diff or output) stays visible after the turn ends. */
 const PERSISTENT_TOOL_NAMES = new Set([
+  'generate_file',
   'edit_file',
   'write_file',
   'memory_write',
   'generate_image',
+  'create_image',
+  'generate_video',
   'generate_diagram',
   'generate_sheet',
   'generate_document',
@@ -42,6 +45,7 @@ export default function WorkGroupCard({
   durationMs,
   activities = [],
   turnOutcome = null,
+  sessionId,
 }: {
   reasoning?: string;
   reasoningSegments?: ReasoningSegment[];
@@ -52,6 +56,7 @@ export default function WorkGroupCard({
   durationMs?: number;
   activities?: ReplyActivity[];
   turnOutcome?: TurnOutcome | null;
+  sessionId?: string;
 }) {
   // ask_user parts are rendered by AskAnswers/the ask card — a turn that only
   // asked questions (e.g. a folded duplicate direction card) shouldn't leave
@@ -110,23 +115,12 @@ export default function WorkGroupCard({
         maxHeight={220}
       />
       )}
-      {active && visibleParts.length > 0 ? (
+      {visibleParts.length > 0 ? (
         <div className="mt-1 flex flex-col items-start gap-1">
           {visibleParts
-            .filter((part) => !part.result && !part.error)
+            .filter((part) => PERSISTENT_TOOL_NAMES.has(part.name) || (active && part.result === undefined && part.error === undefined))
             .map((part) => (
-              <ToolCard key={part.id} part={part} />
-            ))}
-        </div>
-      ) : null}
-      {/* After the turn ends the activity strip collapses, so keep write cards
-          (and their diffs) visible — that is the point of the review surface. */}
-      {!active && visibleParts.some((part) => PERSISTENT_TOOL_NAMES.has(part.name)) ? (
-        <div className="mt-1 flex flex-col items-start gap-1">
-          {visibleParts
-            .filter((part) => PERSISTENT_TOOL_NAMES.has(part.name))
-            .map((part) => (
-              <ToolCard key={part.id} part={part} collapsed />
+              <ToolCard key={part.id} part={part} collapsed={!active} sessionId={sessionId} interrupted={turnOutcome === 'error' || turnOutcome === 'interrupted'} />
             ))}
         </div>
       ) : null}

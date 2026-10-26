@@ -2,11 +2,134 @@
 <html>
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/png" href="/src/renderer/assets/logo.png" />
     <title>Reizo Studio</title>
+    <!-- Keep startup independent of React and the development dependency compiler. -->
+    <style>
+      #reizo-startup {
+        position: fixed; inset: 0; z-index: 99999;
+        display: grid; place-items: center;
+        background: var(--paper, #fafafb); color: var(--ink, #1c1d1e);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        -webkit-app-region: drag; user-select: none;
+        transition: opacity 320ms ease, visibility 320ms;
+      }
+      #reizo-startup[data-leaving] { opacity: 0; visibility: hidden; pointer-events: none; }
+      #reizo-startup [hidden] { display: none; }
+      .reizo-startup-content { text-align: center; animation: reizo-startup-enter 700ms ease both; }
+      .reizo-startup-mark {
+        width: 96px; height: 96px; margin: 0 auto 30px;
+        animation: reizo-startup-breathe 3.2s ease-in-out infinite;
+      }
+      .reizo-startup-mark img {
+        display: block; width: 100%; height: 100%; object-fit: contain;
+        filter: brightness(.65) drop-shadow(0 5px 8px rgb(0 0 0 / 8%));
+        animation: reizo-startup-turn 18s linear infinite;
+      }
+      .reizo-startup-name { margin: 0; font-size: 26px; font-weight: 500; letter-spacing: -.8px; }
+      .reizo-startup-name span { font-weight: 350; color: var(--ink-muted, #62656d); }
+      .reizo-startup-status {
+        display: flex; align-items: center; justify-content: center; gap: 10px;
+        margin: 22px 0 0; color: var(--ink-muted, #62656d);
+        font-size: 12px; line-height: 20px; letter-spacing: .4px;
+      }
+      .reizo-startup-dots { display: inline-flex; gap: 4px; }
+      .reizo-startup-dots i {
+        width: 3px; height: 3px; border-radius: 50%; background: currentColor;
+        animation: reizo-startup-dot 1.4s ease-in-out infinite;
+      }
+      .reizo-startup-dots i:nth-child(2) { animation-delay: 160ms; }
+      .reizo-startup-dots i:nth-child(3) { animation-delay: 320ms; }
+      .reizo-startup-action {
+        position: absolute; bottom: max(48px, 8vh); left: 50%; transform: translateX(-50%);
+        padding: 9px 18px; border: 1px solid var(--line, #d9dbde); border-radius: 99px;
+        background: transparent; color: inherit; font: inherit; font-size: 12px;
+        cursor: pointer; -webkit-app-region: no-drag;
+      }
+      .reizo-startup-action:hover { background: rgb(128 128 128 / 8%); }
+      .reizo-startup-action:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }
+      @keyframes reizo-startup-enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+      @keyframes reizo-startup-turn { to { transform: rotate(360deg); } }
+      @keyframes reizo-startup-breathe { 0%, 100% { opacity: .78; transform: scale(.96); } 50% { opacity: 1; transform: scale(1); } }
+      @keyframes reizo-startup-dot { 0%, 70%, 100% { opacity: .25; } 35% { opacity: 1; } }
+      @media (prefers-color-scheme: dark) {
+        #reizo-startup { background: var(--paper, #0f1011); color: var(--ink, #f2f2f3); }
+        .reizo-startup-name span, .reizo-startup-status { color: var(--ink-muted, #9a9da5); }
+        .reizo-startup-mark img { filter: drop-shadow(0 5px 12px rgb(0 0 0 / 15%)); }
+      }
+      html.dark .reizo-startup-mark img { filter: drop-shadow(0 5px 12px rgb(0 0 0 / 15%)); }
+      @media (prefers-reduced-motion: reduce) {
+        #reizo-startup { transition: none; }
+        #reizo-startup * { animation: none; }
+      }
+    </style>
   </head>
   <body>
+    <div id="reizo-startup" role="status" aria-live="polite" aria-label="Reizo Studio 正在启动">
+      <div class="reizo-startup-content">
+        <div class="reizo-startup-mark">
+          <img src="/src/renderer/assets/logo.png" alt="" width="96" height="96" draggable="false" />
+        </div>
+        <h1 class="reizo-startup-name">Reizo <span>Studio</span></h1>
+        <p class="reizo-startup-status">
+          <span id="reizo-startup-label">正在打开工作台</span>
+          <span class="reizo-startup-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        </p>
+      </div>
+      <button id="reizo-startup-action" class="reizo-startup-action" type="button" hidden>进入工作台</button>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/renderer/main.tsx"></script>
+    <script>
+      (() => {
+        const startup = document.getElementById('reizo-startup');
+        const root = document.getElementById('root');
+        const action = document.getElementById('reizo-startup-action');
+        const startedAt = performance.now();
+        root.inert = true;
+        // Development-only: hold the animation until the preview button is clicked.
+        const preview = '%MODE%' === 'development' && new URLSearchParams(location.search).get('startupPreview') === '1';
+        let ready = false;
+
+        function dismiss() {
+          window.removeEventListener('error', onBootError, true);
+          root.inert = false;
+          startup.setAttribute('data-leaving', '');
+          setTimeout(() => startup.remove(), 340);
+        }
+
+        function onBootError(event) {
+          if (!(event instanceof ErrorEvent) && !(event.target instanceof HTMLScriptElement)) return;
+          if (ready || root.childElementCount) return;
+          document.getElementById('reizo-startup-label').textContent = '启动失败，请重新加载';
+          action.textContent = '重新加载';
+          action.hidden = false;
+          action.onclick = () => location.reload();
+        }
+
+        const observer = new MutationObserver(() => {
+          if (!root.childElementCount || ready) return;
+          ready = true;
+          observer.disconnect();
+          window.removeEventListener('error', onBootError, true);
+          requestAnimationFrame(() => requestAnimationFrame(() => {
+            if (preview) {
+              action.hidden = false;
+              action.onclick = () => {
+                const url = new URL(location.href);
+                url.searchParams.delete('startupPreview');
+                history.replaceState(history.state, '', url);
+                dismiss();
+              };
+            } else {
+              setTimeout(dismiss, Math.max(0, 700 - (performance.now() - startedAt)));
+            }
+          }));
+        });
+        observer.observe(root, { childList: true });
+        window.addEventListener('error', onBootError, true);
+      })();
+    </script>
   </body>
 </html>

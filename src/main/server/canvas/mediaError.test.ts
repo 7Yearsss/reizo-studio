@@ -2,6 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { classifyMediaError } from './mediaError';
 
 describe('classifyMediaError', () => {
+  it('distinguishes the observed distributor failure from a generic transient server failure', () => {
+    const e = classifyMediaError(new Error('分组 gpt-不降智分组 下模型 gpt-image-2 无可用渠道（distributor） (request id: 202610240814127286055628268d9d6XYNouo3R)'));
+    expect(e.code).toBe('channel_unavailable');
+    expect(e.message).toContain('账号分组');
+    expect(e.message).toContain('没有可用渠道');
+    expect(e.message).toContain('202610240814127286055628268d9d6XYNouo3R');
+    expect(e.message).not.toContain('稍后重试');
+    expect(e.message).not.toContain('不降智');
+  });
   it('flags a safety rejection as non-retryable and localises it', () => {
     const e = classifyMediaError(new Error('Your request was rejected as a result of our safety system. content_policy_violation'));
     expect(e.code).toBe('safety_rejection');

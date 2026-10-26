@@ -26,6 +26,9 @@ export function ensureReizoBridge(): ReizoBridge {
   };
 
   const webBridge: ReizoBridge = {
+    accountWallet: async () => { throw new Error('请在 Reizo Studio 客户端使用钱包与充值。'); },
+    accountTopup: async () => { throw new Error('请在 Reizo Studio 客户端充值。'); },
+    accountTopupOpen: async () => { throw new Error('请在 Reizo Studio 客户端打开收银台。'); },
     platform: 'win32' as NodeJS.Platform,
     getApiOrigin: async () => 'http://127.0.0.1:47100',
     windowMinimize: async () => {},

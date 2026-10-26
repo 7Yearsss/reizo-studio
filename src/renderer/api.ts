@@ -522,6 +522,18 @@ export function readWorkspaceFile(relativePath: string) {
   return window.reizo.readWorkspaceFile(relativePath);
 }
 
+export async function readWorkspacePreview(path: string): Promise<import('../shared/filePreview').WorkspacePreview> {
+  return (await api(`/api/workspace/preview?${new URLSearchParams({ path })}`)).json();
+}
+
+export async function downloadArtifactFile(id: string, version?: number): Promise<Blob> {
+  return (await api(`/api/artifacts/${encodeURIComponent(id)}/download${version ? `?v=${version}` : ''}`)).blob();
+}
+
+export async function workspaceMediaUrl(path: string): Promise<string> {
+  return `${await apiOrigin()}/api/workspace/media?${new URLSearchParams({ path })}`;
+}
+
 export function flattenWorkspace(): Promise<DirEntry[]> {
   return window.reizo.flattenWorkspace();
 }
@@ -686,8 +698,12 @@ export async function listCanvasDeliveryPlans(canvasId: string): Promise<import(
   return (await (await api(`/api/canvas/${canvasId}/deliveries`)).json()).deliveries;
 }
 
-export async function getUsageSummary(): Promise<import('../shared/usage').UsageSummary> { return (await api('/api/usage/summary')).json(); }
-export async function listUsageRecords(options: { jobId?: string; limit?: number; cursor?: string } = {}): Promise<import('../shared/usage').UsagePage> {
+export async function getUsageSummary(options: import('../shared/usage').UsageQuery = {}): Promise<import('../shared/usage').UsageSummary> {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(options)) if (value !== undefined) query.set(key, String(value));
+  return (await api(`/api/usage/summary?${query}`)).json();
+}
+export async function listUsageRecords(options: import('../shared/usage').UsageQuery & { jobId?: string; limit?: number; cursor?: string } = {}): Promise<import('../shared/usage').UsagePage> {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(options)) if (value !== undefined) query.set(key, String(value));
   return (await api(`/api/usage/records?${query}`)).json();
@@ -953,6 +969,16 @@ export async function listCanvasJobs(canvasId: string, options: { status?: strin
 
 export async function cancelCanvasJob(canvasId: string, jobId: string): Promise<void> {
   await api(`/api/canvas/${canvasId}/jobs/${jobId}/cancel`, { method: 'POST' });
+}
+
+export async function getCanvasJob(canvasId: string, jobId: string, signal?: AbortSignal): Promise<import('../shared/canvasJobs').CanvasJob> {
+  const data = await (await api(`/api/canvas/${encodeURIComponent(canvasId)}/jobs/${encodeURIComponent(jobId)}`, { signal })).json();
+  // Chat receipts follow an explicitly requested query recovery after a reload.
+  return data.recoveryJob ?? data.job;
+}
+
+export async function queryCanvasVideoJob(canvasId: string, jobId: string): Promise<import('../shared/canvasJobs').CanvasJob> {
+  return (await (await api(`/api/canvas/${encodeURIComponent(canvasId)}/jobs/${encodeURIComponent(jobId)}/query`, { method: 'POST' })).json()).job;
 }
 
 export async function retryCanvasJob(canvasId: string, jobId: string, operationId: string): Promise<{ jobId: string }> {

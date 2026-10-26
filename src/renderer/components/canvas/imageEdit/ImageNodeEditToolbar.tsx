@@ -4,7 +4,6 @@ import { DropdownMenu } from 'radix-ui';
 import { Clapperboard, Ellipsis, Loader2, ScanSearch } from 'lucide-react';
 import type { CanvasNode } from '../../../../shared/canvas';
 import { EDIT_META, IMAGE_EDIT_KINDS, type ImageEditKind } from '../../../../shared/canvasImageEdit';
-import { estimateNodeCost } from '../../../../shared/canvasPricing';
 import { cn } from '../../../lib/cn';
 import { Tooltip } from '../../ui/Tooltip';
 import { CANVAS_MENU_SURFACE } from '../CanvasCommandMenu';
@@ -125,13 +124,7 @@ function VisibleImageToolbar({ sessionId, node, visible, moreOpen, onMoreOpenCha
 
   const titleFor = (kind: ImageEditKind) => {
     const meta = EDIT_META[kind];
-    // matting tries the free local ONNX path first, so no cost hint either.
-    if (meta.local || kind === 'matting') return meta.label;
-    const cost = estimateNodeCost({
-      type: 'image',
-      params: { prompt: '', size: '1024x1024', ...(node.params as object), edit: { kind, sourceNodeId: node.id } },
-    });
-    return `${meta.label} · 约 ${cost} 点`;
+    return meta.label;
   };
 
   if (!canvas) return null;

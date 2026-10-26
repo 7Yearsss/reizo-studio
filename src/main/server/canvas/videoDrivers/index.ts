@@ -2,11 +2,13 @@ import type { VideoDriver } from './types';
 import { mockDriver } from './mockDriver';
 import { falDriver } from './falDriver';
 import { klingDriver } from './klingDriver';
+import { newApiDriver } from './newApiDriver';
 
 export * from './types';
 export { mockDriver, falDriver, klingDriver };
 
 const DRIVERS: Record<string, VideoDriver> = {
+  'new-api': newApiDriver,
   mock: mockDriver,
   fal: falDriver,
   kling: klingDriver,

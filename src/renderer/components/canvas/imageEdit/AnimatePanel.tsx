@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Clapperboard } from 'lucide-react';
 import type { CanvasNode } from '../../../../shared/canvas';
-import { estimateNodeCost } from '../../../../shared/canvasPricing';
 import * as canvasStore from '../../../state/canvasStore';
 import { cn } from '../../../lib/cn';
 import EditOverlayShell from './EditOverlayShell';
@@ -33,7 +32,6 @@ export default function AnimatePanel({
   const [busy, setBusy] = useState(false);
 
   const resolvedRatio: Ratio = ratio ?? '16:9';
-  const cost = estimateNodeCost({ type: 'video', params: { duration, ratio: resolvedRatio } });
 
   const confirm = async () => {
     setBusy(true);
@@ -67,7 +65,7 @@ export default function AnimatePanel({
       onClose={onClose}
       onConfirm={() => void confirm()}
       confirming={busy}
-      confirmHint={`约 ${cost} 点 · 生成一个图生视频节点`}
+      confirmHint="生成一个图生视频节点，调用费用按所选模型结算"
       extraActions={
         <div className="flex items-center gap-2 pr-2">
           <input
