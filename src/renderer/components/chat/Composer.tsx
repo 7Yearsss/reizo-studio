@@ -10,6 +10,7 @@ import { PromptInput } from '../agents/prompt-input';
 import type { PromptEditorHandle } from '../agents/prompt-editor';
 import { renumberCitations } from '../../../shared/promptDraft';
 import { loadDraft, saveDraft } from '../../../shared/composerDraft';
+import { pastedTextFileName, shouldAttachPastedText } from '../../../shared/pastedText';
 import ModelPicker from './ModelPicker';
 import MentionMenu, { extractMentionQuery } from './MentionMenu';
 import SlashPalette, { applySlashArgs, buildSlashCommands, extractSlashQuery, type SlashCommand } from './SlashPalette';
@@ -468,7 +469,21 @@ export default function Composer({
       <div ref={composerBodyRef} className="pointer-events-auto relative mx-auto max-w-3xl"
         onPasteCapture={(event) => {
           const files = transferredFiles(event.clipboardData);
-          if (!files.length) return;
+          if (!files.length) {
+            const text = event.clipboardData.getData('text/plain');
+            if (!shouldAttachPastedText(text)) return;
+            // A very long paste becomes a text attachment (full original text is what the agent reads); undo puts it inline.
+            event.preventDefault(); event.stopPropagation();
+            const file = new File([text], pastedTextFileName(), { type: 'text/plain' });
+            void addDroppedFiles([file]);
+            toast.show({
+              title: `已将 ${text.length.toLocaleString()} 字粘贴内容转为附件`,
+              status: 'info',
+              duration: 8000,
+              action: { label: '改为直接粘贴', onClick: () => { setAttachments((list) => list.filter((a) => a.name !== file.name)); setDraft((d) => d + text); } },
+            });
+            return;
+          }
           event.preventDefault(); event.stopPropagation();
           void addDroppedFiles(files);
         }}>
