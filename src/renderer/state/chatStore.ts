@@ -1071,7 +1071,14 @@ function makeEventFolder(
         setState({ batchRowsById: { ...state.batchRowsById, [event.id]: event.rows } });
         break;
       case 'notice':
-        if (event.tone === 'warn') toast.error(event.text);
+        if (event.action) {
+          toast.show({
+            title: event.text,
+            status: 'info',
+            duration: 15000,
+            action: { label: '继续执行', onClick: () => void sendMessage(sessionId, '继续') },
+          });
+        } else if (event.tone === 'warn') toast.error(event.text);
         else toast.info(event.text);
         break;
       case 'error':

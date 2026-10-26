@@ -36,6 +36,8 @@ export interface LocalSettings {
   busyEnter: BusyEnterBehavior;
   /** Let the agent drive the real mouse/keyboard/screen (the `computer` tool). Off by default. */
   computerUse: boolean;
+  /** Most tool-using steps one reply may take before it stops and offers to continue. */
+  agentStepLimit: number;
   /** Apply harness lessons (derived from recurring tool failures) to the agent prompt without asking. */
   autoApplyHarnessLessons: boolean;
   mediaModels: MediaModels;
@@ -61,6 +63,7 @@ export interface PublicSettings {
   permissionMode: PermissionMode;
   busyEnter: BusyEnterBehavior;
   computerUse: boolean;
+  agentStepLimit: number;
   /** Apply harness lessons (derived from recurring tool failures) to the agent prompt without asking. */
   autoApplyHarnessLessons: boolean;
   mediaModels: MediaModels;
@@ -74,6 +77,7 @@ export interface SettingsPatch {
   permissionMode?: PermissionMode;
   busyEnter?: BusyEnterBehavior;
   computerUse?: boolean;
+  agentStepLimit?: number;
   autoApplyHarnessLessons?: boolean;
   mediaModels?: MediaModels;
   reasoningEffort?: ReasoningEffort | null;
@@ -92,6 +96,13 @@ export const DEFAULT_APPEARANCE: Appearance = 'system';
 export const DEFAULT_PERMISSION_MODE: PermissionMode = 'ask';
 export const DEFAULT_BUSY_ENTER: BusyEnterBehavior = 'queue';
 export const DEFAULT_COMPUTER_USE = false;
+
+export const AGENT_STEP_LIMIT_OPTIONS = [32, 64, 100, 200, 500] as const;
+export const DEFAULT_AGENT_STEP_LIMIT = 64;
+/** Anything that is not a positive whole number in a sane range falls back to the default. */
+export function normalizeAgentStepLimit(value: unknown): number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 8 && value <= 1000 ? value : DEFAULT_AGENT_STEP_LIMIT;
+}
 export const DEFAULT_AUTO_APPLY_HARNESS_LESSONS = false;
 export const DEFAULT_PROVIDER_ID = 'openai';
 /** 'low' default: reasoning models (gpt-5.6-sol class) otherwise burn 10-90s thinking before the first token. */

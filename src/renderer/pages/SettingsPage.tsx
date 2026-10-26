@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { cn } from '../lib/cn';
 import { APP_NAME, APP_VERSION } from '../../shared/constants';
 import { SEARCH_PROVIDERS } from '../../shared/webSearch';
-import type { Appearance, BusyEnterBehavior, PermissionMode, ReasoningEffort } from '../../shared/settings';
+import { AGENT_STEP_LIMIT_OPTIONS, type Appearance, type BusyEnterBehavior, type PermissionMode, type ReasoningEffort } from '../../shared/settings';
 import { useSettingsStore } from '../state/useSettingsStore';
 import * as settingsStore from '../state/settingsStore';
 import * as api from '../api';
@@ -264,6 +264,26 @@ function GeneralSection() {
                 />
               )}
               <span className="relative z-10">{label}</span>
+            </button>
+          );
+        })}
+      </div>
+      </SettingGroup>
+
+      <SettingGroup title="单次回复步数上限" description="一次回复里 Agent 最多连续调用多少步工具；到上限会停下并提示，点「继续执行」即可接着做。">
+      <div className="flex flex-wrap gap-2">
+        {AGENT_STEP_LIMIT_OPTIONS.map((value) => {
+          const active = settings.agentStepLimit === value;
+          return (
+            <button
+              key={value}
+              onClick={() => void settingsStore.patchSettings({ agentStepLimit: value })}
+              className={cn(
+                'rounded-full px-4 py-1.5 text-sm transition-colors duration-150',
+                active ? 'bg-ink font-medium text-paper-raised' : 'text-ink hover:bg-paper-inset/80',
+              )}
+            >
+              {value}
             </button>
           );
         })}

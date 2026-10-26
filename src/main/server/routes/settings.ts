@@ -85,6 +85,12 @@ export function createSettingsRouter(settingsStore: SettingsStore, dataRoot?: st
       }
       patch.autoApplyHarnessLessons = body.autoApplyHarnessLessons;
     }
+    if (body.agentStepLimit !== undefined) {
+      if (!Number.isInteger(body.agentStepLimit) || body.agentStepLimit < 8 || body.agentStepLimit > 1000) {
+        return c.json({ error: 'agentStepLimit must be an integer between 8 and 1000' }, 400);
+      }
+      patch.agentStepLimit = body.agentStepLimit;
+    }
     if (body.computerUse !== undefined) {
       if (typeof body.computerUse !== 'boolean') {
         return c.json({ error: 'computerUse must be a boolean' }, 400);

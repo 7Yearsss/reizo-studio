@@ -7,7 +7,7 @@ import type { AccountModelCredential } from '../../../shared/account';
 import {
   DEFAULT_APPEARANCE,
   DEFAULT_BUSY_ENTER,
-  DEFAULT_COMPUTER_USE, DEFAULT_AUTO_APPLY_HARNESS_LESSONS,
+  DEFAULT_COMPUTER_USE, DEFAULT_AUTO_APPLY_HARNESS_LESSONS, normalizeAgentStepLimit,
   DEFAULT_PERMISSION_MODE,
   DEFAULT_PROVIDER_ID,
   DEFAULT_REASONING_EFFORT,
@@ -27,6 +27,7 @@ interface DiskSettings {
   permissionMode?: PermissionMode;
   busyEnter?: BusyEnterBehavior;
   computerUse?: boolean;
+  agentStepLimit?: number;
   autoApplyHarnessLessons?: boolean;
   mediaModels?: { image?: string; video?: string; draft?: string };
   directorSessions?: Record<string, boolean>;
@@ -94,6 +95,7 @@ export function createSettingsStore(root: string, accountModels?: () => AccountM
       permissionMode: disk.permissionMode ?? DEFAULT_PERMISSION_MODE,
       busyEnter: disk.busyEnter ?? DEFAULT_BUSY_ENTER,
       computerUse: disk.computerUse ?? DEFAULT_COMPUTER_USE,
+      agentStepLimit: normalizeAgentStepLimit(disk.agentStepLimit),
       autoApplyHarnessLessons: disk.autoApplyHarnessLessons ?? DEFAULT_AUTO_APPLY_HARNESS_LESSONS,
       mediaModels: disk.mediaModels ?? {},
       directorSessions: disk.directorSessions ?? {},
@@ -124,6 +126,7 @@ export function createSettingsStore(root: string, accountModels?: () => AccountM
       permissionMode: settings.permissionMode,
       busyEnter: settings.busyEnter,
       computerUse: settings.computerUse,
+      agentStepLimit: settings.agentStepLimit,
       autoApplyHarnessLessons: settings.autoApplyHarnessLessons,
       mediaModels: settings.mediaModels,
       directorSessions: settings.directorSessions,
@@ -187,6 +190,7 @@ export function createSettingsStore(root: string, accountModels?: () => AccountM
       permissionMode: settings.permissionMode,
       busyEnter: settings.busyEnter,
       computerUse: settings.computerUse,
+      agentStepLimit: settings.agentStepLimit,
       autoApplyHarnessLessons: settings.autoApplyHarnessLessons,
       mediaModels: settings.mediaModels,
       directorSessions: settings.directorSessions,
@@ -204,6 +208,7 @@ export function createSettingsStore(root: string, accountModels?: () => AccountM
     if (patch.permissionMode) settings.permissionMode = patch.permissionMode;
     if (patch.busyEnter) settings.busyEnter = patch.busyEnter;
     if (patch.computerUse !== undefined) settings.computerUse = patch.computerUse;
+    if (patch.agentStepLimit !== undefined) settings.agentStepLimit = normalizeAgentStepLimit(patch.agentStepLimit);
     if (patch.autoApplyHarnessLessons !== undefined) settings.autoApplyHarnessLessons = patch.autoApplyHarnessLessons;
     if (patch.mediaModels) {
       settings.mediaModels = { ...settings.mediaModels, ...patch.mediaModels };

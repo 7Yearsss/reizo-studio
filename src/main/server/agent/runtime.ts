@@ -665,7 +665,7 @@ ${expert.instructions}`
   if (initialSnap) lastSeenNodeCount = initialSnap.nodes.length;
 
   // A skill may set its own step limit (`max-turns`); otherwise the global one applies.
-  const stepLimit = expert?.maxTurns ?? skill?.maxTurns ?? MAX_AGENT_STEPS;
+  const stepLimit = expert?.maxTurns ?? skill?.maxTurns ?? settings.agentStepLimit ?? MAX_AGENT_STEPS;
   const buildStream = (messages: ModelMessage[], signal: AbortSignal) =>
     streamText({
       model,
@@ -925,7 +925,7 @@ ${expert.instructions}`
     },
     onContinuePass: async ({ getAssistant, finishReason, passIndex, signal }) => {
       if (hitStepCap(finishReason)) {
-        emit({ type: 'notice', tone: 'warn', text: `本轮已达到 ${stepLimit} 步上限而停止，任务可能未完成。回复「继续」可从断点接着做。` });
+        emit({ type: 'notice', tone: 'warn', text: `本轮已达到 ${stepLimit} 步上限而停止，任务可能未完成。`, action: 'continue' });
       }
       if (passIndex >= MAX_CONTINUE_PASSES) return null;
       const snap = getAssistant();

@@ -118,7 +118,7 @@ export type ChatStreamEvent =
   | { type: 'ask'; id: string; questions: AskQuestion[] }
   | { type: 'todos'; items: TodoItem[] }
   | { type: 'tool_loop'; tier: 'warn' | 'halt'; reason: string }
-  | { type: 'notice'; tone: 'warn' | 'info'; text: string }
+  | { type: 'notice'; tone: 'warn' | 'info'; text: string; action?: 'continue' }
   // Live rows of a parallel batch of sub-tasks (`run_batch`): one per task, replaced wholesale on each change.
   | { type: 'batch'; id: string; rows: BatchProgressRow[] }
   // Memory activity surfaced to the user: files the agent recalled into this

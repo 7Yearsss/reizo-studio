@@ -3,7 +3,7 @@ import type { PublicSettings, SettingsPatch } from '../../shared/settings';
 import {
   DEFAULT_APPEARANCE,
   DEFAULT_BUSY_ENTER,
-  DEFAULT_COMPUTER_USE, DEFAULT_AUTO_APPLY_HARNESS_LESSONS,
+  DEFAULT_COMPUTER_USE, DEFAULT_AGENT_STEP_LIMIT, DEFAULT_AUTO_APPLY_HARNESS_LESSONS,
   DEFAULT_PERMISSION_MODE,
   DEFAULT_PROVIDER_ID,
   DEFAULT_REASONING_EFFORT,
@@ -21,6 +21,7 @@ let state: SettingsState = {
     permissionMode: DEFAULT_PERMISSION_MODE,
     busyEnter: DEFAULT_BUSY_ENTER,
     computerUse: DEFAULT_COMPUTER_USE,
+    agentStepLimit: DEFAULT_AGENT_STEP_LIMIT,
     autoApplyHarnessLessons: DEFAULT_AUTO_APPLY_HARNESS_LESSONS,
     mediaModels: {},
     directorSessions: {},

@@ -50,7 +50,7 @@ export function makeFixtures() {
     ], [['commerce-ref', 'commerce-main'], ['commerce-ref', 'commerce-detail'], ['commerce-detail', 'commerce-features']]),
   };
   const settings: PublicSettings = { appearance: 'light', activeProviderId: 'reizo', workspacePath: null, permissionMode: 'ask',
-    busyEnter: 'queue', computerUse: false,
+    busyEnter: 'queue', computerUse: false, agentStepLimit: 64,
     autoApplyHarnessLessons: false, mediaModels: {}, directorSessions: {}, reasoningEffort: 'low', providers: [
       { id: 'reizo', name: 'REIZO', tag: '多模型', hasKey: false, model: 'gpt-6-astra', baseUrl: '', websiteUrl: 'https://reizo-ai.com',
         allowCustomBaseUrl: false, description: '官网界面体验', models: [{ id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol' }, { id: 'gpt-6-astra', name: 'GPT-6 Astra' }] },
