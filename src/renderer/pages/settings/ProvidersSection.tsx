@@ -1,3 +1,4 @@
+import { matchAny } from '../../../shared/matchText';
 import { useEffect, useRef, useState } from 'react';
 import { Check, KeyRound, Search, ShieldCheck } from 'lucide-react';
 import type { PublicProvider } from '../../../shared/settings';
@@ -14,7 +15,7 @@ export default function ProvidersSection() {
   const [selectedId, setSelectedId] = useState(settings.activeProviderId);
   const [query, setQuery] = useState('');
   const selected = settings.providers.find((p) => p.id === selectedId) ?? settings.providers[0];
-  const visible = settings.providers.filter((p) => `${p.name} ${p.tag} ${p.model}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const visible = settings.providers.filter((p) => !query.trim() || matchAny(query.trim(), [p.name, p.tag, p.model]) > 0);
   return (
     <section className="flex h-full min-h-0 flex-col">
       <header className="mb-5">

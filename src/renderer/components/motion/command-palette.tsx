@@ -1,6 +1,7 @@
 "use client";
 // beui.dev/components/blocks/command-palette
 
+import { matchAny } from '@/shared/matchText';
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Search, type LucideIcon } from "lucide-react";
 import {
@@ -133,7 +134,8 @@ export function CommandPalette({
     return items.filter((it) => {
       if (it.matched) return true;
       const haystacks = [it.label, it.group ?? "", ...(it.keywords ?? [])];
-      return haystacks.some((h) => fuzzyMatch(query, h));
+      // Letter-order match as before, plus full pinyin / initials for Chinese labels (e.g. "wd" finds 文档).
+      return haystacks.some((h) => fuzzyMatch(query, h)) || matchAny(query, haystacks) > 0;
     });
   }, [items, query]);
 

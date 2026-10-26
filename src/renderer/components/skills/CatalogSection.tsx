@@ -1,3 +1,4 @@
+import { matchAny } from '../../../shared/matchText';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, ExternalLink, Globe, LoaderCircle, Package, Plug, Search } from 'lucide-react';
 import { mcpCatalogDraft, type McpCatalogItem, type PluginCatalogItem } from '../../../shared/catalog';
@@ -241,7 +242,7 @@ function PluginDiscover() {
   const categories = useMemo(() => [...new Set((items ?? []).map((i) => i.category).filter((c): c is string => Boolean(c)))].sort(), [items]);
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return (items ?? []).filter((i) => (!category || i.category === category) && (!q || `${i.name} ${i.description} ${i.author ?? ''}`.toLowerCase().includes(q)));
+    return (items ?? []).filter((i) => (!category || i.category === category) && (!q || matchAny(q, [i.name, i.description, i.author]) > 0));
   }, [items, search, category]);
   useEffect(() => { setShown(PAGE); }, [search, category]);
 

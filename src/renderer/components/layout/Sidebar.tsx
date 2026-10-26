@@ -28,6 +28,7 @@ import * as api from '../../api';
 import type { DirEntry } from '../../../shared/workspace';
 import type { SessionSummary } from '../../../shared/chat';
 import { organizeSessions } from '../../../shared/sessionOrganize';
+import { matchAny } from '../../../shared/matchText';
 import type { ChatInteraction } from '../../state/chatStore';
 import {
   ContextMenu,
@@ -288,7 +289,7 @@ export default function Sidebar() {
   }, []);
 
   const q = query.trim().toLowerCase();
-  const matches = (session: SessionSummary) => !q || session.title.toLowerCase().includes(q);
+  const matches = (session: SessionSummary) => !q || matchAny(q, [session.title, session.listPreview ?? '']) > 0;
 
   // Pinned rows float above the folders; archived ones live in their own fold at the bottom.
   const organized = organizeSessions(sessions);
