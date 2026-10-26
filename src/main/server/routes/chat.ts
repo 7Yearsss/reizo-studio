@@ -1,4 +1,6 @@
 import type { ArtifactReviewStore } from '../storage/artifactReviewStore';
+import { findExpertMention, type ExpertAgent } from '../../../shared/expertAgent';
+import type { ExpertStore } from '../storage/expertStore';
 import { Hono } from 'hono';
 import type { SessionStore } from '../../../shared/chat';
 import type { SettingsStore } from '../storage/settingsStore';
@@ -35,6 +37,7 @@ export function createChatRouter(
   artifactReviews?: ArtifactReviewStore,
   /** Summarise an over-long conversation before the turn starts (best effort). */
   beforeTurn?: (sessionId: string) => Promise<unknown>,
+  expertStore?: ExpertStore,
 ) {
   const router = new Hono();
 
@@ -88,6 +91,9 @@ export function createChatRouter(
       skill = availableSkills.find((item) => item.id === skillId) ?? null;
     }
 
+    // `@name` at the start of the message hands it to that expert (its own instructions, model and tool limits).
+    const expert = expertStore ? findExpertMention(body.text, await expertStore.list().catch((): ExpertAgent[] => [])) : null;
+
     if (body.regenerate !== true) await beforeTurn?.(sessionId).catch((): void => undefined);
 
     const response = await runChatTurn({
@@ -96,8 +102,9 @@ export function createChatRouter(
       sessionId,
       userText: body.text,
       // The picker is global and always sent, so a project that sets a model is the one place that overrides it.
-      providerId: project?.defaultModel ? project.defaultModel.providerId : typeof body.providerId === 'string' ? body.providerId : undefined,
-      model: project?.defaultModel ? project.defaultModel.model : typeof body.model === 'string' ? body.model : undefined,
+      providerId: expert?.model ? expert.providerId : project?.defaultModel ? project.defaultModel.providerId : typeof body.providerId === 'string' ? body.providerId : undefined,
+      model: expert?.model ?? (project?.defaultModel ? project.defaultModel.model : typeof body.model === 'string' ? body.model : undefined),
+      expert,
       mentions,
       skill,
       attachments,

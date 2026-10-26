@@ -44,6 +44,8 @@ import { createAdminProvidersRouter } from './routes/adminProviders';
 import { createPublicProvidersRouter } from './routes/publicProviders';
 import { createMemoryEventsStore } from './storage/memoryEventsStore';
 import { createMemoryRouter } from './routes/memory';
+import { createExpertsRouter } from './routes/experts';
+import { createExpertStore } from './storage/expertStore';
 import { recoverCanvasJobs } from './canvas/recoverJobs';
 import { nodeJobsFor } from './canvas/nodeJobs';
 import { stopCanvasWork } from './canvas/workLifecycle';
@@ -217,6 +219,7 @@ export function createApp(options: CreateAppOptions) {
       : [...options.skillsDirs, userSkillsDir]
     : [userSkillsDir];
   const memoryEventsStore = createMemoryEventsStore(options.dataRoot);
+  const expertStore = createExpertStore(options.dataRoot);
   const scheduleStore = options.scheduleStore ?? createScheduleStore(options.dataRoot);
   const thoughtStore = options.thoughtStore ?? createThoughtStore(options.dataRoot);
   // Filled in once the one-shot text model exists (below).
@@ -239,8 +242,10 @@ export function createApp(options: CreateAppOptions) {
       scheduleStore,
       artifactReviews,
       (sessionId) => beforeTurn(sessionId),
+      expertStore,
     ),
   );
+  app.route('/api/experts', createExpertsRouter(expertStore));
   app.route('/api/memory', createMemoryRouter(memoryEventsStore, settingsStore, options.dataRoot));
   app.route('/api/sessions', createSessionArtifactsRouter(artifactStore, sessionStore));
   app.route('/api/artifacts', createArtifactsRouter(artifactStore));

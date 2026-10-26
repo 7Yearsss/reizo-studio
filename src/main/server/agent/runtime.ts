@@ -57,6 +57,8 @@ import { createTurnTraceCollector, writeTurnTrace } from './turnTrace';
 import { readWorkspaceMemory } from '../../workspaceMemory';
 import { formatRules, readRuleSources } from './workspaceRules';
 import { createSkillTools } from './skillTools';
+import type { ExpertAgent } from '../../../shared/expertAgent';
+import { parseAllowedTools } from '../../../shared/skillToolPolicy';
 import { createPersonalMemoryTools, personalMemoryRoot } from './personalMemory';
 import { applySkillToolPolicy } from './skillToolFilter';
 import { observeRetries } from '../../../shared/retryObserver';
@@ -218,6 +220,8 @@ export async function runChatTurn(options: {
   runCeiling?: RunPermission;
   /** Every skill on disk; the model may start the auto-invokable ones with `use_skill`. */
   availableSkills?: Skill[];
+  /** The expert the message was addressed to with `@name`, if any. */
+  expert?: ExpertAgent | null;
 }): Promise<Response> {
   const {
     sessionStore,
@@ -238,6 +242,7 @@ export async function runChatTurn(options: {
     scheduleStore,
     runCeiling,
     availableSkills = [],
+    expert = null,
   } = options;
 
   const turnOriginAt = Date.now();
@@ -425,6 +430,10 @@ export async function runChatTurn(options: {
       : '',
     projectInstructions ? `Project "${projectName}" working rules:\n${projectInstructions}` : '',
     standingRules,
+    expert
+      ? `The user addressed this message to the expert "${expert.name}"${expert.description ? ` (${expert.description})` : ''}. For this reply act as that expert, following these instructions:
+${expert.instructions}`
+      : '',
     runCeiling === 'readonly' ? READ_ONLY_RUN_NOTICE : '',
   ].filter(Boolean);
   const instructions = systemParts.join('\n\n');
@@ -583,7 +592,7 @@ export async function runChatTurn(options: {
       })
     : undefined;
   const tools = rawTools || hasMcpTools
-    ? applySkillToolPolicy(applyRunCeiling(serializeMutatingTools(wrapToolsWithHooks({ ...(rawTools ?? {}), ...(subagentTools ?? {}), ...(mcp?.tools ?? {}) } as NonNullable<typeof rawTools>, hookRunner)), runCeiling), skill?.allowedTools)
+    ? applySkillToolPolicy(applySkillToolPolicy(applyRunCeiling(serializeMutatingTools(wrapToolsWithHooks({ ...(rawTools ?? {}), ...(subagentTools ?? {}), ...(mcp?.tools ?? {}) } as NonNullable<typeof rawTools>, hookRunner)), runCeiling), skill?.allowedTools), parseAllowedTools(expert?.allowedTools))
     : undefined;
 
   const accounting = options.usageStore ?? canvasStore?.usage;
@@ -626,7 +635,7 @@ export async function runChatTurn(options: {
   if (initialSnap) lastSeenNodeCount = initialSnap.nodes.length;
 
   // A skill may set its own step limit (`max-turns`); otherwise the global one applies.
-  const stepLimit = skill?.maxTurns ?? MAX_AGENT_STEPS;
+  const stepLimit = expert?.maxTurns ?? skill?.maxTurns ?? MAX_AGENT_STEPS;
   const buildStream = (messages: ModelMessage[], signal: AbortSignal) =>
     streamText({
       model,
