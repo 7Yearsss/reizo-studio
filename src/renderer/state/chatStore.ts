@@ -1,3 +1,4 @@
+import { HALTED_PREFIX } from '../../shared/loopRecovery';
 import { newClientTurnId } from '../../shared/clientTurnId';
 import { selectPresentation, refreshPresentationReviews, referencePresentation } from './presentationWorkspace';
 import { splitPresentationContext } from '../../shared/presentationReferences';
@@ -1085,7 +1086,7 @@ function makeEventFolder(
         setState({
           loopNoticeBySession: {
             ...state.loopNoticeBySession,
-            [sessionId]: event.tier === 'halt' ? `已停止：${event.reason}` : `这一轮可能卡住了：${event.reason}`,
+            [sessionId]: event.tier === 'halt' ? `${HALTED_PREFIX}${event.reason}` : `这一轮可能卡住了：${event.reason}`,
           },
         });
         break;

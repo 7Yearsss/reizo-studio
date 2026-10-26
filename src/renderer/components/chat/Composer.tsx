@@ -17,6 +17,7 @@ import ModelPicker from './ModelPicker';
 import ContextRing from './ContextRing';
 import MentionMenu, { extractMentionQuery } from './MentionMenu';
 import SessionRefMenu from './SessionRefMenu';
+import { isHaltedNotice, LOOP_RECOVERY_MESSAGE } from '../../../shared/loopRecovery';
 import { PLAN_CONFIRM_MESSAGE } from '../../../shared/planMode';
 import { extractSessionQuery, serializeSessionReference } from '../../../shared/sessionReference';
 import SlashPalette, { applySlashArgs, buildSlashCommands, extractSlashQuery, type SlashCommand } from './SlashPalette';
@@ -580,7 +581,12 @@ export default function Composer({
             className="mb-2 rounded-lg bg-[var(--peach)] px-3 py-2 text-[12px] text-[var(--peach-ink)]"
             role="status"
           >
-            ⚠ {loopNotice}
+            <span>⚠ {loopNotice}</span>
+            {sessionId && !sending && isHaltedNotice(loopNotice) && (
+              <span className="ml-3 inline-flex gap-3">
+                <button type="button" className="underline underline-offset-2" onClick={() => { void chatStore.sendMessage(sessionId, LOOP_RECOVERY_MESSAGE); }}>换个办法继续</button>
+              </span>
+            )}
           </div>
         )}
         {sessionId && <div className="mb-2"><PendingInteraction sessionId={sessionId} /></div>}
