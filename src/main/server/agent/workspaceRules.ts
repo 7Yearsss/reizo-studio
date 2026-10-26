@@ -3,6 +3,8 @@ import path from 'node:path';
 import { redactSecrets } from '../../../shared/redactSecrets';
 
 export const USER_RULES_MAX_CHARS = 4_000;
+/** What the settings page lets the user write (kept under what the agent reads). */
+export const PERSONAL_RULES_MAX_CHARS = 2_000;
 export const WORKSPACE_RULES_MAX_CHARS = 8_000;
 export const RULE_FILE_MAX_CHARS = 4_000;
 export const MAX_RULE_FILES = 20;

@@ -258,7 +258,7 @@ export function createApp(options: CreateAppOptions) {
   app.route('/api/sessions', createPresentationsRouter(artifactStore, sessionStore));
   app.route('/api/refs', createRefsRouter(largeValueStore));
   app.route('/api/projects', createProjectsRouter(projectStore, sessionStore));
-  app.route('/api/settings', createSettingsRouter(settingsStore));
+  app.route('/api/settings', createSettingsRouter(settingsStore, options.dataRoot));
   app.route('/api/workspace', createWorkspacePreviewRouter(settingsStore));
   app.route('/api/admin/providers', createAdminProvidersRouter(providerStore));
   app.route('/api/providers', createPublicProvidersRouter(providerStore));

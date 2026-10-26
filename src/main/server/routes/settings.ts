@@ -1,4 +1,8 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { Hono } from 'hono';
+import { writeTextAtomic } from '../storage/atomicFile';
+import { PERSONAL_RULES_MAX_CHARS } from '../agent/workspaceRules';
 import type { SettingsStore } from '../storage/settingsStore';
 import type { Appearance, PermissionMode, SettingsPatch } from '../../../shared/settings';
 import { getProviderPreset } from '../../../shared/providers';
@@ -6,8 +10,24 @@ import { getProviderPreset } from '../../../shared/providers';
 const APPEARANCES = new Set<Appearance>(['system', 'light', 'dark']);
 const PERMISSION_MODES = new Set<PermissionMode>(['ask', 'workspace', 'full']);
 
-export function createSettingsRouter(settingsStore: SettingsStore) {
+export function createSettingsRouter(settingsStore: SettingsStore, dataRoot?: string) {
   const router = new Hono();
+
+  // Personal preferences: tone, how to address the user, reply style. Cross-project; the agent reads it every turn.
+  router.get('/personal-rules', async (c) => {
+    if (!dataRoot) return c.json({ text: '', maxChars: PERSONAL_RULES_MAX_CHARS });
+    const text = await readFile(path.join(dataRoot, 'RULES.md'), 'utf8').catch(() => '');
+    return c.json({ text, maxChars: PERSONAL_RULES_MAX_CHARS });
+  });
+
+  router.put('/personal-rules', async (c) => {
+    if (!dataRoot) return c.json({ error: 'not configured' }, 400);
+    const body = (await c.req.json().catch((): null => null)) as { text?: unknown } | null;
+    if (typeof body?.text !== 'string') return c.json({ error: 'text is required' }, 400);
+    if (body.text.length > PERSONAL_RULES_MAX_CHARS) return c.json({ error: `最多 ${PERSONAL_RULES_MAX_CHARS} 字` }, 400);
+    await writeTextAtomic(path.join(dataRoot, 'RULES.md'), body.text);
+    return c.json({ ok: true });
+  });
 
   router.get('/', async (c) => {
     return c.json(await settingsStore.getPublic());

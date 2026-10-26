@@ -1,6 +1,6 @@
 import { FolderOpen, Settings2, Sparkles, ChartNoAxesCombined, Database, Info, Blocks } from 'lucide-react';
 import { motion } from 'motion/react';
-import type { ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { cn } from '../lib/cn';
 import { APP_NAME, APP_VERSION } from '../../shared/constants';
 import type { Appearance, BusyEnterBehavior, PermissionMode, ReasoningEffort } from '../../shared/settings';
@@ -85,6 +85,35 @@ function SettingGroup({ title, description, children }: { title: string; descrip
   </section>;
 }
 
+function PersonalRulesEditor() {
+  const [text, setText] = useState('');
+  const [max, setMax] = useState(2000);
+  const [loaded, setLoaded] = useState(false);
+  const saved = useRef('');
+  useEffect(() => {
+    void api.getPersonalRules().then((r) => { setText(r.text); saved.current = r.text; setMax(r.maxChars); setLoaded(true); }, () => setLoaded(true));
+  }, []);
+  const save = () => {
+    if (!loaded || text === saved.current) return;
+    void api.savePersonalRules(text).then(() => { saved.current = text; toast.success('已保存'); }, () => toast.error('保存失败'));
+  };
+  return (
+    <div>
+      <textarea
+        aria-label="个人偏好"
+        value={text}
+        maxLength={max}
+        rows={5}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={save}
+        placeholder={'例如：回答先给结论；称呼我「老板」；表格金额一律保留两位小数；邮件用正式语气。'}
+        className="w-full resize-y rounded-2xl bg-paper-inset px-3 py-2 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      />
+      <p className="mt-1 text-right text-[11px] text-ink-muted">{text.length}/{max}</p>
+    </div>
+  );
+}
+
 function GeneralSection() {
   const settings = useSettingsStore((s) => s.settings);
   const folderName = settings.workspacePath?.split(/[/\\]/).filter(Boolean).pop();
@@ -126,6 +155,10 @@ function GeneralSection() {
           );
         })}
       </div>
+      </SettingGroup>
+
+      <SettingGroup title="个人偏好" description="语气、称呼、回复风格、你的行业习惯。对所有项目生效，每轮对话都会参考。">
+        <PersonalRulesEditor />
       </SettingGroup>
 
       <SettingGroup title="权限" description="写文件和跑命令前要不要先问你。">

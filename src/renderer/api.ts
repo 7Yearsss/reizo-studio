@@ -1186,3 +1186,11 @@ export async function getSkillHistory(skillId: string): Promise<SkillHistoryItem
 export async function restoreSkillVersion(skillId: string, file: string): Promise<void> {
   await api(`/api/skills/${encodeURIComponent(skillId)}/history/restore`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ file }) });
 }
+
+export async function getPersonalRules(): Promise<{ text: string; maxChars: number }> {
+  return (await api('/api/settings/personal-rules')).json();
+}
+
+export async function savePersonalRules(text: string): Promise<void> {
+  await api('/api/settings/personal-rules', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
+}
