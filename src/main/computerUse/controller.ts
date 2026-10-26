@@ -3,7 +3,9 @@ import type { ComputerController, CursorPoint, InputBackend, ScreenSize, Screens
 import { captureScreen } from './capture';
 import { createWindowsInputBackend } from './winInput';
 import { createPosixInputBackend } from './posixInput';
-import { ACTION_SETTLE_MS, clampPoint, createComputerBudget, type ComputerInput } from '../../shared/computerUse';
+import { describeDenial, judgeForegroundApp } from '../../shared/computerAppPolicy';
+import { posixForegroundApp } from './foreground';
+import { ACTION_SETTLE_MS, clampPoint, createComputerBudget, isActingStep, type ComputerInput } from '../../shared/computerUse';
 
 /** Controllers with a live task. `stopAllComputerControl` cuts every one of them off at once. */
 const active = new Set<{ stop(): void }>();
@@ -79,6 +81,13 @@ export function createComputerController(): ComputerController {
 
     async run(action: ComputerInput) {
       if (stopped) throw new Error('用户已按下停止键，电脑操作已中止。请向用户确认下一步，不要继续操作。');
+      if (isActingStep(action)) {
+        // The model picks the coordinates, so judge what is actually in front right now. Detection failure allows
+        // the action (a missing check must not brick the feature), but a known-forbidden app never does.
+        const front = await (backend.foregroundApp ? backend.foregroundApp() : posixForegroundApp()).catch((): null => null);
+        const judged = judgeForegroundApp(front);
+        if (front && judged.verdict === 'deny') throw new Error(describeDenial(front, judged.reason));
+      }
       budget.charge(action);
       if (!lastImageSize && action.action !== 'screenshot' && action.action !== 'wait') {
         await shoot();

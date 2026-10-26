@@ -90,6 +90,8 @@ using System.Runtime.InteropServices;
 public class ReizoWin32 {
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int X, int Y);
   [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, IntPtr e);
   [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint f, IntPtr e);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern short VkKeyScan(char ch);
@@ -255,6 +257,15 @@ export function createWindowsInputBackend(): InputBackend {
       if (!hit) throw new Error('could not read cursor position');
       const [, x, y] = hit.split(/\s+/);
       return { x: Math.round(Number(x) / sf), y: Math.round(Number(y) / sf) };
+    },
+    async foregroundApp() {
+      const lines = await run(
+        `$h=[ReizoWin32]::GetForegroundWindow(); $fgPid=[uint32]0; [ReizoWin32]::GetWindowThreadProcessId($h,[ref]$fgPid) | Out-Null; $q=Get-Process -Id $fgPid -ErrorAction SilentlyContinue; Write-Output ("FG " + $fgPid + "|" + $q.ProcessName + "|" + $q.MainWindowTitle)`,
+      );
+      const hit = lines.find((l) => l.startsWith('FG '));
+      if (!hit) return null;
+      const [pid, name, ...title] = hit.slice(3).split('|');
+      return name ? { pid: Number(pid), process: name, title: title.join('|') } : null;
     },
     dispose() {
       if (ps) {

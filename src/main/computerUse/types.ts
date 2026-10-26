@@ -35,6 +35,8 @@ export interface InputBackend {
   typeText(text: string): Promise<void>;
   pressKey(combo: string): Promise<void>;
   cursorPosition(scaleFactor: number): Promise<CursorPoint>;
+  /** The app whose window is in front right now; absent when the platform cannot tell. */
+  foregroundApp?(): Promise<import('../../shared/computerAppPolicy').ForegroundApp | null>;
   dispose(): void;
 }
 
