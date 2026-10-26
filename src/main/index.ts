@@ -115,6 +115,9 @@ async function bootstrap(): Promise<void> {
   });
 }
 
+/** Hard ceiling for the whole quit sequence; after it the process exits regardless of what is still stopping. */
+const SHUTDOWN_DEADLINE_MS = 15_000;
+
 async function shutdown(): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -168,7 +171,13 @@ app.on('before-quit', (event) => {
   setQuitting(true);
   if (shuttingDown) return;
   event.preventDefault();
+  // A hung scheduler/server stop must not leave an invisible zombie process.
+  const forceExit = setTimeout(() => {
+    console.error('[main] shutdown exceeded its deadline; forcing exit');
+    app.exit(0);
+  }, SHUTDOWN_DEADLINE_MS);
+  forceExit.unref();
   shutdown()
     .catch((err) => console.error('[main] shutdown error', err))
-    .finally(() => app.quit());
+    .finally(() => { clearTimeout(forceExit); app.quit(); });
 });
