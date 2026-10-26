@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+// Fixture hosts like example.test do not resolve; the safe downloader checks DNS before fetching.
+vi.mock('node:dns/promises', () => ({ lookup: async () => [{ address: '93.184.216.34', family: 4 }] }));
 import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import os from 'node:os';

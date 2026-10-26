@@ -1,4 +1,5 @@
 import type { CanvasNode, CanvasNodeOutput } from '../../../shared/canvas';
+import { fetchRemoteAsset } from '../net/fetchRemoteAsset';
 import type { CanvasJob, CanvasJobFinish, CanvasJobTerminalStatus, CanvasJobObservation } from '../../../shared/canvasJobs';
 import type { CanvasStore } from '../storage/canvasStore';
 import type { SettingsStore } from '../storage/settingsStore';
@@ -254,12 +255,9 @@ function launch(entry: ActiveJob, options: VideoRuntimeOptions, loadParams?: (si
           entry.observation = { status: 'downloading', observedAt: new Date().toISOString() };
           let videoBuffer = result.videoBuffer;
           if (!videoBuffer && result.videoUrl) {
-            const response = await fetch(result.videoUrl, { signal: entry.signal });
+            const downloaded = await fetchRemoteAsset(result.videoUrl, { signal: entry.signal });
             if (!isCurrent(entry)) return;
-            if (!response.ok) throw new Error(`Video download failed (${response.status})`);
-            const bytes = await response.arrayBuffer();
-            if (!isCurrent(entry)) return;
-            videoBuffer = Buffer.from(bytes);
+            videoBuffer = downloaded;
           }
           if (!videoBuffer?.byteLength) throw new Error('Video provider returned no video data');
           staged = await stageCanvasAssets(dataRoot, entry.canvasId, [{ name: `${entry.nodeId}-${entry.job.id}.mp4`,
