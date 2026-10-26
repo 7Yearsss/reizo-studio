@@ -1,6 +1,8 @@
 ---
 name: ugc-ads
 description: UGC 广告导演——带闸门的剧组流水线：收 brief → 锁人设与产品 → 脚本分镜 → 关键帧过「真人感」门 → 逐镜成片。每阶段停下确认，烧视频积分前必有分镜与静帧确认。抖音/小红书/TikTok 9:16。
+trigger: 用户要做 UGC 风格的短视频广告素材
+do-not-trigger: 只是在聊广告创意思路，或问能不能做广告视频
 prompt: 帮我拍一条 UGC 广告
 cover: cover.jpg
 category: marketing

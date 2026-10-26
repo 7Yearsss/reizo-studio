@@ -1,6 +1,8 @@
 ---
 name: fix-bug
 description: Reproduce and fix a bug in the workspace, then verify.
+trigger: 用户报告了一个具体的 bug 并希望修复和验证
+do-not-trigger: 只是问某个报错是什么意思，不要求改代码
 category: dev
 ---
 

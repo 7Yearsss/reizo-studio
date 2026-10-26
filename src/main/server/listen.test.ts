@@ -16,6 +16,15 @@ vi.mock('../../shared/constants', async (original) => ({
   ...await original<typeof import('../../shared/constants')>(),
   get API_BASE_PORT() { return ports.base; }, API_PORT_SCAN_ATTEMPTS: 5,
 }));
+// The fixture video is served from 127.0.0.1, which the SSRF guard (rightly) refuses; use a plain download here.
+vi.mock('./net/fetchRemoteAsset', () => ({
+  fetchRemoteAsset: async (url: string, options: { signal?: AbortSignal } = {}) => {
+    const response = await fetch(url, { signal: options.signal });
+    if (!response.ok) throw new Error(`Download failed (${response.status})`);
+    return Buffer.from(await response.arrayBuffer());
+  },
+}));
+
 vi.mock('electron', () => ({
   safeStorage: {
     isEncryptionAvailable: () => true,

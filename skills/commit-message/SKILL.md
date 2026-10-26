@@ -1,6 +1,8 @@
 ---
 name: commit-message
 description: Draft a git commit message from the current workspace diff.
+trigger: 用户要为当前改动生成 git commit 信息
+do-not-trigger: 只是在问 commit 规范
 category: dev
 ---
 

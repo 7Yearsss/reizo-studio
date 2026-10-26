@@ -1,6 +1,8 @@
 ---
 name: sticker-pack
 description: 表情包/贴纸套图生成——先定形象与风格，出角色设定资产，再按表情/动作清单批量产出一套同角色贴纸，九宫格或四宫格落在画布上。
+trigger: 用户要做一套表情包/贴纸
+do-not-trigger: 只是问表情包怎么做，或只要一张图
 prompt: 帮我做一套表情包
 cover: cover.jpg
 category: social

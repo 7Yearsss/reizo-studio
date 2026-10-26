@@ -13,6 +13,12 @@ export interface Skill {
   cover?: string;
   /** Optional category slug used to group skills on the plugins page. */
   category?: string;
+  /** When the model should pick this skill by itself (one line). */
+  trigger?: string;
+  /** Look-alike requests that must NOT start it, e.g. questions about what it can do. */
+  doNotTrigger?: string;
+  /** `disable-auto-invoke: true` — only the user may start it. */
+  autoInvoke?: boolean;
   source: 'bundled' | 'user';
   /** Directory the skill file lives in — used to serve `skill-asset:` URLs. */
   dir: string;
@@ -60,27 +66,38 @@ export async function validateSkill(skill: Skill): Promise<string[]> {
   return issues;
 }
 
+/** Skills the model may start by itself: not opted out, and not a delivery-contract skill (those need the picker to wire their tools). */
+export function autoInvokableSkills(skills: Skill[]): Skill[] {
+  return skills.filter((s) => s.description && s.autoInvoke !== false && !s.contract);
+}
+
 /**
- * Harness² A1: Progressive disclosure — builds a compact one-line-per-skill trigger index
- * (`name — description`) instead of dumping every skill body into the system prompt.
+ * Catalog of skills the model can start with `use_skill`. One entry per skill with an explicit
+ * TRIGGER and DO NOT TRIGGER, so asking what a skill can do does not start it. The skill body
+ * itself is delivered in the tool result, which keeps this prefix stable for prompt caching.
  */
-export function buildSkillsTriggerIndex(skills: Skill[], maxChars = 2_400): string {
-  if (!skills.length) return '';
+export function buildSkillsTriggerIndex(skills: Skill[], maxChars = 7_000): string {
+  const usable = autoInvokableSkills(skills);
+  if (!usable.length) return '';
   const lines: string[] = [];
   let used = 0;
-  for (const s of skills) {
-    if (!s.description) continue;
-    const line = `- ${s.id} (${s.name}): ${s.description.replace(/\s+/g, ' ').slice(0, 160)}`;
-    if (used + line.length > maxChars) break;
+  for (const s of usable) {
+    const line = [
+      `- ${s.id} (${s.name}): ${s.description.replace(/\s+/g, ' ').slice(0, 100)}`,
+      s.trigger ? `  TRIGGER: ${s.trigger.replace(/\s+/g, ' ')}` : '',
+      `  DO NOT TRIGGER: ${(s.doNotTrigger ?? '').replace(/\s+/g, ' ') || '用户只是在问能不能做、怎么做、有哪些能力，或只想聊聊'}`,
+    ].filter(Boolean).join('\n');
+    if (used + line.length > maxChars) { lines.push(`(${usable.length - lines.length} more via use_skill)`); break; }
     lines.push(line);
     used += line.length + 1;
   }
-  return lines.length
-    ? `Available domain skills (progressive disclosure — follow matching domain rules when the request fits):\n${lines.join('\n')}`
-    : '';
+  return [
+    'Skills you can start yourself with the use_skill tool (pass the id). Start one only when the request clearly matches its TRIGGER and not its DO NOT TRIGGER; a question about what you can do is answered in text, not by starting a skill. When a skill instructions are returned, follow them for the rest of the task.',
+    ...lines,
+  ].join('\n');
 }
 
-function parseFrontmatter(raw: string): { name?: string; description?: string; prompt?: string; cover?: string; category?: string; body: string } {
+function parseFrontmatter(raw: string): { name?: string; description?: string; prompt?: string; cover?: string; category?: string; trigger?: string; doNotTrigger?: string; disableAutoInvoke?: boolean; body: string } {
   if (!raw.startsWith('---')) return { body: raw.trim() };
   const end = raw.indexOf('\n---', 3);
   if (end < 0) return { body: raw.trim() };
@@ -92,7 +109,7 @@ function parseFrontmatter(raw: string): { name?: string; description?: string; p
     if (idx < 0) continue;
     fields[line.slice(0, idx).trim()] = line.slice(idx + 1).trim().replace(/^["']|["']$/g, '');
   }
-  return { name: fields.name, description: fields.description, prompt: fields.prompt, cover: fields.cover, category: fields.category, body };
+  return { name: fields.name, description: fields.description, prompt: fields.prompt, cover: fields.cover, category: fields.category, trigger: fields.trigger, doNotTrigger: fields['do-not-trigger'], disableAutoInvoke: /^true$/i.test(fields['disable-auto-invoke'] ?? ''), body };
 }
 
 async function loadSkillFile(file: string, source: Skill['source']): Promise<Skill | null> {
@@ -123,6 +140,9 @@ async function loadSkillFile(file: string, source: Skill['source']): Promise<Ski
       prompt: parsed.prompt,
       cover: parsed.cover,
       category: parsed.category,
+      ...(parsed.trigger ? { trigger: parsed.trigger } : {}),
+      ...(parsed.doNotTrigger ? { doNotTrigger: parsed.doNotTrigger } : {}),
+      autoInvoke: !parsed.disableAutoInvoke,
       body: parsed.body,
       source,
       dir: path.dirname(file),

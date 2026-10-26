@@ -56,6 +56,7 @@ import { loadPluginContributions } from '../plugins/pluginStore';
 import { createTurnTraceCollector, writeTurnTrace } from './turnTrace';
 import { readWorkspaceMemory } from '../../workspaceMemory';
 import { formatRules, readRuleSources } from './workspaceRules';
+import { createSkillTools } from './skillTools';
 import { applyRunCeiling, effectiveRunMode, READ_ONLY_RUN_NOTICE } from './runCeiling';
 import type { RunPermission } from '../../../shared/schedule';
 import type { MemoryEntry } from '../../workspaceMemoryDir';
@@ -68,7 +69,7 @@ import {
   RECALL_BUDGET,
 } from '../../memoryJobs';
 import { redactSecrets } from '../../../shared/redactSecrets';
-import type { Skill } from '../../skills';
+import { buildSkillsTriggerIndex, type Skill } from '../../skills';
 import type { ChatMessage, SessionStore, ToolCallPart } from '../../../shared/chat';
 import type { SettingsStore } from '../storage/settingsStore';
 import type { ArtifactStore } from '../storage/artifactStore';
@@ -211,6 +212,8 @@ export async function runChatTurn(options: {
   scheduleStore?: import('../storage/scheduleStore').ScheduleStore;
   /** Unattended-run ceiling (automations). Only ever tightens the global permission mode and toolset. */
   runCeiling?: RunPermission;
+  /** Every skill on disk; the model may start the auto-invokable ones with `use_skill`. */
+  availableSkills?: Skill[];
 }): Promise<Response> {
   const {
     sessionStore,
@@ -230,6 +233,7 @@ export async function runChatTurn(options: {
     memoryEventsStore,
     scheduleStore,
     runCeiling,
+    availableSkills = [],
   } = options;
 
   const turnOriginAt = Date.now();
@@ -394,6 +398,7 @@ export async function runChatTurn(options: {
         'Workflow: call `computer {action:"screenshot"}` first, decide from the image, act with pixel coordinates from that screenshot (top-left origin), then screenshot again to verify. Work in small steps. ' +
         'The user approves once at the start of the session. Never type passwords, card numbers, or other secrets — ask the user to do that themselves.'
       : '',
+    skill ? '' : buildSkillsTriggerIndex(availableSkills),
     // Per-turn dynamic parts go last so the long static prefix above stays identical across turns (provider prefix caching).
     canvasSummary,
     sessionArtifactsHint,
@@ -543,6 +548,7 @@ export async function runChatTurn(options: {
           ...(videoTools ?? {}),
           ...(computerTools?.tools ?? {}),
           ...(scheduleTools ?? {}),
+          ...(skill ? {} : createSkillTools({ skills: availableSkills })),
           ...(skill?.contract && canvasStore && dataRoot ? createDeliveryTools({ skill, canvasStore, sessionId, dataRoot, artifactStore }) : {}),
         }
       : undefined;

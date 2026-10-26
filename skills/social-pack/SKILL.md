@@ -1,6 +1,8 @@
 ---
 name: social-pack
 description: 社媒套图生成——一个主题/文案，按各平台规格（小红书封面、IG feed/story、公众号头图、X 帖子）出一套风格统一的配图，全部落到画布节点。
+trigger: 用户要为小红书/Instagram/公众号/X 等平台做一套配图或封面，并给出了主题或文案
+do-not-trigger: 只是问社媒套图能不能做、有什么规格；或只要单张图（直接生成即可）
 prompt: 帮我做一套社媒套图
 cover: cover.jpg
 category: social

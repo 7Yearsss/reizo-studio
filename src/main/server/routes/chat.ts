@@ -13,7 +13,7 @@ import {
 } from '../agent/runtime';
 import { isSessionTurnLive, resumeAgentTurn } from '../agent/session';
 import { answerAsk, answerPermission, pendingAsksForSession, type PermissionDecision } from '../agent/permissions';
-import { loadSkills } from '../../skills';
+import { loadSkills, type Skill } from '../../skills';
 import type { LargeValueStore } from '../storage/largeValueStore';
 import type { CanvasStore } from '../storage/canvasStore';
 import type { ProviderStore } from '../storage/providerStore';
@@ -77,9 +77,9 @@ export function createChatRouter(
       : [];
 
     let skill = null;
+    const availableSkills = await loadSkills(skillsDirs).catch((): Skill[] => []);
     if (typeof body.skillId === 'string' && body.skillId.trim()) {
-      const skills = await loadSkills(skillsDirs);
-      skill = skills.find((item) => item.id === body.skillId) ?? null;
+      skill = availableSkills.find((item) => item.id === body.skillId) ?? null;
     }
 
     const response = await runChatTurn({
@@ -103,6 +103,7 @@ export function createChatRouter(
       dataRoot: canvas?.dataRoot,
       memoryEventsStore,
       scheduleStore,
+      availableSkills,
     });
     console.info(`[chat] stream opened session=${sessionId} status=${response.status}`);
     return response;
