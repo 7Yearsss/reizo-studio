@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { createPresentationTools } from './presentationTools';
 import { createVideoEditorTools } from './videoEditorTools';
 import { tryVideoApplyTurn } from './videoApplyTurn';
@@ -58,6 +59,7 @@ import { readWorkspaceMemory } from '../../workspaceMemory';
 import { formatRules, readRuleSources } from './workspaceRules';
 import { createSkillTools } from './skillTools';
 import { createAttachmentTools } from './attachmentTools';
+import { currentDateLine, expandPromptVars } from '../../../shared/promptVars';
 import { DEFAULT_CONTEXT_WINDOW_TOKENS, nextOutputCap } from '../../../shared/autoCompact';
 import { chatModelCapabilities } from '../../../shared/chatModelCapabilities';
 import { createSkillDraftTools, PROPOSE_SKILL_TOOL, runApprovedSkillDraft } from './skillDraftTools';
@@ -372,6 +374,8 @@ export async function runChatTurn(options: {
   const memory = workspacePath ? await readWorkspaceMemory(workspacePath) : '';
   // The user's own memory follows them into every workspace, and works with none open.
   const personalMemory = dataRoot ? await readWorkspaceMemory(personalMemoryRoot(dataRoot)) : '';
+  const promptNow = new Date();
+  const promptVarCtx = { now: promptNow, workspaceName: workspacePath ? path.basename(workspacePath) : undefined, projectName: undefined as string | undefined };
   const standingRules = formatRules(await readRuleSources({ workspacePath, userRulesDir: dataRoot }));
   let projectInstructions = '';
   let projectName = '';
@@ -380,6 +384,7 @@ export async function runChatTurn(options: {
     if (project?.instructions) {
       projectInstructions = project.instructions;
       projectName = project.name;
+      promptVarCtx.projectName = project.name;
     }
   }
   // Compact canvas summary (decision 9). Frozen at turn start — use the
@@ -462,11 +467,12 @@ export async function runChatTurn(options: {
         (skill.experience ? `Accumulated experience for "${skill.name}" (EXPERIENCE.md):\n${skill.experience}\n\n` : '') +
         'If this skill declares a "提问"/"Questions" section, collect each missing input through `ask_user` question cards (concrete options + free text) before producing output — never ask those questions as plain chat text. Ask each question at most once; an input the user already answered is never re-asked.'
       : '',
-    projectInstructions ? `Project "${projectName}" working rules:\n${projectInstructions}` : '',
-    standingRules,
+    currentDateLine(promptNow),
+    projectInstructions ? `Project "${projectName}" working rules:\n${expandPromptVars(projectInstructions, promptVarCtx)}` : '',
+    expandPromptVars(standingRules, promptVarCtx),
     expert
       ? `The user addressed this message to the expert "${expert.name}"${expert.description ? ` (${expert.description})` : ''}. For this reply act as that expert, following these instructions:
-${expert.instructions}`
+${expandPromptVars(expert.instructions, promptVarCtx)}`
       : '',
     planMode ? PLAN_MODE_NOTICE : runCeiling === 'readonly' ? READ_ONLY_RUN_NOTICE : '',
   ].filter(Boolean);
