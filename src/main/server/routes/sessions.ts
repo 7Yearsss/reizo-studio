@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { SessionStore } from '../../../shared/chat';
 import type { ArtifactStore } from '../storage/artifactStore';
 import { pendingInteractionKindForSession } from '../agent/permissions';
+import { buildSessionExport, sessionToMarkdown } from '../../../shared/sessionExport';
 
 export function createSessionsRouter(sessionStore: SessionStore, artifactStore?: ArtifactStore,
   prepareRemove?: (sessionId: string) => (() => void) | void) {
@@ -30,6 +31,18 @@ export function createSessionsRouter(sessionStore: SessionStore, artifactStore?:
     const session = await sessionStore.get(c.req.param('id'));
     if (!session) return c.json({ error: 'Session not found' }, 404);
     return c.json({ session });
+  });
+
+  // Redacted, shareable copy: ?format=json|md, ?detail=structure|full (default structure, for troubleshooting).
+  router.get('/:id/export', async (c) => {
+    const session = await sessionStore.get(c.req.param('id'));
+    if (!session) return c.json({ error: 'Session not found' }, 404);
+    const detail = c.req.query('detail') === 'full' ? 'full' : 'structure';
+    const exported = buildSessionExport(session, detail);
+    if (c.req.query('format') === 'md') {
+      return c.json({ format: 'md', detail, stats: exported.stats, content: sessionToMarkdown(exported.title, exported.messages) });
+    }
+    return c.json({ format: 'json', detail, stats: exported.stats, title: exported.title, messages: exported.messages });
   });
 
   router.patch('/:id', async (c) => {
