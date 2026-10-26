@@ -86,6 +86,7 @@ Electron GUI click-through in a headless environment).
 | Skills, plugins, MCP | `src/main/skills.ts`, `skillHub.ts`, `server/plugins/`, `server/mcp-builtin/`, `agent/mcpTools.ts` | `docs/handoff-plugins.md` |
 | Memory & Harness evolution | `src/main/memoryJobs.ts`, `workspaceMemoryDir.ts`, `agent/harness*.ts`, `skillRefiner.ts`, `turnTrace.ts` | comments at the top of each file |
 | Voice input | `server/voice/`, renderer `VoiceInputButton` + recognition worker | `docs/voice-input.md` |
+| Security guards (permissions, MCP pinning, remote fetch, secrets) | — | `docs/security-adversarial.md` — every row bound to a test; add a row with any new attack surface |
 | Incident notes | — | `docs/operations/` (dated postmortems for chat / video / model-catalog failures) |
 
 `docs/*.md` are long-form design, planning and research notes; many describe batches of work.
