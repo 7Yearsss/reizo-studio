@@ -16,6 +16,7 @@ vi.mock('../../computerUse', () => ({
   createComputerController: () => ({
     run: runMock,
     screenshot: screenshotMock,
+    approvedApps: new Set<string>(),
     dispose: vi.fn(),
   }),
 }));

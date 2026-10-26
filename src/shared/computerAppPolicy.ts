@@ -45,3 +45,31 @@ export function judgeForegroundApp(app: ForegroundApp | null, ownPid: number = p
 export function describeDenial(app: ForegroundApp, reason: string): string {
   return `当前最前面的窗口是「${app.title || app.process}」（${app.process}），${reason}。已拒绝这次操作。请换用其他方式完成，或请用户亲自操作。`;
 }
+
+/**
+ * Apps that are not forbidden but can do a great deal that cannot be undone (send a message, submit a form, delete a
+ * mail). The first action on one of them in a session asks the user once, naming the app.
+ */
+const APPROVAL_REQUIRED: Record<string, string> = {};
+function needsApproval(label: string, names: string[]) { for (const n of names) APPROVAL_REQUIRED[normalize(n)] = label; }
+needsApproval('浏览器', ['chrome', 'google chrome', 'msedge', 'microsoft edge', 'firefox', 'safari', 'brave', 'brave browser', 'opera', 'vivaldi', 'arc', 'chromium', 'iexplore', '360se', '360chrome', 'qqbrowser']);
+needsApproval('聊天软件', ['wechat', 'weixin', 'feishu', 'lark', 'dingtalk', 'slack', 'discord', 'telegram', 'whatsapp', 'signal', 'qq', 'teams', 'ms-teams', 'wxwork', 'wecom']);
+needsApproval('邮件客户端', ['outlook', 'olk', 'thunderbird', 'mail', 'foxmail', 'spark', 'mailspring']);
+
+export interface AppApprovalNeed { key: string; kind: string; name: string }
+
+/** The approval this app needs before it may be driven, or null (unknown apps and failed detection are not gated). */
+export function appApprovalNeed(app: ForegroundApp | null): AppApprovalNeed | null {
+  if (!app) return null;
+  const key = normalize(app.process);
+  const kind = APPROVAL_REQUIRED[key];
+  return kind ? { key, kind, name: app.process.replace(/\.(exe|app)$/i, '') } : null;
+}
+
+/** Thrown from inside the controller when the app in front still needs the user's go-ahead for this session. */
+export class AppApprovalNeededError extends Error {
+  constructor(readonly need: AppApprovalNeed) {
+    super(`需要先征得用户同意才能操作${need.kind}「${need.name}」`);
+    this.name = 'AppApprovalNeededError';
+  }
+}

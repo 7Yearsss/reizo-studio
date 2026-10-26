@@ -18,7 +18,7 @@ afterEach(() => resetPermissionsForTests());
 
 describe('self-extension tools always ask', () => {
   it('locks the list', () => {
-    expect([...ALWAYS_ASK_TOOLS].sort()).toEqual(['computer_confirm', 'create_schedule', 'delete_schedule', 'propose_skill']);
+    expect([...ALWAYS_ASK_TOOLS].sort()).toEqual(['computer_app', 'computer_confirm', 'create_schedule', 'delete_schedule', 'propose_skill']);
   });
 
   it('even full mode asks, and allow-session never becomes a standing grant', async () => {

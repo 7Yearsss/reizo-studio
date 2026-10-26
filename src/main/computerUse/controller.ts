@@ -3,7 +3,7 @@ import type { ComputerController, CursorPoint, InputBackend, ScreenSize, Screens
 import { captureScreen } from './capture';
 import { createWindowsInputBackend } from './winInput';
 import { createPosixInputBackend } from './posixInput';
-import { describeDenial, judgeForegroundApp } from '../../shared/computerAppPolicy';
+import { AppApprovalNeededError, appApprovalNeed, describeDenial, judgeForegroundApp } from '../../shared/computerAppPolicy';
 import { posixForegroundApp } from './foreground';
 import { computerActivity } from './activity';
 import { ACTION_SETTLE_MS, clampPoint, createComputerBudget, isActingStep, type ComputerInput } from '../../shared/computerUse';
@@ -51,6 +51,7 @@ export function createComputerController(): ComputerController {
   // Step and time limits live here, in the main process, so nothing in the renderer or the model can reset them.
   const budget = createComputerBudget();
   let stopped = false;
+  const approvedApps = new Set<string>();
   const handle = { stop: () => { stopped = true; computerActivity.release(handle); } };
   active.add(handle);
   let lastImageSize: ScreenSize | null = null;
@@ -79,6 +80,7 @@ export function createComputerController(): ComputerController {
 
   return {
     screenshot: shoot,
+    approvedApps,
 
     async run(action: ComputerInput) {
       if (stopped) throw new Error('用户已按下停止键，电脑操作已中止。请向用户确认下一步，不要继续操作。');
@@ -88,6 +90,8 @@ export function createComputerController(): ComputerController {
         const front = await (backend.foregroundApp ? backend.foregroundApp() : posixForegroundApp()).catch((): null => null);
         const judged = judgeForegroundApp(front);
         if (front && judged.verdict === 'deny') throw new Error(describeDenial(front, judged.reason));
+        const need = appApprovalNeed(front);
+        if (need && !approvedApps.has(need.key)) throw new AppApprovalNeededError(need);
       }
       budget.charge(action);
       if (isActingStep(action)) computerActivity.touch(handle);

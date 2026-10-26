@@ -888,9 +888,9 @@ ${expert.instructions}`
         const outcome =
           item.name === PROPOSE_SKILL_TOOL
             ? dataRoot ? await runApprovedSkillDraft({ dataRoot, getSkills: () => availableSkills }, item.args, item.toolCallId) : { error: 'Skills cannot be saved in this turn' }
-          : ALWAYS_ASK_TOOLS.has(item.name) && item.name !== COMPUTER_CONFIRM_TOOL
+          : ALWAYS_ASK_TOOLS.has(item.name) && item.name !== COMPUTER_CONFIRM_TOOL && item.name !== 'computer_app'
             ? await runApprovedScheduleTool(scheduleStore, sessionId, item.name, item.args, item.toolCallId)
-            : item.name === COMPUTER_TOOL_NAME || item.name === COMPUTER_CONFIRM_TOOL
+            : item.name === COMPUTER_TOOL_NAME || item.name === COMPUTER_CONFIRM_TOOL || item.name === 'computer_app'
             ? ((await computerTools?.executeApproved(item.args)) ?? {
                 error: 'Computer control is not enabled for this turn',
               })

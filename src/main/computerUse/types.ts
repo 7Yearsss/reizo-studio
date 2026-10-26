@@ -43,5 +43,7 @@ export interface InputBackend {
 export interface ComputerController {
   screenshot(): Promise<Screenshot>;
   run(action: import('../../shared/computerUse').ComputerInput): Promise<{ cursor: CursorPoint | null }>;
+  /** Apps (by `AppApprovalNeed.key`) the user already approved for this session; the controller asks for any other gated app. */
+  approvedApps: Set<string>;
   dispose(): void;
 }

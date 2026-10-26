@@ -30,10 +30,10 @@
 | 持久「始终允许」被用来绕过 computer / 定时任务确认 | 只有 `mcp__*` 工具可被永久允许；computer 与 always-ask 名单忽略该决定，新会话仍询问；存档里混入的这类名字加载时丢弃 | `src/main/server/agent/alwaysAllow.test.ts :: computer and the always-ask tools can never be made permanent` |
 | 工作区被设成包含应用数据目录的文件夹（如用户主目录），Agent 的 write_file / edit_file 改写数据库、密钥、钩子 | 写入前按绝对路径拒绝，覆盖数据目录整棵树；仅限文件写入工具，run_command 不在此守卫内（见下方未覆盖） | `src/main/workspaceWrite.protected.test.ts :: a workspace that contains the data folder cannot write or edit inside it, but its other files still work` |
 | 提示注入让 Agent 把恶意指令存成技能（长期立足点），或把密钥写进技能 | propose_skill 在 always-ask 名单里，每次都弹确认卡，full 模式也不豁免、allow-session 不形成授权；含密钥形态内容的草稿直接拒绝；只能更新用户自己的技能，内置技能不可改写；frontmatter 字段压成单行，草稿无法夹带 allowed-tools 等字段 | `src/main/server/agent/skillDraftTools.test.ts :: writes nothing until the user approves, even in full mode; approving then saves the skill` |
+| 提示注入让 Agent 借浏览器 / 聊天软件 / 邮件客户端做不可撤回的操作（发消息、提交表单、删邮件） | 这三类应用在前台时，会话内第一个动作被拦下，弹出点名该应用的确认卡（computer_app，在 always-ask 名单里，无「本会话都允许」）；同意后同一会话同一应用不再重复问，换一个应用重新问；探测不到前台应用时照旧放行（不让检测失败废掉功能） | `src/main/server/agent/computerAppApproval.test.ts :: holds the first action on a browser, then lets that app through after approval, and still asks for another app` |
 
 ## 未覆盖（没有测试，不能标「已覆盖」）
 
-- computer-use：需确认的应用（浏览器/聊天/邮件）与屏幕悬浮停止按钮——见 #183。
 - 记忆写入（memory_write）目前不强制每次确认——记忆有独立的提取/召回流程，是否纳入「永远要问」名单待评估。
 - 提示注入经网页/文件内容诱导工具调用——需要跨层端到端用例。
 - 子进程在主进程被强杀后的残留——见 #201。

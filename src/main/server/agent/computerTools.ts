@@ -12,6 +12,18 @@ import type { ComputerController } from '../../computerUse/types';
 import { readScreenshot, saveScreenshot, screenshotContentOutput } from '../../computerUse/store';
 import { ApprovalRequiredError, COMPUTER_CONFIRM_TOOL, requestPermission } from './permissions';
 import { classifyConsequence, CONSEQUENCE_LABELS } from '../../../shared/computerConsequence';
+import { AppApprovalNeededError } from '../../../shared/computerAppPolicy';
+
+/** Apps the user approved this session (by `AppApprovalNeed.key`); outlives the per-turn controller. */
+const approvedAppsBySession = new Map<string, Set<string>>();
+function approvedAppsFor(sessionId: string): Set<string> {
+  let set = approvedAppsBySession.get(sessionId);
+  if (!set) { set = new Set(); approvedAppsBySession.set(sessionId, set); }
+  return set;
+}
+
+/** Gate name for "may the agent drive this browser / chat / mail app": asked once per app, never a standing grant. */
+export const COMPUTER_APP_TOOL = 'computer_app';
 
 export { isComputerUseSupported };
 
@@ -74,6 +86,7 @@ export function createComputerTools(options: {
 
   async function perform(input: ComputerInput): Promise<ComputerToolResult> {
     const controller = controllerFor(sessionId);
+    for (const key of approvedAppsFor(sessionId)) controller.approvedApps.add(key);
     const summary = summarizeComputerAction(input);
     await controller.run(input);
     const shot = await controller.screenshot();
@@ -96,6 +109,8 @@ export function createComputerTools(options: {
     tools: buildComputerTools({ ...options, perform }),
     async executeApproved(args) {
       try {
+        // An app approval card: remember the app for this session, then run the action it was holding back.
+        if (typeof args.key === 'string' && typeof args.kind === 'string') approvedAppsFor(sessionId).add(args.key);
         // A confirmation card wraps the real action under `input`.
         const input = ComputerInputSchema.parse('input' in args && args.input && typeof args.input === 'object' ? args.input : args);
         return { result: JSON.stringify(await perform(input)) };
@@ -144,7 +159,15 @@ function buildComputerTools(options: {
             kind: 'permission',
           });
         }
-        return perform(input);
+        try {
+          return await perform(input);
+        } catch (error) {
+          if (!(error instanceof AppApprovalNeededError)) throw error;
+          const appArgs = { app: error.need.name, kind: error.need.kind, key: error.need.key, input };
+          // On the always-ask list, so this records the pending card and never resolves from a standing grant.
+          await requestPermission({ sessionId, toolCallId: toolOptions.toolCallId, name: COMPUTER_APP_TOOL, args: appArgs, mode: permissionMode });
+          throw new ApprovalRequiredError({ toolCallId: toolOptions.toolCallId, name: COMPUTER_APP_TOOL, args: appArgs, kind: 'permission' });
+        }
       },
       // Feed the follow-up screenshot back to the model as an actual image on
       // the live pass. The resume path re-inflates it from disk in
