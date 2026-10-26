@@ -10,7 +10,8 @@ import {
 import { createComputerController, isComputerUseSupported } from '../../computerUse';
 import type { ComputerController } from '../../computerUse/types';
 import { readScreenshot, saveScreenshot, screenshotContentOutput } from '../../computerUse/store';
-import { ApprovalRequiredError, requestPermission } from './permissions';
+import { ApprovalRequiredError, COMPUTER_CONFIRM_TOOL, requestPermission } from './permissions';
+import { classifyConsequence, CONSEQUENCE_LABELS } from '../../../shared/computerConsequence';
 
 export { isComputerUseSupported };
 
@@ -95,7 +96,8 @@ export function createComputerTools(options: {
     tools: buildComputerTools({ ...options, perform }),
     async executeApproved(args) {
       try {
-        const input = ComputerInputSchema.parse(args);
+        // A confirmation card wraps the real action under `input`.
+        const input = ComputerInputSchema.parse('input' in args && args.input && typeof args.input === 'object' ? args.input : args);
         return { result: JSON.stringify(await perform(input)) };
       } catch (err) {
         return { error: err instanceof Error ? err.message : String(err) };
@@ -118,21 +120,27 @@ function buildComputerTools(options: {
         'Control this computer: take a screenshot, then move / click / drag the mouse, scroll, type text, or press keys. ' +
         'Coordinates are pixels in the most recent screenshot you received (top-left origin). ' +
         'Always screenshot first, act on what you see, then screenshot again to check the result. ' +
-        'The user is asked once per session before the first action.',
+        'The user is asked once per session before the first action. On every click / drag / type / key set `consequence` honestly: anything that sends, publishes, deletes, overwrites, installs, pays or changes credentials or security settings is declared with its category and a one-line `summary`, and the user must confirm it each time; use "none" for ordinary navigation.',
       inputSchema: ComputerInputSchema,
       execute: async (input, toolOptions): Promise<ComputerToolResult> => {
+        // Something that sends, pays, deletes… is confirmed on its own, every time (never covered by a session grant).
+        const consequence = classifyConsequence(input);
+        const gate = consequence ? COMPUTER_CONFIRM_TOOL : COMPUTER_TOOL_NAME;
+        const gateArgs = consequence
+          ? { consequence, label: CONSEQUENCE_LABELS[consequence], summary: input.action === 'screenshot' ? '' : ('summary' in input ? input.summary ?? '' : ''), input }
+          : (input as Record<string, unknown>);
         const ok = await requestPermission({
           sessionId,
           toolCallId: toolOptions.toolCallId,
-          name: COMPUTER_TOOL_NAME,
-          args: input as Record<string, unknown>,
+          name: gate,
+          args: gateArgs,
           mode: permissionMode,
         });
         if (!ok) {
           throw new ApprovalRequiredError({
             toolCallId: toolOptions.toolCallId,
-            name: COMPUTER_TOOL_NAME,
-            args: input as Record<string, unknown>,
+            name: gate,
+            args: gateArgs,
             kind: 'permission',
           });
         }

@@ -41,7 +41,7 @@ import { createToolLoopGuard, hashResult } from './toolLoopGuard';
 import { serializeMutatingTools } from './toolSerializer';
 import { createCanvasBudget } from './canvasBudget';
 import { inlineCanvasRefImages } from './canvasRefImages';
-import { consumeInteractions, waitForInteractions, ALWAYS_ASK_TOOLS } from './permissions';
+import { consumeInteractions, waitForInteractions, ALWAYS_ASK_TOOLS, COMPUTER_CONFIRM_TOOL } from './permissions';
 import { translateOpenAiChunk } from './translators/openai';
 import { compactAssistantParts, compactModelMessages } from './modelHistory';
 import { CONTINUE_USER_MESSAGE, MAX_AGENT_STEPS, MAX_CONTINUE_PASSES, hitStepCap, shouldContinueAgentPass, hasDeliveredArtifact } from './continuePass';
@@ -814,9 +814,9 @@ export async function runChatTurn(options: {
           continue;
         }
         const outcome =
-          ALWAYS_ASK_TOOLS.has(item.name)
+          ALWAYS_ASK_TOOLS.has(item.name) && item.name !== COMPUTER_CONFIRM_TOOL
             ? await runApprovedScheduleTool(scheduleStore, sessionId, item.name, item.args, item.toolCallId)
-            : item.name === COMPUTER_TOOL_NAME
+            : item.name === COMPUTER_TOOL_NAME || item.name === COMPUTER_CONFIRM_TOOL
             ? ((await computerTools?.executeApproved(item.args)) ?? {
                 error: 'Computer control is not enabled for this turn',
               })

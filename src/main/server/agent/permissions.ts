@@ -18,7 +18,10 @@ const CONTROL_TOOLS = new Set(['computer']);
  * injected sentence in a web page or document is enough to plant one, so every call is confirmed on its
  * own: `full` mode does not waive it and an `allow-session` answer is treated as a one-time allow.
  */
-export const ALWAYS_ASK_TOOLS: ReadonlySet<string> = new Set(['create_schedule', 'delete_schedule']);
+/** Per-action confirmation for consequential computer-use steps (send, pay, delete…). */
+export const COMPUTER_CONFIRM_TOOL = 'computer_confirm';
+
+export const ALWAYS_ASK_TOOLS: ReadonlySet<string> = new Set(['create_schedule', 'delete_schedule', 'computer_confirm']);
 
 /** Git subcommands that only inspect the repo. Mirrors Claude Code's read-only git set, kept tight. */
 const READ_ONLY_GIT = /^(git\s+)(status|diff|log|show|rev-parse|describe|ls-files)(\s|$)/;

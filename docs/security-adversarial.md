@@ -12,6 +12,9 @@
 | 写命令绕过审批 | 记录待审批提示，不放行 | `src/main/server/agent/permissions.test.ts :: records a pending prompt (never blocks) for a writing command` |
 | 提示注入让 Agent 建立/删除定时任务（长期立足点），即使在 full 模式 | 仍弹确认卡；拒绝后不落盘；allow-session 不形成长期授权 | `src/main/server/agent/alwaysAsk.test.ts :: create_schedule in full mode records a pending card and writes nothing; approving then runs it` |
 | 无人值守的只读自动化被诱导写文件/跑命令/调外部工具，即使全局是 full | 这些工具根本不提供（默认拒绝的白名单），全局 full 不抬高上限 | `src/main/server/agent/runCeiling.test.ts :: read-only keeps only listed read tools; everything else (including new tools and MCP) is withheld` |
+| Agent 在 computer-use 中替用户点「发送」「支付」「删除」等不可撤回操作 | 每次单独弹确认，full 模式与会话授权都不豁免；未声明时按摘要措辞兜底识别 | `src/shared/computerConsequence.test.ts :: catches undeclared send / pay / delete wording in the summary, Chinese and English` |
+| computer-use 驱动终端、IDE、密码管理器、系统工具或 Reizo 自身 | 动作前按最前窗口判断，直接拒绝 | `src/shared/computerAppPolicy.test.ts :: refuses terminals, IDEs, password managers and system tools` |
+| computer-use 无限循环耗费 | 每回合最多 30 个动作步 / 5 分钟，主进程执行 | `src/shared/computerBudget.test.ts :: blocks step 31, not before; looking is free` |
 | MCP 工具定义在首次信任后被篡改 | 工具被拦截，保留旧 pin | `src/main/server/agent/mcpTools.test.ts :: withholds a tool whose description changed after it was first trusted` |
 | 第三方 MCP 工具在非 full 模式下直接执行 | 先询问再运行 | `src/main/server/agent/mcpTools.test.ts :: asks unless the user chose full access` |
 | 用户钩子挂起拖死回合 | 超时放弃，回合继续 | `src/main/server/agent/hooks.test.ts :: gives up on a hook that hangs instead of stalling the turn` |
@@ -27,7 +30,7 @@
 
 ## 未覆盖（没有测试，不能标「已覆盖」）
 
-- computer-use 越权操作（应用清单、动作后果分类、悬浮停止）——见 #183。
+- computer-use：需确认的应用（浏览器/聊天/邮件）与屏幕悬浮停止按钮——见 #183。
 - 记忆写入（memory_write）目前不强制每次确认——记忆有独立的提取/召回流程，是否纳入「永远要问」名单待评估。
 - 提示注入经网页/文件内容诱导工具调用——需要跨层端到端用例。
 - 子进程在主进程被强杀后的残留——见 #201。

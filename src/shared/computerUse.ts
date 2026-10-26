@@ -44,6 +44,19 @@ export const COMPUTER_ACTIONS = [
 
 export type ComputerActionName = (typeof COMPUTER_ACTIONS)[number];
 
+/**
+ * Declared by the model on any click / drag / type / key that is not just looking around. If the action sends,
+ * publishes, deletes, overwrites, installs, pays or changes credentials/security, say which; the user then
+ * confirms it every time. Use "none" for ordinary navigation.
+ */
+const intent = {
+  consequence: z
+    .enum(['none', 'send', 'publish', 'delete', 'overwrite', 'install', 'purchase', 'credential', 'security'])
+    .optional()
+    .describe('What this action does beyond navigation. Declare honestly: the user is asked to confirm anything but "none".'),
+  summary: z.string().max(200).optional().describe('One short sentence: what this action does and why (shown on the confirmation card).'),
+};
+
 const point = {
   x: z.number().int().describe('X pixel, from the left edge of the primary display.'),
   y: z.number().int().describe('Y pixel, from the top edge of the primary display.'),
@@ -61,14 +74,15 @@ export const ComputerInputSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('screenshot') }).describe('Capture the screen. Take one before acting.'),
   z.object({ action: z.literal('cursor_position') }).describe('Report the current cursor x/y.'),
   z.object({ action: z.literal('move'), ...point }).describe('Move the cursor without clicking.'),
-  z.object({ action: z.literal('left_click'), ...optionalPoint }).describe('Left click.'),
-  z.object({ action: z.literal('right_click'), ...optionalPoint }).describe('Right click.'),
-  z.object({ action: z.literal('middle_click'), ...optionalPoint }).describe('Middle click.'),
-  z.object({ action: z.literal('double_click'), ...optionalPoint }).describe('Double left click.'),
+  z.object({ action: z.literal('left_click'), ...optionalPoint, ...intent }).describe('Left click.'),
+  z.object({ action: z.literal('right_click'), ...optionalPoint, ...intent }).describe('Right click.'),
+  z.object({ action: z.literal('middle_click'), ...optionalPoint, ...intent }).describe('Middle click.'),
+  z.object({ action: z.literal('double_click'), ...optionalPoint, ...intent }).describe('Double left click.'),
   z
     .object({
       action: z.literal('left_click_drag'),
       ...point,
+      ...intent,
       fromX: z.number().int().optional().describe('Drag start X. Defaults to the current cursor X.'),
       fromY: z.number().int().optional().describe('Drag start Y. Defaults to the current cursor Y.'),
     })
@@ -95,6 +109,7 @@ export const ComputerInputSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('key'),
+      ...intent,
       keys: z
         .string()
         .min(1)

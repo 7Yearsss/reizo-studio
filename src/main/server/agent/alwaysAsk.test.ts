@@ -11,13 +11,14 @@ import {
   requestPermission,
   resetPermissionsForTests,
 } from './permissions';
+import { createComputerTools } from './computerTools';
 import { createScheduleTools, runApprovedScheduleTool } from './scheduleTools';
 
 afterEach(() => resetPermissionsForTests());
 
 describe('self-extension tools always ask', () => {
   it('locks the list', () => {
-    expect([...ALWAYS_ASK_TOOLS].sort()).toEqual(['create_schedule', 'delete_schedule']);
+    expect([...ALWAYS_ASK_TOOLS].sort()).toEqual(['computer_confirm', 'create_schedule', 'delete_schedule']);
   });
 
   it('even full mode asks, and allow-session never becomes a standing grant', async () => {
@@ -48,5 +49,15 @@ describe('self-extension tools always ask', () => {
     answerPermission('t2', 'deny');
     expect((consumeInteractions('s'))[0].decision).toBe('deny');
     expect(await store.list()).toEqual([]);
+  });
+
+  it('a consequential computer action asks every time, even in full mode and after a session grant', async () => {
+    const tools = createComputerTools({ sessionId: 's', dataRoot: os.tmpdir(), permissionMode: 'full', emit: () => undefined }).tools;
+    const send = { action: 'left_click', x: 5, y: 5, consequence: 'send', summary: '点击发送' };
+    const run = (id: string) => (tools.computer.execute as any)(send, { toolCallId: id });
+    await expect(run('k1')).rejects.toThrow('__REIZO_INTERACTION_REQUIRED__');
+    answerPermission('k1', 'allow-session');
+    consumeInteractions('s');
+    await expect(run('k2')).rejects.toThrow('__REIZO_INTERACTION_REQUIRED__');
   });
 });
