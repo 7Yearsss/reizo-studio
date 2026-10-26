@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { IPC } from '../shared/constants';
 import type { DirEntry } from '../shared/workspace';
 import type { SkillHubInstallRequest, SkillHubSearchQuery } from '../shared/skillhub';
-import type { PluginSummary } from '../shared/plugins';
+import type { PluginPreview, PluginSummary } from '../shared/plugins';
 import type {
   DingTalkConnectParams,
   FeishuConnectParams,
@@ -69,6 +69,8 @@ contextBridge.exposeInMainWorld('reizo', {
   listHooks: (): Promise<HookEntry[]> => ipcRenderer.invoke(IPC.HOOKS_LIST),
   saveHooks: (entries: HookEntry[]): Promise<void> => ipcRenderer.invoke(IPC.HOOKS_SAVE, entries),
   installPlugin: (): Promise<PluginSummary | null> => ipcRenderer.invoke(IPC.PLUGIN_INSTALL),
+  previewPlugin: (): Promise<PluginPreview | null> => ipcRenderer.invoke(IPC.PLUGIN_PREVIEW),
+  installPreviewedPlugin: (sourceDir: string, digest: string): Promise<PluginSummary> => ipcRenderer.invoke(IPC.PLUGIN_INSTALL_CONFIRMED, sourceDir, digest),
   setPluginEnabled: (id: string, enabled: boolean): Promise<void> => ipcRenderer.invoke(IPC.PLUGIN_SET_ENABLED, id, enabled),
   uninstallPlugin: (id: string): Promise<void> => ipcRenderer.invoke(IPC.PLUGIN_UNINSTALL, id),
   uninstallSkill: (id: string) => ipcRenderer.invoke(IPC.SKILL_UNINSTALL, id),

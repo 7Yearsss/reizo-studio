@@ -14,7 +14,7 @@ import type {
 } from '../shared/extensionConfig';
 import { checkNodeEnvironment, readHookEntries, readMcpEntries, testMcpEntry, writeHookEntries, writeMcpEntries } from './server/plugins/extensionConfig';
 import { fetchPluginCatalog, installCatalogPlugin, searchMcpRegistry } from './server/plugins/catalog';
-import { installPlugin, listPlugins, setPluginEnabled, syncPluginSkillsDirs, uninstallPlugin } from './server/plugins/pluginStore';
+import { installPlugin, listPlugins, previewPlugin, setPluginEnabled, syncPluginSkillsDirs, uninstallPlugin } from './server/plugins/pluginStore';
 import { resetMcpBaseline } from './server/agent/mcpTools';
 import {
   connectDingTalkIntegration,
@@ -70,6 +70,22 @@ export function registerPluginIpc(dataRoot: string, skillsDirs: string[]): void 
     const result = await dialog.showOpenDialog(win, { properties: ['openDirectory'], title: '选择扩展包文件夹' });
     if (result.canceled || !result.filePaths[0]) return null;
     const installed = await installPlugin(dataRoot, result.filePaths[0]);
+    await syncPluginSkillsDirs(dataRoot, skillsDirs);
+    return installed;
+  });
+
+  // Step 1: pick a folder and describe what it would install — nothing is copied or started.
+  ipcMain.handle(IPC.PLUGIN_PREVIEW, async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+    const result = await dialog.showOpenDialog(win, { properties: ['openDirectory'], title: '选择扩展包文件夹' });
+    if (result.canceled || !result.filePaths[0]) return null;
+    return previewPlugin(dataRoot, result.filePaths[0]);
+  });
+
+  // Step 2: install exactly what was previewed; refused if the folder changed in between.
+  ipcMain.handle(IPC.PLUGIN_INSTALL_CONFIRMED, async (_event, sourceDir: string, digest: string) => {
+    if (typeof sourceDir !== 'string' || typeof digest !== 'string') throw new Error('Invalid install request');
+    const installed = await installPlugin(dataRoot, sourceDir, { digest });
     await syncPluginSkillsDirs(dataRoot, skillsDirs);
     return installed;
   });

@@ -46,6 +46,8 @@ export const IPC = {
   HOOKS_LIST: 'reizo:hooks-list',
   HOOKS_SAVE: 'reizo:hooks-save',
   PLUGIN_INSTALL: 'reizo:plugin-install',
+  PLUGIN_PREVIEW: 'reizo:plugin-preview',
+  PLUGIN_INSTALL_CONFIRMED: 'reizo:plugin-install-confirmed',
   PLUGIN_SET_ENABLED: 'reizo:plugin-set-enabled',
   PLUGIN_UNINSTALL: 'reizo:plugin-uninstall',
   SKILL_UNINSTALL: 'reizo:skill-uninstall',

@@ -218,7 +218,7 @@ export async function installCatalogPlugin(dataRoot: string, id: string, fetchIm
   const tmp = await mkdtemp(path.join(os.tmpdir(), 'reizo-plugin-'));
   try {
     await downloadGithubSource(entry.source, tmp, fetchImpl);
-    return await installPlugin(dataRoot, tmp);
+    return await installPlugin(dataRoot, tmp, { remember: false }); // a temp download: nothing to watch for updates
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }

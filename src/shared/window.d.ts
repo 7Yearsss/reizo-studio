@@ -1,5 +1,5 @@
 import type { DirEntry } from './workspace';
-import type { PluginSummary } from './plugins';
+import type { PluginPreview, PluginSummary } from './plugins';
 import type {
   DingTalkConnectParams,
   FeishuConnectParams,
@@ -77,6 +77,8 @@ export interface ReizoBridge {
   saveHooks(entries: HookEntry[]): Promise<void>;
   /** Opens a folder picker and installs the chosen extension pack (disabled until the user enables it). */
   installPlugin(): Promise<PluginSummary | null>;
+  previewPlugin(): Promise<PluginPreview | null>;
+  installPreviewedPlugin(sourceDir: string, digest: string): Promise<PluginSummary>;
   setPluginEnabled(id: string, enabled: boolean): Promise<void>;
   uninstallPlugin(id: string): Promise<void>;
   uninstallSkill(id: string): Promise<void>;

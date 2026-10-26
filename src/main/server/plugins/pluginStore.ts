@@ -1,6 +1,7 @@
+import { createHash } from 'node:crypto';
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { PluginSummary } from '../../../shared/plugins';
+import type { PluginPreview, PluginSummary } from '../../../shared/plugins';
 import { parseHooksConfigDetailed, type HookSpec } from '../agent/hooks';
 import { parseMcpConfig, type McpServerConfig } from '../agent/mcpTools';
 
@@ -147,15 +148,65 @@ export async function inspectPluginDir(dir: string): Promise<Inspection | null> 
   };
 }
 
+/** Where a pack came from and what it contained when installed — the basis for "update available". */
+interface InstalledRecord { digest: string; sourceDir?: string }
+interface PluginState { enabled: Set<string>; installed: Record<string, InstalledRecord> }
+
+async function readState(dataRoot: string): Promise<PluginState> {
+  const parsed = (await readJson(stateFile(dataRoot))) as { enabled?: unknown; installed?: unknown } | undefined;
+  const list = parsed?.enabled;
+  const installed: Record<string, InstalledRecord> = {};
+  if (parsed?.installed && typeof parsed.installed === 'object') {
+    for (const [id, record] of Object.entries(parsed.installed as Record<string, unknown>)) {
+      const r = record as Partial<InstalledRecord>;
+      if (typeof r?.digest === 'string') installed[id] = { digest: r.digest, ...(typeof r.sourceDir === 'string' ? { sourceDir: r.sourceDir } : {}) };
+    }
+  }
+  return { enabled: new Set(Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : []), installed };
+}
+
+async function writeState(dataRoot: string, state: PluginState): Promise<void> {
+  await mkdir(dataRoot, { recursive: true });
+  await writeFile(stateFile(dataRoot), `${JSON.stringify({ enabled: [...state.enabled].sort(), installed: state.installed }, null, 2)}\n`, 'utf8');
+}
+
 async function readEnabled(dataRoot: string): Promise<Set<string>> {
-  const parsed = await readJson(stateFile(dataRoot));
-  const list = (parsed as { enabled?: unknown } | undefined)?.enabled;
-  return new Set(Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : []);
+  return (await readState(dataRoot)).enabled;
 }
 
 async function writeEnabled(dataRoot: string, enabled: Set<string>): Promise<void> {
-  await mkdir(dataRoot, { recursive: true });
-  await writeFile(stateFile(dataRoot), `${JSON.stringify({ enabled: [...enabled].sort() }, null, 2)}\n`, 'utf8');
+  const state = await readState(dataRoot);
+  await writeState(dataRoot, { ...state, enabled });
+}
+
+const DIGEST_SKIPPED = new Set(['.git', 'node_modules']);
+const DIGEST_MAX_FILES = 5_000;
+
+/** Fingerprint of everything a pack contains (paths and bytes), so any change — even with the same version number — shows. */
+export async function digestPluginDir(dir: string): Promise<string> {
+  const hash = createHash('sha256');
+  let files = 0;
+  async function walk(current: string, rel: string): Promise<void> {
+    const entries = (await readdir(current, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
+      if (DIGEST_SKIPPED.has(entry.name)) continue;
+      const relative = rel ? `${rel}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) { await walk(path.join(current, entry.name), relative); continue; }
+      if (!entry.isFile()) continue;
+      if (++files > DIGEST_MAX_FILES) throw new Error('这个扩展包文件太多（超过 5000 个），无法安全校验。');
+      hash.update(relative + '\0');
+      hash.update(await readFile(path.join(current, entry.name)));
+      hash.update('\0');
+    }
+  }
+  await walk(path.resolve(dir), '');
+  return hash.digest('hex');
+}
+
+/** Has the folder this pack was imported from changed since? A missing folder is not an update. */
+async function sourceChanged(record: InstalledRecord): Promise<boolean> {
+  if (!record.sourceDir || !(await exists(record.sourceDir))) return false;
+  try { return (await digestPluginDir(record.sourceDir)) !== record.digest; } catch { return false; }
 }
 
 async function installedDirs(dataRoot: string): Promise<string[]> {
@@ -166,18 +217,41 @@ async function installedDirs(dataRoot: string): Promise<string[]> {
 }
 
 export async function listPlugins(dataRoot: string): Promise<PluginSummary[]> {
-  const enabled = await readEnabled(dataRoot);
+  const { enabled, installed } = await readState(dataRoot);
   const result: PluginSummary[] = [];
   for (const dir of await installedDirs(dataRoot)) {
     const inspection = await inspectPluginDir(dir);
     // The folder name is the identity (`installPlugin` names it), so state keys stay stable.
-    if (inspection) result.push({ ...inspection.summary, id: path.basename(dir), enabled: enabled.has(path.basename(dir)) });
+    if (!inspection) continue;
+    const id = path.basename(dir);
+    const updateAvailable = installed[id] ? await sourceChanged(installed[id]) : false;
+    result.push({ ...inspection.summary, id, enabled: enabled.has(id), ...(updateAvailable ? { updateAvailable: true } : {}) });
   }
   return result.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** Copy a plugin folder in. Replaces an existing copy of the same plugin but keeps its on/off state; new ones start off. */
-export async function installPlugin(dataRoot: string, sourceDir: string): Promise<PluginSummary> {
+/** Look at a folder without installing or starting anything: what it would add, and whether it differs from the installed copy. */
+export async function previewPlugin(dataRoot: string, sourceDir: string): Promise<PluginPreview> {
+  const inspection = await inspectPluginDir(sourceDir);
+  if (!inspection) throw new Error('这个文件夹不是扩展包：需要 plugin.json（.claude-plugin 或 .codex-plugin 下），或者一个 skills 目录。');
+  const digest = await digestPluginDir(sourceDir);
+  const { installed } = await readState(dataRoot);
+  const current = (await listPlugins(dataRoot)).find((p) => p.id === inspection.summary.id);
+  return {
+    sourceDir: path.resolve(sourceDir),
+    digest,
+    summary: inspection.summary,
+    ...(current ? { existing: { version: current.version, sameContent: installed[current.id]?.digest === digest } } : {}),
+  };
+}
+
+/**
+ * Copy a plugin folder in. Replaces an existing copy of the same plugin but keeps its on/off state; new ones start off.
+ * With `expect`, the folder must still match the fingerprint the user was shown, so nothing can change between preview and install.
+ */
+export async function installPlugin(dataRoot: string, sourceDir: string, expect?: { digest?: string; remember?: boolean }): Promise<PluginSummary> {
+  const digest = await digestPluginDir(sourceDir);
+  if (expect?.digest && digest !== expect.digest) throw new Error('这个文件夹在你预览之后发生了变化，已取消安装。请重新预览。');
   const inspection = await inspectPluginDir(sourceDir);
   if (!inspection) throw new Error('这个文件夹不是扩展包：需要 plugin.json（.claude-plugin 或 .codex-plugin 下），或者一个 skills 目录。');
   const id = inspection.summary.id;
@@ -186,10 +260,12 @@ export async function installPlugin(dataRoot: string, sourceDir: string): Promis
   await mkdir(pluginsDir(dataRoot), { recursive: true });
   await rm(dest, { recursive: true, force: true });
   await cp(sourceDir, dest, { recursive: true, filter: (src) => path.basename(src) !== '.git' && path.basename(src) !== 'node_modules' });
-  const enabled = await readEnabled(dataRoot);
+  const state = await readState(dataRoot);
+  state.installed[id] = { digest, ...(expect?.remember === false ? {} : { sourceDir: path.resolve(sourceDir) }) };
+  await writeState(dataRoot, state);
   const installed = (await listPlugins(dataRoot)).find((p) => p.id === id);
   if (!installed) throw new Error('安装后无法读取这个扩展包。');
-  return { ...installed, enabled: enabled.has(id) };
+  return { ...installed, enabled: state.enabled.has(id) };
 }
 
 export async function setPluginEnabled(dataRoot: string, id: string, on: boolean): Promise<void> {
@@ -203,8 +279,10 @@ export async function setPluginEnabled(dataRoot: string, id: string, on: boolean
 export async function uninstallPlugin(dataRoot: string, id: string): Promise<void> {
   assertPluginId(id);
   await rm(path.join(pluginsDir(dataRoot), id), { recursive: true, force: true });
-  const enabled = await readEnabled(dataRoot);
-  if (enabled.delete(id)) await writeEnabled(dataRoot, enabled);
+  const state = await readState(dataRoot);
+  const wasEnabled = state.enabled.delete(id);
+  const hadRecord = delete state.installed[id];
+  if (wasEnabled || hadRecord) await writeState(dataRoot, state);
 }
 
 function assertPluginId(id: string): void {

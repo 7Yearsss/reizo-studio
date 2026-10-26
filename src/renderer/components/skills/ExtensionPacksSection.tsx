@@ -3,6 +3,7 @@ import { Package, Plus, Trash2 } from 'lucide-react';
 import type { PluginSummary } from '../../../shared/plugins';
 import * as skillStore from '../../state/skillStore';
 import { CatalogIcon } from './CatalogIcon';
+import { previewConfirmText } from '../../../shared/pluginPreviewText';
 
 export const PACKS_CHANGED = 'reizo:packs-changed';
 
@@ -37,6 +38,7 @@ function PackCard({ pack, busy, onToggle, onRemove }: { pack: PluginSummary; bus
           <div className="flex flex-wrap items-center gap-2">
             <span className="truncate text-sm font-medium text-ink">{pack.name}</span>
             {pack.version ? <span className="text-xs text-ink-muted">v{pack.version}</span> : null}
+            {pack.updateAvailable ? <span title="你导入它的文件夹内容已经变了；重新导入即可更新" className="rounded-full bg-[color-mix(in_srgb,#d9622b_14%,transparent)] px-1.5 py-0.5 text-[11px] text-[#d9622b]">可更新</span> : null}
             <span className="rounded-full bg-paper-inset px-1.5 py-0.5 text-[11px] text-ink-muted">{FORMAT_LABEL[pack.format]}</span>
           </div>
           {pack.description ? <p className="mt-1 line-clamp-2 text-xs text-ink-muted">{pack.description}</p> : null}
@@ -92,6 +94,15 @@ export default function ExtensionPacksSection() {
     return () => window.removeEventListener(PACKS_CHANGED, onChanged);
   }, [refresh]);
 
+  /** Pick a folder, show exactly what it carries, and only then copy it in (refused if it changes in between). */
+  async function importWithPreview() {
+    const preview = await window.reizo?.previewPlugin?.();
+    if (!preview) return;
+    if (preview.existing?.sameContent) { window.alert(previewConfirmText(preview)); return; }
+    if (!window.confirm(previewConfirmText(preview))) return;
+    await window.reizo?.installPreviewedPlugin?.(preview.sourceDir, preview.digest);
+  }
+
   /** Run an action, then reload packs and skills (a pack's skills appear or vanish with it). */
   async function act(id: string | null, action: () => Promise<unknown>) {
     setBusyId(id ?? '*');
@@ -113,7 +124,7 @@ export default function ExtensionPacksSection() {
         <button
           type="button"
           disabled={busyId !== null}
-          onClick={() => void act(null, () => (window.reizo?.installPlugin ? window.reizo.installPlugin() : Promise.resolve(null)))}
+          onClick={() => void act(null, importWithPreview)}
           className="ml-auto inline-flex items-center gap-1 rounded-full border border-line px-3 py-1 text-xs text-ink-muted transition-colors hover:border-ink-muted hover:text-ink disabled:opacity-50"
         >
           <Plus size={12} />

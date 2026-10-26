@@ -25,4 +25,16 @@ export interface PluginSummary {
   hooks: PluginHookInfo[];
   /** Things the plugin declares that Reizo cannot use (unsupported hook events, unreadable files). */
   warnings: string[];
+  /** The folder it was imported from has changed since (compared by content, so an unchanged version number still shows). */
+  updateAvailable?: boolean;
+}
+
+/** What importing a folder would install — shown to the user BEFORE anything is copied or started. */
+export interface PluginPreview {
+  sourceDir: string;
+  /** Content fingerprint; the install is refused if the folder no longer matches it. */
+  digest: string;
+  summary: Omit<PluginSummary, 'enabled'>;
+  /** Already installed: its version, and whether this import would change anything. */
+  existing?: { version?: string; sameContent: boolean };
 }
