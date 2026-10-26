@@ -1,4 +1,4 @@
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, rename } from 'node:fs/promises';
 import { writeTextAtomic } from './atomicFile';
 import path from 'node:path';
 import { safeStorage } from 'electron';
@@ -68,7 +68,15 @@ export function createProviderStore(root: string) {
   async function readRaw(): Promise<StoredDiskConfig> {
     try {
       const raw = await readFile(file, 'utf8');
-      return JSON.parse(raw) as StoredDiskConfig;
+      try {
+        return JSON.parse(raw) as StoredDiskConfig;
+      } catch (parseError) {
+        if (!(parseError instanceof SyntaxError)) throw parseError;
+        // Corrupt JSON: keep the bytes for recovery and start from defaults instead of failing every request.
+        await rename(file, `${file}.corrupt-${Date.now()}`).catch((): void => undefined);
+        console.warn(`[storage] ${file} was not valid JSON; moved aside and reset`);
+        return { providers: {}, deletedIds: [] };
+      }
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
         return { providers: {}, deletedIds: [] };

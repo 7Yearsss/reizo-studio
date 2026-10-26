@@ -1,4 +1,4 @@
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, rename } from 'node:fs/promises';
 import { writeTextAtomic } from './atomicFile';
 import path from 'node:path';
 import { safeDecrypt, safeEncrypt } from './providerStore';
@@ -48,7 +48,15 @@ export function createSettingsStore(root: string, accountModels?: () => AccountM
   async function readRaw(): Promise<DiskSettings> {
     try {
       const raw = await readFile(file, 'utf8');
-      return JSON.parse(raw) as DiskSettings;
+      try {
+        return JSON.parse(raw) as DiskSettings;
+      } catch (parseError) {
+        if (!(parseError instanceof SyntaxError)) throw parseError;
+        // Corrupt JSON: keep the bytes for recovery and start from defaults instead of failing every request.
+        await rename(file, `${file}.corrupt-${Date.now()}`).catch((): void => undefined);
+        console.warn(`[storage] ${file} was not valid JSON; moved aside and reset`);
+        return {};
+      }
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return {};
       throw err;
