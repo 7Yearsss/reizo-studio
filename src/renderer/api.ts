@@ -1208,3 +1208,21 @@ export interface ContextUsage { usedTokens: number; windowTokens: number; ratio:
 export async function getContextUsage(sessionId: string): Promise<ContextUsage> {
   return (await api(`/api/sessions/${sessionId}/context`)).json();
 }
+
+export interface MemoryItem { fileName: string; name: string; description: string; type: string; body: string; private?: boolean; updatedAt?: string }
+
+export async function listMemory(scope: 'personal' | 'workspace'): Promise<{ available: boolean; entries: MemoryItem[] }> {
+  return (await api(`/api/memory/entries?scope=${scope}`)).json();
+}
+
+export async function saveMemory(file: string, scope: 'personal' | 'workspace', patch: { body: string; private?: boolean; description?: string }): Promise<void> {
+  await api(`/api/memory/entries/${encodeURIComponent(file)}?scope=${scope}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(patch) });
+}
+
+export async function deleteMemory(file: string, scope: 'personal' | 'workspace'): Promise<void> {
+  await api(`/api/memory/${encodeURIComponent(file)}?scope=${scope}`, { method: 'DELETE' });
+}
+
+export async function clearMemory(scope: 'personal' | 'workspace'): Promise<void> {
+  await api(`/api/memory?scope=${scope}`, { method: 'DELETE' });
+}

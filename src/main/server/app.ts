@@ -241,7 +241,7 @@ export function createApp(options: CreateAppOptions) {
       (sessionId) => beforeTurn(sessionId),
     ),
   );
-  app.route('/api/memory', createMemoryRouter(memoryEventsStore, settingsStore));
+  app.route('/api/memory', createMemoryRouter(memoryEventsStore, settingsStore, options.dataRoot));
   app.route('/api/sessions', createSessionArtifactsRouter(artifactStore, sessionStore));
   app.route('/api/artifacts', createArtifactsRouter(artifactStore));
   // One-shot rewrite for the review bar's "重写这条": a plain completion on the configured chat model, no turn or history.

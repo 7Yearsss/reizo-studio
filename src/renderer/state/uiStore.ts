@@ -1,7 +1,7 @@
 import * as tabStore from './tabStore';
 
 export type SidebarMode = 'chat' | 'projects' | 'skills' | 'artifacts' | 'automation' | 'settings';
-export type SettingsSection = 'general' | 'providers' | 'extensions' | 'usage' | 'storage' | 'about';
+export type SettingsSection = 'general' | 'providers' | 'memory' | 'extensions' | 'usage' | 'storage' | 'about';
 export type RightPanelTab = 'canvas' | 'video' | 'sheets' | 'documents' | 'presentations' | 'artifacts' | 'files' | 'git' | 'terminal';
 
 export interface UiState {
