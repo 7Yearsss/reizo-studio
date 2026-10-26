@@ -92,13 +92,21 @@ export function createSessionsRouter(sessionStore: SessionStore, artifactStore?:
     const body = await c.req.json().catch(() => ({}));
     const hasTitle = typeof body?.title === 'string' && body.title.trim();
     const hasProject = body?.projectId === null || typeof body?.projectId === 'string';
-    if (!hasTitle && !hasProject) {
-      return c.json({ error: 'title or projectId is required' }, 400);
+    const pinned = typeof body?.pinned === 'boolean' ? body.pinned : undefined;
+    const archived = typeof body?.archived === 'boolean' ? body.archived : undefined;
+    if (!hasTitle && !hasProject && pinned === undefined && archived === undefined) {
+      return c.json({ error: 'title, projectId, pinned or archived is required' }, 400);
+    }
+    // A running turn would keep working in a session the user just tucked away; make them stop it first (or say force).
+    if (archived && isSessionTurnLive(c.req.param('id')) && body?.force !== true) {
+      return c.json({ error: 'Session is running', code: 'session_running' }, 409);
     }
     try {
       const session = await sessionStore.update(c.req.param('id'), {
         title: hasTitle ? body.title : undefined,
         projectId: hasProject ? body.projectId : undefined,
+        pinned,
+        archived,
       });
       return c.json({ session });
     } catch {

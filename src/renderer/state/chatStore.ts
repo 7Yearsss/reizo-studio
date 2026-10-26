@@ -336,6 +336,14 @@ export async function renameSession(id: string, title: string): Promise<void> {
   tabStore.renameChatTab(id, title);
 }
 
+/** Pin / unpin / archive / restore. Archiving a running session throws ApiRequestError(409) unless `force`. */
+export async function setSessionOrganized(id: string, patch: { pinned?: boolean; archived?: boolean; force?: boolean }): Promise<void> {
+  const session = await api.patchSession(id, patch);
+  setState({
+    sessions: state.sessions.map((s) => (s.id === id ? { ...s, pinnedAt: session.pinnedAt ?? null, archivedAt: session.archivedAt ?? null } : s)),
+  });
+}
+
 export async function restoreSession(id: string): Promise<void> {
   await api.restoreSession(id);
   await loadSessions();

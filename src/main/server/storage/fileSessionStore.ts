@@ -98,7 +98,12 @@ export function createFileSessionStore(root: string): SessionStore {
       if (patch.projectId !== undefined) {
         session.projectId = patch.projectId;
       }
-      session.updatedAt = new Date().toISOString();
+      if (patch.pinned !== undefined) session.pinnedAt = patch.pinned ? new Date().toISOString() : null;
+      if (patch.archived !== undefined) {
+        session.archivedAt = patch.archived ? new Date().toISOString() : null;
+        if (patch.archived) session.pinnedAt = null;
+      }
+      if ((typeof patch.title === 'string' && patch.title.trim()) || patch.projectId !== undefined) session.updatedAt = new Date().toISOString();
       await writeSession(session);
       return session;
     },

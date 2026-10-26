@@ -45,6 +45,10 @@ export const sessions = sqliteTable('sessions', {
 
   // Trash: soft-deleted sessions are hidden from lists and purged after the retention period.
   deletedAt: integer('deleted_at'),
+
+  // Organising: pinned sessions sort first, archived ones move to their own fold. Neither changes updatedAt.
+  pinnedAt: integer('pinned_at'),
+  archivedAt: integer('archived_at'),
 });
 
 export const messages = sqliteTable(

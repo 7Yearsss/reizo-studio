@@ -266,4 +266,8 @@ export const MIGRATIONS: Migration[] = [
     `ALTER TABLE sessions ADD COLUMN deleted_at integer`,
     `CREATE INDEX sessions_deleted_idx ON sessions(deleted_at)`,
   ] },
+  { name: '0016_session_pin_archive', statements: [
+    `ALTER TABLE sessions ADD COLUMN pinned_at integer`,
+    `ALTER TABLE sessions ADD COLUMN archived_at integer`,
+  ] },
 ];

@@ -216,7 +216,7 @@ export async function listSessionsByProject(projectId: string): Promise<SessionS
 
 export async function patchSession(
   id: string,
-  patch: { title?: string; projectId?: string | null },
+  patch: { title?: string; projectId?: string | null; pinned?: boolean; archived?: boolean; force?: boolean },
 ): Promise<Session> {
   const res = await api(`/api/sessions/${id}`, {
     method: 'PATCH',

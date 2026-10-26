@@ -115,6 +115,9 @@ export interface SessionSummary {
   listPreview?: string | null;
   listPreviewRole?: ChatRole | null;
   listMessageCount?: number;
+  /** ISO time the session was pinned / archived; absent when it is not. Neither moves `updatedAt`. */
+  pinnedAt?: string | null;
+  archivedAt?: string | null;
   /** Unanswered interaction waiting on the user — sidebar rows badge it. */
   pendingInteraction?: 'ask' | 'permission' | null;
 }
@@ -141,6 +144,8 @@ export const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 export interface SessionPatch {
   title?: string;
   projectId?: string | null;
+  pinned?: boolean;
+  archived?: boolean;
 }
 
 /**

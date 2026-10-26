@@ -36,6 +36,8 @@ interface SessionRowRaw {
   list_preview_role: string | null;
   list_message_count: number;
   deleted_at: number | null;
+  pinned_at: number | null;
+  archived_at: number | null;
 }
 
 interface MessageRowRaw {
@@ -69,6 +71,8 @@ function toSummary(row: SessionRowRaw): SessionSummary {
     listPreview: row.list_preview,
     listPreviewRole: (row.list_preview_role as ChatRole | null) ?? null,
     listMessageCount: row.list_message_count,
+    pinnedAt: iso(row.pinned_at),
+    archivedAt: iso(row.archived_at),
   };
 }
 
@@ -322,9 +326,16 @@ export function createSqliteSessionStore(handle: DbHandle): SessionStore & TurnR
         const title =
           typeof patch.title === 'string' && patch.title.trim() ? patch.title.trim() : current.title;
         const projectId = patch.projectId !== undefined ? patch.projectId : current.projectId ?? null;
+        const touched = (typeof patch.title === 'string' && patch.title.trim() !== '') || patch.projectId !== undefined;
         raw
           .prepare('UPDATE sessions SET title = ?, project_id = ?, updated_at = ? WHERE id = ?')
-          .run(title, projectId, Date.now(), id);
+          .run(title, projectId, touched ? Date.now() : Date.parse(current.updatedAt), id);
+        const now = Date.now();
+        if (patch.pinned !== undefined) raw.prepare('UPDATE sessions SET pinned_at = ? WHERE id = ?').run(patch.pinned ? now : null, id);
+        if (patch.archived !== undefined) {
+          // Archiving drops the pin: an archived session should not still claim the top of the list.
+          raw.prepare('UPDATE sessions SET archived_at = ?, pinned_at = CASE WHEN ? THEN NULL ELSE pinned_at END WHERE id = ?').run(patch.archived ? now : null, patch.archived ? 1 : 0, id);
+        }
         return requireSession(id);
       });
     },

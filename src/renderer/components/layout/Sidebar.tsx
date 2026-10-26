@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import {
+  Archive,
+  ArchiveRestore,
   ChevronRight,
   CirclePlus,
   LayoutGrid,
   Pencil,
+  Pin,
+  PinOff,
   Plus,
   Sparkles,
   SquarePen,
@@ -23,6 +27,7 @@ import * as uiStore from '../../state/uiStore';
 import * as api from '../../api';
 import type { DirEntry } from '../../../shared/workspace';
 import type { SessionSummary } from '../../../shared/chat';
+import { organizeSessions } from '../../../shared/sessionOrganize';
 import type { ChatInteraction } from '../../state/chatStore';
 import {
   ContextMenu,
@@ -51,6 +56,34 @@ async function deleteWithUndo(id: string, title: string): Promise<void> {
   });
 }
 import Tooltip from '../ui/Tooltip';
+
+/** Archive tucks a conversation away without deleting it. A running one is not archived silently: the toast offers to stop it first. */
+async function archiveSession(session: SessionSummary): Promise<void> {
+  try {
+    await chatStore.setSessionOrganized(session.id, { archived: true });
+  } catch (error) {
+    if (error instanceof api.ApiRequestError && error.status === 409) {
+      toast.show({
+        title: `「${session.title}」还在运行`,
+        status: 'info',
+        duration: 8000,
+        action: {
+          label: '停止并归档',
+          onClick: () => void chatStore.stopMessage(session.id).then(() => chatStore.setSessionOrganized(session.id, { archived: true, force: true })),
+        },
+      });
+      return;
+    }
+    toast.error('无法归档', error instanceof Error ? error.message : undefined);
+    return;
+  }
+  toast.show({
+    title: `已归档「${session.title}」`,
+    status: 'info',
+    duration: 5000,
+    action: { label: '撤销', onClick: () => void chatStore.setSessionOrganized(session.id, { archived: false }) },
+  });
+}
 
 const COLLAPSE_KEY = 'reizo:sidebar-collapsed';
 const FOLDER_FOLD_KEY = 'reizo:sidebar-folders';
@@ -140,6 +173,26 @@ function SessionContextMenu({
             </span>
           </ContextMenuItem>
         )}
+        {session.archivedAt ? (
+          <ContextMenuItem onSelect={() => void chatStore.setSessionOrganized(session.id, { archived: false })}>
+            <span className="flex items-center gap-2">
+              <ArchiveRestore size={13} /> 取消归档
+            </span>
+          </ContextMenuItem>
+        ) : (
+          <>
+            <ContextMenuItem onSelect={() => void chatStore.setSessionOrganized(session.id, { pinned: !session.pinnedAt })}>
+              <span className="flex items-center gap-2">
+                {session.pinnedAt ? <PinOff size={13} /> : <Pin size={13} />} {session.pinnedAt ? '取消置顶' : '置顶'}
+              </span>
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => void archiveSession(session)}>
+              <span className="flex items-center gap-2">
+                <Archive size={13} /> 归档
+              </span>
+            </ContextMenuItem>
+          </>
+        )}
         <ContextMenuSeparator className="my-1 h-px bg-line" />
         <ContextMenuItem
           tone="destructive"
@@ -190,6 +243,7 @@ export default function Sidebar() {
     }
   });
   const [trashOpen, setTrashOpen] = useState(false);
+  const [archivedOpen, setArchivedOpen] = useState(false);
   const [chatsOpen, setChatsOpen] = useState(() => localStorage.getItem(CHATS_FOLD_KEY) !== '0');
 
   useEffect(() => {
@@ -234,6 +288,11 @@ export default function Sidebar() {
   const q = query.trim().toLowerCase();
   const matches = (session: SessionSummary) => !q || session.title.toLowerCase().includes(q);
 
+  // Pinned rows float above the folders; archived ones live in their own fold at the bottom.
+  const organized = organizeSessions(sessions);
+  const pinnedVisible = organized.pinned.filter(matches);
+  const archivedVisible = organized.archived.filter(matches);
+
   // A project is a workspace folder: one row per distinct `workspacePath` seen on any session, plus the
   // currently selected folder so it shows up the moment it is picked, before its first message.
   const folderGroups = (() => {
@@ -241,7 +300,7 @@ export default function Sidebar() {
     const keyOf = folderKey;
     if (workspacePath) map.set(keyOf(workspacePath), { path: workspacePath, sessions: [] });
     const loose: SessionSummary[] = [];
-    for (const session of sessions) {
+    for (const session of organized.rest) {
       if (!session.workspacePath) { loose.push(session); continue; }
       const key = keyOf(session.workspacePath);
       const group = map.get(key) ?? { path: session.workspacePath, sessions: [] };
@@ -516,7 +575,13 @@ export default function Sidebar() {
         </div>
         {chatsOpen && (
           <nav className="anim-fade min-h-0 flex-1 space-y-0.5 overflow-y-auto px-1 pb-2">
-            {folderGroups.groups.length === 0 && folderGroups.loose.length === 0 && !q && (
+            {pinnedVisible.length > 0 && (
+              <div className="pb-1">
+                <p className="px-3 pb-0.5 pt-1 text-[11px] text-ink-muted">置顶</p>
+                {pinnedVisible.map(renderSession)}
+              </div>
+            )}
+            {folderGroups.groups.length === 0 && folderGroups.loose.length === 0 && pinnedVisible.length === 0 && !q && (
               <p className="px-3 py-1.5 text-xs text-ink-muted">暂无会话</p>
             )}
             {folderGroups.groups.map((group) => {
@@ -583,6 +648,16 @@ export default function Sidebar() {
       </div>
 
       <div className="shrink-0">
+        {organized.archived.length > 0 && (
+          <>
+            <button type="button" onClick={() => setArchivedOpen((v) => !v)} className={foldRow} aria-expanded={archivedOpen || !!q}>
+              <ChevronRight size={14} className={cn('shrink-0 transition-transform duration-150 ease-[var(--ease-out)] motion-reduce:transition-none', (archivedOpen || !!q) && 'rotate-90')} />
+              已归档
+              <span className="text-ink-muted/70">{organized.archived.length}</span>
+            </button>
+            {(archivedOpen || !!q) && <div className="max-h-40 space-y-0.5 overflow-y-auto px-1">{archivedVisible.map(renderSession)}</div>}
+          </>
+        )}
         <button type="button" onClick={() => setTrashOpen((v) => !v)} className={foldRow} aria-expanded={trashOpen}>
           <ChevronRight size={14} className={cn('shrink-0 transition-transform duration-150 ease-[var(--ease-out)] motion-reduce:transition-none', trashOpen && 'rotate-90')} />
           最近删除
