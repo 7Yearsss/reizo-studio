@@ -8,8 +8,10 @@ export interface GuardFinding { reason: string }
 
 // Zero-width space, word joiner & invisible operators, bidi overrides/isolates, LRM/RLM. ZWJ/ZWNJ are left alone:
 // emoji sequences and some scripts depend on them.
-const INVISIBLE = /[​‎‏‪-‮⁠-⁤⁦-⁩]/;
-const MID_TEXT_BOM = /.﻿/s;
+// Built from code points so no invisible character has to sit in this source file.
+const ch = (code: number): string => String.fromCharCode(code);
+const INVISIBLE = new RegExp(`[${ch(0x200b)}${ch(0x200e)}${ch(0x200f)}${ch(0x202a)}-${ch(0x202e)}${ch(0x2060)}-${ch(0x2064)}${ch(0x2066)}-${ch(0x2069)}]`);
+const MID_TEXT_BOM = new RegExp(`.${ch(0xfeff)}`, 's');
 
 const INJECTION: Array<{ re: RegExp; reason: string }> = [
   { re: /ignore\s+(?:all\s+|any\s+)?(?:the\s+)?(?:previous|prior|above|earlier)\s+(?:instructions?|prompts?|rules?)/i, reason: 'prompt injection ("ignore previous instructions")' },
