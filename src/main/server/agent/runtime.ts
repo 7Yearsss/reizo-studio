@@ -57,6 +57,7 @@ import { createTurnTraceCollector, writeTurnTrace } from './turnTrace';
 import { readWorkspaceMemory } from '../../workspaceMemory';
 import { formatRules, readRuleSources } from './workspaceRules';
 import { createSkillTools } from './skillTools';
+import { messagesForModel } from '../../../shared/compactBoundary';
 import { applyRunCeiling, effectiveRunMode, READ_ONLY_RUN_NOTICE } from './runCeiling';
 import type { RunPermission } from '../../../shared/schedule';
 import type { MemoryEntry } from '../../workspaceMemoryDir';
@@ -434,8 +435,10 @@ export async function runChatTurn(options: {
   const history: ModelMessage[] = [];
   // Reference blocks (sheet data, selections) are only fresh for the turn they
   // were sent in; older ones collapse to an identity line so history stays small.
-  const currentUserIndex = session.messages.findLastIndex((m) => m.role === 'user');
-  for (const [index, message] of session.messages.entries()) {
+  // A compaction boundary swaps everything before it for a summary; the full transcript stays in the session.
+  const modelMessages = messagesForModel(session.messages);
+  const currentUserIndex = modelMessages.findLastIndex((m) => m.role === 'user');
+  for (const [index, message] of modelMessages.entries()) {
     if (message.role === 'user') {
       history.push({ role: 'user', content: index === currentUserIndex ? message.content : compactReferenceContext(message.content) });
       continue;

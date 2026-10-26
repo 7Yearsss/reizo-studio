@@ -61,7 +61,7 @@ export function snipOldTurns(
   const snipped = snipEnd - 1;
   const stub: ModelMessage = {
     role: 'user' as const,
-    content: `[Earlier ${snipped} conversation turns were compacted to save context window (${estimatedTokens} estimated tokens). The key findings and tool results from those turns have been incorporated into subsequent messages.]`,
+    content: `[Earlier ${snipped} conversation turns were left out to fit the context window (${estimatedTokens} estimated tokens) and no summary of them exists. Do not assume you remember their content; if you need a detail from them, ask the user. (The user can run /compact to have the earlier conversation summarised instead.)]`,
   };
 
   return [

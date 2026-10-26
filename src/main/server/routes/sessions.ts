@@ -3,11 +3,12 @@ import { hasTrash, TRASH_RETENTION_MS, type SessionStore } from '../../../shared
 import type { ArtifactStore } from '../storage/artifactStore';
 import { pendingInteractionKindForSession } from '../agent/permissions';
 import { isSessionTurnLive } from '../agent/session';
+import { compactSession, type RewriteText } from '../agent/compaction';
 import { closeSessionMcp } from '../agent/mcpTools';
 import { buildSessionExport, sessionToMarkdown } from '../../../shared/sessionExport';
 
 export function createSessionsRouter(sessionStore: SessionStore, artifactStore?: ArtifactStore,
-  prepareRemove?: (sessionId: string) => (() => void) | void) {
+  prepareRemove?: (sessionId: string) => (() => void) | void, rewriteText?: RewriteText) {
   const router = new Hono();
 
   // Retention sweep at boot: trashed sessions past the retention period go for good, artifacts included.
@@ -16,6 +17,19 @@ export function createSessionsRouter(sessionStore: SessionStore, artifactStore?:
       .then(async (ids) => { if (artifactStore) for (const id of ids) await artifactStore.removeBySession(id); })
       .catch((error) => console.warn('[sessions] trash purge failed', error));
   }
+
+  // /compact: replace the older part of the conversation with a model-written summary (the transcript stays).
+  router.post('/:id/compact', async (c) => {
+    if (!rewriteText) return c.json({ error: 'compaction is not configured' }, 400);
+    const id = c.req.param('id');
+    if (isSessionTurnLive(id)) return c.json({ error: '会话正在运行，请等它结束后再压缩' }, 409);
+    try {
+      const result = await compactSession({ sessionStore, sessionId: id, rewriteText, keepRecentTurns: 1, source: 'manual' });
+      return c.json(result);
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 502);
+    }
+  });
 
   router.get('/trash', async (c) => {
     if (!hasTrash(sessionStore)) return c.json({ sessions: [] });

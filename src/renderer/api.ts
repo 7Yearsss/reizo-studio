@@ -1195,3 +1195,9 @@ export async function getPersonalRules(): Promise<{ text: string; maxChars: numb
 export async function savePersonalRules(text: string): Promise<void> {
   await api('/api/settings/personal-rules', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
 }
+
+export interface CompactResult { compacted: boolean; summarized: number; reason?: string }
+
+export async function compactSession(sessionId: string): Promise<CompactResult> {
+  return (await api(`/api/sessions/${sessionId}/compact`, { method: 'POST' })).json();
+}

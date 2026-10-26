@@ -42,6 +42,7 @@ export function buildSlashCommands(skills: SkillSummary[]): SlashCommand[] {
   return [
     { id: 'new', name: 'new', description: '打开新对话', kind: 'builtin' },
     { id: 'settings', name: 'settings', description: '打开设置', kind: 'builtin' },
+    { id: 'compact', name: 'compact', description: '压缩较早的对话，腾出上下文（完整记录保留）', kind: 'builtin' },
     ...skills.map((skill) => ({
       id: skill.id,
       name: skill.id,

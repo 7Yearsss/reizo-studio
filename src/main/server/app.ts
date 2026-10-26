@@ -218,12 +218,6 @@ export function createApp(options: CreateAppOptions) {
   const memoryEventsStore = createMemoryEventsStore(options.dataRoot);
   const scheduleStore = options.scheduleStore ?? createScheduleStore(options.dataRoot);
   const thoughtStore = options.thoughtStore ?? createThoughtStore(options.dataRoot);
-  app.route('/api/sessions', createSessionsRouter(sessionStore, artifactStore, (sessionId) => {
-    void closeSessionMcp(sessionId);
-    const canvasId = canvasStore.findCanvasBySession(sessionId)?.id;
-    if (!canvasId) return;
-    return () => { stopCanvasRun(canvasId, canvasStore); };
-  }));
   app.route(
     '/api/sessions',
     createChatRouter(
@@ -255,6 +249,12 @@ export function createApp(options: CreateAppOptions) {
     return text;
   };
   app.route('/api', createDocumentsRouter(artifactStore, sessionStore, artifactReviews, rewriteText));
+  app.route('/api/sessions', createSessionsRouter(sessionStore, artifactStore, (sessionId) => {
+    void closeSessionMcp(sessionId);
+    const canvasId = canvasStore.findCanvasBySession(sessionId)?.id;
+    if (!canvasId) return;
+    return () => { stopCanvasRun(canvasId, canvasStore); };
+  }, rewriteText));
   app.route('/api/sessions', createPresentationsRouter(artifactStore, sessionStore));
   app.route('/api/refs', createRefsRouter(largeValueStore));
   app.route('/api/projects', createProjectsRouter(projectStore, sessionStore));

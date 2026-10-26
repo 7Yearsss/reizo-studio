@@ -35,7 +35,7 @@ import { useSheetWorkspace, sheetMentions, pinSheetSelection, clearPinnedSheets,
 import { labelSheetRanges, sameSheetPlace } from '../../../shared/sheetReferences';
 import { serializeSheetReference } from '../../../shared/sheetReferences';
 import { MAX_SHEET_UPLOAD_BYTES } from '../../../shared/sheetFile';
-import { importSheet, importDocument, importPresentation } from '../../api';
+import { importSheet, importDocument, importPresentation, compactSession } from '../../api';
 import * as artifactStore from '../../state/artifactStore';
 import * as uiStore from '../../state/uiStore';
 import { Button } from '../ui/button';
@@ -465,6 +465,20 @@ export default function Composer({
   }, [sessionId, focusComposer]);
 
   function pickSlash(command: SlashCommand, args: string) {
+    if (command.id === 'compact') {
+      setDraft('');
+      if (!sessionId) return;
+      const progress = toast.loading('正在压缩较早的对话…');
+      void compactSession(sessionId).then(
+        (result) => {
+          toast.dismiss(progress);
+          if (result.compacted) toast.success('已压缩较早的对话', '模型之后只看摘要和最近一轮；完整记录仍在这里');
+          else toast.info(result.reason === 'empty_summary' ? '没有生成有效摘要，未改动' : '对话还很短，无需压缩');
+        },
+        (error: unknown) => { toast.dismiss(progress); toast.error('压缩失败', error instanceof Error ? error.message : undefined); },
+      );
+      return;
+    }
     setSkillId(command.id);
     setDraft(applySlashArgs(command.prompt, args));
     // The palette button steals focus on click — hand it back to the textarea

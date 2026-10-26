@@ -1,4 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { isCompactBoundary } from '../../../shared/compactBoundary';
+import CompactDivider from './CompactDivider';
 import { ArrowDown } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import type { ChatMessage } from '../../../shared/chat';
@@ -177,7 +179,9 @@ export default function MessageList({
                 </div>
               }
             >
-              {m.role === 'user' ? (
+              {isCompactBoundary(m) ? (
+                <CompactDivider message={m} />
+              ) : m.role === 'user' ? (
                 <UserMessage
                   content={m.content}
                   sessionId={sessionId}
