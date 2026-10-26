@@ -4,6 +4,8 @@ import { createMCPClient, type MCPClient } from '@ai-sdk/mcp';
 import { Experimental_StdioMCPTransport as StdioMCPTransport } from '@ai-sdk/mcp/mcp-stdio';
 import { detectToolDrift, fingerprintTools } from 'ai';
 import type { PermissionMode } from '../../../shared/settings';
+import { z } from 'zod';
+import { MCP_META_THRESHOLD, searchTools } from '../../../shared/toolSearch';
 import { ApprovalRequiredError, requestPermission } from './permissions';
 import { guardChildCommand } from './childGuard';
 
@@ -242,8 +244,33 @@ function buildMcpToolset(
     };
   }
 
+  // Past the threshold, the model gets a fixed pair of tools instead of one definition per MCP tool: it searches,
+  // then calls by name. Each call still goes through the real tool's own approval, so grants and cards are unchanged.
+  const exposed = tools;
+  const catalog = [...poolEntry.entries.entries()].map(([name, { raw, serverName }]) => ({ name, server: serverName, description: String(raw.description ?? ''), schema: (raw.inputSchema as { jsonSchema?: unknown } | undefined)?.jsonSchema }));
+  const useMeta = catalog.length > MCP_META_THRESHOLD;
+  const metaTools: Record<string, unknown> = useMeta ? {
+    mcp_search: {
+      description: `Search the ${catalog.length} external (MCP) tools available to you by what you want to do; returns the best matches with their exact names and input schemas. Call one with mcp_call.`,
+      inputSchema: z.object({ query: z.string().describe('What you want to do, in a few words.') }),
+      execute: async ({ query }: { query: string }) => ({
+        total: catalog.length,
+        matches: searchTools(catalog, query, 8).map((t) => ({ name: t.name, server: t.server, description: t.description.slice(0, 300), inputSchema: t.schema })),
+      }),
+    },
+    mcp_call: {
+      description: 'Call an external (MCP) tool found with mcp_search, by its exact name. The tool is approved and runs exactly as if you had called it directly.',
+      inputSchema: z.object({ name: z.string().describe('Exact tool name from mcp_search.'), input: z.record(z.string(), z.unknown()).optional().describe('Arguments for that tool.') }),
+      execute: async ({ name, input }: { name: string; input?: Record<string, unknown> }, toolOptions: { toolCallId: string; messages: unknown[]; abortSignal?: AbortSignal }) => {
+        const target = exposed[name] as ExecutableTool | undefined;
+        if (!target?.execute) return { error: `No external tool "${name}". Use mcp_search to find the exact name.` };
+        return target.execute(input ?? {}, toolOptions);
+      },
+    },
+  } : {};
+
   return {
-    tools,
+    tools: useMeta ? metaTools : tools,
     warnings: poolEntry.warnings,
     async executeApproved(name, args, toolCallId) {
       const item = poolEntry.entries.get(name);
