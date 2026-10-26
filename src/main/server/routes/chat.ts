@@ -78,10 +78,14 @@ export function createChatRouter(
         )
       : [];
 
+    // A project can set the skill and model its conversations start with. A skill the user picked for this message wins.
+    const inSession = projectStore ? await sessionStore.get(sessionId) : null;
+    const project = inSession?.projectId && projectStore ? await projectStore.get(inSession.projectId).catch((): null => null) : null;
+    const skillId = typeof body.skillId === 'string' && body.skillId.trim() ? body.skillId : project?.defaultSkillId;
     let skill = null;
     const availableSkills = await loadSkills(skillsDirs).catch((): Skill[] => []);
-    if (typeof body.skillId === 'string' && body.skillId.trim()) {
-      skill = availableSkills.find((item) => item.id === body.skillId) ?? null;
+    if (skillId) {
+      skill = availableSkills.find((item) => item.id === skillId) ?? null;
     }
 
     if (body.regenerate !== true) await beforeTurn?.(sessionId).catch((): void => undefined);
@@ -91,8 +95,9 @@ export function createChatRouter(
       settingsStore,
       sessionId,
       userText: body.text,
-      providerId: typeof body.providerId === 'string' ? body.providerId : undefined,
-      model: typeof body.model === 'string' ? body.model : undefined,
+      // The picker is global and always sent, so a project that sets a model is the one place that overrides it.
+      providerId: project?.defaultModel ? project.defaultModel.providerId : typeof body.providerId === 'string' ? body.providerId : undefined,
+      model: project?.defaultModel ? project.defaultModel.model : typeof body.model === 'string' ? body.model : undefined,
       mentions,
       skill,
       attachments,

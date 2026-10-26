@@ -72,6 +72,14 @@ export function createProjectStore(root: string) {
       if (patch.instructions !== undefined) {
         project.instructions = patch.instructions?.trim() || undefined;
       }
+      if (patch.defaultSkillId !== undefined) project.defaultSkillId = patch.defaultSkillId?.trim() || undefined;
+      if (patch.defaultModel !== undefined) {
+        project.defaultModel = patch.defaultModel && patch.defaultModel.model.trim()
+          ? { model: patch.defaultModel.model.trim(), ...(patch.defaultModel.providerId?.trim() ? { providerId: patch.defaultModel.providerId.trim() } : {}) }
+          : undefined;
+      }
+      if (patch.pinned !== undefined) project.pinned = patch.pinned || undefined;
+      if (patch.archived !== undefined) project.archivedAt = patch.archived ? (project.archivedAt ?? new Date().toISOString()) : undefined;
       project.updatedAt = new Date().toISOString();
       await writeProject(project);
       return project;

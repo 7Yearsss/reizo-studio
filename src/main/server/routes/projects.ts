@@ -19,7 +19,10 @@ export function createProjectsRouter(projectStore: ProjectStore, sessionStore: S
       description: typeof body?.description === 'string' ? body.description : undefined,
       instructions: typeof body?.instructions === 'string' ? body.instructions : undefined,
     });
-    return c.json({ project }, 201);
+    const created = typeof body?.defaultSkillId === 'string' && body.defaultSkillId.trim()
+      ? await projectStore.update(project.id, { defaultSkillId: body.defaultSkillId })
+      : project;
+    return c.json({ project: created }, 201);
   });
 
   router.get('/:id', async (c) => {
@@ -36,6 +39,11 @@ export function createProjectsRouter(projectStore: ProjectStore, sessionStore: S
         description: body?.description === null || typeof body?.description === 'string' ? body.description : undefined,
         instructions:
           body?.instructions === null || typeof body?.instructions === 'string' ? body.instructions : undefined,
+        defaultSkillId: body?.defaultSkillId === null || typeof body?.defaultSkillId === 'string' ? body.defaultSkillId : undefined,
+        defaultModel:
+          body?.defaultModel === null || (body?.defaultModel && typeof body.defaultModel.model === 'string') ? body.defaultModel : undefined,
+        pinned: typeof body?.pinned === 'boolean' ? body.pinned : undefined,
+        archived: typeof body?.archived === 'boolean' ? body.archived : undefined,
       });
       return c.json({ project });
     } catch {

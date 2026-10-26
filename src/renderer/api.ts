@@ -566,6 +566,7 @@ export async function createProject(input: {
   name: string;
   description?: string;
   instructions?: string;
+  defaultSkillId?: string;
 }): Promise<Project> {
   const res = await api('/api/projects', {
     method: 'POST',
@@ -584,7 +585,7 @@ export async function getProject(id: string): Promise<Project> {
 
 export async function patchProject(
   id: string,
-  patch: { name?: string; description?: string | null; instructions?: string | null },
+  patch: import('../shared/project').ProjectPatch,
 ): Promise<Project> {
   const res = await api(`/api/projects/${id}`, {
     method: 'PATCH',

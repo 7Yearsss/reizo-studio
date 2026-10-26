@@ -32,6 +32,7 @@ export async function createProject(input: {
   name: string;
   description?: string;
   instructions?: string;
+  defaultSkillId?: string;
 }): Promise<Project> {
   const project = await api.createProject(input);
   setState({ projects: [project, ...state.projects.filter((p) => p.id !== project.id)] });

@@ -3,6 +3,7 @@ import { FolderKanban, X } from 'lucide-react';
 import * as projectStore from '../../state/projectStore';
 import * as uiStore from '../../state/uiStore';
 import { toast } from '../../lib/toast';
+import { useSkillStore } from '../../state/useSkillStore';
 import { Input } from '../motion/input';
 import { StatefulButton, type ButtonState } from '../motion/button/stateful';
 import { CenterMorphModal, CenterMorphModalContent } from '../motion/center-morph-modal';
@@ -17,6 +18,8 @@ export default function ProjectDialog({
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [instructions, setInstructions] = useState('');
+  const [defaultSkillId, setDefaultSkillId] = useState('');
+  const skills = useSkillStore().skills;
   const [error, setError] = useState<string | null>(null);
   const [btnState, setBtnState] = useState<ButtonState>('idle');
 
@@ -24,6 +27,7 @@ export default function ProjectDialog({
     setName('');
     setDescription('');
     setInstructions('');
+    setDefaultSkillId('');
     setError(null);
     setBtnState('idle');
   }
@@ -44,6 +48,7 @@ export default function ProjectDialog({
         name: trimmed,
         description: description.trim() || undefined,
         instructions: instructions.trim() || undefined,
+        defaultSkillId: defaultSkillId || undefined,
       });
       setBtnState('success');
       toast.success(`项目「${project.name}」已创建`);
@@ -128,6 +133,20 @@ export default function ProjectDialog({
                 placeholder="告诉 Agent 这个项目需要遵守的背景、语气或技术约束"
                 className="w-full resize-y rounded-[9px] border border-line/60 bg-paper px-3 py-2.5 text-sm leading-5 text-ink outline-none transition-colors focus:border-accent"
               />
+            </label>
+
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-medium text-ink-muted">
+                默认技能 <span className="font-normal opacity-70">可选 · 项目内的对话自动使用</span>
+              </span>
+              <select
+                value={defaultSkillId}
+                onChange={(e) => setDefaultSkillId(e.target.value)}
+                className="w-full rounded-[9px] border border-line/60 bg-paper px-3 py-2 text-sm text-ink outline-none transition-colors focus:border-accent"
+              >
+                <option value="">不指定</option>
+                {skills.map((skill) => <option key={skill.id} value={skill.id}>/{skill.id} · {skill.name}</option>)}
+              </select>
             </label>
 
             {error ? (
