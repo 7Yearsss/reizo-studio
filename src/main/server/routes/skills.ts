@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import type { SessionStore } from '../../../shared/chat';
 import { loadSkills, type Skill } from '../../skills';
 import { applySkillRefinement, proposeSkillRefinement } from '../agent/skillRefiner';
+import { listSkillHistory, readSkillSnapshot } from '../agent/skillHistory';
 
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp']);
 
@@ -153,6 +154,30 @@ export function createSkillsRouter(
         experienceEntry: body.experienceEntry ?? null,
       });
       return c.json({ ok: true, ...saved });
+    } catch (error) {
+      return c.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
+    }
+  });
+
+  /** Versions a skill had before each refinement, newest first. */
+  router.get('/:id/history', async (c) => {
+    if (!options?.dataRoot) return c.json({ history: [] });
+    return c.json({ history: await listSkillHistory(path.join(options.dataRoot, 'skills', c.req.param('id'))) });
+  });
+
+  /** Put an earlier version back; the version being replaced is kept too, so a restore can be undone. */
+  router.post('/:id/history/restore', async (c) => {
+    if (!options?.dataRoot) return c.json({ error: 'skill history is not configured' }, 400);
+    const id = c.req.param('id');
+    const body = (await c.req.json().catch(() => ({}))) as { file?: string };
+    const skillDir = path.join(options.dataRoot, 'skills', id);
+    const content = body.file ? await readSkillSnapshot(skillDir, body.file) : null;
+    if (content === null) return c.json({ error: 'snapshot not found' }, 404);
+    const skill = (await loadSkills(dirs)).find((item) => item.id === id);
+    if (!skill) return c.json({ error: 'skill not found' }, 404);
+    try {
+      await applySkillRefinement({ dataRoot: options.dataRoot, skill, afterMarkdown: content, reason: '恢复前的版本' });
+      return c.json({ ok: true });
     } catch (error) {
       return c.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
     }

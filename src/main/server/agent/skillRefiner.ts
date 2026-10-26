@@ -1,4 +1,5 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { snapshotSkill } from './skillHistory';
 import path from 'node:path';
 import type { ChatMessage } from '../../../shared/chat';
 import { buildFileDiffPreview, type FileDiffPreview } from '../../../shared/stream';
@@ -226,6 +227,8 @@ export async function applySkillRefinement(opts: {
   skill: Skill;
   afterMarkdown: string;
   experienceEntry?: SkillRefinementProposal['experienceEntry'];
+  /** Shown in the skill's history next to the snapshot of what this write replaced. */
+  reason?: string;
 }): Promise<{ skillPath: string; experiencePath?: string }> {
   assertMemorySafe(opts.afterMarkdown);
   const targetDir = path.join(opts.dataRoot, 'skills', opts.skill.id);
@@ -245,6 +248,9 @@ export async function applySkillRefinement(opts: {
   }
 
   const skillPath = path.join(targetDir, 'SKILL.md');
+  // Keep what is being replaced: the earlier overlay, or the bundled/installed original on the first refinement.
+  const previous = await readFile(skillPath, 'utf8').catch(() => readFile(path.join(opts.skill.dir, 'SKILL.md'), 'utf8').catch((): null => null));
+  if (previous !== null && previous !== opts.afterMarkdown) await snapshotSkill(targetDir, previous, opts.reason ?? 'AI 自优化前的版本');
   await writeFile(skillPath, opts.afterMarkdown, 'utf8');
 
   let experiencePath: string | undefined;

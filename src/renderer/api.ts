@@ -1175,3 +1175,14 @@ export async function testAdminProvider(passkey: string, id: string): Promise<{ 
   return res.json();
 }
 
+
+export interface SkillHistoryItem { file: string; at: string; reason: string }
+
+export async function getSkillHistory(skillId: string): Promise<SkillHistoryItem[]> {
+  const res = await api(`/api/skills/${encodeURIComponent(skillId)}/history`);
+  return ((await res.json()) as { history?: SkillHistoryItem[] }).history ?? [];
+}
+
+export async function restoreSkillVersion(skillId: string, file: string): Promise<void> {
+  await api(`/api/skills/${encodeURIComponent(skillId)}/history/restore`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ file }) });
+}

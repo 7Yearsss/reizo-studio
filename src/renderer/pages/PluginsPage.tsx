@@ -23,6 +23,7 @@ import * as skillStore from '../state/skillStore';
 import type { SkillSummary } from '../state/skillStore';
 import * as api from '../api';
 import SkillDetailModal from '../components/skills/SkillDetailModal';
+import SkillHistoryMenu from '../components/skills/SkillHistoryMenu';
 import ExtensionPacksSection from '../components/skills/ExtensionPacksSection';
 import CatalogSection from '../components/skills/CatalogSection';
 import * as tabStore from '../state/tabStore';
@@ -519,6 +520,7 @@ export default function PluginsPage() {
           onClose={() => setDetail(null)}
           footer={
             <>
+              <SkillHistoryMenu skillId={detail.skill.id} />
               <button
                 type="button"
                 onClick={() => {
