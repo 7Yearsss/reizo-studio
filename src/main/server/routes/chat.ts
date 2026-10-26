@@ -1,3 +1,4 @@
+import { parseClientTurnId, isDuplicateTurn } from '../../../shared/clientTurnId';
 import type { ArtifactReviewStore } from '../storage/artifactReviewStore';
 import { findExpertMention, type ExpertAgent } from '../../../shared/expertAgent';
 import type { ExpertStore } from '../storage/expertStore';
@@ -64,6 +65,12 @@ export function createChatRouter(
     }
 
     const sessionId = c.req.param('id');
+    // A retried send (lost response, double dispatch) carries the id of a turn we already took: do not start another.
+    const clientTurnId = parseClientTurnId(body.clientTurnId);
+    if (clientTurnId && body.regenerate !== true) {
+      const existing = await sessionStore.get(sessionId);
+      if (existing && isDuplicateTurn(existing.messages, clientTurnId)) return c.json({ error: 'This message was already sent', code: 'duplicate_turn' }, 409);
+    }
     console.info(
       `[chat] request accepted session=${sessionId} chars=${body.text.length} provider=${typeof body.providerId === 'string' ? body.providerId : 'default'} model=${typeof body.model === 'string' ? body.model : 'default'}`,
     );
@@ -114,6 +121,7 @@ export function createChatRouter(
       truncateAfterId: typeof body.truncateAfterId === 'string' ? body.truncateAfterId : undefined,
       regenerate: body.regenerate === true,
       planMode: body.planMode === true,
+      clientTurnId,
       largeValueStore,
       canvasStore: canvas?.canvasStore,
       canvasProviderStore: canvas?.providerStore,

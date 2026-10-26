@@ -1,3 +1,4 @@
+import { newClientTurnId } from '../../shared/clientTurnId';
 import { selectPresentation, refreshPresentationReviews, referencePresentation } from './presentationWorkspace';
 import { splitPresentationContext } from '../../shared/presentationReferences';
 import { selectDocument, refreshDocumentReviews, restoreDocumentReferences } from './documentWorkspace';
@@ -1319,6 +1320,7 @@ async function dispatchTurn(
       truncateAfterId: turn.truncateAfterId,
       regenerate: turn.regenerate,
       planMode: state.planModeBySession[sessionId] === true,
+      clientTurnId: turn.regenerate ? undefined : newClientTurnId(),
       signal: abort.signal,
       onEvent: makeEventFolder(sessionId, acc),
     });

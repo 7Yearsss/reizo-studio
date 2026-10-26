@@ -240,6 +240,8 @@ export async function runChatTurn(options: {
   runCeiling?: RunPermission;
   /** Plan mode: read-only until the user confirms the plan (forces the read-only ceiling for this turn). */
   planMode?: boolean;
+  /** Id the client chose for this send; stamped on the user row so a retry can be recognised. */
+  clientTurnId?: string;
   /** Every skill on disk; the model may start the auto-invokable ones with `use_skill`. */
   availableSkills?: Skill[];
   /** The expert the message was addressed to with `@name`, if any. */
@@ -263,6 +265,7 @@ export async function runChatTurn(options: {
     memoryEventsStore,
     scheduleStore,
     planMode = false,
+    clientTurnId,
     runCeiling: requestedCeiling,
     availableSkills = [],
     expert = null,
@@ -337,6 +340,7 @@ export async function runChatTurn(options: {
       role: 'user',
       content: extraBlocks ? `${userText}\n\n${extraBlocks}` : userText,
       createdAt: new Date().toISOString(),
+      ...(clientTurnId ? { clientId: clientTurnId } : {}),
     };
     await sessionStore.appendMessage(sessionId, userMessage);
     session = { ...session, messages: [...session.messages, userMessage] };

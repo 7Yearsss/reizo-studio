@@ -310,6 +310,8 @@ export async function sendMessage(
     truncateAfterId?: string;
     regenerate?: boolean;
     planMode?: boolean;
+    /** Lets the server recognise a retry of this very send. */
+    clientTurnId?: string;
     signal?: AbortSignal;
     onEvent: StreamEventHandler;
   },
@@ -328,6 +330,7 @@ export async function sendMessage(
       truncateAfterId: options.truncateAfterId,
       regenerate: options.regenerate || undefined,
       planMode: options.planMode || undefined,
+      clientTurnId: options.clientTurnId,
     }),
     signal: options.signal,
   });
@@ -335,6 +338,8 @@ export async function sendMessage(
   const contentType = res.headers.get('content-type') ?? '';
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
+    // The server already has this send: join the turn it started instead of failing or sending it again.
+    if (res.status === 409 && body.code === 'duplicate_turn') return resumeTurn(sessionId, 0, null, options.onEvent, options.signal);
     throw new Error(body.error ?? `Request failed: ${res.status}`);
   }
   if (!contentType.includes('ndjson') && contentType.includes('json')) {
