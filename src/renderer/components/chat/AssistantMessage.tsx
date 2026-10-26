@@ -8,6 +8,7 @@ import WorkGroupCard from './WorkGroupCard';
 import AskAnswers from './AskAnswers';
 import GeneratedMediaStrip from './GeneratedMediaStrip';
 import ProducedFiles from './ProducedFiles';
+import { MessageTranslations, TranslateButton } from './MessageTranslation';
 import { deliverableOf } from './DeliverableCard';
 
 function StreamingCaret() {
@@ -22,6 +23,7 @@ function StreamingCaret() {
 export default function AssistantMessage({
   content,
   sessionId,
+  messageId,
   parts,
   reasoning,
   reasoningSegments,
@@ -37,6 +39,8 @@ export default function AssistantMessage({
 }: {
   content: string;
   sessionId?: string;
+  /** Set for saved messages; enables per-message actions that need an id (translate). */
+  messageId?: string;
   parts?: ToolCallPart[];
   reasoning?: string;
   reasoningSegments?: ReasoningSegment[];
@@ -85,6 +89,7 @@ export default function AssistantMessage({
         </div>
       ) : null}
       <ProducedFiles parts={parts} />
+      {sessionId && messageId && !streaming ? <MessageTranslations sessionId={sessionId} messageId={messageId} /> : null}
       {(Boolean(content) || (parts?.length ?? 0) > 0) && !streaming && (
         <div className="flex items-center gap-3">
           {turnOutcome === 'interrupted' ? (
@@ -102,6 +107,7 @@ export default function AssistantMessage({
               className="inline-flex items-center gap-1 text-[11px] text-ink-muted hover:text-ink cursor-pointer"
             />
             {content && isSpeechSupported() && <SpeakButton text={content} />}
+            {content && sessionId && messageId && <TranslateButton sessionId={sessionId} messageId={messageId} />}
             {canRetry && (
               <button
                 type="button"

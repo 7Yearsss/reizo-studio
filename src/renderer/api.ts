@@ -288,6 +288,20 @@ export async function testNetwork(): Promise<{ ok: boolean; ms: number; detail: 
   return res.json();
 }
 
+export async function getTranslations(sessionId: string): Promise<import('../shared/translation').TranslationMap> {
+  const res = await api(`/api/sessions/${sessionId}/translations`);
+  return ((await res.json()) as { translations?: import('../shared/translation').TranslationMap }).translations ?? {};
+}
+
+export async function translateMessage(sessionId: string, messageId: string, lang: string): Promise<import('../shared/translation').StoredTranslation> {
+  const res = await api(`/api/sessions/${sessionId}/messages/${messageId}/translate`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ lang }) });
+  return ((await res.json()) as { translation: import('../shared/translation').StoredTranslation }).translation;
+}
+
+export async function deleteTranslation(sessionId: string, messageId: string, lang: string): Promise<void> {
+  await api(`/api/sessions/${sessionId}/messages/${messageId}/translations/${lang}`, { method: 'DELETE' });
+}
+
 export async function getDiskSpace(): Promise<{ freeBytes: number | null; totalBytes: number | null }> {
   const res = await api('/api/storage/disk');
   return (await res.json()) as { freeBytes: number | null; totalBytes: number | null };

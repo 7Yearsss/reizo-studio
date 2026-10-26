@@ -12,6 +12,7 @@ import { createSettingsStore } from './storage/settingsStore';
 import { createSessionsRouter } from './routes/sessions';
 import { createAutoCompactor } from './agent/compaction';
 import { createStorageRouter } from './routes/storage';
+import { createTranslationsRouter } from './routes/translations';
 import { createNetworkRouter } from './routes/network';
 import { setWriteProtectedRoots } from '../workspaceWrite';
 import { createToolApprovalsRouter } from './routes/toolApprovals';
@@ -286,6 +287,7 @@ export function createApp(options: CreateAppOptions) {
     if (!canvasId) return;
     return () => { stopCanvasRun(canvasId, canvasStore); };
   }, rewriteText, activeWindowTokens));
+  app.route('/api/sessions', createTranslationsRouter({ dataRoot: options.dataRoot, sessionStore, rewriteText }));
   app.route('/api/sessions', createPresentationsRouter(artifactStore, sessionStore));
   app.route('/api/refs', createRefsRouter(largeValueStore));
   app.route('/api/projects', createProjectsRouter(projectStore, sessionStore));

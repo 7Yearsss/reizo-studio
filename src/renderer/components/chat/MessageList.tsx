@@ -194,6 +194,7 @@ export default function MessageList({
                 <AssistantMessage
                   content={m.content}
                   sessionId={sessionId}
+                  messageId={m.id}
                   parts={m.parts}
                   reasoning={m.reasoning}
                   reasoningSegments={m.reasoningSegments}
