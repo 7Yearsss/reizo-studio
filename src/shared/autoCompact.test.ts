@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BREAKER_AUTH_DISABLE_MS, BREAKER_COOLDOWN_MS, classifyCompactionFailure, compactLevel, createCompactBreaker, keepRecentTurnsFor } from './autoCompact';
+import { BASE_OUTPUT_CAP, nextOutputCap, BREAKER_AUTH_DISABLE_MS, BREAKER_COOLDOWN_MS, classifyCompactionFailure, compactLevel, createCompactBreaker, keepRecentTurnsFor } from './autoCompact';
 
 describe('compactLevel', () => {
   it('tiers by window usage', () => {
@@ -48,5 +48,19 @@ describe('failure classification and breaker', () => {
     breaker.recordSuccess();
     breaker.recordFailure(new Error('x')); breaker.recordFailure(new Error('x'));
     expect(breaker.canAttempt()).toBe(true);
+  });
+});
+
+
+describe('nextOutputCap', () => {
+  it('starts at the base, doubles each time, and never passes the window minus a margin', () => {
+    const first = nextOutputCap(undefined, 128_000);
+    expect(first).toBe(BASE_OUTPUT_CAP);
+    expect(nextOutputCap(first, 128_000)).toBe(BASE_OUTPUT_CAP * 2);
+    expect(nextOutputCap(100_000, 128_000)).toBe(127_000);
+    expect(nextOutputCap(127_000, 128_000)).toBe(127_000);
+  });
+  it('a small window still gets at least the base', () => {
+    expect(nextOutputCap(undefined, 4_000)).toBe(BASE_OUTPUT_CAP);
   });
 });

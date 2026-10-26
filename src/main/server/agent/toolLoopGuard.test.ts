@@ -205,3 +205,20 @@ describe('result-aware repeat detection', () => {
     expect(hashResult({ a: 1 })).not.toBe(hashResult({ a: 2 }));
   });
 });
+
+describe('meta-only runs', () => {
+  const meta = (name: string, i: number): ToolOutcome => ({ name, args: { q: `q${i}` }, ok: true, resultHash: `h${i}` });
+
+  it('warns after six lookups in a row and halts at twelve, even though every call differs', () => {
+    const run = (n: number) => Array.from({ length: n }, (_, i) => meta(i % 2 ? 'mcp_search' : 'use_skill', i));
+    expect(inspectToolStream(run(5)).tier).toBe('ok');
+    expect(inspectToolStream(run(6)).tier).toBe('warn');
+    expect(inspectToolStream(run(12)).tier).toBe('halt');
+    expect(inspectToolStream(run(12)).reason).toContain('查工具');
+  });
+
+  it('real work in between resets the count', () => {
+    const calls = [...Array.from({ length: 8 }, (_, i) => meta('use_skill', i)), { name: 'read_file', args: { path: 'a' }, ok: true, resultHash: 'x' } as ToolOutcome, ...Array.from({ length: 3 }, (_, i) => meta('mcp_search', i + 20))];
+    expect(inspectToolStream(calls).tier).toBe('ok');
+  });
+});

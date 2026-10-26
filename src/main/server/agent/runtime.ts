@@ -58,6 +58,8 @@ import { readWorkspaceMemory } from '../../workspaceMemory';
 import { formatRules, readRuleSources } from './workspaceRules';
 import { createSkillTools } from './skillTools';
 import { createAttachmentTools } from './attachmentTools';
+import { DEFAULT_CONTEXT_WINDOW_TOKENS, nextOutputCap } from '../../../shared/autoCompact';
+import { chatModelCapabilities } from '../../../shared/chatModelCapabilities';
 import { createSkillDraftTools, PROPOSE_SKILL_TOOL, runApprovedSkillDraft } from './skillDraftTools';
 import { inlineAttachment } from '../../../shared/attachmentText';
 import { createWebTools, HTTP_FETCH_TOOL, WEB_SEARCH_TOOL } from './webTools';
@@ -681,9 +683,12 @@ ${expert.instructions}`
 
   // A skill may set its own step limit (`max-turns`); otherwise the global one applies.
   const stepLimit = expert?.maxTurns ?? skill?.maxTurns ?? settings.agentStepLimit ?? MAX_AGENT_STEPS;
+  // After a reply is cut off by the provider's output limit, later passes ask for a higher limit and keep it.
+  let outputCap: number | undefined;
   const buildStream = (messages: ModelMessage[], signal: AbortSignal) =>
     streamText({
       model,
+      ...(outputCap ? { maxOutputTokens: outputCap } : {}),
       instructions: mcp?.warnings?.length ? `${instructions}\n\n[MCP Notice]\n${mcp.warnings.map((w) => `- ${w}`).join('\n')}` : instructions,
       messages: compactModelMessages(messages),
       tools,
@@ -954,6 +959,7 @@ ${expert.instructions}`
         delivered: hasDeliveredArtifact(snap.parts),
       });
       if (!reason) return null;
+      if (reason === 'truncated') outputCap = nextOutputCap(outputCap, chatModelCapabilities(modelId).contextWindow ?? DEFAULT_CONTEXT_WINDOW_TOKENS);
       console.info(`[chat] continue pass reason=${reason} pass=${passIndex + 1}`);
       trace.onContinue(reason);
       return buildStream(

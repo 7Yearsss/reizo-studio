@@ -182,6 +182,14 @@ const DIVERSITY_WINDOWS = [
   { window: 16, minPresent: 12, maxDistinct: 4, haltAt: 16, label: 'ABCD 轮换调用' },
 ] as const;
 
+/**
+ * Tools that only look things up or start another tool (searching for a tool, opening a skill, reading the memory index).
+ * A long unbroken run of nothing but these means the model is browsing its own toolbox instead of doing the task.
+ */
+const META_TOOLS: ReadonlySet<string> = new Set(['use_skill', 'mcp_search', 'list_schedules', 'memory_read', 'personal_memory_read', 'get_video_models']);
+export const META_ONLY_WARN = 6;
+export const META_ONLY_HALT = 12;
+
 function shortName(sig: string): string {
   return sig.split('(')[0];
 }
@@ -256,6 +264,11 @@ export function inspectToolStream(
     );
   }
 
+  // Only lookups for a long stretch: it is circling its toolbox, not working on the task.
+  let metaRun = 0;
+  for (let i = outcomes.length - 1; i >= 0 && META_TOOLS.has(outcomes[i].name); i -= 1) metaRun += 1;
+  if (metaRun >= META_ONLY_HALT) return { tier: 'halt', reason: `连续 ${metaRun} 次只在查工具 / 技能，没有推进任务` };
+
   // L2 / L3: fingerprint-diversity collapse over the recent window.
   for (const spec of DIVERSITY_WINDOWS) {
     const slice = outcomes.slice(-spec.window);
@@ -266,6 +279,8 @@ export function inspectToolStream(
       return { tier, reason: `${spec.label}：最近 ${slice.length} 次调用只有 ${distinct} 种` };
     }
   }
+
+  if (metaRun >= META_ONLY_WARN) return { tier: 'warn', reason: `连续 ${metaRun} 次只在查工具 / 技能，没有推进任务` };
 
   if (consecutiveErrors >= thresholds.consecutiveWarn) {
     return attachDiagnosis({ tier: 'warn', reason: `${consecutiveErrors} 次工具调用连续失败` }, outcomes);

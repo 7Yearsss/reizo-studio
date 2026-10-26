@@ -59,3 +59,15 @@ export function createCompactBreaker(now: () => number = Date.now) {
     },
   };
 }
+
+/** Output cap used on the first retry after a reply was cut off by the provider's default limit. */
+export const BASE_OUTPUT_CAP = 8_192;
+
+/**
+ * The output limit for the next pass after a reply was truncated: double what was used (starting from a base, since the
+ * provider's own default is unknown), never past the model's window minus a margin for the prompt. Once raised it stays raised.
+ */
+export function nextOutputCap(current: number | undefined, windowTokens: number): number {
+  const ceiling = Math.max(BASE_OUTPUT_CAP, windowTokens - 1_000);
+  return Math.min((current ?? BASE_OUTPUT_CAP / 2) * 2, ceiling);
+}
