@@ -33,7 +33,7 @@ export default function PermissionPrompt({
 
   const preview = permission.preview ?? null;
 
-  const isConfirm = permission.name === 'computer_confirm' || permission.name === 'create_schedule' || permission.name === 'delete_schedule';
+  const isConfirm = permission.name === 'computer_confirm' || permission.name === 'create_schedule' || permission.name === 'delete_schedule' || permission.name === 'propose_skill';
   const confirmLabel = typeof permission.args.label === 'string' ? permission.args.label : '';
   const confirmSummary = typeof permission.args.summary === 'string' ? permission.args.summary : '';
   const parameters = (permission.name === 'computer_confirm'
@@ -63,6 +63,8 @@ export default function PermissionPrompt({
         ? '允许 Agent 创建一个自动化任务？'
         : permission.name === 'delete_schedule'
           ? '允许 Agent 删除一个自动化任务？'
+          : permission.name === 'propose_skill'
+            ? `保存为技能「${typeof permission.args.name === 'string' ? permission.args.name : ''}」${typeof permission.args.updateId === 'string' ? '（更新已有）' : ''}？`
     : isComputer
       ? '允许 Agent 操作这台电脑？'
       : isCanvasBudget

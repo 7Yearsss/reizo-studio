@@ -21,7 +21,7 @@ const CONTROL_TOOLS = new Set(['computer']);
 /** Per-action confirmation for consequential computer-use steps (send, pay, delete…). */
 export const COMPUTER_CONFIRM_TOOL = 'computer_confirm';
 
-export const ALWAYS_ASK_TOOLS: ReadonlySet<string> = new Set(['create_schedule', 'delete_schedule', 'computer_confirm']);
+export const ALWAYS_ASK_TOOLS: ReadonlySet<string> = new Set(['create_schedule', 'delete_schedule', 'computer_confirm', 'propose_skill']);
 
 /** Git subcommands that only inspect the repo. Mirrors Claude Code's read-only git set, kept tight. */
 const READ_ONLY_GIT = /^(git\s+)(status|diff|log|show|rev-parse|describe|ls-files)(\s|$)/;

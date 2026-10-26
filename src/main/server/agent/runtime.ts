@@ -58,6 +58,7 @@ import { readWorkspaceMemory } from '../../workspaceMemory';
 import { formatRules, readRuleSources } from './workspaceRules';
 import { createSkillTools } from './skillTools';
 import { createAttachmentTools } from './attachmentTools';
+import { createSkillDraftTools, PROPOSE_SKILL_TOOL, runApprovedSkillDraft } from './skillDraftTools';
 import { inlineAttachment } from '../../../shared/attachmentText';
 import { createWebTools, HTTP_FETCH_TOOL, WEB_SEARCH_TOOL } from './webTools';
 import { createWebSearchStore } from '../storage/webSearchStore';
@@ -603,6 +604,7 @@ ${expert.instructions}`
           ...(webTools ? webTools.tools : {}),
           ...(skill ? {} : createSkillTools({ skills: availableSkills })),
           ...(artifactStore ? createAttachmentTools({ sessionId, artifacts: artifactStore }) : {}),
+          ...(dataRoot && !skill ? createSkillDraftTools({ dataRoot, getSkills: () => availableSkills, sessionId, permissionMode: runPermissionMode }) : {}),
           ...(skill?.contract && canvasStore && dataRoot ? createDeliveryTools({ skill, canvasStore, sessionId, dataRoot, artifactStore }) : {}),
         }
       : undefined;
@@ -880,7 +882,9 @@ ${expert.instructions}`
           continue;
         }
         const outcome =
-          ALWAYS_ASK_TOOLS.has(item.name) && item.name !== COMPUTER_CONFIRM_TOOL
+          item.name === PROPOSE_SKILL_TOOL
+            ? dataRoot ? await runApprovedSkillDraft({ dataRoot, getSkills: () => availableSkills }, item.args, item.toolCallId) : { error: 'Skills cannot be saved in this turn' }
+          : ALWAYS_ASK_TOOLS.has(item.name) && item.name !== COMPUTER_CONFIRM_TOOL
             ? await runApprovedScheduleTool(scheduleStore, sessionId, item.name, item.args, item.toolCallId)
             : item.name === COMPUTER_TOOL_NAME || item.name === COMPUTER_CONFIRM_TOOL
             ? ((await computerTools?.executeApproved(item.args)) ?? {

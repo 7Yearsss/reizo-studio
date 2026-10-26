@@ -883,6 +883,47 @@ exports[`tool contract snapshots > presentations 1`] = `
 }
 `;
 
+exports[`tool contract snapshots > propose_skill 1`] = `
+{
+  "propose_skill": {
+    "description": "Propose saving a reusable workflow from this conversation as a skill. The user reviews and approves the draft before anything is saved. Do not propose one-off tasks, anything tied to this run's specific values, or what an existing skill already covers (pass updateId to improve one of the user's own skills instead).",
+    "input": {
+      "properties": {
+        "body": {
+          "description": "The reusable steps, in Markdown, written for a future run (no one-off details).",
+          "type": "string",
+        },
+        "description": {
+          "description": "One sentence: what the skill does.",
+          "type": "string",
+        },
+        "doNotTrigger": {
+          "description": "Look-alike requests that must not start it.",
+          "type": "string",
+        },
+        "name": {
+          "description": "Short skill name.",
+          "type": "string",
+        },
+        "trigger": {
+          "description": "One line: when the model should start it by itself.",
+          "type": "string",
+        },
+        "updateId": {
+          "description": "Id of an existing USER skill to update instead of creating a new one.",
+          "type": "string",
+        },
+      },
+      "required": [
+        "body",
+        "description",
+        "name",
+      ],
+    },
+  },
+}
+`;
+
 exports[`tool contract snapshots > read_attachment 1`] = `
 {
   "read_attachment": {

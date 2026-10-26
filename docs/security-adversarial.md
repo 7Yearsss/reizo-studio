@@ -29,6 +29,7 @@
 | 模型陷入重复调用循环 | 判定卡住并中止 | `src/main/server/agent/toolLoopGuard.test.ts :: still halts identical calls with identical results` |
 | 持久「始终允许」被用来绕过 computer / 定时任务确认 | 只有 `mcp__*` 工具可被永久允许；computer 与 always-ask 名单忽略该决定，新会话仍询问；存档里混入的这类名字加载时丢弃 | `src/main/server/agent/alwaysAllow.test.ts :: computer and the always-ask tools can never be made permanent` |
 | 工作区被设成包含应用数据目录的文件夹（如用户主目录），Agent 的 write_file / edit_file 改写数据库、密钥、钩子 | 写入前按绝对路径拒绝，覆盖数据目录整棵树；仅限文件写入工具，run_command 不在此守卫内（见下方未覆盖） | `src/main/workspaceWrite.protected.test.ts :: a workspace that contains the data folder cannot write or edit inside it, but its other files still work` |
+| 提示注入让 Agent 把恶意指令存成技能（长期立足点），或把密钥写进技能 | propose_skill 在 always-ask 名单里，每次都弹确认卡，full 模式也不豁免、allow-session 不形成授权；含密钥形态内容的草稿直接拒绝；只能更新用户自己的技能，内置技能不可改写；frontmatter 字段压成单行，草稿无法夹带 allowed-tools 等字段 | `src/main/server/agent/skillDraftTools.test.ts :: writes nothing until the user approves, even in full mode; approving then saves the skill` |
 
 ## 未覆盖（没有测试，不能标「已覆盖」）
 
