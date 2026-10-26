@@ -1,6 +1,7 @@
-import { app, BrowserWindow, nativeTheme, screen } from 'electron';
+import { app, BrowserWindow, clipboard, Menu, nativeTheme, screen, type MenuItemConstructorOptions } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
+import { buildContextMenuModel } from '../shared/contextMenuModel';
 import { parseSavedWindowState, resolveWindowBounds, type SavedWindowState } from '../shared/windowBounds';
 
 let mainWindow: BrowserWindow | null = null;
@@ -72,6 +73,30 @@ function trackWindowState(win: BrowserWindow): void {
   });
 }
 
+/**
+ * Right-click menu for places the web UI has no menu of its own (inputs, selected text, images, links). Electron shows
+ * nothing by default, so even Paste was missing. Components with their own context menu call preventDefault and never
+ * reach this. Images are copied from Chromium's decoded pixels; no URL from the page is fetched.
+ */
+function installContextMenu(win: BrowserWindow): void {
+  win.webContents.on('context-menu', (_event, params) => {
+    const model = buildContextMenuModel(params);
+    if (model.length === 0) return;
+    const wc = win.webContents;
+    const template: MenuItemConstructorOptions[] = model.map((item): MenuItemConstructorOptions => {
+      switch (item.type) {
+        case 'separator': return { type: 'separator' };
+        case 'role': return { role: item.role, label: item.label, enabled: item.enabled };
+        case 'replace-word': return { label: item.label, click: () => wc.replaceMisspelling(item.word) };
+        case 'add-to-dictionary': return { label: item.label, click: () => wc.session.addWordToSpellCheckerDictionary(item.word) };
+        case 'copy-image': return { label: item.label, click: () => wc.copyImageAt(params.x, params.y) };
+        case 'copy-link': return { label: item.label, click: () => clipboard.writeText(item.url) };
+      }
+    });
+    Menu.buildFromTemplate(template).popup({ window: win });
+  });
+}
+
 export function createMainWindow(): BrowserWindow {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.show();
@@ -111,6 +136,7 @@ export function createMainWindow(): BrowserWindow {
 
   if (restored.maximized) mainWindow.maximize();
   trackWindowState(mainWindow);
+  installContextMenu(mainWindow);
 
   if (iconPath && process.platform === 'win32') {
     mainWindow.setIcon(iconPath);
