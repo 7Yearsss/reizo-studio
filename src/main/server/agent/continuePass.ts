@@ -34,6 +34,14 @@ export type ContinueReason = 'truncated' | 'todos' | 'deferred' | 'undelivered';
  * the rest of the job, or an explicit deliverable request where no artifact/file
  * was produced yet (Harness² A6). That decision lives in code, not in the system prompt.
  */
+/** Steps one provider pass may take before the SDK stops it, even with tool calls still pending. */
+export const MAX_AGENT_STEPS = 64;
+
+/** The pass stopped because it ran out of steps, not because the model finished: the AI SDK reports 'tool-calls'. */
+export function hitStepCap(finishReason?: string): boolean {
+  return (finishReason ?? '').toLowerCase() === 'tool-calls';
+}
+
 export function shouldContinueAgentPass(input: {
   text: string;
   todos?: Pick<TodoItem, 'status'>[];

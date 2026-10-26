@@ -43,7 +43,7 @@ import { inlineCanvasRefImages } from './canvasRefImages';
 import { consumeInteractions, waitForInteractions } from './permissions';
 import { translateOpenAiChunk } from './translators/openai';
 import { compactAssistantParts, compactModelMessages } from './modelHistory';
-import { CONTINUE_USER_MESSAGE, MAX_CONTINUE_PASSES, shouldContinueAgentPass, hasDeliveredArtifact } from './continuePass';
+import { CONTINUE_USER_MESSAGE, MAX_AGENT_STEPS, MAX_CONTINUE_PASSES, hitStepCap, shouldContinueAgentPass, hasDeliveredArtifact } from './continuePass';
 import { appendHookNote, createHookRunner, loadHooks, wrapToolsWithHooks } from './hooks';
 import { connectMcpTools, MCP_TOOL_PREFIX } from './mcpTools';
 import { hasReasoningLeak } from './reasoningLeak';
@@ -598,7 +598,7 @@ export async function runChatTurn(options: {
       instructions: mcp?.warnings?.length ? `${instructions}\n\n[MCP Notice]\n${mcp.warnings.map((w) => `- ${w}`).join('\n')}` : instructions,
       messages: compactModelMessages(messages),
       tools,
-      stopWhen: tools ? isStepCount(64) : undefined,
+      stopWhen: tools ? isStepCount(MAX_AGENT_STEPS) : undefined,
       maxRetries: PROVIDER_MAX_RETRIES,
       timeout: PROVIDER_TIMEOUT,
       providerOptions,
@@ -843,6 +843,9 @@ export async function runChatTurn(options: {
       );
     },
     onContinuePass: async ({ getAssistant, finishReason, passIndex, signal }) => {
+      if (hitStepCap(finishReason)) {
+        emit({ type: 'notice', tone: 'warn', text: `本轮已达到 ${MAX_AGENT_STEPS} 步上限而停止，任务可能未完成。回复「继续」可从断点接着做。` });
+      }
       if (passIndex >= MAX_CONTINUE_PASSES) return null;
       const snap = getAssistant();
       const reason = shouldContinueAgentPass({

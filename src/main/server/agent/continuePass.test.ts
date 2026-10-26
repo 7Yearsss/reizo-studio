@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hasDeliveredArtifact, looksLikeDeferredWork, looksLikeDeliverableRequest, shouldContinueAgentPass } from './continuePass';
+import { hasDeliveredArtifact, hitStepCap, looksLikeDeferredWork, looksLikeDeliverableRequest, shouldContinueAgentPass } from './continuePass';
 
 const SCREENSHOT =
   '初步看下来，这批改动不是单纯 UI 调整，而是把权限交互从“阻塞等待”改成“抛出请求、暂停 turn、用户处理后重新发起 provider pass”，同时增加 turn outcome 持久化。这个改动风险较高，我继续核对几个关键边界：重复交互、取消/关闭窗口、错误状态处理、迁移兼容和恢复流程。';
@@ -78,5 +78,13 @@ describe('shouldContinueAgentPass', () => {
         todos: [{ status: 'completed' }],
       }),
     ).toBeNull();
+  });
+});
+
+describe('hitStepCap', () => {
+  it('is true only when the pass stopped with tool calls pending', () => {
+    expect(hitStepCap('tool-calls')).toBe(true);
+    expect(hitStepCap('stop')).toBe(false);
+    expect(hitStepCap(undefined)).toBe(false);
   });
 });
