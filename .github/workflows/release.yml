@@ -2,9 +2,17 @@ name: Build and release
 
 on:
   # Manual only: run from the Actions tab (or `gh workflow run release.yml`)
-  # to build and publish installers for all three platforms.
+  # to build installers for the selected platforms, optionally publishing them.
   workflow_dispatch:
     inputs:
+      platform:
+        description: Platforms to build
+        type: choice
+        options:
+          - all
+          - macos
+          - windows
+        default: all
       publish:
         description: Publish installers to the public downloads repository
         type: boolean
@@ -14,24 +22,35 @@ permissions:
   contents: read
 
 jobs:
+  targets:
+    name: Select build platforms
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+    steps:
+      - id: select
+        env:
+          BUILD_PLATFORM: ${{ inputs.platform }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs';
+          const targets = [
+            { os: 'windows-latest', name: 'windows-x64', arch: 'x64' },
+            { os: 'macos-latest', name: 'macos-arm64', arch: 'arm64' },
+            { os: 'macos-15-intel', name: 'macos-x64', arch: 'x64' },
+          ];
+          const platform = process.env.BUILD_PLATFORM || 'all';
+          if (!['all', 'macos', 'windows'].includes(platform)) throw new Error('Invalid build platform');
+          const include = targets.filter(target => platform === 'all' || target.name.startsWith(platform + '-'));
+          appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify({ include })}\n`);
+          NODE
   build:
     name: Build (${{ matrix.os }})
+    needs: targets
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            name: windows-x64
-            arch: x64
-          - os: macos-latest
-            name: macos-arm64
-            arch: arm64
-          - os: macos-15-intel
-            name: macos-x64
-            arch: x64
-          # - os: ubuntu-latest
-          #   name: linux
+      matrix: ${{ fromJSON(needs.targets.outputs.matrix) }}
 
     steps:
       - name: Check out source
