@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/client';
 import { createSqliteSessionStore } from '../storage/sqliteSessionStore';
 import { isCompactBoundary, messagesForModel } from '../../../shared/compactBoundary';
-import { buildTranscript, compactSession } from './compaction';
+import { buildTranscript, compactSession, createAutoCompactor } from './compaction';
 
 async function seed(turns: number) {
   const handle = openDb(':memory:');
@@ -58,5 +58,25 @@ describe('compactSession', () => {
   it('caps the transcript it sends', () => {
     const big = Array.from({ length: 40 }, (_, i) => ({ id: `m${i}`, role: 'user' as const, content: 'x'.repeat(5000), createdAt: '' }));
     expect(buildTranscript(big).length).toBeLessThanOrEqual(60_001);
+  });
+
+  it('auto-compacts only past ~75% of the window, and stops after a failing model trips the breaker', async () => {
+    const { handle, store, id } = await seed(6);
+    let calls = 0;
+    const ok = createAutoCompactor({ sessionStore: store, rewriteText: async () => { calls++; return '摘要'; }, windowTokens: 100_000 });
+    expect(await ok(id)).toBeNull(); // small conversation: untouched
+    expect(calls).toBe(0);
+    const tight = createAutoCompactor({ sessionStore: store, rewriteText: async () => { calls++; return '摘要'; }, windowTokens: 60 });
+    expect(await tight(id)).toMatchObject({ compacted: true });
+    expect(calls).toBe(1);
+    handle.close();
+
+    const failing = await seed(6);
+    let attempts = 0;
+    const broken = createAutoCompactor({ sessionStore: failing.store, rewriteText: async () => { attempts++; throw new Error('weird failure'); }, windowTokens: 60 });
+    for (let i = 0; i < 6; i++) expect(await broken(failing.id)).toBeNull(); // never throws into the turn
+    expect(attempts).toBe(3); // breaker opens after three real failures
+    expect((await failing.store.get(failing.id))!.messages.some(isCompactBoundary)).toBe(false);
+    failing.handle.close();
   });
 });

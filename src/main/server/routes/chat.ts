@@ -33,6 +33,8 @@ export function createChatRouter(
   memoryEventsStore?: MemoryEventsStore,
   scheduleStore?: ScheduleStore,
   artifactReviews?: ArtifactReviewStore,
+  /** Summarise an over-long conversation before the turn starts (best effort). */
+  beforeTurn?: (sessionId: string) => Promise<unknown>,
 ) {
   const router = new Hono();
 
@@ -81,6 +83,8 @@ export function createChatRouter(
     if (typeof body.skillId === 'string' && body.skillId.trim()) {
       skill = availableSkills.find((item) => item.id === body.skillId) ?? null;
     }
+
+    if (body.regenerate !== true) await beforeTurn?.(sessionId).catch((): void => undefined);
 
     const response = await runChatTurn({
       sessionStore,

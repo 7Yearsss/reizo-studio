@@ -1,6 +1,9 @@
 import { nanoid } from 'nanoid';
 import type { ChatMessage, SessionStore } from '../../../shared/chat';
-import { isCompactBoundary, makeBoundary, parseBoundary, summarizableRange } from '../../../shared/compactBoundary';
+import { isCompactBoundary, makeBoundary, messagesForModel, parseBoundary, summarizableRange } from '../../../shared/compactBoundary';
+import { compactLevel, createCompactBreaker, keepRecentTurnsFor } from '../../../shared/autoCompact';
+import { estimateMessagesTokens } from './budgetTracker';
+import { isSessionTurnLive } from './session';
 import { redactSecrets } from '../../../shared/redactSecrets';
 
 export type RewriteText = (system: string, prompt: string, signal?: AbortSignal) => Promise<string>;
@@ -66,4 +69,45 @@ export async function compactSession(options: {
     makeBoundary({ summaryText: summary, summarizedToId: range.toId, source: options.source }, nanoid()),
   );
   return { compacted: true, summarized: range.messages.length };
+}
+
+/** Rough token cost of what the model would be sent for this session (tool results are clipped before sending). */
+export function estimateSessionTokens(messages: ChatMessage[]): number {
+  return estimateMessagesTokens(
+    messagesForModel(messages).map((m) => ({
+      role: m.role,
+      content: m.content + (m.parts ?? []).map((p) => String(p.result ?? '').slice(0, 2_000)).join(''),
+    })),
+  );
+}
+
+/**
+ * Before a turn: if the conversation has grown past ~75% of the context window, summarise the older part
+ * first so the turn does not run into the limit. Best effort — any failure leaves the session as it was and
+ * the turn proceeds; a breaker stops it from retrying a model that keeps failing.
+ */
+export function createAutoCompactor(options: { sessionStore: SessionStore; rewriteText: RewriteText; windowTokens?: number }) {
+  const breakers = new Map<string, ReturnType<typeof createCompactBreaker>>();
+  return async function autoCompactBeforeTurn(sessionId: string): Promise<CompactResult | null> {
+    if (isSessionTurnLive(sessionId)) return null;
+    const session = await options.sessionStore.get(sessionId);
+    if (!session) return null;
+    const level = compactLevel(estimateSessionTokens(session.messages), options.windowTokens);
+    if (level !== 'compact' && level !== 'urgent') return null;
+    const breaker = breakers.get(sessionId) ?? createCompactBreaker();
+    breakers.set(sessionId, breaker);
+    if (!breaker.canAttempt()) return null;
+    try {
+      const result = await compactSession({
+        sessionStore: options.sessionStore, sessionId, rewriteText: options.rewriteText,
+        keepRecentTurns: keepRecentTurnsFor(level), source: 'auto',
+      });
+      breaker.recordSuccess();
+      return result;
+    } catch (error) {
+      breaker.recordFailure(error);
+      console.warn('[compaction] automatic compaction failed; continuing without it', error instanceof Error ? error.message : error);
+      return null;
+    }
+  };
 }

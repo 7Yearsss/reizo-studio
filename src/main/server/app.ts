@@ -10,6 +10,7 @@ import type { SessionStore } from '../../shared/chat';
 import { createFileSessionStore } from './storage/fileSessionStore';
 import { createSettingsStore } from './storage/settingsStore';
 import { createSessionsRouter } from './routes/sessions';
+import { createAutoCompactor } from './agent/compaction';
 import { createChatRouter } from './routes/chat';
 import { createSettingsRouter } from './routes/settings';
 import { createWorkspacePreviewRouter } from './routes/workspacePreview';
@@ -218,6 +219,8 @@ export function createApp(options: CreateAppOptions) {
   const memoryEventsStore = createMemoryEventsStore(options.dataRoot);
   const scheduleStore = options.scheduleStore ?? createScheduleStore(options.dataRoot);
   const thoughtStore = options.thoughtStore ?? createThoughtStore(options.dataRoot);
+  // Filled in once the one-shot text model exists (below).
+  let beforeTurn: (sessionId: string) => Promise<unknown> = async () => undefined;
   app.route(
     '/api/sessions',
     createChatRouter(
@@ -235,6 +238,7 @@ export function createApp(options: CreateAppOptions) {
       memoryEventsStore,
       scheduleStore,
       artifactReviews,
+      (sessionId) => beforeTurn(sessionId),
     ),
   );
   app.route('/api/memory', createMemoryRouter(memoryEventsStore, settingsStore));
@@ -249,6 +253,7 @@ export function createApp(options: CreateAppOptions) {
     return text;
   };
   app.route('/api', createDocumentsRouter(artifactStore, sessionStore, artifactReviews, rewriteText));
+  beforeTurn = createAutoCompactor({ sessionStore, rewriteText });
   app.route('/api/sessions', createSessionsRouter(sessionStore, artifactStore, (sessionId) => {
     void closeSessionMcp(sessionId);
     const canvasId = canvasStore.findCanvasBySession(sessionId)?.id;
