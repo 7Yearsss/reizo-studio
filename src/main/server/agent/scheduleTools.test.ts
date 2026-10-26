@@ -8,7 +8,7 @@ import { createScheduleTools, MIN_INTERVAL_MS } from './scheduleTools';
 function setup() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'reizo-sched-'));
   const scheduleStore = createScheduleStore(dir);
-  const tools = createScheduleTools({ scheduleStore });
+  const tools = createScheduleTools({ scheduleStore, skipApproval: true });
   return { scheduleStore, tools };
 }
 
@@ -76,7 +76,7 @@ describe('scheduleTools', () => {
 
   it('replays the same agent tool call without arranging a second automation', async () => {
     const { scheduleStore } = setup();
-    const tools = createScheduleTools({ scheduleStore, sessionId: 'fixture-session' });
+    const tools = createScheduleTools({ scheduleStore, sessionId: 'fixture-session', skipApproval: true });
     const input = { prompt: 'stable fixture', intervalMinutes: 1, once: true };
     const execute = tools.create_schedule.execute as unknown as (request: typeof input, options: { toolCallId: string }) => Promise<{ ok: boolean; schedule: { id: string } }>;
     const first = await execute(input, { toolCallId: 'same-call' });

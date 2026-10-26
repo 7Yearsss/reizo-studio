@@ -10,6 +10,7 @@
 | --- | --- | --- |
 | 无人值守会话里模型请求需审批的操作（如提示注入建定时任务后自动执行） | 权限自动拒绝，回合不挂起 | `src/main/server/agent/permissions.test.ts :: auto-denies permissions in a headless session so the turn never suspends` |
 | 写命令绕过审批 | 记录待审批提示，不放行 | `src/main/server/agent/permissions.test.ts :: records a pending prompt (never blocks) for a writing command` |
+| 提示注入让 Agent 建立/删除定时任务（长期立足点），即使在 full 模式 | 仍弹确认卡；拒绝后不落盘；allow-session 不形成长期授权 | `src/main/server/agent/alwaysAsk.test.ts :: create_schedule in full mode records a pending card and writes nothing; approving then runs it` |
 | MCP 工具定义在首次信任后被篡改 | 工具被拦截，保留旧 pin | `src/main/server/agent/mcpTools.test.ts :: withholds a tool whose description changed after it was first trusted` |
 | 第三方 MCP 工具在非 full 模式下直接执行 | 先询问再运行 | `src/main/server/agent/mcpTools.test.ts :: asks unless the user chose full access` |
 | 用户钩子挂起拖死回合 | 超时放弃，回合继续 | `src/main/server/agent/hooks.test.ts :: gives up on a hook that hangs instead of stalling the turn` |
@@ -26,5 +27,6 @@
 ## 未覆盖（没有测试，不能标「已覆盖」）
 
 - computer-use 越权操作（应用清单、动作后果分类、悬浮停止）——见 #183。
+- 记忆写入（memory_write）目前不强制每次确认——记忆有独立的提取/召回流程，是否纳入「永远要问」名单待评估。
 - 提示注入经网页/文件内容诱导工具调用——需要跨层端到端用例。
 - 子进程在主进程被强杀后的残留——见 #201。

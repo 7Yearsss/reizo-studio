@@ -19,7 +19,7 @@ import { quotaFetch, llmSchedulerFor } from './provider/quotaFetch';
 import { createGenerationScheduler } from '../canvas/generationScheduler';
 import { createDeliveryTools } from './deliveryTools';
 import { createAskUserTool, createWorkspaceTools } from './workspaceTools';
-import { createScheduleTools } from './scheduleTools';
+import { createScheduleTools, runApprovedScheduleTool } from './scheduleTools';
 import { createCanvasTools } from './canvasTools';
 import { createArtifactTools } from './artifactTools';
 import { FILE_GENERATION_INSTRUCTIONS } from './fileTools';
@@ -41,7 +41,7 @@ import { createToolLoopGuard, hashResult } from './toolLoopGuard';
 import { serializeMutatingTools } from './toolSerializer';
 import { createCanvasBudget } from './canvasBudget';
 import { inlineCanvasRefImages } from './canvasRefImages';
-import { consumeInteractions, waitForInteractions } from './permissions';
+import { consumeInteractions, waitForInteractions, ALWAYS_ASK_TOOLS } from './permissions';
 import { translateOpenAiChunk } from './translators/openai';
 import { compactAssistantParts, compactModelMessages } from './modelHistory';
 import { CONTINUE_USER_MESSAGE, MAX_AGENT_STEPS, MAX_CONTINUE_PASSES, hitStepCap, shouldContinueAgentPass, hasDeliveredArtifact } from './continuePass';
@@ -515,7 +515,7 @@ export async function runChatTurn(options: {
 
   // Automations live outside any workspace — the agent can always schedule
   // recurring or one-shot follow-up work (paseo-style heartbeat).
-  const scheduleTools = scheduleStore ? createScheduleTools({ scheduleStore, sessionId }) : undefined;
+  const scheduleTools = scheduleStore ? createScheduleTools({ scheduleStore, sessionId, permissionMode: settings.permissionMode }) : undefined;
 
   let currentPresentationRefs = regenerate ? splitPresentationContext(userMessage?.content ?? '').refs : presentationRefs.refs;
   let currentDocumentRefs = regenerate ? splitDocumentContext(userMessage?.content ?? '').refs : documentRefs.refs;
@@ -801,7 +801,9 @@ export async function runChatTurn(options: {
           continue;
         }
         const outcome =
-          item.name === COMPUTER_TOOL_NAME
+          ALWAYS_ASK_TOOLS.has(item.name)
+            ? await runApprovedScheduleTool(scheduleStore, sessionId, item.name, item.args, item.toolCallId)
+            : item.name === COMPUTER_TOOL_NAME
             ? ((await computerTools?.executeApproved(item.args)) ?? {
                 error: 'Computer control is not enabled for this turn',
               })

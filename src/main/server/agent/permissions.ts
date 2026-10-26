@@ -13,12 +13,19 @@ const SHELL_TOOLS = new Set(['run_command']);
  */
 const CONTROL_TOOLS = new Set(['computer']);
 
+/**
+ * Tools that leave durable state behind (an unattended recurring run, a standing instruction). A single
+ * injected sentence in a web page or document is enough to plant one, so every call is confirmed on its
+ * own: `full` mode does not waive it and an `allow-session` answer is treated as a one-time allow.
+ */
+export const ALWAYS_ASK_TOOLS: ReadonlySet<string> = new Set(['create_schedule', 'delete_schedule']);
+
 /** Git subcommands that only inspect the repo. Mirrors Claude Code's read-only git set, kept tight. */
 const READ_ONLY_GIT = /^(git\s+)(status|diff|log|show|rev-parse|describe|ls-files)(\s|$)/;
 const READ_ONLY_GIT_REMOTE = /^git\s+remote(\s+(-v|--verbose))?\s*$/;
 
 export function needsApproval(mode: PermissionMode, toolName: string): boolean {
-  if (CONTROL_TOOLS.has(toolName)) return true;
+  if (CONTROL_TOOLS.has(toolName) || ALWAYS_ASK_TOOLS.has(toolName)) return true;
   // Third-party MCP servers: ask (once per tool per session) unless the user chose full access.
   if (toolName.startsWith('mcp__')) return mode !== 'full';
   if (mode === 'full') return false;
@@ -292,7 +299,7 @@ export async function requestPermission(options: {
   preview?: FileDiffPreview;
 }): Promise<boolean> {
   const { sessionId, toolCallId, name, args, mode, preview } = options;
-  if (sessionAllow.get(sessionId)?.has(name)) return true;
+  if (!ALWAYS_ASK_TOOLS.has(name) && sessionAllow.get(sessionId)?.has(name)) return true;
   if (!needsApproval(mode, name)) return true;
   if (name === 'run_command' && typeof args.command === 'string' && isReadOnlyShellCommand(args.command)) {
     return true;
@@ -522,7 +529,9 @@ export function answerPermission(toolCallId: string, decision: PermissionDecisio
     }
     if (visibleInteraction.get(sessionId) === toolCallId) visibleInteraction.delete(sessionId);
     console.info(`[chat] permission answered session=${sessionId} id=${toolCallId} decision=${decision}`);
-    if (decision === 'allow-session') {
+    if (decision === 'allow-session' && ALWAYS_ASK_TOOLS.has(item.name)) {
+      item.decision = 'allow'; // never a standing grant for these
+    } else if (decision === 'allow-session') {
       rememberSessionAllow(sessionId, item.name);
       // Parallel prompts for the same tool are covered by the same grant.
       for (const other of list) {
