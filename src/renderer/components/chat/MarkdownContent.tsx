@@ -1,13 +1,15 @@
-import { useMemo, useState, useCallback, type ReactNode } from 'react';
+import { useMemo, useRef, useState, useCallback, type ReactNode } from 'react';
 import type { PluggableList } from 'unified';
-import { Streamdown, defaultRemarkPlugins } from 'streamdown';
+import { Streamdown, defaultRemarkPlugins, extractTableDataFromElement } from 'streamdown';
+import * as api from '../../api';
+import { toast } from '../../lib/toast';
 import { code } from '@streamdown/code';
 import { createMathPlugin } from '@streamdown/math';
 import 'katex/dist/katex.min.css';
 
 // $x$ inline and $x$ block; models and users write both.
 const math = createMathPlugin({ singleDollarTextMath: true });
-import { Check, Copy } from 'lucide-react';
+import { Check, Copy, FileSpreadsheet } from 'lucide-react';
 import { normalizeMarkdownFences } from '../../lib/markdown/normalizeMarkdownFences';
 import { stripThinkTags } from '../../lib/markdown/stripThinkTags';
 import * as tabStore from '../../state/tabStore';
@@ -121,8 +123,35 @@ export default function MarkdownContent({
     }
   }, []);
 
+  // Hovering a rendered table offers to turn it into a real Sheet (editable, formulas, version history).
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [hoverTable, setHoverTable] = useState<{ el: HTMLElement; top: number; right: number } | null>(null);
+  const onPointerOver = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const table = (e.target as HTMLElement).closest('table');
+    const root = rootRef.current;
+    if (!table || !root) return;
+    setHoverTable((prev) => {
+      if (prev?.el === table) return prev;
+      const t = table.getBoundingClientRect();
+      const r = root.getBoundingClientRect();
+      return { el: table, top: t.bottom - r.top + 4, right: r.right - t.right };
+    });
+  }, []);
+  const tableToSheet = useCallback(async () => {
+    const sessionId = tabStore.activeSessionId();
+    if (!hoverTable || !sessionId) return;
+    const data = extractTableDataFromElement(hoverTable.el);
+    const rows = [data.headers, ...data.rows];
+    try {
+      const artifact = await api.createSheetFromTable(sessionId, data.headers[0] ? `${data.headers[0]}等` : '表格', rows);
+      if (await openArtifact(sessionId, artifact.id)) uiStore.setRightPanelTabForSession(sessionId, 'sheets');
+    } catch {
+      toast.error('无法转为表格');
+    }
+  }, [hoverTable]);
+
   return (
-    <div onClick={handleClick} className="[&_a[href^='canvas:']]:inline-flex [&_a[href^='canvas:']]:items-center [&_a[href^='canvas:']]:gap-1 [&_a[href^='canvas:']]:rounded-md [&_a[href^='canvas:']]:border [&_a[href^='canvas:']]:border-accent/40 [&_a[href^='canvas:']]:bg-accent/10 [&_a[href^='canvas:']]:px-1.5 [&_a[href^='canvas:']]:py-0.5 [&_a[href^='canvas:']]:text-xs [&_a[href^='canvas:']]:font-medium [&_a[href^='canvas:']]:text-accent [&_a[href^='canvas:']]:no-underline [&_a[href^='canvas:']]:cursor-pointer hover:[&_a[href^='canvas:']]:bg-accent/20 transition-colors">
+    <div ref={rootRef} onPointerOver={onPointerOver} onPointerLeave={() => setHoverTable(null)} onClick={handleClick} className="relative [&_a[href^='canvas:']]:inline-flex [&_a[href^='canvas:']]:items-center [&_a[href^='canvas:']]:gap-1 [&_a[href^='canvas:']]:rounded-md [&_a[href^='canvas:']]:border [&_a[href^='canvas:']]:border-accent/40 [&_a[href^='canvas:']]:bg-accent/10 [&_a[href^='canvas:']]:px-1.5 [&_a[href^='canvas:']]:py-0.5 [&_a[href^='canvas:']]:text-xs [&_a[href^='canvas:']]:font-medium [&_a[href^='canvas:']]:text-accent [&_a[href^='canvas:']]:no-underline [&_a[href^='canvas:']]:cursor-pointer hover:[&_a[href^='canvas:']]:bg-accent/20 transition-colors">
       <Streamdown
         mode={streaming ? 'streaming' : 'static'}
         isAnimating={streaming}
@@ -139,6 +168,16 @@ export default function MarkdownContent({
       >
         {markdown}
       </Streamdown>
+      {hoverTable && !streaming && (
+        <button
+          type="button"
+          onClick={() => void tableToSheet()}
+          style={{ top: hoverTable.top, right: hoverTable.right }}
+          className="absolute z-10 inline-flex h-6 items-center gap-1 rounded-md border border-line bg-paper px-2 text-[11px] text-ink-muted shadow-sm transition-colors hover:text-ink"
+        >
+          <FileSpreadsheet size={12} /> 转为表格
+        </button>
+      )}
       {previewPath && <WorkspaceFileDialog path={previewPath} onClose={() => setPreviewPath(null)} />}
     </div>
   );

@@ -1,4 +1,5 @@
 import { validateHtmlContent } from '../../../shared/htmlContent';
+import { sheetFromTableRows } from '../../../shared/tableToSheet';
 import { normalizePresentation } from '../../../shared/presentationContent';
 import { normalizeDocumentContent } from '../../../shared/documentContent';
 import { readFile } from 'node:fs/promises';
@@ -50,6 +51,20 @@ export function createSessionArtifactsRouter(artifactStore: ArtifactStore, sessi
     const parsed = await parseXlsxToSheetContent(Buffer.concat(chunks), name);
     if ('error' in parsed) return c.json({ error: parsed.error }, 400);
     const artifact = await artifactStore.create({ sessionId: session.id, projectId: session.projectId, name, kind: 'sheet', mimeType: SHEET_MIME, source: 'attachment', content: serializeSheetContent(parsed.content), origin: { surface: 'attachment' } });
+    return c.json({ artifact }, 201);
+  });
+
+  // A table from a chat reply becomes a real, editable Sheet artifact.
+  router.post('/:id/artifacts/sheets/from-table', async (c) => {
+    const session = await sessionStore.get(c.req.param('id'));
+    if (!session) return c.json({ error: 'Session not found' }, 404);
+    const body = (await c.req.json().catch((): null => null)) as { name?: unknown; rows?: unknown } | null;
+    const rows = Array.isArray(body?.rows) && body.rows.every((r) => Array.isArray(r) && r.every((v) => typeof v === 'string')) ? body.rows as string[][] : null;
+    if (!rows) return c.json({ error: 'rows must be string[][]' }, 400);
+    const name = typeof body?.name === 'string' && body.name.trim() ? body.name.trim() : '表格';
+    const built = sheetFromTableRows(name, rows);
+    if ('error' in built) return c.json({ error: built.error }, 400);
+    const artifact = await artifactStore.create({ sessionId: session.id, projectId: session.projectId, name: /\.xlsx$/i.test(name) ? name : `${name}.xlsx`, kind: 'sheet', mimeType: SHEET_MIME, source: 'generated', content: serializeSheetContent(built.content), origin: { surface: 'chat' } });
     return c.json({ artifact }, 201);
   });
 

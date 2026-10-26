@@ -680,6 +680,11 @@ export async function importSheet(sessionId: string, file: File): Promise<Artifa
   return (await res.json()).artifact;
 }
 
+export async function createSheetFromTable(sessionId: string, name: string, rows: string[][]): Promise<ArtifactWithContent> {
+  const res = await api(`/api/sessions/${sessionId}/artifacts/sheets/from-table`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, rows }) });
+  return (await res.json()).artifact;
+}
+
 export async function createDocument(sessionId: string, name: string): Promise<ArtifactWithContent> {
   return (await (await api(`/api/sessions/${sessionId}/documents`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) })).json()).artifact;
 }
