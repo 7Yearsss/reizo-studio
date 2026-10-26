@@ -13,6 +13,7 @@ import { createUsageStore } from './server/storage/usageStore';
 import { createThoughtStore } from './server/storage/thoughtStore';
 import { createMainWindow, getAppIcon, setQuitting } from './window';
 import { stopAllComputerControl } from './computerUse';
+import { initComputerStopOverlay } from './computerUse/stopOverlay';
 import { registerWindowIpc } from './windowIpc';
 import { registerWorkspaceIpc } from './workspaceIpc';
 import { createTray } from './tray';
@@ -114,6 +115,7 @@ async function bootstrap(): Promise<void> {
   globalShortcut.register('CommandOrControl+Shift+Space', () => {
     createMainWindow();
   });
+  initComputerStopOverlay();
   // Emergency stop for computer control: works from any app, because the agent may be driving the screen.
   globalShortcut.register('CommandOrControl+Alt+Shift+S', () => {
     if (stopAllComputerControl() > 0) {

@@ -5,6 +5,7 @@ import { createWindowsInputBackend } from './winInput';
 import { createPosixInputBackend } from './posixInput';
 import { describeDenial, judgeForegroundApp } from '../../shared/computerAppPolicy';
 import { posixForegroundApp } from './foreground';
+import { computerActivity } from './activity';
 import { ACTION_SETTLE_MS, clampPoint, createComputerBudget, isActingStep, type ComputerInput } from '../../shared/computerUse';
 
 /** Controllers with a live task. `stopAllComputerControl` cuts every one of them off at once. */
@@ -50,7 +51,7 @@ export function createComputerController(): ComputerController {
   // Step and time limits live here, in the main process, so nothing in the renderer or the model can reset them.
   const budget = createComputerBudget();
   let stopped = false;
-  const handle = { stop: () => { stopped = true; } };
+  const handle = { stop: () => { stopped = true; computerActivity.release(handle); } };
   active.add(handle);
   let lastImageSize: ScreenSize | null = null;
   let logicalSize: ScreenSize | null = null;
@@ -89,6 +90,7 @@ export function createComputerController(): ComputerController {
         if (front && judged.verdict === 'deny') throw new Error(describeDenial(front, judged.reason));
       }
       budget.charge(action);
+      if (isActingStep(action)) computerActivity.touch(handle);
       if (!lastImageSize && action.action !== 'screenshot' && action.action !== 'wait') {
         await shoot();
       }
@@ -154,6 +156,7 @@ export function createComputerController(): ComputerController {
 
     dispose() {
       active.delete(handle);
+      computerActivity.release(handle);
       backend.dispose();
     },
   };
