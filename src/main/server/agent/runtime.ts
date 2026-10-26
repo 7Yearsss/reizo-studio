@@ -68,6 +68,7 @@ import { applySkillToolPolicy } from './skillToolFilter';
 import { observeRetries } from '../../../shared/retryObserver';
 import { messagesForModel } from '../../../shared/compactBoundary';
 import { applyRunCeiling, effectiveRunMode, READ_ONLY_RUN_NOTICE } from './runCeiling';
+import { ceilingWithPlanMode, PLAN_MODE_NOTICE } from '../../../shared/planMode';
 import type { RunPermission } from '../../../shared/schedule';
 import type { MemoryEntry } from '../../workspaceMemoryDir';
 import {
@@ -236,6 +237,8 @@ export async function runChatTurn(options: {
   scheduleStore?: import('../storage/scheduleStore').ScheduleStore;
   /** Unattended-run ceiling (automations). Only ever tightens the global permission mode and toolset. */
   runCeiling?: RunPermission;
+  /** Plan mode: read-only until the user confirms the plan (forces the read-only ceiling for this turn). */
+  planMode?: boolean;
   /** Every skill on disk; the model may start the auto-invokable ones with `use_skill`. */
   availableSkills?: Skill[];
   /** The expert the message was addressed to with `@name`, if any. */
@@ -258,12 +261,15 @@ export async function runChatTurn(options: {
     dataRoot,
     memoryEventsStore,
     scheduleStore,
-    runCeiling,
+    planMode = false,
+    runCeiling: requestedCeiling,
     availableSkills = [],
     expert = null,
   } = options;
 
   const turnOriginAt = Date.now();
+  // Plan mode is a read-only run until the user confirms; it only ever tightens.
+  const runCeiling = ceilingWithPlanMode(requestedCeiling, planMode);
   let session = await sessionStore.get(sessionId);
   if (skill?.contractError) return Response.json({ error: skill.contractError }, { status: 400 });
   if (!session) {
@@ -455,7 +461,7 @@ export async function runChatTurn(options: {
       ? `The user addressed this message to the expert "${expert.name}"${expert.description ? ` (${expert.description})` : ''}. For this reply act as that expert, following these instructions:
 ${expert.instructions}`
       : '',
-    runCeiling === 'readonly' ? READ_ONLY_RUN_NOTICE : '',
+    planMode ? PLAN_MODE_NOTICE : runCeiling === 'readonly' ? READ_ONLY_RUN_NOTICE : '',
   ].filter(Boolean);
   const instructions = systemParts.join('\n\n');
 

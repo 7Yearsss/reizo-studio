@@ -309,6 +309,7 @@ export async function sendMessage(
     attachments?: { name: string; content: string }[];
     truncateAfterId?: string;
     regenerate?: boolean;
+    planMode?: boolean;
     signal?: AbortSignal;
     onEvent: StreamEventHandler;
   },
@@ -326,6 +327,7 @@ export async function sendMessage(
       attachments: options.attachments,
       truncateAfterId: options.truncateAfterId,
       regenerate: options.regenerate || undefined,
+      planMode: options.planMode || undefined,
     }),
     signal: options.signal,
   });

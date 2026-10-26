@@ -102,6 +102,8 @@ export interface ChatState {
   composerSeedBySession: Record<string, ComposerSeed | undefined>;
   /** Skill pinned to a session — stays active across turns until unpinned. */
   skillBySession: Record<string, string | undefined>;
+  /** Sessions in plan mode: read-only until the user confirms the plan. Kept on this machine across restarts. */
+  planModeBySession: Record<string, boolean>;
   /** Canvas nodes the user pulled into the composer as `@`-style references. */
   nodeRefsBySession: Record<string, NodeRef[]>;
   /** When true, clicking nodes on canvas adds them to the composer as references. */
@@ -139,6 +141,7 @@ let state: ChatState = {
   steerPendingBySession: {},
   composerSeedBySession: {},
   skillBySession: {},
+  planModeBySession: loadPlanModes(),
   nodeRefsBySession: {},
   pickingReferenceBySession: {},
   interruptDismissedBySession: {},
@@ -535,6 +538,24 @@ export function seedComposer(
       },
     },
   });
+}
+
+const PLAN_MODE_KEY = 'reizo:plan-mode';
+function loadPlanModes(): Record<string, boolean> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PLAN_MODE_KEY) ?? '{}') as Record<string, unknown>;
+    return Object.fromEntries(Object.entries(raw).filter(([, v]) => v === true)) as Record<string, boolean>;
+  } catch {
+    return {};
+  }
+}
+
+export function setPlanMode(sessionId: string, on: boolean): void {
+  const next = { ...state.planModeBySession };
+  if (on) next[sessionId] = true;
+  else delete next[sessionId];
+  setState({ planModeBySession: next });
+  try { localStorage.setItem(PLAN_MODE_KEY, JSON.stringify(next)); } catch { /* per-viewer convenience */ }
 }
 
 export function setSessionSkill(sessionId: string, skillId?: string): void {
@@ -1297,6 +1318,7 @@ async function dispatchTurn(
       attachments: extra.attachments,
       truncateAfterId: turn.truncateAfterId,
       regenerate: turn.regenerate,
+      planMode: state.planModeBySession[sessionId] === true,
       signal: abort.signal,
       onEvent: makeEventFolder(sessionId, acc),
     });

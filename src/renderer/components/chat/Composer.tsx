@@ -17,6 +17,7 @@ import ModelPicker from './ModelPicker';
 import ContextRing from './ContextRing';
 import MentionMenu, { extractMentionQuery } from './MentionMenu';
 import SessionRefMenu from './SessionRefMenu';
+import { PLAN_CONFIRM_MESSAGE } from '../../../shared/planMode';
 import { extractSessionQuery, serializeSessionReference } from '../../../shared/sessionReference';
 import SlashPalette, { applySlashArgs, buildSlashCommands, extractSlashQuery, type SlashCommand } from './SlashPalette';
 import PendingInteraction from './PendingInteraction';
@@ -189,6 +190,7 @@ export default function Composer({
   }, [activeSelectedNodes, nodeRefs]);
   const hasAttachments = attachments.length > 0 || nodeRefs.length > 0 || unpinnedSelectionNodes.length > 0;
 
+  const planMode = useChatStore((s) => (sessionId ? s.planModeBySession?.[sessionId] === true : false));
   const mentionQuery = extractMentionQuery(draft);
   const sessionQuery = extractSessionQuery(draft);
   const allSessions = useChatStore((s) => s.sessions);
@@ -490,6 +492,12 @@ export default function Composer({
     : null;
 
   function pickSlash(command: SlashCommand, args: string) {
+    if (command.id === 'plan') {
+      setDraft('');
+      if (sessionId) chatStore.setPlanMode(sessionId, !planMode);
+      window.setTimeout(focusComposer, 0);
+      return;
+    }
     if (command.id === 'compact') {
       setDraft('');
       if (!sessionId) return;
@@ -633,6 +641,13 @@ export default function Composer({
           <SlashPalette query={slash.query} args={slash.args} commands={slashCommands} onPick={pickSlash} />
         )}
         <div className="relative">
+            {sessionId && planMode && (
+              <div className="mb-2 flex items-center gap-3 rounded-lg border border-line bg-paper-inset/70 px-3 py-2 text-[13px] text-ink" role="status">
+                <span className="flex-1">计划模式：Agent 只读，先出计划，不会改动任何东西。</span>
+                <button type="button" onClick={() => { chatStore.setPlanMode(sessionId, false); void chatStore.sendMessage(sessionId, PLAN_CONFIRM_MESSAGE); }} className="rounded-full bg-ink px-2.5 py-1 text-[12px] text-paper-raised transition-opacity hover:opacity-85">确认并执行</button>
+                <button type="button" onClick={() => chatStore.setPlanMode(sessionId, false)} className="text-[12px] text-ink-muted hover:text-ink">退出</button>
+              </div>
+            )}
             {sessionId && <ComposerDock todos={todos} />}
             {syncingSheet && <p role="status" className="mb-2 text-xs text-ink-muted">正在保存工作区内容…</p>}
             {addingFiles > 0 && <p role="status" className="mb-2 text-xs text-ink-muted">正在添加附件…</p>}

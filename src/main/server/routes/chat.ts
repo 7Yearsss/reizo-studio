@@ -113,6 +113,7 @@ export function createChatRouter(
       projectStore,
       truncateAfterId: typeof body.truncateAfterId === 'string' ? body.truncateAfterId : undefined,
       regenerate: body.regenerate === true,
+      planMode: body.planMode === true,
       largeValueStore,
       canvasStore: canvas?.canvasStore,
       canvasProviderStore: canvas?.providerStore,
