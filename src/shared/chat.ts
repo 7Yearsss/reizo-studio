@@ -123,6 +123,21 @@ export interface Session extends SessionSummary {
   messages: ChatMessage[];
 }
 
+/** Optional trash capability (SQLite store). Soft-deleted sessions leave list() and are purged after the retention period. */
+export interface SessionTrashStore {
+  softDelete(id: string): Promise<void>;
+  restore(id: string): Promise<boolean>;
+  listDeleted(): Promise<Array<SessionSummary & { deletedAt: string }>>;
+  /** Hard-delete sessions trashed before `olderThanMs`; returns their ids. */
+  purgeExpired(olderThanMs: number): Promise<string[]>;
+}
+
+export function hasTrash(store: SessionStore): store is SessionStore & SessionTrashStore {
+  return typeof (store as Partial<SessionTrashStore>).softDelete === 'function';
+}
+
+export const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
 export interface SessionPatch {
   title?: string;
   projectId?: string | null;

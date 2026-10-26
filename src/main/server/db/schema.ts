@@ -42,6 +42,9 @@ export const sessions = sqliteTable('sessions', {
   listPreview: text('list_preview'),
   listPreviewRole: text('list_preview_role'),
   listMessageCount: integer('list_message_count').notNull().default(0),
+
+  // Trash: soft-deleted sessions are hidden from lists and purged after the retention period.
+  deletedAt: integer('deleted_at'),
 });
 
 export const messages = sqliteTable(

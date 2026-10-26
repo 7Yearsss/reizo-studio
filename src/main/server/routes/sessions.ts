@@ -1,12 +1,31 @@
 import { Hono } from 'hono';
-import type { SessionStore } from '../../../shared/chat';
+import { hasTrash, TRASH_RETENTION_MS, type SessionStore } from '../../../shared/chat';
 import type { ArtifactStore } from '../storage/artifactStore';
 import { pendingInteractionKindForSession } from '../agent/permissions';
+import { isSessionTurnLive } from '../agent/session';
+import { closeSessionMcp } from '../agent/mcpTools';
 import { buildSessionExport, sessionToMarkdown } from '../../../shared/sessionExport';
 
 export function createSessionsRouter(sessionStore: SessionStore, artifactStore?: ArtifactStore,
   prepareRemove?: (sessionId: string) => (() => void) | void) {
   const router = new Hono();
+
+  // Retention sweep at boot: trashed sessions past the retention period go for good, artifacts included.
+  if (hasTrash(sessionStore)) {
+    void sessionStore.purgeExpired(TRASH_RETENTION_MS)
+      .then(async (ids) => { if (artifactStore) for (const id of ids) await artifactStore.removeBySession(id); })
+      .catch((error) => console.warn('[sessions] trash purge failed', error));
+  }
+
+  router.get('/trash', async (c) => {
+    if (!hasTrash(sessionStore)) return c.json({ sessions: [] });
+    return c.json({ sessions: await sessionStore.listDeleted(), retentionDays: TRASH_RETENTION_MS / 86_400_000 });
+  });
+
+  router.post('/:id/restore', async (c) => {
+    if (!hasTrash(sessionStore) || !(await sessionStore.restore(c.req.param('id')))) return c.json({ error: 'Session not in trash' }, 404);
+    return c.json({ session: await sessionStore.get(c.req.param('id')) });
+  });
 
   router.get('/', async (c) => {
     const projectId = c.req.query('projectId');
@@ -65,6 +84,13 @@ export function createSessionsRouter(sessionStore: SessionStore, artifactStore?:
 
   router.delete('/:id', async (c) => {
     const id = c.req.param('id');
+    if (isSessionTurnLive(id)) return c.json({ error: 'Session is running; stop it before deleting' }, 409);
+    // Default delete moves to trash (artifacts kept, restorable). ?permanent=1 removes for good.
+    if (hasTrash(sessionStore) && c.req.query('permanent') !== '1') {
+      void closeSessionMcp(id);
+      await sessionStore.softDelete(id);
+      return c.body(null, 204);
+    }
     const afterRemove = prepareRemove?.(id);
     if (artifactStore) await artifactStore.removeBySession(id);
     await sessionStore.remove(id);

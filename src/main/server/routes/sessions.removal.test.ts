@@ -46,7 +46,7 @@ describe('session removal execution cleanup', () => {
       return afterRemove;
     });
     const app = new Hono().route('/api/sessions', createSessionsRouter(sessions, undefined, prepare));
-    expect((await app.request(`/api/sessions/${session.id}`, { method: 'DELETE' })).status).toBe(204);
+    expect((await app.request(`/api/sessions/${session.id}?permanent=1`, { method: 'DELETE' })).status).toBe(204);
     expect(prepare).toHaveBeenCalledTimes(1);
     expect(afterRemove).toHaveBeenCalledTimes(1);
   });
@@ -60,7 +60,7 @@ describe('session removal execution cleanup', () => {
     vi.spyOn(sessions, 'remove').mockRejectedValue(new Error('Delete failed'));
     const app = new Hono().route('/api/sessions', createSessionsRouter(sessions, undefined, () => cancel));
     app.onError((_error, c) => c.json({ error: 'Delete failed' }, 500));
-    expect((await app.request(`/api/sessions/${session.id}`, { method: 'DELETE' })).status).toBe(500);
+    expect((await app.request(`/api/sessions/${session.id}?permanent=1`, { method: 'DELETE' })).status).toBe(500);
     expect(cancel).not.toHaveBeenCalled();
     expect(store.jobs.get(accepted.job.id)?.status).toBe('running');
     expect(getActiveJob(canvasId, node.id, store)?.signal.aborted).toBe(false);
@@ -92,7 +92,7 @@ describe('session removal execution cleanup', () => {
       const id = first.store.findCanvasBySession(sessionId)?.id;
       return () => { if (id) cancelVideoJobsForCanvas(first.store, id); };
     }));
-    expect((await app.request(`/api/sessions/${first.session.id}`, { method: 'DELETE' })).status).toBe(204);
+    expect((await app.request(`/api/sessions/${first.session.id}?permanent=1`, { method: 'DELETE' })).status).toBe(204);
     await firstJob.completion;
     expect(first.store.jobs.get(firstJob.job.id)).toBeNull();
     expect(getActiveJob(first.canvasId, first.node.id, first.store)).toBeUndefined();

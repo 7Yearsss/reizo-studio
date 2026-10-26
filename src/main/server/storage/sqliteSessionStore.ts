@@ -34,6 +34,7 @@ interface SessionRowRaw {
   list_preview: string | null;
   list_preview_role: string | null;
   list_message_count: number;
+  deleted_at: number | null;
 }
 
 interface MessageRowRaw {
@@ -239,7 +240,7 @@ export function createSqliteSessionStore(handle: DbHandle): SessionStore & TurnR
   return {
     async list() {
       const rows = raw
-        .prepare('SELECT * FROM sessions ORDER BY updated_at DESC')
+        .prepare('SELECT * FROM sessions WHERE deleted_at IS NULL ORDER BY updated_at DESC')
         .all() as unknown as SessionRowRaw[];
       return rows.map(toSummary);
     },
@@ -337,6 +338,33 @@ export function createSqliteSessionStore(handle: DbHandle): SessionStore & TurnR
         );
         return requireSession(id);
       });
+    },
+
+    async softDelete(id: string) {
+      await withLock(id, () => {
+        raw.prepare('UPDATE sessions SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL').run(Date.now(), id);
+      });
+    },
+
+    async restore(id: string) {
+      return withLock(id, () => {
+        const result = raw.prepare('UPDATE sessions SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL').run(id);
+        return Number(result.changes) > 0;
+      });
+    },
+
+    async listDeleted() {
+      const rows = raw
+        .prepare('SELECT * FROM sessions WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC')
+        .all() as unknown as SessionRowRaw[];
+      return rows.map((row) => ({ ...toSummary(row), deletedAt: new Date(row.deleted_at as number).toISOString() }));
+    },
+
+    async purgeExpired(olderThanMs: number) {
+      const cutoff = Date.now() - olderThanMs;
+      const rows = raw.prepare('SELECT id FROM sessions WHERE deleted_at IS NOT NULL AND deleted_at < ?').all(cutoff) as unknown as Array<{ id: string }>;
+      for (const { id } of rows) await withLock(id, () => { raw.prepare('DELETE FROM sessions WHERE id = ?').run(id); });
+      return rows.map((r) => r.id);
     },
 
     async remove(id: string) {
