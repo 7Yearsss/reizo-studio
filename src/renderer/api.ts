@@ -1240,3 +1240,13 @@ export async function saveExpert(input: Omit<ExpertItem, 'id'>): Promise<ExpertI
 export async function deleteExpert(id: string): Promise<void> {
   await api(`/api/experts/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
+
+export interface WebSearchSettings { provider: 'searxng' | 'brave' | 'tavily' | null; baseUrl: string; hasKey: boolean }
+
+export async function getWebSearchSettings(): Promise<WebSearchSettings> {
+  return (await api('/api/settings/web-search')).json();
+}
+
+export async function saveWebSearchSettings(input: { provider: string; baseUrl?: string; apiKey?: string }): Promise<void> {
+  await api('/api/settings/web-search', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
+}

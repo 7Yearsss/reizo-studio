@@ -3,6 +3,7 @@ import { motion } from 'motion/react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { cn } from '../lib/cn';
 import { APP_NAME, APP_VERSION } from '../../shared/constants';
+import { SEARCH_PROVIDERS } from '../../shared/webSearch';
 import type { Appearance, BusyEnterBehavior, PermissionMode, ReasoningEffort } from '../../shared/settings';
 import { useSettingsStore } from '../state/useSettingsStore';
 import * as settingsStore from '../state/settingsStore';
@@ -120,6 +121,42 @@ function PersonalRulesEditor() {
   );
 }
 
+function WebSearchEditor() {
+  const [provider, setProvider] = useState<'' | 'searxng' | 'brave' | 'tavily'>('');
+  const [baseUrl, setBaseUrl] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [hasKey, setHasKey] = useState(false);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    void api.getWebSearchSettings().then((s) => { setProvider(s.provider ?? ''); setBaseUrl(s.baseUrl); setHasKey(s.hasKey); }, (): void => undefined);
+  }, []);
+  const meta = SEARCH_PROVIDERS.find((p) => p.id === provider);
+  const field = 'w-full rounded-xl bg-paper-inset px-3 py-2 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-ring';
+  const save = () => {
+    if (!provider || saving) return;
+    setSaving(true);
+    void api.saveWebSearchSettings({ provider, baseUrl, ...(apiKey ? { apiKey } : {}) }).then(
+      () => { toast.success('已保存'); if (apiKey) setHasKey(true); setApiKey(''); },
+      (e: unknown) => toast.error('保存失败', e instanceof Error ? e.message : undefined),
+    ).finally(() => setSaving(false));
+  };
+  return (
+    <div className="space-y-2">
+      <select aria-label="搜索服务" value={provider} onChange={(e) => setProvider(e.target.value as typeof provider)} className={field}>
+        <option value="">未启用</option>
+        {SEARCH_PROVIDERS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+      </select>
+      {meta?.needsUrl ? <input aria-label="SearXNG 地址" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="http://localhost:8080" className={field} /> : null}
+      {meta?.needsKey ? <input aria-label="API Key" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={hasKey ? '已保存（留空保持不变）' : 'API Key'} className={field} /> : null}
+      {provider ? (
+        <div className="flex justify-end">
+          <button type="button" onClick={save} disabled={saving} className="rounded-full bg-ink px-4 py-1.5 text-sm text-paper-raised disabled:opacity-40">保存</button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function GeneralSection() {
   const settings = useSettingsStore((s) => s.settings);
   const folderName = settings.workspacePath?.split(/[/\\]/).filter(Boolean).pop();
@@ -165,6 +202,10 @@ function GeneralSection() {
 
       <SettingGroup title="个人偏好" description="语气、称呼、回复风格、你的行业习惯。对所有项目生效，每轮对话都会参考。">
         <PersonalRulesEditor />
+      </SettingGroup>
+
+      <SettingGroup title="联网搜索" description="让 Agent 能搜索网页（再用「访问网页」读取）。搜索词会发给你选的服务。">
+        <WebSearchEditor />
       </SettingGroup>
 
       <SettingGroup title="权限" description="写文件和跑命令前要不要先问你。">

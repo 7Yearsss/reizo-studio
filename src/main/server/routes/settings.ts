@@ -3,6 +3,8 @@ import path from 'node:path';
 import { Hono } from 'hono';
 import { writeTextAtomic } from '../storage/atomicFile';
 import { PERSONAL_RULES_MAX_CHARS } from '../agent/workspaceRules';
+import type { SearchProvider } from '../../../shared/webSearch';
+import type { WebSearchStore } from '../storage/webSearchStore';
 import type { SettingsStore } from '../storage/settingsStore';
 import type { Appearance, PermissionMode, SettingsPatch } from '../../../shared/settings';
 import { getProviderPreset } from '../../../shared/providers';
@@ -10,8 +12,30 @@ import { getProviderPreset } from '../../../shared/providers';
 const APPEARANCES = new Set<Appearance>(['system', 'light', 'dark']);
 const PERMISSION_MODES = new Set<PermissionMode>(['ask', 'workspace', 'full']);
 
-export function createSettingsRouter(settingsStore: SettingsStore, dataRoot?: string) {
+export function createSettingsRouter(settingsStore: SettingsStore, dataRoot?: string, webSearchStore?: WebSearchStore) {
   const router = new Hono();
+
+  // Which web search service the agent's web_search uses. The key is write-only: it is never sent back.
+  router.get('/web-search', async (c) => {
+    const config = await webSearchStore?.get();
+    return c.json({ provider: config?.provider ?? null, baseUrl: config?.baseUrl ?? '', hasKey: Boolean(config?.apiKey) });
+  });
+
+  router.put('/web-search', async (c) => {
+    if (!webSearchStore) return c.json({ error: 'not configured' }, 400);
+    const body = (await c.req.json().catch((): null => null)) as { provider?: string; baseUrl?: unknown; apiKey?: unknown } | null;
+    if (!body || typeof body.provider !== 'string') return c.json({ error: 'provider is required' }, 400);
+    try {
+      await webSearchStore.save({
+        provider: body.provider as SearchProvider,
+        baseUrl: typeof body.baseUrl === 'string' ? body.baseUrl : undefined,
+        apiKey: typeof body.apiKey === 'string' ? body.apiKey : undefined,
+      });
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    }
+    return c.json({ ok: true });
+  });
 
   // Personal preferences: tone, how to address the user, reply style. Cross-project; the agent reads it every turn.
   router.get('/personal-rules', async (c) => {

@@ -57,7 +57,8 @@ import { createTurnTraceCollector, writeTurnTrace } from './turnTrace';
 import { readWorkspaceMemory } from '../../workspaceMemory';
 import { formatRules, readRuleSources } from './workspaceRules';
 import { createSkillTools } from './skillTools';
-import { createWebTools, HTTP_FETCH_TOOL } from './webTools';
+import { createWebTools, HTTP_FETCH_TOOL, WEB_SEARCH_TOOL } from './webTools';
+import { createWebSearchStore } from '../storage/webSearchStore';
 import type { ExpertAgent } from '../../../shared/expertAgent';
 import { parseAllowedTools } from '../../../shared/skillToolPolicy';
 import { createPersonalMemoryTools, personalMemoryRoot } from './personalMemory';
@@ -551,7 +552,7 @@ ${expert.instructions}`
   const personalMemoryTools = dataRoot && runCeiling !== 'readonly'
     ? createPersonalMemoryTools({ sessionId, dataRoot, permissionMode: runPermissionMode, emit: (event) => emit(event) })
     : undefined;
-  const webTools = runCeiling === 'readonly' ? undefined : createWebTools({ sessionId, permissionMode: runPermissionMode });
+  const webTools = runCeiling === 'readonly' ? undefined : createWebTools({ sessionId, permissionMode: runPermissionMode, getSearchConfig: dataRoot ? () => createWebSearchStore(dataRoot).get() : undefined });
   const scheduleTools = scheduleStore ? createScheduleTools({ scheduleStore, sessionId, permissionMode: runPermissionMode }) : undefined;
 
   let currentPresentationRefs = regenerate ? splitPresentationContext(userMessage?.content ?? '').refs : presentationRefs.refs;
@@ -859,8 +860,8 @@ ${expert.instructions}`
             ? ((await computerTools?.executeApproved(item.args)) ?? {
                 error: 'Computer control is not enabled for this turn',
               })
-            : item.name === HTTP_FETCH_TOOL
-              ? ((await webTools?.executeApproved(item.args)) ?? { error: 'Web access is not available in this turn' })
+            : item.name === HTTP_FETCH_TOOL || item.name === WEB_SEARCH_TOOL
+              ? ((await webTools?.executeApproved(item.name, item.args)) ?? { error: 'Web access is not available in this turn' })
             : item.name.startsWith('personal_memory_')
               ? ((await personalMemoryTools?.executeApproved(item.name, item.args)) ?? { error: 'Personal memory is not available in this turn' })
             : item.name.startsWith(MCP_TOOL_PREFIX)

@@ -46,6 +46,7 @@ import { createMemoryEventsStore } from './storage/memoryEventsStore';
 import { createMemoryRouter } from './routes/memory';
 import { createExpertsRouter } from './routes/experts';
 import { createExpertStore } from './storage/expertStore';
+import { createWebSearchStore } from './storage/webSearchStore';
 import { recoverCanvasJobs } from './canvas/recoverJobs';
 import { nodeJobsFor } from './canvas/nodeJobs';
 import { stopCanvasWork } from './canvas/workLifecycle';
@@ -220,6 +221,7 @@ export function createApp(options: CreateAppOptions) {
     : [userSkillsDir];
   const memoryEventsStore = createMemoryEventsStore(options.dataRoot);
   const expertStore = createExpertStore(options.dataRoot);
+  const webSearchStore = createWebSearchStore(options.dataRoot);
   const scheduleStore = options.scheduleStore ?? createScheduleStore(options.dataRoot);
   const thoughtStore = options.thoughtStore ?? createThoughtStore(options.dataRoot);
   // Filled in once the one-shot text model exists (below).
@@ -268,7 +270,7 @@ export function createApp(options: CreateAppOptions) {
   app.route('/api/sessions', createPresentationsRouter(artifactStore, sessionStore));
   app.route('/api/refs', createRefsRouter(largeValueStore));
   app.route('/api/projects', createProjectsRouter(projectStore, sessionStore));
-  app.route('/api/settings', createSettingsRouter(settingsStore, options.dataRoot));
+  app.route('/api/settings', createSettingsRouter(settingsStore, options.dataRoot, webSearchStore));
   app.route('/api/workspace', createWorkspacePreviewRouter(settingsStore));
   app.route('/api/admin/providers', createAdminProvidersRouter(providerStore));
   app.route('/api/providers', createPublicProvidersRouter(providerStore));

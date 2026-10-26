@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { answerPermission, consumeInteractions, resetPermissionsForTests } from './permissions';
-import { createWebTools, fetchPage, FETCH_MAX_CHARS } from './webTools';
+import { createWebTools, fetchPage, FETCH_MAX_CHARS, runWebSearch } from './webTools';
 
 afterEach(() => resetPermissionsForTests());
 
@@ -41,5 +41,31 @@ describe('http_fetch', () => {
     answerPermission('w1', 'deny');
     expect(consumeInteractions('s')[0].decision).toBe('deny');
     expect(typeof executeApproved).toBe('function');
+  });
+});
+
+describe('web_search', () => {
+  const json = (body: unknown, status = 200) => (async () => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })) as unknown as typeof fetch;
+
+  it('searches through the configured service and frames the results', async () => {
+    const out = await runWebSearch('春季新品', { provider: 'searxng', baseUrl: 'http://localhost:8080' }, { fetchImpl: json({ results: [{ title: '新品', url: 'https://a.com', content: '介绍' }] }) });
+    expect(out).toContain('<search_results');
+    expect(out).toContain('1. 新品');
+    expect(out).toContain('untrusted');
+  });
+
+  it('tells the model (and so the user) when nothing is configured, without any request', async () => {
+    const never = (async () => { throw new Error('must not be called'); }) as unknown as typeof fetch;
+    expect(await runWebSearch('x', null, { fetchImpl: never })).toContain('还没有配置');
+    expect(await runWebSearch('x', { provider: 'brave' }, { fetchImpl: never })).toContain('API Key');
+  });
+
+  it('points at the key when the service rejects it', async () => {
+    await expect(runWebSearch('x', { provider: 'brave', apiKey: 'bad' }, { fetchImpl: json({}, 401) })).rejects.toThrow('API Key');
+  });
+
+  it('asks first in ask mode and sends nothing until approved', async () => {
+    const { tools } = createWebTools({ sessionId: 's', permissionMode: 'ask', getSearchConfig: async () => ({ provider: 'searxng', baseUrl: 'http://localhost:8080' }) });
+    await expect((tools.web_search.execute as any)({ query: '价格' }, { toolCallId: 'q1' })).rejects.toThrow('__REIZO_INTERACTION_REQUIRED__');
   });
 });

@@ -55,6 +55,8 @@ export default function PermissionPrompt({
     ? `允许写入 ${preview.path}？`
     : permission.name === 'http_fetch'
       ? `允许访问网页 ${typeof permission.args.url === 'string' ? permission.args.url.replace(/^https?:\/\//, '').slice(0, 60) : ''}？`
+    : permission.name === 'web_search'
+      ? `允许联网搜索「${typeof permission.args.query === 'string' ? permission.args.query.slice(0, 40) : ''}」？`
     : permission.name === 'computer_confirm'
       ? `Agent 要${confirmLabel || '执行一个不可撤回的操作'}，允许吗？`
       : permission.name === 'create_schedule'
