@@ -6,6 +6,9 @@ export const SCHEDULE_PRESETS = [
   { id: '1d', label: '每天', intervalMs: 24 * 60 * 60 * 1000 },
 ] as const;
 
+/** A recurring automation that fails this many runs in a row is paused instead of burning cost. */
+export const MAX_CONSECUTIVE_FAILURES = 3;
+
 export interface Schedule {
   id: string;
   name: string;
@@ -21,6 +24,10 @@ export interface Schedule {
   lastSessionId?: string;
   lastRunOperationId?: string;
   lastOutcome?: 'succeeded' | 'failed' | 'interrupted';
+  /** Failed runs since the last success; reset by a success or by re-enabling. */
+  consecutiveFailures?: number;
+  /** Set when the schedule was paused automatically (not by the user). */
+  autoPausedAt?: string;
   enabled: boolean;
   lastRunAt: string | null;
   nextRunAt: string;

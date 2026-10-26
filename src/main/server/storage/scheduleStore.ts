@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { nanoid } from 'nanoid';
-import type { Schedule, SchedulePatch } from '../../../shared/schedule';
+import { MAX_CONSECUTIVE_FAILURES, type Schedule, type SchedulePatch } from '../../../shared/schedule';
 import { serializeFileMutation, writeTextAtomic } from './atomicFile';
 
 interface Receipt { operationId: string; kind: 'create' | 'run'; fingerprint: string; scheduleId: string }
@@ -50,7 +50,14 @@ export function createScheduleStore(root: string) {
     if (current.activeExecution?.sessionId) current.lastSessionId = current.activeExecution.sessionId;
     if (current.activeExecution?.operationId) current.lastRunOperationId = current.activeExecution.operationId;
     delete current.activeExecution;
+    if (outcome === 'succeeded') current.consecutiveFailures = 0;
+    if (outcome === 'failed') current.consecutiveFailures = (current.consecutiveFailures ?? 0) + 1;
     if (current.once || outcome === 'interrupted') current.enabled = false;
+    else if (current.enabled && (current.consecutiveFailures ?? 0) >= MAX_CONSECUTIVE_FAILURES) {
+      current.enabled = false;
+      current.autoPausedAt = new Date(now).toISOString();
+      current.lastError = `连续失败 ${current.consecutiveFailures} 次，已自动暂停${error ? `：${error}` : ''}`;
+    }
   }
   return {
     async list(): Promise<Schedule[]> { return (await readDisk()).schedules; },
@@ -80,6 +87,7 @@ export function createScheduleStore(root: string) {
         if (patch.intervalMs !== undefined) { current.intervalMs = patch.intervalMs; current.nextRunAt = new Date(Date.now() + patch.intervalMs).toISOString(); }
         if (patch.enabled !== undefined) {
           current.enabled = patch.enabled;
+          if (patch.enabled) { current.consecutiveFailures = 0; delete current.autoPausedAt; }
           if (!patch.enabled) delete current.pendingRun;
           else if (patch.nextRunAt === undefined && !current.activeExecution) current.nextRunAt = new Date(Date.now() + current.intervalMs).toISOString();
         }
