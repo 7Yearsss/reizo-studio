@@ -9,7 +9,9 @@ import { closeSessionMcp } from '../agent/mcpTools';
 import { buildSessionExport, sessionToMarkdown } from '../../../shared/sessionExport';
 
 export function createSessionsRouter(sessionStore: SessionStore, artifactStore?: ArtifactStore,
-  prepareRemove?: (sessionId: string) => (() => void) | void, rewriteText?: RewriteText) {
+  prepareRemove?: (sessionId: string) => (() => void) | void, rewriteText?: RewriteText,
+  /** Context window of the model the next turn will use, when known; otherwise the default applies. */
+  getWindowTokens?: () => Promise<number | undefined>) {
   const router = new Hono();
 
   // Retention sweep at boot: trashed sessions past the retention period go for good, artifacts included.
@@ -24,7 +26,7 @@ export function createSessionsRouter(sessionStore: SessionStore, artifactStore?:
     const session = await sessionStore.get(c.req.param('id'));
     if (!session) return c.json({ error: 'Session not found' }, 404);
     const usedTokens = estimateSessionTokens(session.messages);
-    const windowTokens = DEFAULT_CONTEXT_WINDOW_TOKENS;
+    const windowTokens = (await getWindowTokens?.().catch((): undefined => undefined)) ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
     return c.json({ usedTokens, windowTokens, ratio: usedTokens / windowTokens, level: compactLevel(usedTokens, windowTokens) });
   });
 

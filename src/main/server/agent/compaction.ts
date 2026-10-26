@@ -86,13 +86,14 @@ export function estimateSessionTokens(messages: ChatMessage[]): number {
  * first so the turn does not run into the limit. Best effort — any failure leaves the session as it was and
  * the turn proceeds; a breaker stops it from retrying a model that keeps failing.
  */
-export function createAutoCompactor(options: { sessionStore: SessionStore; rewriteText: RewriteText; windowTokens?: number }) {
+export function createAutoCompactor(options: { sessionStore: SessionStore; rewriteText: RewriteText; windowTokens?: number; /** The context window of the model the next turn will use, when known. */ getWindowTokens?: () => Promise<number | undefined> }) {
   const breakers = new Map<string, ReturnType<typeof createCompactBreaker>>();
   return async function autoCompactBeforeTurn(sessionId: string): Promise<CompactResult | null> {
     if (isSessionTurnLive(sessionId)) return null;
     const session = await options.sessionStore.get(sessionId);
     if (!session) return null;
-    const level = compactLevel(estimateSessionTokens(session.messages), options.windowTokens);
+    const windowTokens = (await options.getWindowTokens?.().catch((): undefined => undefined)) ?? options.windowTokens;
+    const level = compactLevel(estimateSessionTokens(session.messages), windowTokens);
     if (level !== 'compact' && level !== 'urgent') return null;
     const breaker = breakers.get(sessionId) ?? createCompactBreaker();
     breakers.set(sessionId, breaker);

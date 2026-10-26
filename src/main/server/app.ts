@@ -11,6 +11,7 @@ import { createFileSessionStore } from './storage/fileSessionStore';
 import { createSettingsStore } from './storage/settingsStore';
 import { createSessionsRouter } from './routes/sessions';
 import { createAutoCompactor } from './agent/compaction';
+import { chatModelCapabilities } from '../../shared/chatModelCapabilities';
 import { createChatRouter } from './routes/chat';
 import { createSettingsRouter } from './routes/settings';
 import { createWorkspacePreviewRouter } from './routes/workspacePreview';
@@ -262,13 +263,19 @@ export function createApp(options: CreateAppOptions) {
     return text;
   };
   app.route('/api', createDocumentsRouter(artifactStore, sessionStore, artifactReviews, rewriteText));
-  beforeTurn = createAutoCompactor({ sessionStore, rewriteText });
+  // The ring and auto-compaction budget against the active model's real window when we know it.
+  const activeWindowTokens = async (): Promise<number | undefined> => {
+    const settings = await settingsStore.get();
+    const model = settings.providers?.[settings.activeProviderId]?.model;
+    return model ? chatModelCapabilities(model).contextWindow : undefined;
+  };
+  beforeTurn = createAutoCompactor({ sessionStore, rewriteText, getWindowTokens: activeWindowTokens });
   app.route('/api/sessions', createSessionsRouter(sessionStore, artifactStore, (sessionId) => {
     void closeSessionMcp(sessionId);
     const canvasId = canvasStore.findCanvasBySession(sessionId)?.id;
     if (!canvasId) return;
     return () => { stopCanvasRun(canvasId, canvasStore); };
-  }, rewriteText));
+  }, rewriteText, activeWindowTokens));
   app.route('/api/sessions', createPresentationsRouter(artifactStore, sessionStore));
   app.route('/api/refs', createRefsRouter(largeValueStore));
   app.route('/api/projects', createProjectsRouter(projectStore, sessionStore));

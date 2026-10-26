@@ -1,5 +1,6 @@
 import { ChevronDown } from 'lucide-react';
 import { useState } from 'react';
+import { capabilityBadge } from '../../../shared/chatModelCapabilities';
 import { EMPTY_SHORTLIST, parseShortlist, recordPick, shortlistOptions, toggleFavorite, type ModelShortlist } from '../../../shared/modelShortlist';
 import { Popover } from 'radix-ui';
 import { useSettingsStore } from '../../state/useSettingsStore';
@@ -46,7 +47,7 @@ export default function ModelPicker({ compact = false }: { compact?: boolean }) 
   const label = active.id === 'reizo-account' && !active.models.length ? '暂无文本模型' : currentModel?.name || active.model || active.name;
   const textOptions = configured.flatMap((provider) => {
     const models = provider.models.length || provider.id === 'reizo-account' ? provider.models : [{ id: provider.model || '__custom', name: provider.model || '自定义模型' }];
-    return models.map((model) => ({ ...model, value: JSON.stringify([provider.id, model.id]), providerId: provider.id,
+    return models.map((model) => ({ ...model, badge: capabilityBadge(model.id), value: JSON.stringify([provider.id, model.id]), providerId: provider.id,
       source: configured.length > 1 ? provider.name : undefined }));
   });
   const mediaProvider = mediaCatalogProvider(settings) ?? active;
