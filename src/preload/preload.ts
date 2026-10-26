@@ -69,6 +69,20 @@ contextBridge.exposeInMainWorld('reizo', {
   listHooks: (): Promise<HookEntry[]> => ipcRenderer.invoke(IPC.HOOKS_LIST),
   saveHooks: (entries: HookEntry[]): Promise<void> => ipcRenderer.invoke(IPC.HOOKS_SAVE, entries),
   relaunchApp: (): Promise<void> => ipcRenderer.invoke(IPC.APP_RELAUNCH),
+  quickSubmit: (text: string): Promise<boolean> => ipcRenderer.invoke(IPC.QUICK_SUBMIT, text),
+  quickHide: (): Promise<void> => ipcRenderer.invoke(IPC.QUICK_HIDE),
+  /** The floating box asked a question: the main window opens a conversation for it. Returns an unsubscribe. */
+  onQuickAsk: (callback: (text: string) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, text: unknown): void => { if (typeof text === 'string') callback(text); };
+    ipcRenderer.on(IPC.QUICK_ASK, listener);
+    return () => { ipcRenderer.removeListener(IPC.QUICK_ASK, listener); };
+  },
+  /** The floating box was just shown again: clear it. */
+  onQuickReset: (callback: () => void): (() => void) => {
+    const listener = (): void => callback();
+    ipcRenderer.on(IPC.QUICK_RESET, listener);
+    return () => { ipcRenderer.removeListener(IPC.QUICK_RESET, listener); };
+  },
   installPlugin: (): Promise<PluginSummary | null> => ipcRenderer.invoke(IPC.PLUGIN_INSTALL),
   setPluginConfig: (id: string, name: string, value: string | null): Promise<void> => ipcRenderer.invoke(IPC.PLUGIN_SET_CONFIG, id, name, value),
   previewPlugin: (): Promise<PluginPreview | null> => ipcRenderer.invoke(IPC.PLUGIN_PREVIEW),

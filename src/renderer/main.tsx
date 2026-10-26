@@ -1,6 +1,8 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
+import QuickAssistant from './components/QuickAssistant';
+import { isQuickWindowHash } from '../shared/quickAsk';
 import ErrorBoundary from './components/ErrorBoundary';
 import { ensureReizoBridge } from './lib/reizoBridge';
 import './index.css';
@@ -47,7 +49,7 @@ try {
   createRoot(root).render(
     <StrictMode>
       <ErrorBoundary>
-        <App />
+        {isQuickWindowHash(window.location.hash) ? <QuickAssistant /> : <App />}
       </ErrorBoundary>
     </StrictMode>,
   );

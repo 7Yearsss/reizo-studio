@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Notification, powe
 import { describeActiveWork, hasActiveWork } from '../shared/quitConfirm';
 import { liveTurnCount } from './server/agent/session';
 import { stopAllBackgroundShells } from './backgroundShells';
+import { registerQuickAssistantIpc, toggleQuickAssistant } from './quickAssistant';
 import { activeVideoJobCount } from './server/canvas/videoJobRuntime';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -138,6 +139,9 @@ async function bootstrap(): Promise<void> {
   globalShortcut.register('CommandOrControl+Shift+Space', () => {
     createMainWindow();
   });
+  // A small floating box for a quick question from any app.
+  registerQuickAssistantIpc();
+  globalShortcut.register('CommandOrControl+Alt+Space', () => { toggleQuickAssistant(); });
   initComputerStopOverlay();
   // Emergency stop for computer control: works from any app, because the agent may be driving the screen.
   globalShortcut.register('CommandOrControl+Alt+Shift+S', () => {

@@ -77,6 +77,10 @@ export interface ReizoBridge {
   saveHooks(entries: HookEntry[]): Promise<void>;
   /** Opens a folder picker and installs the chosen extension pack (disabled until the user enables it). */
   relaunchApp(): Promise<void>;
+  quickSubmit(text: string): Promise<boolean>;
+  quickHide(): Promise<void>;
+  onQuickAsk(callback: (text: string) => void): () => void;
+  onQuickReset(callback: () => void): () => void;
   installPlugin(): Promise<PluginSummary | null>;
   setPluginConfig(id: string, name: string, value: string | null): Promise<void>;
   previewPlugin(): Promise<PluginPreview | null>;

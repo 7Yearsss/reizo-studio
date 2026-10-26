@@ -4,8 +4,23 @@ import * as settingsStore from './state/settingsStore';
 import * as chatStore from './state/chatStore';
 import * as skillStore from './state/skillStore';
 import * as projectStore from './state/projectStore';
+import * as tabStore from './state/tabStore';
+import * as uiStore from './state/uiStore';
 
 export default function App() {
+  // A question typed into the floating box opens its own conversation here.
+  useEffect(() => {
+    const off = window.reizo?.onQuickAsk?.((text) => {
+      void (async () => {
+        const session = await chatStore.createSession('新对话');
+        uiStore.setMode('chat');
+        tabStore.openChatTab(session.id, session.title);
+        await chatStore.sendMessage(session.id, text);
+      })();
+    });
+    return (): void => { off?.(); };
+  }, []);
+
   useEffect(() => {
     void settingsStore.loadSettings();
     void chatStore.loadSessions();
