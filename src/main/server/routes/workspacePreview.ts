@@ -8,7 +8,7 @@ import { resolveInsideWorkspace, toWorkspaceRelative } from '../../workspacePath
 import { readWorkspaceText } from '../../workspaceFs';
 import { previewMedia, type WorkspacePreview } from '../../../shared/filePreview';
 
-const TEXT_FILE = /\.(?:md|markdown|mdx|txt|html?|css|js|jsx|ts|tsx|json|jsonc|yaml|yml|toml|xml|svg|csv|py|sh|ps1|sql|log|ini|conf|env|gitignore)$/i;
+const TEXT_FILE = /\.(?:md|markdown|mdx|txt|html?|css|js|jsx|ts|tsx|json|jsonc|yaml|yml|toml|xml|svg|csv|py|sh|ps1|sql|log|ini|conf|gitignore)$/i;
 
 /** Read-only previews share the same canonical workspace boundary as file tools. */
 export function createWorkspacePreviewRouter(settings: Pick<SettingsStore, 'get'>) {

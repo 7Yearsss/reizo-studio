@@ -1,4 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { DropdownMenu } from 'radix-ui';
 import { ArrowLeft, ChevronRight, type LucideIcon } from 'lucide-react';
 import { cn } from '../../lib/cn';
@@ -34,9 +35,14 @@ export function CanvasCommandMenu({
 
   return (
     <DropdownMenu.Root open modal={false} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DropdownMenu.Trigger asChild>
-        <button type="button" tabIndex={-1} aria-hidden className="pointer-events-none fixed size-px opacity-0" style={{ left: x, top: y }} />
-      </DropdownMenu.Trigger>
+      {/* Portaled to body: inside the drawer a transformed ancestor would turn `fixed` into
+          drawer-relative and push the menu away from the click point. */}
+      {createPortal(
+        <DropdownMenu.Trigger asChild>
+          <button type="button" tabIndex={-1} aria-hidden className="pointer-events-none fixed size-px opacity-0" style={{ left: x, top: y }} />
+        </DropdownMenu.Trigger>,
+        document.body,
+      )}
       <DropdownMenu.Portal>
         <DropdownMenu.Content
           ref={setContentRef}

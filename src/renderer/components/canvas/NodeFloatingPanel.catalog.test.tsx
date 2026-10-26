@@ -58,7 +58,6 @@ it.each(['reizo-account', 'openai'])('uses real account video options while chat
     await act(async () => { vi.advanceTimersByTime(150); });
     expect([...host.querySelectorAll('[aria-label="生成模型"] option')].map(item => item.getAttribute('value'))).toEqual(['__configured_model__', 'wan3.0-video']);
     await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="生成参数"]')?.click());
-    expect(host.textContent).toContain('时长与画幅使用模型默认值');
     expect(host.textContent).not.toMatch(/\d+ 点/);
     expect(host.querySelector('button[title*="账号余额结算"]')?.textContent).toBe('生成');
     for (const label of ['视频时长', '画幅比例', '运镜']) expect(host.querySelector(`[aria-label="${label}"]`)).toBeNull();

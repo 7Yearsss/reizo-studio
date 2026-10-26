@@ -18,6 +18,7 @@ import { Field, FieldGroup, FieldLabel } from '../ui/field';
 import { Tooltip } from '../ui/Tooltip';
 import { cn } from '../../lib/cn';
 import CanvasUtilityPanel from './CanvasUtilityPanel';
+import useCanvasLayer from './useCanvasLayer';
 import JobUsageDetails from './JobUsageDetails';
 
 const labels: Record<CanvasJobStatus, string> = { queued: '排队中', running: '进行中', succeeded: '已完成', failed: '失败', cancelled: '已取消', interrupted: '已中断' };
@@ -145,8 +146,9 @@ export default function CanvasJobsPanel({ sessionId, open, onClose }: { sessionI
     } finally { actionInFlight.current = false; setBusy(''); }
   };
 
+  const layer = useCanvasLayer(open);
   if (!open) return null;
-  return <Panel position="top-left" className="!m-3 !ml-[60px]">
+  return <Panel position="top-left" className="!m-3 !ml-[60px]" style={{ zIndex: layer.zIndex }} onPointerDownCapture={layer.raise}>
     <CanvasUtilityPanel title="任务历史" icon={Clock} description="当前画布的执行记录" onClose={() => { setConfirm(''); onClose(); }}
       actions={<Tooltip content="刷新任务历史"><Button type="button" variant="ghost" size="icon-xs" aria-label="刷新任务历史" disabled={loading} onClick={() => setRefresh((value) => value + 1)}>{loading ? <LoaderCircle className="animate-spin motion-reduce:animate-none" /> : <RefreshCw />}</Button></Tooltip>}
       onKeyDown={(event) => { event.stopPropagation(); if (event.key === 'Escape' && !event.defaultPrevented) { event.preventDefault(); if (confirm && !busy) setConfirm(''); else if (!confirm) onClose(); } }}>

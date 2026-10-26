@@ -1766,7 +1766,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       aria-label="创作画布"
       onPointerDownCapture={(event) => {
         const target = event.target as HTMLElement;
-        if (event.currentTarget.contains(target) && !target.closest('input, textarea, select, button, a, [contenteditable="true"], [role="textbox"], video, audio')) {
+        if (event.currentTarget.contains(target) && !target.closest('input, textarea, select, button, a, [contenteditable="true"], [role="textbox"], [role="menu"], video, audio')) {
           canvasRootRef.current?.focus({ preventScroll: true });
         }
       }}
@@ -2078,8 +2078,8 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           </div>
         </Panel>
 
-        {storeNodes.length === 0 ? (
-          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center select-none">
+        {storeNodes.length === 0 && !utilityPanel ? (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center pl-16 select-none">
             <CanvasEmptyPrompt
               pending={emptyCreating}
               error={emptyCreationError}

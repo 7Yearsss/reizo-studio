@@ -133,6 +133,7 @@ adding logic here (with a unit test) over embedding it in a route or component.
 
 ## Conventions
 
+- UI copy stays minimal — no explanatory text; let components and motion explain. See `AGENTS.md`.
 - Path alias `@/*` → `src/*` (tsconfig, all vite configs, vitest).
 - Renderer imports use the `@/renderer/...` aliases from `components.json`; shadcn is
   "new-york" style, `src/renderer/components/ui/`, Tailwind v4 (CSS-first, no config file —

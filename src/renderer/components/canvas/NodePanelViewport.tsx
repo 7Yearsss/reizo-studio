@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { CanvasNode } from '../../../shared/canvas';
 import useNodeScreenAnchor from './useNodeScreenAnchor';
+import useCanvasLayer from './useCanvasLayer';
 
 /** Spatially anchored in canvas screen pixels, outside the scaled node layer. */
 export default function NodePanelViewport({ node, children, onClose, onBoundary }: {
@@ -12,6 +13,7 @@ export default function NodePanelViewport({ node, children, onClose, onBoundary 
 }) {
   const { canvas, nodeRect, canvasWidth, canvasHeight, railRect, navRect } = useNodeScreenAnchor(node);
   const panelRef = useRef<HTMLDivElement>(null);
+  const layer = useCanvasLayer();
   const [panelHeight, setPanelHeight] = useState(240);
   useLayoutEffect(() => { onBoundary?.(canvas); return () => onBoundary?.(null); }, [canvas, onBoundary]);
   useLayoutEffect(() => {
@@ -42,8 +44,9 @@ export default function NodePanelViewport({ node, children, onClose, onBoundary 
   const left = Math.max(minimumLeft, Math.min(center - width / 2, canvasWidth - width - 12));
   return createPortal(
     <div ref={panelRef} data-mention-composer={node.id} data-node-panel-screen role="region" aria-label={`${node.title || '节点'}输入面板`}
-      className="nodrag nopan nowheel pointer-events-auto absolute z-[6] flex min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-card text-foreground shadow-xl"
-      style={{ width, maxHeight, left: Math.round(left), top: Math.round(top) }}
+      className="nodrag nopan nowheel pointer-events-auto absolute flex min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-card text-foreground shadow-xl"
+      style={{ width, maxHeight, left: Math.round(left), top: Math.round(top), zIndex: layer.zIndex }}
+      onPointerDownCapture={layer.raise}
       onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}
       onKeyDown={(event) => {
         event.stopPropagation();

@@ -12,6 +12,7 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import AssetMetadataEditor from './AssetMetadataEditor';
 import CanvasUtilityPanel from './CanvasUtilityPanel';
+import useCanvasLayer from './useCanvasLayer';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Skeleton } from '../ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
@@ -212,6 +213,7 @@ function AssetShelf({ sessionId, selectedTargetIds, flash, open, onOpenChange, h
   }} />;
 
   const panelClass = cn('!m-3', position === 'top-left' && '!ml-[60px]');
+  const layer = useCanvasLayer(expanded);
   if (!expanded) return hideTrigger ? fileInput : <Panel position={position} className={panelClass}>
     <Tooltip content="浏览画布素材和素材库"><Button type="button" variant="outline" size="sm" onClick={() => setShelfOpen(true)} aria-label="打开素材栏"
       onDragOver={(event) => { event.preventDefault(); setDragOver(true); }}
@@ -225,7 +227,7 @@ function AssetShelf({ sessionId, selectedTargetIds, flash, open, onOpenChange, h
   const hasQuery = Boolean(search.trim() || activeFilters || kind !== 'all');
   const resetFilters = () => { setSearch(''); setKind('all'); setFolder('*'); setTag(''); requestAnimationFrame(() => searchRef.current?.focus()); };
   const close = () => { setDragOver(false); setShelfOpen(false); };
-  return <Panel position={position} className={panelClass}>
+  return <Panel position={position} className={panelClass} style={{ zIndex: layer.zIndex }} onPointerDownCapture={layer.raise}>
     <CanvasUtilityPanel title="素材栏" icon={Library} description={mode === 'current' ? `${anchors.length} 个图钉，${media.length} 个产物` : '跨画布复用已保存的作品'} onClose={close} className={cn(dragOver && 'border-accent border-dashed')}
       actions={<Tooltip content="上传参考图片"><Button type="button" variant="ghost" size="icon-xs" disabled={busy[keyFor('upload')]} onClick={() => fileRef.current?.click()} aria-label="上传参考图片">{busy[keyFor('upload')] ? <LoaderCircle className="animate-spin motion-reduce:animate-none" /> : <ImagePlus />}</Button></Tooltip>}
       onKeyDown={(event) => { event.stopPropagation(); if (event.key === 'Escape' && !event.defaultPrevented) { event.preventDefault(); close(); } }}

@@ -4,7 +4,7 @@ import { ToggleGroup } from 'radix-ui';
 import { Bot, X, Plus, Sparkles, SlidersHorizontal, Loader2 } from 'lucide-react';
 import { toast } from '../../lib/toast';
 import { Button } from '../ui/button';
-import { Field, FieldGroup, FieldLabel } from '../ui/field';
+import { Field, FieldGroup } from '../ui/field';
 import { Separator } from '../ui/separator';
 import MentionTextArea, { type MentionTextAreaHandle } from './MentionTextArea';
 import { useAssetUrl } from './useAssetUrl';
@@ -17,6 +17,7 @@ import NodePanelSelect from './NodePanelSelect';
 import type { CanvasInputSource } from '../../state/canvasInputSources';
 import { useSettingsStore } from '../../state/useSettingsStore';
 import { mediaCatalogProvider } from '../../lib/modelCatalog';
+import { modelVendorDomain } from '../../../shared/providers';
 
 const CONFIGURED_MODEL = '__configured_model__';
 
@@ -130,15 +131,16 @@ function NodePanelBody({ sessionId, node, prompt, onPromptChange, onPromptCommit
   const models = mediaProvider?.catalog ? mediaProvider.catalog[isVideo ? 'video' : 'image'] : account ? [] : isVideo ? CANVAS_VIDEO_MODELS : CANVAS_IMAGE_MODELS;
   const configuredModel = settings.mediaModels?.[isVideo ? 'video' : 'image'];
   const defaultModelName = models.find(item => item.id === configuredModel)?.name;
-  const modelOptions = [{ value: CONFIGURED_MODEL, label: defaultModelName ? `默认 · ${defaultModelName}` : '沿用设置' }, ...models.map((item) => ({ value: item.id, label: item.name }))];
+  const modelOptions = [{ value: CONFIGURED_MODEL, label: defaultModelName ? `默认 · ${defaultModelName}` : '沿用设置', iconDomain: configuredModel ? modelVendorDomain(configuredModel) : undefined }, ...models.map((item) => ({ value: item.id, label: item.name, iconDomain: modelVendorDomain(item.id) ?? modelVendorDomain(item.name) }))];
   const providerValue = audioProvider || audioProviders?.find((item) => item.isDefault)?.id || audioProviders?.[0]?.id || '';
   const candidateMap = useMemo(() => new Map(candidates.map((candidate) => [candidate.id, candidate])), [candidates]);
   const refs = useMemo(() => canvasStore.composerRefIds(node).map((id) => candidateMap.get(id) || canvasStore.nodeById(sessionId, id)).filter((item): item is CanvasNode => Boolean(item)), [node, candidateMap, sessionId]);
   const pinned = useMemo(() => refs.map((item) => item.id), [refs]);
   const hasPrompt = upstreamSources.some((item) => item.sourceType === 'note' || item.sourceType === 'agent');
   const hasFrame = upstreamSources.some((item) => item.handleId === 'start_frame' || item.sourceType === 'image' && isVideo);
-  const canGenerate = Boolean(prompt.trim() || hasPrompt || isVideo && hasFrame);
-  const placeholder = hasPrompt ? '已接入上游文本，可在此补充创作要求…' : hasFrame ? '已接入首帧，描述动态与运镜…' : isNote ? '输入提示词、分镜剧本或旁白，输入 @ 引用节点…' : isVideo ? '描述主体动作与镜头运动，输入 @ 引用节点…' : isAudio ? '描述音色、配乐或旁白，输入 @ 引用节点…' : '描述主体、构图与光影，输入 @ 引用节点…';
+  const hasParams = isVideo && Boolean(onDurationChange && durationOptions.length || onCameraChange && (!account || videoSupport?.camera)) || isAudio && Boolean(audioVoices?.length && onAudioVoiceChange);
+  const canGenerate =Boolean(prompt.trim() || hasPrompt || isVideo && hasFrame);
+  const placeholder = hasPrompt ? '补充创作要求…' : hasFrame ? '描述动态与运镜…' : '输入提示词，@ 引用节点';
   useEffect(() => {
     canvasStore.setMentionComposer(sessionId, node.id, (source) => areaRef.current?.insertMentionNode(source));
   }, [sessionId, node.id]);
@@ -160,7 +162,7 @@ function NodePanelBody({ sessionId, node, prompt, onPromptChange, onPromptCommit
   return <NodePanelViewport node={node} onClose={close} onBoundary={setBoundary}>
     <header className="flex shrink-0 items-center gap-2 px-3 pb-2 pt-3">
       <span className="truncate text-xs font-medium">{node.title || typeLabel}</span>
-      <span className="shrink-0 text-[11px] text-muted-foreground">{typeLabel}</span>
+      {node.title && node.title !== typeLabel ? <span className="shrink-0 text-[11px] text-muted-foreground">{typeLabel}</span> : null}
       {isImage ? <div data-node-panel-editor-slot={node.id} className="ml-auto shrink-0" /> : null}
       <Button type="button" variant="ghost" size="icon-xs" aria-label="收起输入面板" onClick={close} className={isImage ? undefined : 'ml-auto'}><X /></Button>
     </header>
@@ -169,11 +171,9 @@ function NodePanelBody({ sessionId, node, prompt, onPromptChange, onPromptCommit
         {refs.map((reference) => <RefChip key={reference.id} node={reference} disabled={running} onInsert={() => areaRef.current?.insertMentionNode(reference)} onRemove={() => { void canvasStore.removeComposerRef(sessionId, node.id, reference.id).catch((cause) => toast.error(cause instanceof Error ? cause.message : '移除参考失败')); }} />)}
         {!isVideo || !account || videoSupport?.startFrame ? <Button type="button" variant="ghost" size="sm" disabled={running} onClick={() => canvasStore.startPickingCanvasRefs(sessionId, node.id)}><Plus data-icon="inline-start" />参考</Button> : null}
       </div>
-      {upstreamSources.length ? <p className="mb-2 text-[11px] leading-5 text-muted-foreground">已接入：{upstreamSources.map((source) => source.sourceTitle).join('、')}</p> : null}
       {node.runState === 'error' && node.output?.error ? <p role="alert" className="mb-2 rounded-lg bg-danger/10 px-2.5 py-2 text-xs leading-5 text-danger">{node.output.error}</p> : null}
       <FieldGroup className="gap-3">
         <Field className="gap-1.5">
-          <FieldLabel>提示词</FieldLabel>
           <div className="min-h-16 cursor-text select-text rounded-lg bg-muted/35 px-2.5 py-2" onClick={() => areaRef.current?.focus()}>
             <MentionTextArea key={node.id} ref={areaRef} variant="flat" value={prompt} onChange={onPromptChange} onCommit={onPromptCommit}
               candidates={candidates} pinnedNodeIds={pinned} onChipClick={(id) => canvasStore.focusNode(sessionId, id)} placeholder={placeholder}
@@ -183,13 +183,10 @@ function NodePanelBody({ sessionId, node, prompt, onPromptChange, onPromptCommit
               onMentionRemove={(id) => { void canvasStore.disconnectMention(sessionId, node.id, id).catch((cause) => toast.error(cause instanceof Error ? cause.message : '移除引用失败')); }} />
           </div>
         </Field>
-        {paramsOpen ? <Field className="gap-2">
-          <FieldLabel>生成参数</FieldLabel>
+        {paramsOpen && hasParams ? <Field className="gap-2">
           {isVideo && onDurationChange && durationOptions.length ? <PanelChoices label="视频时长" value={duration} options={durationOptions} disabled={running} onChange={(value) => onDurationChange(value as '5s' | '10s')} /> : null}
-          {isVideo && account && !durationOptions.length ? <p className="text-xs text-muted-foreground">时长与画幅使用模型默认值</p> : null}
           {isVideo && onCameraChange && (!account || videoSupport?.camera) ? <div className="flex items-center gap-2 text-xs"><span className="text-muted-foreground">运镜</span><CameraDial value={camera} onChange={onCameraChange} portalBoundary={boundary} restoreInputFocus={() => areaRef.current?.focus()} disabled={running} /></div> : null}
           {isAudio && audioVoices?.length && onAudioVoiceChange ? <NodePanelSelect label="音色" value={audioVoice || audioVoices[0].id} options={audioVoices.map((voice) => ({ value: voice.id, label: voice.tag ? `${voice.name} (${voice.tag})` : voice.name }))} onChange={onAudioVoiceChange} disabled={running} boundary={boundary} /> : null}
-          {isImage && onVariationsCountChange ? <PanelChoices label="变体数量" value={String(variationsCount)} options={[1, 2, 4].map((count) => ({ value: String(count), label: `${count} 张` }))} onChange={(value) => onVariationsCountChange(Number(value) as 1 | 2 | 4)} disabled={running} /> : null}
         </Field> : null}
       </FieldGroup>
     </div>
@@ -202,7 +199,7 @@ function NodePanelBody({ sessionId, node, prompt, onPromptChange, onPromptCommit
         {isVideo && onRatioChange && ratioOptions.length ? <NodePanelSelect label="画幅比例" value={ratio} options={ratioOptions} onChange={(value) => onRatioChange(value as '16:9' | '9:16' | '1:1')} disabled={running} boundary={boundary} /> : null}
         {isImage && onSizeChange ? <NodePanelSelect label="图片尺寸" value={size} options={[{ value: '1024x1024', label: '方形 1:1' }, { value: '1024x1536', label: '竖幅 2:3' }, { value: '1536x1024', label: '横幅 3:2' }]} onChange={(value) => onSizeChange(value as '1024x1024' | '1024x1536' | '1536x1024')} disabled={running} boundary={boundary} /> : null}
         {isImage && onVariationsCountChange ? <NodePanelSelect label="变体数量" value={String(variationsCount)} options={[1, 2, 4].map((count) => ({ value: String(count), label: `${count} 张` }))} onChange={(value) => onVariationsCountChange(Number(value) as 1 | 2 | 4)} disabled={running} boundary={boundary} /> : null}
-        {!isNote ? <Button type="button" variant={paramsOpen ? 'secondary' : 'ghost'} size="icon-sm" aria-label="生成参数" aria-expanded={paramsOpen} disabled={running} onClick={() => setParamsOpen((open) => !open)}><SlidersHorizontal /></Button> : null}
+        {hasParams ? <Button type="button" variant={paramsOpen ? 'secondary' : 'ghost'} size="icon-sm" aria-label="生成参数" aria-expanded={paramsOpen} disabled={running} onClick={() => setParamsOpen((open) => !open)}><SlidersHorizontal /></Button> : null}
       </div>
       <div className="flex items-center gap-2">
         {(isImage || isVideo) ? <Button type="button" variant="ghost" size="sm" disabled={refining || running || !prompt.trim()} onClick={() => { void onRefine(); }}>{refining ? <Loader2 data-icon="inline-start" className="animate-spin motion-reduce:animate-none" /> : <Sparkles data-icon="inline-start" />}{refining ? '润色中' : '润色'}</Button> : null}
