@@ -268,6 +268,7 @@ export default function AutomationPage() {
                       </ul>
                     </details>
                   ) : null}
+                  {schedule.autoPausedAt && !schedule.enabled ? <p className="mt-2 text-xs leading-relaxed text-danger">已因连续失败自动暂停。先看运行记录排查原因，再点「启用」恢复。</p> : null}
                   {schedule.lastOutcome === 'interrupted' && !schedule.activeExecution ? <p className="mt-2 text-xs leading-relaxed text-ink-muted">上次结果尚未确认，未自动重新提交。先查看关联会话，再决定是否重试。</p> : null}
                   {confirmRun === schedule.id && !schedule.activeExecution && !schedule.pendingRun ? <div className="mt-3 flex flex-col gap-2 rounded-lg bg-paper p-3"><p className="text-xs leading-relaxed text-ink-muted">按当前自动化配置手动运行一次，可能产生模型费用。已暂停的周期计划保持暂停。</p><div className="flex justify-end gap-1"><Button type="button" variant="ghost" size="xs" disabled={Boolean(busy)} onClick={() => setConfirmRun('')} autoFocus>取消</Button><Button type="button" size="xs" disabled={Boolean(busy)} onClick={() => void perform(`schedule:${schedule.id}`, async () => {
                     let id = runAttempts.current.get(schedule.id); if (!id) { id = nanoid(); runAttempts.current.set(schedule.id, id); }

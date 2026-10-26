@@ -82,6 +82,15 @@ export function startScheduler(options: {
       }
     } catch (err) {
       await options.scheduleStore.finishExecution(schedule.id, executionId, stopping || err instanceof ScheduledRunInterruptedError ? 'interrupted' : 'failed', err instanceof Error ? err.message : String(err));
+      // A schedule that just paused itself must not fail silently — the user has to know it stopped.
+      const after = (await options.scheduleStore.list()).find((item) => item.id === schedule.id);
+      if (after?.autoPausedAt && Date.now() - Date.parse(after.autoPausedAt) < 10_000) {
+        try {
+          new Notification({ title: 'Reizo 自动化已暂停', body: `「${schedule.name}」${after.lastError ?? '连续失败，已自动暂停'}`, icon: getAppIcon() }).show();
+        } catch {
+          /* ignore */
+        }
+      }
     } finally {
       if (sessionId) { liveSessions.delete(sessionId); unmarkHeadlessSession(sessionId); }
     }
