@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { MAX_CONSECUTIVE_FAILURES } from '../../../shared/schedule';
+import { MAX_CONSECUTIVE_FAILURES, MAX_RUN_HISTORY } from '../../../shared/schedule';
 import { createScheduleStore } from './scheduleStore';
 
 describe('schedule auto-pause', () => {
@@ -44,5 +44,15 @@ describe('schedule auto-pause', () => {
     expect(resumed.enabled).toBe(true);
     expect(resumed.consecutiveFailures).toBe(0);
     expect(resumed.autoPausedAt).toBeUndefined();
+  });
+
+  it('keeps a capped run history, newest first', async () => {
+    const store = createScheduleStore(root);
+    const s = await store.create({ name: 'history', prompt: 'x', intervalMs: 60_000 });
+    for (let i = 0; i < MAX_RUN_HISTORY + 3; i++) await run(store, s.id, i, 'succeeded');
+    const runs = (await store.list())[0].runs ?? [];
+    expect(runs).toHaveLength(MAX_RUN_HISTORY);
+    expect(runs[0].executionId).toBe(`exec-${MAX_RUN_HISTORY + 2}-succeeded`);
+    expect(runs[0].outcome).toBe('succeeded');
   });
 });

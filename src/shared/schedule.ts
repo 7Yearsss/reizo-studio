@@ -9,7 +9,22 @@ export const SCHEDULE_PRESETS = [
 /** A recurring automation that fails this many runs in a row is paused instead of burning cost. */
 export const MAX_CONSECUTIVE_FAILURES = 3;
 
+/** How many past runs a schedule remembers. */
+export const MAX_RUN_HISTORY = 20;
+
+export interface ScheduleRun {
+  executionId: string;
+  kind: 'scheduled' | 'manual';
+  startedAt: string;
+  endedAt: string;
+  outcome: 'succeeded' | 'failed' | 'interrupted';
+  error: string | null;
+  sessionId?: string;
+}
+
 export interface Schedule {
+  /** Most recent first, capped at MAX_RUN_HISTORY. */
+  runs?: ScheduleRun[];
   id: string;
   name: string;
   prompt: string;

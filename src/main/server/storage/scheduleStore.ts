@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { nanoid } from 'nanoid';
-import { MAX_CONSECUTIVE_FAILURES, type Schedule, type SchedulePatch } from '../../../shared/schedule';
+import { MAX_CONSECUTIVE_FAILURES, MAX_RUN_HISTORY, type Schedule, type SchedulePatch, type ScheduleRun } from '../../../shared/schedule';
 import { serializeFileMutation, writeTextAtomic } from './atomicFile';
 
 interface Receipt { operationId: string; kind: 'create' | 'run'; fingerprint: string; scheduleId: string }
@@ -49,6 +49,10 @@ export function createScheduleStore(root: string) {
     if (executionId) current.lastExecutionId = executionId;
     if (current.activeExecution?.sessionId) current.lastSessionId = current.activeExecution.sessionId;
     if (current.activeExecution?.operationId) current.lastRunOperationId = current.activeExecution.operationId;
+    if (current.activeExecution) {
+      const run: ScheduleRun = { executionId: current.activeExecution.id, kind: current.activeExecution.kind, startedAt: current.activeExecution.startedAt, endedAt: new Date(now).toISOString(), outcome, error, ...(current.activeExecution.sessionId ? { sessionId: current.activeExecution.sessionId } : {}) };
+      current.runs = [run, ...(current.runs ?? [])].slice(0, MAX_RUN_HISTORY);
+    }
     delete current.activeExecution;
     if (outcome === 'succeeded') current.consecutiveFailures = 0;
     if (outcome === 'failed') current.consecutiveFailures = (current.consecutiveFailures ?? 0) + 1;

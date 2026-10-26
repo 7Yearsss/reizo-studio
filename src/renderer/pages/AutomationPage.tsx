@@ -217,6 +217,21 @@ export default function AutomationPage() {
                     {schedule.lastError ? ` · 上次失败：${schedule.lastError}` : ''}
                   </p>
                   {(schedule.activeExecution ? schedule.activeExecution.sessionId : schedule.lastSessionId) ? <Button type="button" variant="ghost" size="xs" className="mt-2" onClick={() => { const sessionId = schedule.activeExecution ? schedule.activeExecution.sessionId : schedule.lastSessionId; if (!sessionId) return; uiStore.setMode('chat'); tabStore.openChatTab(sessionId, schedule.name); }}>{schedule.activeExecution ? '查看本次会话' : '查看上次结果'}</Button> : null}
+                  {schedule.runs?.length ? (
+                    <details className="mt-2 text-xs text-ink-muted">
+                      <summary className="cursor-pointer select-none hover:text-ink">运行记录（{schedule.runs.length}）</summary>
+                      <ul className="mt-1 space-y-1">
+                        {schedule.runs.map((run) => (
+                          <li key={run.executionId} className="flex items-center gap-2">
+                            <span className={run.outcome === 'succeeded' ? 'text-ink' : 'text-danger'}>{run.outcome === 'succeeded' ? '成功' : run.outcome === 'failed' ? '失败' : '中断'}</span>
+                            <span>{new Date(run.startedAt).toLocaleString()}{run.kind === 'manual' ? ' · 手动' : ''}</span>
+                            {run.error ? <span className="min-w-0 flex-1 truncate" title={run.error}>{run.error}</span> : <span className="flex-1" />}
+                            {run.sessionId ? <button type="button" className="shrink-0 underline-offset-2 hover:text-ink hover:underline" onClick={() => { uiStore.setMode('chat'); tabStore.openChatTab(run.sessionId!, schedule.name); }}>查看会话</button> : null}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  ) : null}
                   {schedule.lastOutcome === 'interrupted' && !schedule.activeExecution ? <p className="mt-2 text-xs leading-relaxed text-ink-muted">上次结果尚未确认，未自动重新提交。先查看关联会话，再决定是否重试。</p> : null}
                   {confirmRun === schedule.id && !schedule.activeExecution && !schedule.pendingRun ? <div className="mt-3 flex flex-col gap-2 rounded-lg bg-paper p-3"><p className="text-xs leading-relaxed text-ink-muted">按当前自动化配置手动运行一次，可能产生模型费用。已暂停的周期计划保持暂停。</p><div className="flex justify-end gap-1"><Button type="button" variant="ghost" size="xs" disabled={Boolean(busy)} onClick={() => setConfirmRun('')} autoFocus>取消</Button><Button type="button" size="xs" disabled={Boolean(busy)} onClick={() => void perform(`schedule:${schedule.id}`, async () => {
                     let id = runAttempts.current.get(schedule.id); if (!id) { id = nanoid(); runAttempts.current.set(schedule.id, id); }
