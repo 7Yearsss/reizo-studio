@@ -4,6 +4,7 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import type { PermissionMode } from '../../../shared/settings';
 import { hasSecret } from '../../../shared/redactSecrets';
+import { scanContent } from '../../../shared/contentGuard';
 import { findSimilarSkills, renderSkillMarkdown, skillIdFromName, validateSkillDraft, type SkillDraft } from '../../../shared/skillDraft';
 import type { Skill } from '../../skills';
 import { writeTextAtomic } from '../storage/atomicFile';
@@ -45,6 +46,8 @@ export function createSkillDraftTools(options: Options) {
     const problems = validateSkillDraft(draft, id);
     if (problems.length) return { error: problems.join('；') };
     if (hasSecret(`${draft.name}\n${draft.description}\n${draft.body}`)) return { error: '草稿里含有疑似密钥 / 令牌的内容，请去掉后再提议' };
+    const finding = scanContent([draft.name, draft.description, draft.body, draft.trigger ?? '', draft.doNotTrigger ?? ''].join('\n'));
+    if (finding) return { error: `草稿被内容安全检查拒绝（${finding.reason}），请去掉后再提议` };
     if (args.updateId) {
       const target = skills.find((s) => s.id === args.updateId);
       if (!target || target.source !== 'user') return { error: '只能更新你自己的技能；内置技能请另起新技能' };

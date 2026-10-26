@@ -1,3 +1,4 @@
+import { scanContent } from '../shared/contentGuard';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { listWorkspaceDir, readWorkspaceText } from './workspaceFs';
@@ -55,6 +56,9 @@ export function assertMemorySafe(text: string): void {
       throw new Error(`Refusing to persist unsafe memory content (${reason})`);
     }
   }
+  // Replayed into every future prompt: also refuse hidden characters and stock injection phrasing.
+  const finding = scanContent(text);
+  if (finding) throw new Error(`Refusing to persist unsafe memory content (${finding.reason})`);
 }
 
 export function memoryFileNameFor(name: string): string {
