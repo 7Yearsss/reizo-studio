@@ -4,6 +4,7 @@ import {
   ArchiveRestore,
   ChevronRight,
   CirclePlus,
+  Download,
   LayoutGrid,
   Pencil,
   Pin,
@@ -58,6 +59,24 @@ async function deleteWithUndo(id: string, title: string): Promise<void> {
   });
 }
 import Tooltip from '../ui/Tooltip';
+
+/** Download a shareable copy of one conversation, then say what was replaced so nothing is a surprise. */
+async function exportSessionFile(session: SessionSummary, detail: 'structure' | 'full'): Promise<void> {
+  try {
+    const exported = await api.exportSession(session.id, detail === 'full' ? 'md' : 'json', detail);
+    const body = detail === 'full' ? exported.content ?? '' : JSON.stringify({ title: exported.title, messages: exported.messages }, null, 2);
+    const url = URL.createObjectURL(new Blob([body], { type: detail === 'full' ? 'text/markdown' : 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${session.title.replace(/[\/:*?"<>|]+/g, '_').slice(0, 40) || 'conversation'}.${detail === 'full' ? 'md' : 'json'}`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    const { secrets, paths, emails } = exported.stats;
+    toast.success('已导出', `已替换 ${secrets} 处密钥、${paths} 处本机路径、${emails} 个邮箱`);
+  } catch (error) {
+    toast.error('导出失败', error instanceof Error ? error.message : undefined);
+  }
+}
 
 /** Archive tucks a conversation away without deleting it. A running one is not archived silently: the toast offers to stop it first. */
 async function archiveSession(session: SessionSummary): Promise<void> {
@@ -166,6 +185,16 @@ function SessionContextMenu({
         >
           <span className="flex items-center gap-2">
             <SquarePen size={13} /> 打开
+          </span>
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => void exportSessionFile(session, 'full')}>
+          <span className="flex items-center gap-2">
+            <Download size={13} /> 导出对话（脱敏）
+          </span>
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => void exportSessionFile(session, 'structure')}>
+          <span className="flex items-center gap-2">
+            <Download size={13} /> 导出排障版（不含正文）
           </span>
         </ContextMenuItem>
         {onRename && (

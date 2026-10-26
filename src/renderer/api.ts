@@ -307,6 +307,14 @@ export async function compareModels(text: string, targets: Array<{ providerId: s
   return ((await res.json()) as { results: import('../shared/compare').CompareResult[] }).results;
 }
 
+export interface SessionExportResult { content?: string; title?: string; stats: { secrets: number; paths: number; emails: number }; messages?: unknown[] }
+
+/** A redacted copy of a conversation: keys, local paths and e-mail addresses are replaced; "structure" drops message text. */
+export async function exportSession(sessionId: string, format: 'json' | 'md', detail: 'structure' | 'full'): Promise<SessionExportResult> {
+  const res = await api(`/api/sessions/${sessionId}/export?format=${format}&detail=${detail}`);
+  return res.json();
+}
+
 export async function getDiskSpace(): Promise<{ freeBytes: number | null; totalBytes: number | null }> {
   const res = await api('/api/storage/disk');
   return (await res.json()) as { freeBytes: number | null; totalBytes: number | null };
