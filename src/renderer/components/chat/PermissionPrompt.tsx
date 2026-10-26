@@ -53,6 +53,8 @@ export default function PermissionPrompt({
   const planned = typeof permission.args.planned === 'number' ? permission.args.planned : null;
   const title = preview
     ? `允许写入 ${preview.path}？`
+    : permission.name === 'http_fetch'
+      ? `允许访问网页 ${typeof permission.args.url === 'string' ? permission.args.url.replace(/^https?:\/\//, '').slice(0, 60) : ''}？`
     : permission.name === 'computer_confirm'
       ? `Agent 要${confirmLabel || '执行一个不可撤回的操作'}，允许吗？`
       : permission.name === 'create_schedule'

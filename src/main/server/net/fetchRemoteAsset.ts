@@ -35,7 +35,9 @@ async function assertPublicHost(url: URL, resolve: (host: string) => Promise<str
  * connecting, not pinned, so a rebinding attacker with a tiny TTL is reduced
  * but not eliminated.
  */
-export async function fetchRemoteAsset(rawUrl: string, options: FetchRemoteAssetOptions = {}): Promise<Buffer> {
+export interface RemoteResponse { body: Buffer; contentType: string; finalUrl: string }
+
+export async function fetchRemote(rawUrl: string, options: FetchRemoteAssetOptions = {}): Promise<RemoteResponse> {
   const resolve = options.resolve ?? resolveAll;
   const doFetch = options.fetchImpl ?? fetch;
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_ASSET_BYTES;
@@ -62,7 +64,7 @@ export async function fetchRemoteAsset(rawUrl: string, options: FetchRemoteAsset
     const chunks: Uint8Array[] = [];
     let total = 0;
     const reader = response.body?.getReader();
-    if (!reader) return Buffer.alloc(0);
+    if (!reader) return { body: Buffer.alloc(0), contentType: response.headers.get('content-type') ?? '', finalUrl: url.href };
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -73,7 +75,11 @@ export async function fetchRemoteAsset(rawUrl: string, options: FetchRemoteAsset
       }
       chunks.push(value);
     }
-    return Buffer.concat(chunks);
+    return { body: Buffer.concat(chunks), contentType: response.headers.get('content-type') ?? '', finalUrl: url.href };
   }
   throw new RemoteFetchError('Too many redirects');
+}
+
+export async function fetchRemoteAsset(rawUrl: string, options: FetchRemoteAssetOptions = {}): Promise<Buffer> {
+  return (await fetchRemote(rawUrl, options)).body;
 }
