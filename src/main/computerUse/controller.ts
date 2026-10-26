@@ -3,7 +3,17 @@ import type { ComputerController, CursorPoint, InputBackend, ScreenSize, Screens
 import { captureScreen } from './capture';
 import { createWindowsInputBackend } from './winInput';
 import { createPosixInputBackend } from './posixInput';
-import { ACTION_SETTLE_MS, clampPoint, type ComputerInput } from '../../shared/computerUse';
+import { ACTION_SETTLE_MS, clampPoint, createComputerBudget, type ComputerInput } from '../../shared/computerUse';
+
+/** Controllers with a live task. `stopAllComputerControl` cuts every one of them off at once. */
+const active = new Set<{ stop(): void }>();
+
+/** The user's emergency brake: the next action of every live computer-use task is refused. Returns how many were stopped. */
+export function stopAllComputerControl(): number {
+  const count = active.size;
+  for (const handle of active) handle.stop();
+  return count;
+}
 
 /** Whether this OS can be driven at all. Cheap; safe to call at startup. */
 export function isComputerUseSupported(platform: NodeJS.Platform = process.platform): boolean {
@@ -35,6 +45,11 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  */
 export function createComputerController(): ComputerController {
   const backend = createBackend();
+  // Step and time limits live here, in the main process, so nothing in the renderer or the model can reset them.
+  const budget = createComputerBudget();
+  let stopped = false;
+  const handle = { stop: () => { stopped = true; } };
+  active.add(handle);
   let lastImageSize: ScreenSize | null = null;
   let logicalSize: ScreenSize | null = null;
   let scaleFactor = 1;
@@ -63,6 +78,8 @@ export function createComputerController(): ComputerController {
     screenshot: shoot,
 
     async run(action: ComputerInput) {
+      if (stopped) throw new Error('用户已按下停止键，电脑操作已中止。请向用户确认下一步，不要继续操作。');
+      budget.charge(action);
       if (!lastImageSize && action.action !== 'screenshot' && action.action !== 'wait') {
         await shoot();
       }
@@ -127,6 +144,7 @@ export function createComputerController(): ComputerController {
     },
 
     dispose() {
+      active.delete(handle);
       backend.dispose();
     },
   };

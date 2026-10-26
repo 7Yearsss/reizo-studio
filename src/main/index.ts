@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, ipcMain } from 'electron';
+import { app, BrowserWindow, globalShortcut, ipcMain, Notification } from 'electron';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
@@ -11,7 +11,8 @@ import { createSettingsStore } from './server/storage/settingsStore';
 import { createScheduleStore } from './server/storage/scheduleStore';
 import { createUsageStore } from './server/storage/usageStore';
 import { createThoughtStore } from './server/storage/thoughtStore';
-import { createMainWindow, setQuitting } from './window';
+import { createMainWindow, getAppIcon, setQuitting } from './window';
+import { stopAllComputerControl } from './computerUse';
 import { registerWindowIpc } from './windowIpc';
 import { registerWorkspaceIpc } from './workspaceIpc';
 import { createTray } from './tray';
@@ -112,6 +113,12 @@ async function bootstrap(): Promise<void> {
   createTray();
   globalShortcut.register('CommandOrControl+Shift+Space', () => {
     createMainWindow();
+  });
+  // Emergency stop for computer control: works from any app, because the agent may be driving the screen.
+  globalShortcut.register('CommandOrControl+Alt+Shift+S', () => {
+    if (stopAllComputerControl() > 0) {
+      try { new Notification({ title: 'Reizo', body: '已停止电脑操作', icon: getAppIcon() }).show(); } catch { /* ignore */ }
+    }
   });
 }
 

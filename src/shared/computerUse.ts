@@ -204,3 +204,37 @@ export function summarizeComputerAction(input: ComputerInput): string {
 function pointSuffix(input: { x?: number; y?: number }): string {
   return typeof input.x === 'number' && typeof input.y === 'number' ? ` (${input.x}, ${input.y})` : '（当前位置）';
 }
+
+/** One task may take at most this many acting steps (clicks, typing, keys, scrolls, drags) … */
+export const COMPUTER_MAX_STEPS = 30;
+/** … and run at most this long, counted from its first acting step. Enforced in the main process. */
+export const COMPUTER_MAX_MS = 5 * 60_000;
+
+/** Looking (screenshot / cursor / wait) is free; only actions that change the machine count. */
+export function isActingStep(action: ComputerInput): boolean {
+  return action.action !== 'screenshot' && action.action !== 'cursor_position' && action.action !== 'wait';
+}
+
+export interface ComputerBudget {
+  /** Throws when the next acting step would exceed the step or time budget. */
+  charge(action: ComputerInput): void;
+  readonly steps: number;
+}
+
+export function createComputerBudget(options: { maxSteps?: number; maxMs?: number; now?: () => number } = {}): ComputerBudget {
+  const maxSteps = options.maxSteps ?? COMPUTER_MAX_STEPS;
+  const maxMs = options.maxMs ?? COMPUTER_MAX_MS;
+  const now = options.now ?? Date.now;
+  let steps = 0;
+  let deadline: number | null = null;
+  return {
+    get steps() { return steps; },
+    charge(action) {
+      if (!isActingStep(action)) return;
+      deadline ??= now() + maxMs;
+      if (now() > deadline) throw new Error(`电脑操作已超过 ${Math.round(maxMs / 60_000)} 分钟上限，已停止。请向用户汇报进度，由用户决定是否继续。`);
+      if (steps >= maxSteps) throw new Error(`电脑操作已达 ${maxSteps} 步上限，已停止。请向用户汇报进度，由用户决定是否继续。`);
+      steps += 1;
+    },
+  };
+}
