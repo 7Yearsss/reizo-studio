@@ -17,6 +17,7 @@ import ModelPicker from './ModelPicker';
 import ContextRing from './ContextRing';
 import MentionMenu, { extractMentionQuery } from './MentionMenu';
 import SessionRefMenu from './SessionRefMenu';
+import CompareDialog from './CompareDialog';
 import BackgroundTasksChip from './BackgroundTasksChip';
 import { isHaltedNotice, LOOP_RECOVERY_MESSAGE } from '../../../shared/loopRecovery';
 import { PLAN_CONFIRM_MESSAGE } from '../../../shared/planMode';
@@ -197,6 +198,8 @@ export default function Composer({
   const sessionQuery = extractSessionQuery(draft);
   const allSessions = useChatStore((s) => s.sessions);
   // Referenced conversations are kept apart from file mentions, which are dropped when the draft has no '@'.
+  const [compareOpen, setCompareOpen] = useState(false);
+  const [compareText, setCompareText] = useState('');
   const [sessionRefs, setSessionRefs] = useState<Array<{ id: string; title: string }>>([]);
   const slash = extractSlashQuery(draft);
   const slashCommands = buildSlashCommands(skills);
@@ -494,6 +497,12 @@ export default function Composer({
     : null;
 
   function pickSlash(command: SlashCommand, args: string) {
+    if (command.id === 'compare') {
+      setCompareText(args.trim() || draft.replace(/^\/compare\s*/, '').trim());
+      setDraft('');
+      setCompareOpen(true);
+      return;
+    }
     if (command.id === 'plan') {
       setDraft('');
       if (sessionId) chatStore.setPlanMode(sessionId, !planMode);
@@ -657,6 +666,7 @@ export default function Composer({
               </div>
             )}
             {sessionId && <BackgroundTasksChip sessionId={sessionId} />}
+            {compareOpen && <CompareDialog open onOpenChange={setCompareOpen} initialText={compareText} />}
             {sessionId && <ComposerDock todos={todos} />}
             {syncingSheet && <p role="status" className="mb-2 text-xs text-ink-muted">正在保存工作区内容…</p>}
             {addingFiles > 0 && <p role="status" className="mb-2 text-xs text-ink-muted">正在添加附件…</p>}

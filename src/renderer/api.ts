@@ -302,6 +302,11 @@ export async function deleteTranslation(sessionId: string, messageId: string, la
   await api(`/api/sessions/${sessionId}/messages/${messageId}/translations/${lang}`, { method: 'DELETE' });
 }
 
+export async function compareModels(text: string, targets: Array<{ providerId: string; model: string }>): Promise<import('../shared/compare').CompareResult[]> {
+  const res = await api('/api/compare', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, targets }) });
+  return ((await res.json()) as { results: import('../shared/compare').CompareResult[] }).results;
+}
+
 export async function getDiskSpace(): Promise<{ freeBytes: number | null; totalBytes: number | null }> {
   const res = await api('/api/storage/disk');
   return (await res.json()) as { freeBytes: number | null; totalBytes: number | null };

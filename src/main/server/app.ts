@@ -12,6 +12,7 @@ import { createSettingsStore } from './storage/settingsStore';
 import { createSessionsRouter } from './routes/sessions';
 import { createAutoCompactor } from './agent/compaction';
 import { createStorageRouter } from './routes/storage';
+import { createCompareRouter } from './routes/compare';
 import { createTranslationsRouter } from './routes/translations';
 import { createNetworkRouter } from './routes/network';
 import { setWriteProtectedRoots } from '../workspaceWrite';
@@ -265,6 +266,15 @@ export function createApp(options: CreateAppOptions) {
   app.route('/api/memory', createMemoryRouter(memoryEventsStore, settingsStore, options.dataRoot));
   app.route('/api/sessions', createSessionArtifactsRouter(artifactStore, sessionStore));
   app.route('/api/artifacts', createArtifactsRouter(artifactStore));
+  // One plain completion on a chosen provider/model (model comparison); same quota and usage accounting as chat.
+  const generateOnce = async (target: { providerId: string; model: string }, prompt: string, signal?: AbortSignal): Promise<string> => {
+    const { providerId, modelId, apiKey, baseUrl } = resolveSettingsModel(await settingsStore.get(), { category: 'llm', providerId: target.providerId, model: target.model });
+    const model = createOpenAiModel({ apiKey, modelId, baseUrl, fetch: quotaFetch(llmSchedulerFor(canvasStore), providerId,
+      usageFetch(canvasStore.usage, { providerId, model: modelId, category: 'llm', accepting: () => !canvasWorkStopped(canvasStore) }), true) });
+    const { text } = await generateText({ model, prompt, abortSignal: signal });
+    return text;
+  };
+  app.route('/api/compare', createCompareRouter(generateOnce));
   // One-shot rewrite for the review bar's "重写这条": a plain completion on the configured chat model, no turn or history.
   const rewriteText = async (system: string, prompt: string, signal?: AbortSignal): Promise<string> => {
     const { providerId, modelId, apiKey, baseUrl } = resolveSettingsModel(await settingsStore.get(), { category: 'llm' });
