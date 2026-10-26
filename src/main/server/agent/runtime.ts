@@ -57,6 +57,7 @@ import { createTurnTraceCollector, writeTurnTrace } from './turnTrace';
 import { readWorkspaceMemory } from '../../workspaceMemory';
 import { formatRules, readRuleSources } from './workspaceRules';
 import { createSkillTools } from './skillTools';
+import { createPersonalMemoryTools, personalMemoryRoot } from './personalMemory';
 import { applySkillToolPolicy } from './skillToolFilter';
 import { observeRetries } from '../../../shared/retryObserver';
 import { messagesForModel } from '../../../shared/compactBoundary';
@@ -330,6 +331,8 @@ export async function runChatTurn(options: {
   const workspacePath = settings.workspacePath;
   const runPermissionMode = effectiveRunMode(settings.permissionMode, runCeiling);
   const memory = workspacePath ? await readWorkspaceMemory(workspacePath) : '';
+  // The user's own memory follows them into every workspace, and works with none open.
+  const personalMemory = dataRoot ? await readWorkspaceMemory(personalMemoryRoot(dataRoot)) : '';
   const standingRules = formatRules(await readRuleSources({ workspacePath, userRulesDir: dataRoot }));
   let projectInstructions = '';
   let projectName = '';
@@ -405,6 +408,9 @@ export async function runChatTurn(options: {
     // Per-turn dynamic parts go last so the long static prefix above stays identical across turns (provider prefix caching).
     canvasSummary,
     sessionArtifactsHint,
+    personalMemory
+      ? 'Personal memory index (about the USER, applies in every workspace — each line points at an entry, read it with personal_memory_read):\n' + redactSecrets(personalMemory)
+      : '',
     memory
       ? 'Workspace memory index (MEMORY.md — each line points at a file in memory/, read it with memory_read):\n' +
           redactSecrets(memory)
@@ -532,6 +538,9 @@ export async function runChatTurn(options: {
 
   // Automations live outside any workspace — the agent can always schedule
   // recurring or one-shot follow-up work (paseo-style heartbeat).
+  const personalMemoryTools = dataRoot && runCeiling !== 'readonly'
+    ? createPersonalMemoryTools({ sessionId, dataRoot, permissionMode: runPermissionMode, emit: (event) => emit(event) })
+    : undefined;
   const scheduleTools = scheduleStore ? createScheduleTools({ scheduleStore, sessionId, permissionMode: runPermissionMode }) : undefined;
 
   let currentPresentationRefs = regenerate ? splitPresentationContext(userMessage?.content ?? '').refs : presentationRefs.refs;
@@ -553,6 +562,7 @@ export async function runChatTurn(options: {
           ...(videoTools ?? {}),
           ...(computerTools?.tools ?? {}),
           ...(scheduleTools ?? {}),
+          ...(personalMemoryTools ? personalMemoryTools.tools : {}),
           ...(skill ? {} : createSkillTools({ skills: availableSkills })),
           ...(skill?.contract && canvasStore && dataRoot ? createDeliveryTools({ skill, canvasStore, sessionId, dataRoot, artifactStore }) : {}),
         }
@@ -599,9 +609,10 @@ export async function runChatTurn(options: {
 
   // Semantic memory recall: kicked off in parallel with stream setup, then
   // injected at the first step boundary so it never delays the first token.
-  const recallPromise = workspacePath
-    ? startMemoryRecall({ sessionId, workspaceRoot: workspacePath, model, query: userText })
-    : Promise.resolve([]);
+  const recallPromise = Promise.all([
+    workspacePath ? startMemoryRecall({ sessionId, workspaceRoot: workspacePath, model, query: userText }) : Promise.resolve([] as MemoryEntry[]),
+    dataRoot ? startMemoryRecall({ sessionId, workspaceRoot: personalMemoryRoot(dataRoot), model, query: userText }) : Promise.resolve([] as MemoryEntry[]),
+  ]).then(([fromWorkspace, fromPersonal]) => [...fromPersonal, ...fromWorkspace]);
   let recallInjected = false;
   let recallSettled: MemoryEntry[] | null = null;
   void withTimeout(recallPromise, RECALL_BUDGET.timeoutMs, []).then((entries) => {
@@ -827,6 +838,8 @@ export async function runChatTurn(options: {
             ? ((await computerTools?.executeApproved(item.args)) ?? {
                 error: 'Computer control is not enabled for this turn',
               })
+            : item.name.startsWith('personal_memory_')
+              ? ((await personalMemoryTools?.executeApproved(item.name, item.args)) ?? { error: 'Personal memory is not available in this turn' })
             : item.name.startsWith(MCP_TOOL_PREFIX)
               ? ((await mcp?.executeApproved(item.name, item.args, item.toolCallId)) ?? {
                   error: 'This turn has no MCP tools',

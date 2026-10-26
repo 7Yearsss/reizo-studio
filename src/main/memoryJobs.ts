@@ -201,7 +201,7 @@ export function startMemoryRecall(opts: {
     try {
       const manifest = await listMemoryManifest(workspaceRoot);
       const seen = recalledBySession.get(sessionId) ?? new Set<string>();
-      const candidates = manifest.filter((m) => !seen.has(m.fileName));
+      const candidates = manifest.filter((m) => !seen.has(m.fileName) && !m.private);
       if (!candidates.length || !query.trim()) return [];
       if (candidates.length <= RECALL_TOP_K) {
         const all: MemoryEntry[] = [];

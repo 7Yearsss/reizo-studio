@@ -21,11 +21,14 @@ export interface MemoryEntry {
   description: string;
   type: MemoryType;
   body: string;
+  /** Private memories are never injected or recalled automatically; they are read only on request. */
+  private?: boolean;
   /** File modification time; drives the "may be out of date" warning. */
   updatedAt?: string;
 }
 
 export interface MemoryManifestItem {
+  private?: boolean;
   fileName: string;
   name: string;
   description: string;
@@ -67,7 +70,7 @@ export function normalizeMemoryType(value: unknown): MemoryType {
   return (MEMORY_TYPES as string[]).includes(String(value)) ? (value as MemoryType) : 'project';
 }
 
-function parseFrontmatter(raw: string): { name: string; description: string; type: MemoryType; body: string } | null {
+function parseFrontmatter(raw: string): { name: string; description: string; type: MemoryType; body: string; private?: boolean } | null {
   const m = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   if (!m) return null;
   const meta = m[1];
@@ -81,6 +84,7 @@ function parseFrontmatter(raw: string): { name: string; description: string; typ
     description: get('description'),
     type: (MEMORY_TYPES as string[]).includes(typeRaw) ? (typeRaw as MemoryType) : 'project',
     body: m[2].trim(),
+    ...(/^ {0,2}private:\s*true\s*$/m.test(meta) ? { private: true } : {}),
   };
 }
 
@@ -91,6 +95,7 @@ function serializeEntry(entry: Omit<MemoryEntry, 'fileName'>): string {
     `description: ${entry.description}`,
     'metadata:',
     `  type: ${entry.type}`,
+    ...(entry.private ? ['  private: true'] : []),
     '---',
     '',
     entry.body.trim(),
@@ -122,6 +127,7 @@ export async function listMemoryManifest(workspaceRoot: string): Promise<MemoryM
           name: parsed.name || entry.name.replace(/\.md$/, ''),
           description: parsed.description,
           type: parsed.type,
+          ...(parsed.private ? { private: true } : {}),
         });
       } catch {
         /* unreadable file — skip */
@@ -160,7 +166,8 @@ async function rebuildIndex(workspaceRoot: string): Promise<void> {
   } catch {
     /* no index yet */
   }
-  const lines = manifest.map(
+  // Private memories stay out of the index that is injected every turn.
+  const lines = manifest.filter((m) => !m.private).map(
     (m) => `- [${m.name}](${MEMORY_DIR}/${m.fileName}) — ${m.description}`,
   );
   const content = [
@@ -176,7 +183,7 @@ async function rebuildIndex(workspaceRoot: string): Promise<void> {
 /** Create or overwrite one memory file and refresh the index. */
 export async function writeMemoryEntry(
   workspaceRoot: string,
-  entry: { name: string; description: string; type: MemoryType; body: string },
+  entry: { name: string; description: string; type: MemoryType; body: string; private?: boolean },
 ): Promise<{ path: string; fileName: string }> {
   assertMemorySafe(`${entry.name}\n${entry.description}\n${entry.body}`);
   await ensureMemoryDir(workspaceRoot);
