@@ -9,6 +9,7 @@ export const API_PORT_SCAN_ATTEMPTS = 50;
 export const IPC = {
   ACCOUNT_STATUS: 'reizo:account-status',
   ACCOUNT_LOGIN: 'reizo:account-login',
+  ACCOUNT_PASSWORD_LOGIN: 'reizo:account-password-login',
   ACCOUNT_LOGOUT: 'reizo:account-logout',
   ACCOUNT_REOPEN: 'reizo:account-reopen',
   ACCOUNT_REFRESH: 'reizo:account-refresh',

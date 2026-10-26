@@ -94,6 +94,7 @@ export function ensureReizoBridge(): ReizoBridge {
     },
     accountStatus: async () => ({ status: 'signed-out' as const, webOrigin: '' }),
     accountLogin: async () => ({ status: 'signed-out' as const, webOrigin: '' }),
+    accountPasswordLogin: async () => ({ status: 'signed-out' as const, webOrigin: '', message: '请在桌面客户端中使用账号密码登录。' }),
     accountLogout: async () => ({ status: 'signed-out' as const, webOrigin: '' }),
     accountReopen: async () => ({ status: 'signed-out' as const, webOrigin: '' }),
     accountRefresh: async () => ({ status: 'signed-out' as const, webOrigin: '' }),

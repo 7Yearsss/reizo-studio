@@ -155,3 +155,58 @@ describe('account model credentials', () => {
     }
   });
 });
+
+describe('password account login', () => {
+  it('uses native JSON login and the existing model/storage flow without exposing or saving the password', async () => {
+    const f = fixture(null, true);
+    f.fetcher.mockResolvedValueOnce(response({ ...authenticated, token }))
+      .mockResolvedValueOnce(response(authenticated)).mockResolvedValueOnce(response({ credential: modelSession }));
+    const state = await f.service.loginWithPassword({ username: '  alice@example.com  ', password: '  password with spaces  ' });
+    expect(state).toMatchObject({ status: 'authenticated', user, models: { ready: true } });
+    expect(f.open).not.toHaveBeenCalled(); expect(f.connected).toHaveBeenCalledOnce();
+    const [url, options] = f.fetcher.mock.calls[0];
+    expect(url).toBe(`${origin}/api/desktop-auth/login`);
+    expect(options).toMatchObject({ method: 'POST', redirect: 'error', cache: 'no-store', headers: { 'Content-Type': 'application/json' } });
+    expect(JSON.parse(String(options?.body))).toEqual({ username: 'alice@example.com', password: '  password with spaces  ' });
+    expect(options?.headers).not.toHaveProperty('Authorization');
+    expect(f.fetcher.mock.calls.slice(1).every(([, options]) => !options?.body)).toBe(true);
+    expect(JSON.stringify(f.write.mock.calls)).not.toContain('password with spaces');
+    expect(JSON.stringify(state)).not.toContain(token); expect(JSON.stringify(state)).not.toContain('sk-device-test');
+  });
+  it('rejects invalid inputs before a network request', async () => {
+    const f = fixture();
+    for (const input of [null, {}, { username: '  ', password: 'x' }, { username: 'a', password: '' }, { username: 'a', password: 'x'.repeat(129) }, { username: 'x'.repeat(321), password: 'x' }, { username: 'a', password: 'x', token }]) {
+      expect((await f.service.loginWithPassword(input)).status).toBe('signed-out');
+    }
+    expect(f.fetcher).not.toHaveBeenCalled();
+  });
+  it('returns safe credential errors and allows an explicit retry', async () => {
+    const f = fixture();
+    f.fetcher.mockResolvedValueOnce(response({ error: 'remote secret password' }, 401));
+    expect(await f.service.loginWithPassword({ username: 'alice', password: 'wrong' })).toMatchObject({ status: 'signed-out', message: '账号或密码不正确。' });
+    expect(f.write).not.toHaveBeenCalled();
+    f.fetcher.mockResolvedValueOnce(response({ ...authenticated, token })).mockResolvedValueOnce(response(authenticated));
+    expect((await f.service.loginWithPassword({ username: 'alice', password: 'correct' })).status).toBe('authenticated');
+  });
+  it('deduplicates submissions and revokes a late login after logout without restoring the account', async () => {
+    const f = fixture(); let finish!: (value: Response) => void;
+    f.fetcher.mockReturnValueOnce(new Promise(resolve => { finish = resolve; })).mockResolvedValueOnce(response({ revoked: true }));
+    const first = f.service.loginWithPassword({ username: 'alice', password: 'secret' });
+    await f.service.loginWithPassword({ username: 'alice', password: 'secret' });
+    expect(f.fetcher).toHaveBeenCalledOnce(); await f.service.logout();
+    finish(response({ ...authenticated, token })); await first;
+    expect(f.service.snapshot().status).toBe('signed-out'); expect(f.connected).not.toHaveBeenCalled();
+    expect(f.fetcher.mock.calls[1]).toMatchObject([`${origin}/api/desktop-auth/session`, { method: 'DELETE' }]);
+    expect(f.write.mock.calls.every(([value]) => value === null)).toBe(true);
+  });
+  it('revokes an unverified login and keeps encrypted persistence mandatory', async () => {
+    const f = fixture();
+    f.fetcher.mockResolvedValueOnce(response({ ...authenticated, token })).mockRejectedValueOnce(new Error('network')).mockResolvedValueOnce(response({ revoked: true }));
+    expect((await f.service.loginWithPassword({ username: 'alice', password: 'secret' })).status).toBe('signed-out');
+    expect(f.fetcher.mock.calls[2][1]?.method).toBe('DELETE');
+    f.fetcher.mockResolvedValueOnce(response({ ...authenticated, token })).mockResolvedValueOnce(response(authenticated)).mockResolvedValueOnce(response({ revoked: true }));
+    f.write.mockImplementation(() => { throw new Error('encryption unavailable'); });
+    expect(await f.service.loginWithPassword({ username: 'alice', password: 'secret' })).toMatchObject({ status: 'signed-out', message: expect.stringContaining('安全保存') });
+    expect(f.connected).not.toHaveBeenCalled();
+  });
+});

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { AccountModelCredential, AccountState, AccountUser } from '../../shared/account';
 import { parseModelCatalog } from '../../shared/modelCatalog';
+import { accountPasswordLoginSchema, type AccountPasswordLogin } from '../../shared/accountLogin';
 import { AccountWalletClient } from './wallet';
 import type { CashierPurchase } from './cashierPolicy';
 
@@ -36,7 +37,7 @@ class AccountHttpError extends Error { constructor(public readonly status: numbe
 
 export class AccountService {
   private credential: AccountCredential | null = null;
-  private pending: { token: string; url: string; code: string; expiresAt: string } | null = null;
+  private pending: ({ token: string; expiresAt: string } & ({ method: 'browser'; url: string; code: string } | { method: 'password' })) | null = null;
   private state: AccountState;
   private generation = 0;
   private starting = false;
@@ -80,13 +81,14 @@ export class AccountService {
     try { this.deps.write(null); }
     catch { this.state.message += ' 本机旧凭据文件未能移除，下次启动仍会重新验证。'; }
   }
-  private async request(path: string, method: string, token?: string): Promise<Record<string, unknown>> {
+  private async request(path: string, method: string, token?: string, input?: AccountPasswordLogin): Promise<Record<string, unknown>> {
     const response = await this.deps.fetch(`${this.deps.origin}/api/desktop-auth/${path}`, {
-      method, headers: token ? { Authorization: `Bearer ${token}` } : {},
+      method, headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(input ? { 'Content-Type': 'application/json' } : {}) },
+      ...(input ? { body: JSON.stringify(input) } : {}),
       redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(15_000),
     });
     // Never surface remote response text (which could contain sensitive details).
-    if (!response.ok) throw new AccountHttpError(response.status, response.status === 404 ? '网站尚未启用桌面登录，请先更新网页服务。' : response.status === 429 ? '请求过于频繁，请稍后重试。' : '账号服务暂不可用，请稍后重试。');
+    if (!response.ok) throw new AccountHttpError(response.status, path === 'login' && response.status === 401 ? '账号或密码不正确。' : response.status === 404 ? '网站尚未启用此登录方式，请先更新网页服务。' : response.status === 429 ? '请求过于频繁，请稍后重试。' : '账号服务暂不可用，请稍后重试。');
     return await response.json() as Record<string, unknown>;
   }
   private revoke(token: string) { return this.request('session', 'DELETE', token); }
@@ -104,7 +106,7 @@ export class AccountService {
       const url = new URL(String(result.verificationUrl));
       if (url.origin !== this.deps.origin || url.username || url.password || url.pathname !== '/desktop/connect' || url.search !== `?request=${result.requestId}` || url.hash) throw new Error('登录服务返回了不受信任的地址。');
       if (generation !== this.generation) { await this.revoke(issuedToken).catch((): void => undefined); return this.snapshot(); }
-      this.pending = { token: issuedToken, url: url.href, code: result.code, expiresAt: result.expiresAt };
+      this.pending = { method: 'browser', token: issuedToken, url: url.href, code: result.code, expiresAt: result.expiresAt };
       this.state = { status: 'pending', webOrigin: this.deps.origin, code: result.code, expiresAt: result.expiresAt };
       try { await this.deps.open(url.href); }
       catch { if (generation === this.generation) this.state.message = '未能打开浏览器，请点击“重新打开浏览器”。'; }
@@ -118,7 +120,44 @@ export class AccountService {
     return this.snapshot();
   }
   async reopen(): Promise<void> {
-    if (this.pending) await this.deps.open(this.pending.url);
+    if (this.pending?.method === 'browser') await this.deps.open(this.pending.url);
+  }
+  async loginWithPassword(input: unknown): Promise<AccountState> {
+    if (this.starting || this.pending || this.credential) return this.snapshot();
+    const parsed = accountPasswordLoginSchema.safeParse(input);
+    if (!parsed.success) {
+      this.state = { status: 'signed-out', webOrigin: this.deps.origin, message: '请输入有效的用户名或邮箱和密码。' };
+      return this.snapshot();
+    }
+    this.starting = true;
+    const generation = ++this.generation;
+    let issuedToken: string | undefined;
+    try {
+      const result = await this.request('login', 'POST', undefined, parsed.data);
+      if (typeof result.token === 'string' && /^[A-Za-z0-9_-]{43}$/.test(result.token)) issuedToken = result.token;
+      if (generation !== this.generation) {
+        if (issuedToken) await this.revoke(issuedToken).catch((): void => undefined);
+        return this.snapshot();
+      }
+      if (!issuedToken || result.status !== 'authenticated' || !isUser(result.user) || !future(result.expiresAt, this.now())) throw new Error('Invalid login response');
+      this.pending = { method: 'password', token: issuedToken, expiresAt: result.expiresAt };
+      // Revalidate the new grant and use the same encrypted storage/model bootstrap
+      // as browser login. The password is never part of a saved credential.
+      await this.refresh();
+      if (generation === this.generation && this.pending?.token === issuedToken) {
+        const message = this.state.message || '登录未完成，请稍后重试。';
+        this.pending = null; ++this.generation;
+        this.state = { status: 'signed-out', webOrigin: this.deps.origin, message };
+        await this.revoke(issuedToken).catch((): void => undefined);
+      }
+    } catch (error) {
+      if (issuedToken) await this.revoke(issuedToken).catch((): void => undefined);
+      if (generation === this.generation) {
+        this.pending = null;
+        this.state = { status: 'signed-out', webOrigin: this.deps.origin, message: error instanceof AccountHttpError ? error.message : '无法完成账号密码登录，请检查网络后重试。' };
+      }
+    } finally { this.starting = false; }
+    return this.snapshot();
   }
   refresh(): Promise<AccountState> {
     if (this.refreshing) return this.refreshing;

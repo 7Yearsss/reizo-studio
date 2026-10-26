@@ -5,6 +5,22 @@ The desktop account control uses the existing Reizo web identity system in the
 
 ## User flow
 
+The login dialog offers **浏览器登录** and **账号密码登录**. Password login accepts
+the same username or email and password as the Reizo website. The renderer clears
+the password on submission and when leaving the form; main sends it once as JSON
+to the configured HTTPS `/api/desktop-auth/login` endpoint, rejecting redirects.
+The password is never included in account state, settings or encrypted credentials.
+OAuth-only accounts can continue using browser login.
+
+Both methods use the same revocable desktop grant, encrypted credential persistence,
+model bootstrap, wallet and logout. Password login revalidates the issued grant
+before declaring success and revokes late grants after cancellation. A local
+encrypted-storage failure still prevents completion; this option does not change
+the OS credential-storage requirements. Deploy the matching web login route before
+using a rebuilt client. No new database migration is required.
+
+Browser login:
+
 1. Click the account control at the bottom of the sidebar, choose **登录 Reizo**,
    then **使用浏览器登录**.
 2. The desktop starts a ten-minute request and opens the system browser.
@@ -51,6 +67,11 @@ No installer has been rebuilt for this UI change.
 Requires the matching winlume change and migration `0015_desktop_sessions`:
 
 - `POST /api/desktop-auth/start`: requestId, secret token, display code, expiry, verificationUrl.
+- `POST /api/desktop-auth/login`: bounded username/email and password JSON; validates
+  through the website credential verifier and returns a 30-day desktop bearer and
+  public account identity. Only a hash is persisted server-side. Per-IP and hashed
+  identifier rate limits apply; invalid accounts use the same generic error. This
+  endpoint does not create browser cookies or expose a browser approval code.
 - `GET /api/desktop-auth/request?request=...`: public pending/expiry check only.
 - `POST /api/desktop-auth/approve`: browser session, same-origin JSON and confirmation
   code; one conditional update claims the pending request.

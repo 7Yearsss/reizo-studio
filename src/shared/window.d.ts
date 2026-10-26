@@ -28,6 +28,7 @@ import type {
 export interface ReizoBridge {
   accountStatus(): Promise<import('./account').AccountState>;
   accountLogin(): Promise<import('./account').AccountState>;
+  accountPasswordLogin(input: import('./accountLogin').AccountPasswordLogin): Promise<import('./account').AccountState>;
   accountLogout(): Promise<import('./account').AccountState>;
   accountReopen(): Promise<import('./account').AccountState>;
   accountRefresh(): Promise<import('./account').AccountState>;

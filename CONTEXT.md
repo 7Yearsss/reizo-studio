@@ -53,6 +53,11 @@ evidence remain immutable; this view does not automatically synchronize charges.
 
 ## Account Wallet
 
+Account login offers browser approval and direct username/email-password login.
+Both issue the same revocable desktop grant and use the existing encrypted local
+credential store, model bootstrap and wallet authorization. Passwords are submitted
+only to the configured account origin and never persisted or echoed in account state.
+
 The signed-in account menu offers **钱包与充值**. Wallet balance and recharge
 configuration come from the current Reizo web workspace. Select an amount and
 payment method in the desktop, then open the isolated native cashier for payment.

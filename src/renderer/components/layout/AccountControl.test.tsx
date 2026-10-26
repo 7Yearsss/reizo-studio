@@ -16,12 +16,13 @@ const pending: AccountState = { ...signedOut, status: 'pending', code: '1234ABCD
 const authenticated: AccountState = { ...signedOut, status: 'authenticated', user: { id: '1', username: 'admin', displayName: 'Admin', email: null } };
 let root: Root, container: HTMLDivElement;
 let snapshot: AccountState;
-const bridge = { accountStatus: vi.fn(), accountLogin: vi.fn(), accountLogout: vi.fn(), accountReopen: vi.fn(), accountRefresh: vi.fn(), platform: 'win32' };
+const bridge = { accountStatus: vi.fn(), accountLogin: vi.fn(), accountPasswordLogin: vi.fn(), accountLogout: vi.fn(), accountReopen: vi.fn(), accountRefresh: vi.fn(), platform: 'win32' };
 beforeEach(() => {
   vi.clearAllMocks(); vi.useFakeTimers(); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   snapshot = signedOut;
   bridge.accountStatus.mockImplementation(async () => snapshot);
   bridge.accountLogin.mockResolvedValue(pending);
+  bridge.accountPasswordLogin.mockResolvedValue(authenticated);
   bridge.accountLogout.mockResolvedValue(signedOut);
   vi.stubGlobal('reizo', bridge);
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
@@ -104,5 +105,46 @@ it('keeps authorization open when login fails and allows retry', async () => {
   expect(mocks.error).toHaveBeenCalledTimes(1);
   await select('使用浏览器登录'); expect(bridge.accountLogin).toHaveBeenCalledTimes(2);
   snapshot = authenticated; await poll();
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+});
+
+async function fill(name: string, value: string) {
+  const input = document.querySelector<HTMLInputElement>(`input[name="${name}"]`);
+  const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+  if (!input || !setValue) throw new Error(`Missing field ${name}`);
+  await act(async () => {
+    setValue.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+async function submitPassword() {
+  await act(async () => document.querySelector('form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+}
+
+it('offers native password login, clears the password on submit, and closes only after authenticated', async () => {
+  let finish!: (state: AccountState) => void;
+  bridge.accountPasswordLogin.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+  await render(); await openMenu(); await select('登录 Reizo'); await select('账号密码登录');
+  expect(bridge.accountPasswordLogin).not.toHaveBeenCalled();
+  await fill('username', ' alice@example.com '); await fill('password', ' secret ');
+  await submitPassword(); await submitPassword();
+  expect(bridge.accountPasswordLogin).toHaveBeenCalledOnce();
+  expect(bridge.accountPasswordLogin).toHaveBeenCalledWith({ username: 'alice@example.com', password: ' secret ' });
+  expect(document.querySelector<HTMLInputElement>('input[name="password"]')?.value).toBe('');
+  expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+  expect(bridge.accountLogin).not.toHaveBeenCalled();
+  await act(async () => finish(authenticated));
+  expect(document.querySelector('[role="dialog"]')).toBeNull(); expect(mocks.success).toHaveBeenCalledOnce();
+});
+it('shows password errors, allows retry, and discards passwords when switching login methods', async () => {
+  bridge.accountPasswordLogin.mockResolvedValueOnce({ ...signedOut, message: '账号或密码不正确。' });
+  await render(); await openMenu(); await select('登录 Reizo'); await select('账号密码登录');
+  await fill('username', 'alice'); await fill('password', 'wrong'); await submitPassword();
+  expect(document.querySelector('[role="alert"]')?.textContent).toBe('账号或密码不正确。');
+  expect(document.querySelector<HTMLInputElement>('input[name="password"]')?.value).toBe('');
+  await fill('password', 'temporary'); await select('浏览器登录'); await select('账号密码登录');
+  expect(document.querySelector<HTMLInputElement>('input[name="password"]')?.value).toBe('');
+  await fill('username', 'alice'); await fill('password', 'correct'); await submitPassword();
+  expect(bridge.accountPasswordLogin).toHaveBeenCalledTimes(2);
   expect(document.querySelector('[role="dialog"]')).toBeNull();
 });

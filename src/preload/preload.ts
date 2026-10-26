@@ -25,6 +25,7 @@ import type { McpCatalogPage, PluginCatalog } from '../shared/catalog';
 contextBridge.exposeInMainWorld('reizo', {
   accountStatus: () => ipcRenderer.invoke(IPC.ACCOUNT_STATUS),
   accountLogin: () => ipcRenderer.invoke(IPC.ACCOUNT_LOGIN),
+  accountPasswordLogin: (input: import('../shared/accountLogin').AccountPasswordLogin) => ipcRenderer.invoke(IPC.ACCOUNT_PASSWORD_LOGIN, input),
   accountLogout: () => ipcRenderer.invoke(IPC.ACCOUNT_LOGOUT),
   accountReopen: () => ipcRenderer.invoke(IPC.ACCOUNT_REOPEN),
   accountRefresh: () => ipcRenderer.invoke(IPC.ACCOUNT_REFRESH),
