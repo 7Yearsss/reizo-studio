@@ -11,6 +11,7 @@ import type { PromptEditorHandle } from '../agents/prompt-editor';
 import { renumberCitations } from '../../../shared/promptDraft';
 import { loadDraft, saveDraft } from '../../../shared/composerDraft';
 import { pastedTextFileName, shouldAttachPastedText } from '../../../shared/pastedText';
+import { findPlaceholders } from '../../../shared/promptPlaceholders';
 import ModelPicker from './ModelPicker';
 import MentionMenu, { extractMentionQuery } from './MentionMenu';
 import SlashPalette, { applySlashArgs, buildSlashCommands, extractSlashQuery, type SlashCommand } from './SlashPalette';
@@ -193,6 +194,8 @@ export default function Composer({
     if (!seed) return;
     setDraft(seed.text);
     replaceFromIdRef.current = seed.replaceFromId;
+    // A prefilled template with ${…} slots lands the caret on the first one.
+    if (findPlaceholders(seed.text).length) window.setTimeout(() => editorRef.current?.selectPlaceholder(), 0);
   }, [seed?.nonce, seed?.text, seed?.replaceFromId]);
 
   /** Write [n] into the draft so the instruction that follows is tied to picked range n. */
@@ -253,8 +256,18 @@ export default function Composer({
     }
   }
 
+  /** Unfilled `${…}` slots stop a send: jump to the first one and say how many are left. */
+  function blockedByPlaceholders(): boolean {
+    const slots = findPlaceholders(draft);
+    if (slots.length === 0) return false;
+    editorRef.current?.selectPlaceholder();
+    toast.info(`还有 ${slots.length} 处待填写`, '按 Tab 跳到下一处');
+    return true;
+  }
+
   async function submit() {
     if ((!draft.trim() && !hasAttachments) || disabled || preparing.current || addingFilesRef.current > 0) return;
+    if (blockedByPlaceholders()) return;
     preparing.current = true;
     setSyncingSheet(true);
     try {
@@ -275,6 +288,7 @@ export default function Composer({
   /** Ctrl/Cmd+Enter while a turn is live — the opposite of the busyEnter lane. */
   async function submitNow() {
     if ((!draft.trim() && !hasAttachments) || disabled || !sessionId || preparing.current || addingFilesRef.current > 0) return;
+    if (blockedByPlaceholders()) return;
     preparing.current = true;
     setSyncingSheet(true);
     try {

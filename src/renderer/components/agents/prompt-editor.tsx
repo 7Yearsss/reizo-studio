@@ -1,12 +1,13 @@
 import { createContext, forwardRef, useContext, useEffect, useImperativeHandle, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { Copy, ExternalLink, Pencil, Trash2 } from 'lucide-react';
 import { Extension, InputRule, Node, mergeAttributes, type JSONContent } from '@tiptap/core';
-import { Plugin } from '@tiptap/pm/state';
+import { Plugin, TextSelection } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, type NodeViewProps } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { cn } from '@/renderer/lib/cn';
 import { parseDraft, serializeDraft, type DraftNode } from '@/shared/promptDraft';
+import { nextPlaceholderIndex, PLACEHOLDER_PATTERN } from '@/shared/promptPlaceholders';
 
 /** What an inline reference chip shows: where it points and a short quote of the picked range. */
 export interface ChipInfo {
@@ -80,6 +81,36 @@ const ReferenceChip = Node.create<{ isLabel: (label: number) => boolean }>({
 
 const URL_PATTERN = /https?:\/\/[^\s<>"'，。；、）)】」]+/g;
 
+/** Document ranges of every `${…}` fill-in slot. */
+function placeholderRanges(doc: import('@tiptap/pm/model').Node): Array<{ start: number; end: number; name: string }> {
+  const ranges: Array<{ start: number; end: number; name: string }> = [];
+  doc.descendants((node, pos) => {
+    if (!node.isText || !node.text) return;
+    for (const match of node.text.matchAll(PLACEHOLDER_PATTERN)) {
+      const start = pos + (match.index ?? 0);
+      ranges.push({ start, end: start + match[0].length, name: match[0].slice(2, -1) });
+    }
+  });
+  return ranges;
+}
+
+/** Highlights `${…}` slots (decoration only — the draft text is untouched). */
+const PlaceholderHighlight = Extension.create({
+  name: 'placeholderHighlight',
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        props: {
+          decorations: (state) => DecorationSet.create(
+            state.doc,
+            placeholderRanges(state.doc).map((r) => Decoration.inline(r.start, r.end, { class: 'prompt-editor-placeholder' })),
+          ),
+        },
+      }),
+    ];
+  },
+});
+
 /** Styles pasted/typed URLs as links (decoration only — the draft text is untouched). */
 const UrlHighlight = Extension.create({
   name: 'urlHighlight',
@@ -108,6 +139,8 @@ export interface PromptEditorHandle {
   focus(): void;
   /** Put range `label`'s chip at the caret (the end when the editor is not focused). */
   insertReference(label: number): void;
+  /** Select the next (or previous) `${…}` slot so typing replaces it; false when there is none. */
+  selectPlaceholder(reverse?: boolean): boolean;
 }
 
 export interface PromptEditorProps {
@@ -126,6 +159,17 @@ export interface PromptEditorProps {
   /** Enter (or Ctrl/Cmd+Enter) was pressed and nothing handled it: submit. */
   onEnter(sendNow: boolean): void;
   className?: string;
+}
+
+function jumpToPlaceholder(view: import('@tiptap/pm/view').EditorView, reverse: boolean): boolean {
+  const ranges = placeholderRanges(view.state.doc);
+  if (ranges.length === 0) return false;
+  const sel = view.state.selection;
+  // From inside a selected slot, move past it so repeated Tab walks the list.
+  const caret = reverse ? sel.from : sel.to;
+  const target = ranges[nextPlaceholderIndex(ranges, caret, reverse)]!;
+  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, target.start, target.end)).scrollIntoView());
+  return true;
 }
 
 const NO_CHIPS: ChipContextValue = { info: () => undefined, open: () => undefined };
@@ -156,6 +200,7 @@ export const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(fu
         strike: false, underline: false, link: false, dropcursor: false, gapcursor: false, trailingNode: false,
       }),
       UrlHighlight,
+      PlaceholderHighlight,
       ReferenceChip.configure({ isLabel: (label: number) => isLabelRef.current(label) }),
     ],
     [],
@@ -179,6 +224,10 @@ export const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(fu
         const textBeforeCaret = serializeDraft(view.state.doc.cut(0, from).toJSON() as DraftNode);
         latest.current.onKeyDown?.(event, { textBeforeCaret });
         if (event.defaultPrevented) return true;
+        if (event.key === 'Tab' && !event.isComposing && jumpToPlaceholder(view, event.shiftKey)) {
+          event.preventDefault();
+          return true;
+        }
         // Enter sends; only Shift+Enter makes a new line. An IME confirming a candidate is not a send.
         if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
           event.preventDefault();
@@ -213,6 +262,11 @@ export const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(fu
     ref,
     () => ({
       focus: () => editor?.commands.focus(undefined, { scrollIntoView: false }),
+      selectPlaceholder: (reverse = false) => {
+        if (!editor || editor.isDestroyed) return false;
+        editor.commands.focus(undefined, { scrollIntoView: false });
+        return jumpToPlaceholder(editor.view, reverse);
+      },
       insertReference: (label) => {
         if (!editor || editor.isDestroyed) return;
         const at = editor.isFocused ? editor.state.selection.from : editor.state.doc.content.size - 1;
