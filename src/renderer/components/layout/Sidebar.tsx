@@ -68,7 +68,7 @@ async function exportSessionFile(session: SessionSummary, detail: 'structure' | 
     const url = URL.createObjectURL(new Blob([body], { type: detail === 'full' ? 'text/markdown' : 'application/json' }));
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${session.title.replace(/[\/:*?"<>|]+/g, '_').slice(0, 40) || 'conversation'}.${detail === 'full' ? 'md' : 'json'}`;
+    link.download = `${session.title.replace(/[/\\:*?"<>|]+/g, '_').slice(0, 40) || 'conversation'}.${detail === 'full' ? 'md' : 'json'}`;
     link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     const { secrets, paths, emails } = exported.stats;
