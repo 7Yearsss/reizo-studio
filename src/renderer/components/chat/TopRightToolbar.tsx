@@ -74,6 +74,19 @@ export default function TopRightToolbar({
   const [moreOpen, setMoreOpen] = useState(false);
   const panelsRef = useRef<HTMLDivElement>(null);
   const moreRef = useRef<HTMLDivElement>(null);
+  const closeTimer = useRef<number | undefined>(undefined);
+
+  // The panel menu opens on hover; a short close delay lets the pointer cross the gap to the menu.
+  const hoverOpenPanels = () => {
+    window.clearTimeout(closeTimer.current);
+    setMoreOpen(false);
+    setPanelsOpen(true);
+  };
+  const hoverClosePanels = () => {
+    window.clearTimeout(closeTimer.current);
+    closeTimer.current = window.setTimeout(() => setPanelsOpen(false), 160);
+  };
+  useEffect(() => () => window.clearTimeout(closeTimer.current), []);
 
   useEffect(() => {
     if (!panelsOpen && !moreOpen) return;
@@ -153,13 +166,10 @@ export default function TopRightToolbar({
       )}
 
       {/* One entry point for every right-hand panel */}
-      <div className="relative" ref={panelsRef}>
+      <div className="relative" ref={panelsRef} onMouseEnter={hoverOpenPanels} onMouseLeave={hoverClosePanels}>
         <button
           type="button"
-          onClick={() => {
-            setMoreOpen(false);
-            setPanelsOpen((o) => !o);
-          }}
+          onClick={hoverOpenPanels}
           aria-haspopup="menu"
           aria-expanded={panelsOpen}
           title="打开面板"
