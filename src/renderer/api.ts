@@ -330,6 +330,11 @@ export async function rollbackSnapshot(sessionId: string, snapshotId: string, fo
   return res.json();
 }
 
+export async function getSessionTraces(sessionId: string): Promise<import('../main/server/agent/turnTrace').TurnTrace[]> {
+  const res = await api(`/api/diagnostics/traces/${encodeURIComponent(sessionId)}`);
+  return ((await res.json()) as { traces?: import('../main/server/agent/turnTrace').TurnTrace[] }).traces ?? [];
+}
+
 export async function getDiskSpace(): Promise<{ freeBytes: number | null; totalBytes: number | null }> {
   const res = await api('/api/storage/disk');
   return (await res.json()) as { freeBytes: number | null; totalBytes: number | null };

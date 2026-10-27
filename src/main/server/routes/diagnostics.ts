@@ -84,6 +84,16 @@ async function checkMcp(dataRoot: string): Promise<CheckResult> {
 export function createDiagnosticsRouter(options: { dataRoot: string; settingsStore: SettingsStore; skillsDirs?: string[] }) {
   const router = new Hono();
 
+  // The recorded turns of one conversation (newest last), scrubbed the same way as the support bundle.
+  router.get('/traces/:sessionId', async (c) => {
+    // Same file-name rule the trace writer uses, so only this conversation's own file can be reached.
+    const file = path.join(options.dataRoot, 'traces', `${c.req.param('sessionId').replace(/[^\w.-]/g, '_')}.jsonl`);
+    const lines = (await readFile(file, 'utf8').catch((): string => '')).split(/\r?\n/).filter(Boolean).slice(-30);
+    const traces: unknown[] = [];
+    for (const line of lines) { try { traces.push(scrubValue(JSON.parse(line))); } catch { /* skip a torn line */ } }
+    return c.json({ traces });
+  });
+
   // One-click self-check: each row says what was tested and what to do about a failure.
   router.get('/check', async (c) => {
     const results: CheckResult[] = [];

@@ -13,6 +13,7 @@ import { lazyWithRetry } from '../../lib/lazyWithRetry';
 import ToastContainer from '../ui/ToastContainer';
 import GlobalCommandPalette from './GlobalCommandPalette';
 import DiskSpaceMonitor from './DiskSpaceMonitor';
+import TraceDialog from '../chat/TraceDialog';
 import { applyStoredCustomCss } from '../../lib/customCss';
 import SettingsDialog from './SettingsDialog';
 
@@ -48,6 +49,7 @@ export default function MainLayout() {
     <div className="flex h-screen flex-col overflow-hidden bg-paper text-ink">
       <CustomTitleBar />
       <DiskSpaceMonitor />
+      <TraceDialog />
       <div className="flex min-h-0 flex-1">
         <Sidebar />
         <main

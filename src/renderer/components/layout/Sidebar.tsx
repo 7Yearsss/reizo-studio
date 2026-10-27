@@ -4,6 +4,7 @@ import {
   ArchiveRestore,
   ChevronRight,
   CirclePlus,
+  Activity,
   Download,
   LayoutGrid,
   Pencil,
@@ -185,6 +186,11 @@ function SessionContextMenu({
         >
           <span className="flex items-center gap-2">
             <SquarePen size={13} /> 打开
+          </span>
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => window.dispatchEvent(new CustomEvent('reizo:open-trace', { detail: { id: session.id, title: session.title } }))}>
+          <span className="flex items-center gap-2">
+            <Activity size={13} /> 查看运行记录
           </span>
         </ContextMenuItem>
         <ContextMenuItem onSelect={() => void exportSessionFile(session, 'full')}>

@@ -47,4 +47,15 @@ describe('diagnostics bundle', () => {
     expect(byId.skills.status).toBe('ok');
     expect(body.status).toBe('fail');
   });
+  it('serves one conversation recorded turns, scrubbed, and cannot be pointed at another file', async () => {
+    await mkdir(path.join(root, 'traces'), { recursive: true });
+    await writeFile(path.join(root, 'traces', 'abc.jsonl'), `${JSON.stringify({ sessionId: 'abc', durationMs: 5, tools: [{ name: 'run_command', ok: false, error: 'bad sk-abcdefghijklmnopqrstuvwxyz0123456789' }] })}\n`);
+    await writeFile(path.join(root, 'secret.jsonl'), `${JSON.stringify({ leaked: true })}\n`);
+    const router = createDiagnosticsRouter({ dataRoot: root, settingsStore: {} as never });
+    const body = (await (await router.request('/traces/abc')).json()) as { traces: Array<{ tools: Array<{ error: string }> }> };
+    expect(body.traces).toHaveLength(1);
+    expect(body.traces[0].tools[0].error).not.toContain('sk-abcdefgh');
+    const sneaky = (await (await router.request('/traces/..%2Fsecret')).json()) as { traces: unknown[] };
+    expect(sneaky.traces).toEqual([]);
+  });
 });
