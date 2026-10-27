@@ -53,6 +53,9 @@ export class VideoExportTasks {
   constructor(root: string, private transport: ExportTaskTransport, private pollMs = 1000) {
     this.directory = path.join(root, 'video-editor-export-jobs');
     this.loaded = this.load();
+    // A failed load still reaches whoever awaits it (start); marking it handled here only stops an unobserved
+    // rejection — e.g. the data folder removed while the app shuts down — from crashing the process.
+    this.loaded.catch((): void => undefined);
   }
   private async load() {
     await mkdir(this.directory, { recursive: true });
