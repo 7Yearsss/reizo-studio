@@ -1,4 +1,4 @@
-import { Bot, Brain, FolderOpen, Settings2, Sparkles, ChartNoAxesCombined, Database, Info, Blocks, Globe } from 'lucide-react';
+import { Bot, Brain, FolderOpen, Settings2, Sparkles, ChartNoAxesCombined, Database, Info, Blocks, Globe, BookOpen } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { cn } from '../lib/cn';
@@ -21,6 +21,7 @@ import UsageCostsSection from './settings/UsageCostsSection';
 import ExtensionsSection from './settings/ExtensionsSection';
 import AlwaysAllowedTools from './settings/AlwaysAllowedTools';
 import MemorySection from './settings/MemorySection';
+import KnowledgeSection from './settings/KnowledgeSection';
 import ExpertsSection from './settings/ExpertsSection';
 import HarnessLessonsSection from './settings/HarnessLessonsSection';
 import { setAnchorQuestion, useAnchorQuestion } from '../lib/anchorQuestionPref';
@@ -31,6 +32,7 @@ const SECTIONS: { id: SectionId; label: string; icon: typeof Settings2 }[] = [
   { id: 'general', label: '通用', icon: Settings2 },
   { id: 'providers', label: '模型', icon: Sparkles },
   { id: 'memory', label: '记忆', icon: Brain },
+  { id: 'knowledge', label: '资料库', icon: BookOpen },
   { id: 'experts', label: '专家', icon: Bot },
   { id: 'extensions', label: '扩展', icon: Blocks },
   { id: 'usage', label: '用量与费用', icon: ChartNoAxesCombined },
@@ -82,6 +84,7 @@ export default function SettingsPage() {
         {section === 'providers' && <ProvidersSection />}
         {section === 'network' && <NetworkSection />}
         {section === 'memory' && <MemorySection />}
+        {section === 'knowledge' && <KnowledgeSection />}
         {section === 'experts' && <ExpertsSection />}
         {section === 'extensions' && <><ExtensionsSection /><AlwaysAllowedTools /></>}
         {section === 'usage' && <UsageCostsSection onOpenProviders={() => setSection('providers')} />}

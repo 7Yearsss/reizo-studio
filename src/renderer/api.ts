@@ -1418,3 +1418,20 @@ export type UpdateStatusDto =
 export async function checkForUpdates(): Promise<UpdateStatusDto> {
   return (await api('/api/updates/check')).json();
 }
+
+export interface KnowledgeDocDto { id: string; name: string; chars: number; chunks: number; addedAt: string }
+
+export async function listKnowledge(): Promise<KnowledgeDocDto[]> {
+  return ((await (await api('/api/knowledge')).json()) as { documents: KnowledgeDocDto[] }).documents;
+}
+
+export async function addKnowledge(name: string, text: string): Promise<KnowledgeDocDto> {
+  const res = await api('/api/knowledge', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, text }) });
+  const body = (await res.json()) as { document?: KnowledgeDocDto; error?: string };
+  if (!res.ok || !body.document) throw new Error(body.error ?? '导入失败');
+  return body.document;
+}
+
+export async function removeKnowledge(id: string): Promise<void> {
+  await api(`/api/knowledge/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}

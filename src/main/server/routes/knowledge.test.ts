@@ -22,13 +22,13 @@ describe('knowledge base', () => {
     expect(((await (await router.request('/')).json()) as { documents: unknown[] }).documents).toHaveLength(2);
 
     const tool = createKnowledgeTools({ store }).knowledge_search;
-    const out = (await tool.execute!({ query: '多久可以退款' }, { toolCallId: 't', messages: [] })) as { hits: Array<{ source: string }> };
+    const out = (await tool.execute!({ query: '多久可以退款' }, { toolCallId: 't', messages: [], context: undefined })) as { hits: Array<{ source: string }> };
     expect(out.hits[0].source).toBe('退款政策.md');
 
     await post(router, '退款政策.md', '退款期限改为十四天。');
     const list = ((await (await router.request('/')).json()) as { documents: Array<{ id: string; name: string }> }).documents;
     expect(list).toHaveLength(2);
-    const changed = (await tool.execute!({ query: '十四天' }, { toolCallId: 't', messages: [] })) as { hits: Array<{ text: string }> };
+    const changed = (await tool.execute!({ query: '十四天' }, { toolCallId: 't', messages: [], context: undefined })) as { hits: Array<{ text: string }> };
     expect(changed.hits[0].text).toContain('十四天');
 
     const gone = list.find((d) => d.name === '发货说明.md')!;
