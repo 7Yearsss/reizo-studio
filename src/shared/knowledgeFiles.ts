@@ -33,7 +33,7 @@ export const KNOWLEDGE_MAX_FOLDER_FILES = 200;
  */
 export function pickFolderFiles<T extends { path: string; size: number }>(entries: readonly T[]): { picked: T[]; skipped: number; truncated: boolean } {
   const wanted = entries.filter((entry) => {
-    const parts = entry.path.split(/[\/]/).filter(Boolean);
+    const parts = entry.path.split(/[\\/]/).filter(Boolean);
     const name = parts[parts.length - 1] ?? '';
     if (parts.some((part) => part.startsWith('.') && part.length > 1) || name.startsWith('~$')) return false;
     if (parts.slice(0, -1).some((part) => SKIPPED_FOLDERS.has(part.toLowerCase()))) return false;
