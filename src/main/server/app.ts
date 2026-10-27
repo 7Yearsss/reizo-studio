@@ -22,6 +22,8 @@ import { setWriteProtectedRoots } from '../workspaceWrite';
 import { createToolApprovalsRouter } from './routes/toolApprovals';
 import { createDiagnosticsRouter } from './routes/diagnostics';
 import { createUpdatesRouter } from './routes/updates';
+import { createKnowledgeRouter } from './routes/knowledge';
+import { createKnowledgeStore } from './storage/knowledgeStore';
 import { UPDATE_FEED_URL } from '../../shared/constants';
 import { chatModelCapabilities } from '../../shared/chatModelCapabilities';
 import { createChatRouter } from './routes/chat';
@@ -268,6 +270,7 @@ export function createApp(options: CreateAppOptions) {
   app.route('/api/local-models', createLocalModelsRouter({ settingsStore }));
   app.route('/api/network', createNetworkRouter({ dataRoot: options.dataRoot }));
   app.route('/api/tool-approvals', createToolApprovalsRouter(options.dataRoot));
+  app.route('/api/knowledge', createKnowledgeRouter(createKnowledgeStore(options.dataRoot)));
   app.route('/api/updates', createUpdatesRouter({
     appVersion: async () => {
       try { return (await import('electron')).app.getVersion(); } catch { return process.env.npm_package_version ?? '0.0.0'; }

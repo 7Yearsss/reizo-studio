@@ -6,7 +6,7 @@ import type { RunPermission } from '../../../shared/schedule';
  * MCP tool, anything) is withheld, so adding capability can never silently widen an automation.
  */
 export const READ_ONLY_RUN_TOOLS: ReadonlySet<string> = new Set([
-  'read_file', 'read_attachment', 'read_background', 'find_files', 'grep', 'list_dir', 'memory_read',
+  'read_file', 'read_attachment', 'knowledge_search', 'read_background', 'find_files', 'grep', 'list_dir', 'memory_read',
   'read_canvas', 'read_node', 'read_sheet', 'read_document', 'read_presentation', 'read_delivery_plans',
   'check_sheet', 'check_document', 'check_delivery', 'get_video_models', 'list_assets', 'list_schedules',
   'todo_write', 'ask_user', 'video_editor_context', 'delegate_research', 'run_batch',

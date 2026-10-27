@@ -59,6 +59,8 @@ import { readWorkspaceMemory } from '../../workspaceMemory';
 import { formatRules, readRuleSources } from './workspaceRules';
 import { createSkillTools } from './skillTools';
 import { createAttachmentTools } from './attachmentTools';
+import { createKnowledgeTools } from './knowledgeTools';
+import { createKnowledgeStore } from '../storage/knowledgeStore';
 import { createFileSnapshotStore } from '../storage/fileSnapshots';
 import { currentDateLine, expandPromptVars } from '../../../shared/promptVars';
 import { DEFAULT_CONTEXT_WINDOW_TOKENS, nextOutputCap } from '../../../shared/autoCompact';
@@ -621,6 +623,7 @@ ${expandPromptVars(expert.instructions, promptVarCtx)}`
           ...(webTools ? webTools.tools : {}),
           ...(skill ? {} : createSkillTools({ skills: availableSkills })),
           ...(artifactStore ? createAttachmentTools({ sessionId, artifacts: artifactStore }) : {}),
+          ...(dataRoot ? createKnowledgeTools({ store: createKnowledgeStore(dataRoot) }) : {}),
           ...(dataRoot && !skill ? createSkillDraftTools({ dataRoot, getSkills: () => availableSkills, sessionId, permissionMode: runPermissionMode }) : {}),
           ...(skill?.contract && canvasStore && dataRoot ? createDeliveryTools({ skill, canvasStore, sessionId, dataRoot, artifactStore }) : {}),
         }

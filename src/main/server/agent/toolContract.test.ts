@@ -1,3 +1,5 @@
+import { createKnowledgeTools } from './knowledgeTools';
+import { createKnowledgeStore } from '../storage/knowledgeStore';
 import os from 'node:os';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -51,6 +53,7 @@ describe('tool contract snapshots', () => {
   it('web', () => expect(contract(createWebTools({ sessionId: 's', permissionMode: 'ask' }).tools)).toMatchSnapshot());
   it('personal memory', () => expect(contract(createPersonalMemoryTools({ sessionId: 's', dataRoot: os.tmpdir(), permissionMode: 'ask', emit: none }).tools)).toMatchSnapshot());
   it('propose_skill', () => expect(contract(createSkillDraftTools({ dataRoot: os.tmpdir(), getSkills: () => [] }))).toMatchSnapshot());
+  it('knowledge_search', () => expect(contract(createKnowledgeTools({ store: createKnowledgeStore(os.tmpdir()) }))).toMatchSnapshot());
   it('read_attachment', () => expect(contract(createAttachmentTools({ sessionId: 's', artifacts: stub }))).toMatchSnapshot());
   it('use_skill', () => expect(contract(createSkillTools({ skills: [skill] }))).toMatchSnapshot());
   it('sub-agents', () => {
