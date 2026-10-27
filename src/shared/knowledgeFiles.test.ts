@@ -3,7 +3,8 @@ import { knowledgeFileProblem, looksBinary, OFFICE_FILE } from './knowledgeFiles
 
 describe('knowledge files', () => {
   it('turns away formats it cannot read, with what to do instead', () => {
-    expect(knowledgeFileProblem({ name: '合同.pdf', size: 10 })).toContain('另存为');
+    expect(knowledgeFileProblem({ name: '图.png', size: 10 })).toContain('另存为');
+    expect(knowledgeFileProblem({ name: '合同.pdf', size: 10 })).toBeNull();
     expect(knowledgeFileProblem({ name: '说明.MD', size: 10 })).toBeNull();
     expect(knowledgeFileProblem({ name: '报告.docx', size: 10 })).toBeNull();
     expect(OFFICE_FILE.test('表.XLSX')).toBe(true);

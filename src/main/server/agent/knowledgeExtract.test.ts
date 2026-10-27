@@ -11,7 +11,47 @@ async function docx(text: string): Promise<Uint8Array> {
   return zip.generateAsync({ type: 'uint8array' });
 }
 
+function pdf(text: string): Uint8Array {
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+    '',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+  const stream = `BT /F1 18 Tf 20 100 Td (${text}) Tj ET`;
+  objects[3] = `<< /Length ${stream.length} >>
+stream
+${stream}
+endstream`;
+  let out = `%PDF-1.4
+`;
+  const offsets: number[] = [];
+  objects.forEach((body, i) => { offsets.push(out.length); out += `${i + 1} 0 obj
+${body}
+endobj
+`; });
+  const xref = out.length;
+  out += `xref
+0 ${objects.length + 1}
+0000000000 65535 f 
+${offsets.map((o) => `${String(o).padStart(10, '0')} 00000 n 
+`).join('')}`;
+  out += `trailer
+<< /Size ${objects.length + 1} /Root 1 0 R >>
+startxref
+${xref}
+%%EOF`;
+  return new TextEncoder().encode(out);
+}
+
 describe('extractKnowledgeText', () => {
+  it('reads the text of a PDF page by page', async () => {
+    const text = await extractKnowledgeText('spec.pdf', pdf('Refund within seven days'));
+    expect(text).toContain('## 第 1 页');
+    expect(text).toContain('Refund within seven days');
+  });
+
   it('reads Word, Excel and PowerPoint, keeping sheet and slide labels', async () => {
     expect(await extractKnowledgeText('政策.docx', await docx('退款七天内可申请'))).toContain('退款七天内可申请');
 

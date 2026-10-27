@@ -48,7 +48,7 @@ export default function KnowledgeSection() {
   return (
     <section className="mb-8 max-w-3xl">
       <h2 className="mb-1 flex items-center gap-2 text-base font-semibold"><BookOpen size={16} /> 资料库</h2>
-      <p className="mb-3 text-sm text-ink-muted">把你的政策、产品资料、品牌规范、笔记放进来，助手回答时会先从这里查，并说明出自哪个文件。支持文本类文件（.txt、.md、.csv、.json、.html 等）和 Word（.docx）、Excel（.xlsx）、PowerPoint（.pptx）；PDF 暂不支持，请先另存为文本。资料保存在本机，被查到的片段会随提问发给你所用的模型服务。</p>
+      <p className="mb-3 text-sm text-ink-muted">把你的政策、产品资料、品牌规范、笔记放进来，助手回答时会先从这里查，并说明出自哪个文件。支持文本类文件（.txt、.md、.csv、.json、.html 等）和 Word（.docx）、Excel（.xlsx）、PowerPoint（.pptx）和带文字的 PDF（扫描件无法识别文字）。资料保存在本机，被查到的片段会随提问发给你所用的模型服务。</p>
       <input ref={input} type="file" multiple className="hidden" onChange={(e) => void importFiles(e.target.files)} />
       <button type="button" disabled={busy} onClick={() => input.current?.click()} className="rounded-full bg-ink px-4 py-1.5 text-sm text-paper-raised disabled:opacity-50">{busy ? '导入中…' : '导入文件'}</button>
       {docs && docs.length > 0 && (

@@ -42,6 +42,16 @@ async function pptxText(bytes: Uint8Array): Promise<string> {
   return parts.join('\n\n');
 }
 
+async function pdfText(bytes: Uint8Array): Promise<string> {
+  // Loaded on demand so the PDF reader only costs anything when someone imports a PDF.
+  const { extractText, getDocumentProxy } = await import('unpdf');
+  const pdf = await getDocumentProxy(new Uint8Array(bytes));
+  const { totalPages, text } = await extractText(pdf, { mergePages: false });
+  const pages = text.map((t, i) => ({ n: i + 1, t: t.replace(/[ \t]+/g, ' ').trim() })).filter((p) => p.t);
+  if (pages.length === 0 && totalPages > 0) throw new UnsupportedKnowledgeFile('这份 PDF 里没有可选取的文字（可能是扫描件/图片），暂时无法导入');
+  return pages.map((p) => `## 第 ${p.n} 页\n${p.t}`).join('\n\n');
+}
+
 /** Plain text out of the office formats people actually keep their material in. PDF is not readable yet and says so. */
 export async function extractKnowledgeText(name: string, bytes: Uint8Array): Promise<string> {
   const ext = /\.([a-z0-9]+)$/i.exec(name)?.[1]?.toLowerCase() ?? '';
@@ -49,10 +59,11 @@ export async function extractKnowledgeText(name: string, bytes: Uint8Array): Pro
     if (ext === 'docx') return (await mammoth.extractRawText({ buffer: Buffer.from(bytes) })).value.trim();
     if (ext === 'xlsx') return (await xlsxText(bytes)).trim();
     if (ext === 'pptx') return (await pptxText(bytes)).trim();
-  } catch {
+    if (ext === 'pdf') return (await pdfText(bytes)).trim();
+  } catch (error) {
+    if (error instanceof UnsupportedKnowledgeFile) throw error;
     throw new UnsupportedKnowledgeFile(`「${name}」读取失败，文件可能已损坏或有密码保护`);
   }
-  if (ext === 'pdf') throw new UnsupportedKnowledgeFile('暂不支持直接读取 PDF，请先另存为 .txt 或 .md（或从 PDF 复制文字）');
   if (ext === 'doc' || ext === 'xls' || ext === 'ppt') throw new UnsupportedKnowledgeFile(`旧版 .${ext} 格式不支持，请在 Office 里另存为 .${ext}x`);
   return new TextDecoder('utf-8').decode(bytes);
 }
