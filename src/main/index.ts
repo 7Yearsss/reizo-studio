@@ -4,6 +4,7 @@ import { liveTurnCount } from './server/agent/session';
 import { stopAllBackgroundShells } from './backgroundShells';
 import { registerQuickAssistantIpc, toggleQuickAssistant } from './quickAssistant';
 import { deepLinkFromSecondInstance, registerDeepLinks } from './deepLinks';
+import { screenshotToChat } from './screenshotToChat';
 import { activeVideoJobCount } from './server/canvas/videoJobRuntime';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -144,6 +145,8 @@ async function bootstrap(): Promise<void> {
   registerQuickAssistantIpc();
   registerDeepLinks();
   globalShortcut.register('CommandOrControl+Alt+Space', () => { toggleQuickAssistant(); });
+  // Screenshot the display under the cursor straight into the current conversation.
+  globalShortcut.register('CommandOrControl+Alt+A', () => { void screenshotToChat(); });
   initComputerStopOverlay();
   // Emergency stop for computer control: works from any app, because the agent may be driving the screen.
   globalShortcut.register('CommandOrControl+Alt+Shift+S', () => {

@@ -81,6 +81,7 @@ export interface ReizoBridge {
   quickSubmit(text: string): Promise<boolean>;
   quickHide(): Promise<void>;
   onQuickAsk(callback: (text: string) => void): () => void;
+  onScreenshot(callback: (payload: { dataUrl?: string; error?: string }) => void): () => void;
   onDeepLink(callback: (action: DeepLinkAction) => void): () => void;
   onQuickReset(callback: () => void): () => void;
   installPlugin(): Promise<PluginSummary | null>;

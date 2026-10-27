@@ -84,6 +84,12 @@ contextBridge.exposeInMainWorld('reizo', {
     ipcRenderer.on(IPC.QUICK_RESET, listener);
     return () => { ipcRenderer.removeListener(IPC.QUICK_RESET, listener); };
   },
+  /** The screenshot shortcut produced an image (data URL) or an error message. */
+  onScreenshot: (callback: (payload: { dataUrl?: string; error?: string }) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown): void => { if (payload && typeof payload === 'object') callback(payload as { dataUrl?: string; error?: string }); };
+    ipcRenderer.on(IPC.SCREENSHOT_TO_CHAT, listener);
+    return (): void => { ipcRenderer.removeListener(IPC.SCREENSHOT_TO_CHAT, listener); };
+  },
   /** A `reizo://` link asked for something; the renderer must show a confirmation card. Pending links are replayed on subscribe. */
   onDeepLink: (callback: (action: DeepLinkAction) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, action: unknown): void => { if (action && typeof action === 'object') callback(action as DeepLinkAction); };
