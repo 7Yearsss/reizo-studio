@@ -44,7 +44,7 @@ import { useSheetWorkspace, sheetMentions, pinSheetSelection, clearPinnedSheets,
 import { labelSheetRanges, sameSheetPlace } from '../../../shared/sheetReferences';
 import { serializeSheetReference } from '../../../shared/sheetReferences';
 import { MAX_SHEET_UPLOAD_BYTES } from '../../../shared/sheetFile';
-import { importSheet, importDocument, importPresentation, compactSession } from '../../api';
+import { importSheet, importDocument, importPresentation, compactSession, extractAttachmentText } from '../../api';
 import * as artifactStore from '../../state/artifactStore';
 import * as uiStore from '../../state/uiStore';
 import { Button } from '../ui/button';
@@ -447,8 +447,17 @@ export default function Composer({
         const read = await window.reizo.readDroppedFile(file);
         next.push({ name: read.name, content: read.content });
       } catch {
-        if (file.type.startsWith('text') || file.name.endsWith('.md') || file.name.endsWith('.json')) {
+        if (/\.pdf$/i.test(file.name)) {
+          // A PDF cannot be read as text here: the server pulls the text out so the model can read it.
+          try {
+            const extracted = await extractAttachmentText(file);
+            next.push({ name: extracted.name, content: extracted.text });
+            if (extracted.truncated) toast.info(`「${file.name}」内容较长，已截取前 50 万字`);
+          } catch (error) { toast.error(`「${file.name}」无法作为附件`, error instanceof Error ? error.message : undefined); }
+        } else if (file.type.startsWith('text') || file.name.endsWith('.md') || file.name.endsWith('.json')) {
           next.push({ name: file.name, content: await file.text() });
+        } else {
+          toast.error(`「${file.name}」暂不支持作为附件`, '可以先另存为文本、Markdown，或放进资料库');
         }
       }
     }

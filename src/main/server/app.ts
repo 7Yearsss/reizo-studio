@@ -23,6 +23,7 @@ import { createToolApprovalsRouter } from './routes/toolApprovals';
 import { createDiagnosticsRouter } from './routes/diagnostics';
 import { createUpdatesRouter } from './routes/updates';
 import { createKnowledgeRouter } from './routes/knowledge';
+import { createAttachmentsRouter } from './routes/attachments';
 import { createKnowledgeStore } from './storage/knowledgeStore';
 import { UPDATE_FEED_URL } from '../../shared/constants';
 import { chatModelCapabilities } from '../../shared/chatModelCapabilities';
@@ -270,6 +271,7 @@ export function createApp(options: CreateAppOptions) {
   app.route('/api/local-models', createLocalModelsRouter({ settingsStore }));
   app.route('/api/network', createNetworkRouter({ dataRoot: options.dataRoot }));
   app.route('/api/tool-approvals', createToolApprovalsRouter(options.dataRoot));
+  app.route('/api/attachments', createAttachmentsRouter());
   app.route('/api/knowledge', createKnowledgeRouter(createKnowledgeStore(options.dataRoot)));
   app.route('/api/updates', createUpdatesRouter({
     appVersion: async () => {

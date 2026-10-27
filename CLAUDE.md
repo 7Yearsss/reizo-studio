@@ -122,7 +122,7 @@ streaming `Response` from the chat route, which Hono won't merge `c.header()` in
 
 Routes (`server/routes/`): `sessions`, `chat`, `settings`, `skills`, `schedules`, `projects`,
 `artifacts`, `documents`, `presentations`, `canvas`, `canvasMaintenance`, `videoEditor`,
-`voice`, `computerUse`, `storage` (free disk space), `network` (proxy), `translations` (message translation), `diagnostics` (redacted support bundle), `updates` (three-state update check against a feed), `knowledge` (local document search), `toolApprovals` (persisted always-allow MCP tools), `memory`, `harness`, `usage`, `matting`, `workspacePreview`,
+`voice`, `computerUse`, `storage` (free disk space), `network` (proxy), `translations` (message translation), `diagnostics` (redacted support bundle), `updates` (three-state update check against a feed), `knowledge` (local document search), `attachments` (text out of a PDF / Office file for a message), `toolApprovals` (persisted always-allow MCP tools), `memory`, `harness`, `usage`, `matting`, `workspacePreview`,
 `refs` (large-value blob store), `publicProviders`, `adminProviders`. `createApp()` in
 `app.ts` wires stores → routers; `listen.ts` owns the port scan; the *test* app
 (`test:api`) constructs `createApp()` directly with an in-memory db. When you add a route,

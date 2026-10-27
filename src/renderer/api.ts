@@ -1443,3 +1443,10 @@ export async function addKnowledgeFile(file: File): Promise<KnowledgeDocDto> {
 export async function removeKnowledge(id: string): Promise<void> {
   await api(`/api/knowledge/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
+
+export async function extractAttachmentText(file: File): Promise<{ name: string; text: string; truncated: boolean }> {
+  const res = await api(`/api/attachments/extract?name=${encodeURIComponent(file.name)}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: file });
+  const body = (await res.json()) as { name?: string; text?: string; truncated?: boolean; error?: string };
+  if (!res.ok || body.text === undefined) throw new Error(body.error ?? '读取失败');
+  return { name: body.name ?? file.name, text: body.text, truncated: body.truncated === true };
+}
