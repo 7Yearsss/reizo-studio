@@ -12,6 +12,7 @@ import {
   WINDOW_GROW_ITEMS,
 } from '../../lib/buildRenderItems';
 import { MessageScroller } from '../agents/message-scroller';
+import { useAnchorQuestion } from '../../lib/anchorQuestionPref';
 import { useChatStore } from '../../state/useChatStore';
 import ErrorBoundary from '../ErrorBoundary';
 import UserMessage from './UserMessage';
@@ -109,6 +110,7 @@ export default function MessageList({
   const shown = items.slice(windowStart);
   const hasOlder = windowStart > 0;
 
+  const anchorQuestion = useAnchorQuestion();
   return (
     <div className="relative min-h-0 flex-1">
       {/* Soft top fade — scrolled messages dissolve under the header instead of hitting a hard edge */}
@@ -117,6 +119,7 @@ export default function MessageList({
         className="pointer-events-none absolute inset-x-0 top-0 z-10 h-10 bg-gradient-to-b from-paper via-paper/70 to-transparent"
       />
       <MessageScroller
+        anchorQuestion={anchorQuestion}
         followOutput={following}
         followThreshold={80}
         smooth={false}

@@ -16,6 +16,7 @@ import {
   type PreviewRailItem,
 } from "@/renderer/components/motion/preview-rail";
 import { cn } from "@/renderer/lib/cn";
+import { followScrollTop, isFollowing } from "@/shared/turnAnchor";
 import { isPanelResizing, onPanelResizeEnd } from "@/renderer/lib/panelResize";
 
 const PREVIEW_TITLE_LENGTH = 56;
@@ -76,6 +77,8 @@ function getMessagePreview(
 }
 
 export interface MessageScrollerProps extends ComponentPropsWithRef<"div"> {
+  /** Keep the reader's latest message at the top while its reply streams below, instead of chasing the end. */
+  anchorQuestion?: boolean;
   /** Keep streamed output pinned while the reader remains near the end. */
   followOutput?: boolean;
   /** Distance from the end that still counts as following the output. */
@@ -107,6 +110,7 @@ export interface MessageScrollerProps extends ComponentPropsWithRef<"div"> {
 }
 
 export function MessageScroller({
+  anchorQuestion = false,
   followOutput = true,
   followThreshold = 56,
   smooth = true,
@@ -270,21 +274,34 @@ export function MessageScroller({
     });
   }, [navigation, syncRailItems, updateActiveRailItem]);
 
+  /** Top of the latest user message inside the viewport's scroll space, when the question is anchored. */
+  const questionTopOf = useCallback((viewport: HTMLElement): number | undefined => {
+    if (!anchorQuestion) return undefined;
+    const users = viewport.querySelectorAll<HTMLElement>('[data-slot="message"][data-from="user"]');
+    const last = users[users.length - 1];
+    if (!last) return undefined;
+    return last.getBoundingClientRect().top - viewport.getBoundingClientRect().top + viewport.scrollTop;
+  }, [anchorQuestion]);
+
   const scrollToEnd = useCallback((behavior: ScrollBehavior) => {
     const viewport = viewportRef.current;
     if (!viewport) return;
+    const maxScroll = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+    const top = followScrollTop({ scrollTop: viewport.scrollTop, maxScroll, questionTop: questionTopOf(viewport) });
+    // Anchored: the question is already where it should be, and the view never moves up.
+    if (anchorQuestion && top <= viewport.scrollTop) return;
 
     programmaticScrollRef.current = true;
     if (typeof viewport.scrollTo === "function") {
-      viewport.scrollTo({ top: viewport.scrollHeight, behavior });
+      viewport.scrollTo({ top: anchorQuestion ? top : viewport.scrollHeight, behavior });
     } else {
-      viewport.scrollTop = viewport.scrollHeight;
+      viewport.scrollTop = anchorQuestion ? top : viewport.scrollHeight;
     }
     if (scrollTimerRef.current) window.clearTimeout(scrollTimerRef.current);
     scrollTimerRef.current = window.setTimeout(() => {
       programmaticScrollRef.current = false;
     }, behavior === "smooth" ? 320 : 0);
-  }, []);
+  }, [anchorQuestion, questionTopOf]);
 
   const handleScroll = useCallback(() => {
     const viewport = viewportRef.current;
@@ -294,7 +311,7 @@ export function MessageScroller({
       viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
     setFollowing(distance <= followThreshold);
     updateActiveRailItem();
-  }, [followThreshold, setFollowing, updateActiveRailItem]);
+  }, [followThreshold, questionTopOf, setFollowing, updateActiveRailItem]);
 
   const leaveLiveEdge = useCallback(() => {
     programmaticScrollRef.current = false;

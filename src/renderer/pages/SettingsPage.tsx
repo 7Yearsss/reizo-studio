@@ -23,6 +23,7 @@ import AlwaysAllowedTools from './settings/AlwaysAllowedTools';
 import MemorySection from './settings/MemorySection';
 import ExpertsSection from './settings/ExpertsSection';
 import HarnessLessonsSection from './settings/HarnessLessonsSection';
+import { setAnchorQuestion, useAnchorQuestion } from '../lib/anchorQuestionPref';
 
 type SectionId = uiStore.SettingsSection;
 
@@ -190,6 +191,7 @@ function CustomCssGroup() {
 }
 
 function GeneralSection() {
+  const anchorQuestion = useAnchorQuestion();
   const settings = useSettingsStore((s) => s.settings);
   const folderName = settings.workspacePath?.split(/[/\\]/).filter(Boolean).pop();
 
@@ -351,6 +353,10 @@ function GeneralSection() {
           );
         })}
       </div>
+      <label className="mt-3 flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={anchorQuestion} onChange={(e) => setAnchorQuestion(e.target.checked)} />
+        长回复时把我的提问固定在上方（不自动滚到底部，需要时自己往下读）
+      </label>
       </SettingGroup>
 
       <SettingGroup title="思考力度" description="推理模型回答前“想”多少——低档一句话问题 ~3s 出答，高档适合复杂任务但更慢（默认档最慢可达 90s）。">
