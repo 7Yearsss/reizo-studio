@@ -48,7 +48,8 @@ import { importSheet, importDocument, importPresentation, compactSession } from 
 import * as artifactStore from '../../state/artifactStore';
 import * as uiStore from '../../state/uiStore';
 import { Button } from '../ui/button';
-import { toast } from '../../lib/toast';
+import { toast, showToast } from '../../lib/toast';
+import { hasSecret, redactSecrets } from '../../../shared/redactSecrets';
 import { CHAT_DROP_FILES_EVENT } from '../../lib/chatDrop';
 import { isImageFile, transferredFiles } from '../../lib/fileTransfer';
 
@@ -295,9 +296,24 @@ export default function Composer({
     return true;
   }
 
+  // A key typed into the chat goes to the model and the saved conversation. Say so once per draft; sending again goes ahead.
+  const secretWarnedRef = useRef('');
+  function blockedBySecret(): boolean {
+    if (!hasSecret(draft) || secretWarnedRef.current === draft) return false;
+    secretWarnedRef.current = draft;
+    showToast({
+      title: '这段话里像是有密钥或密码',
+      description: '发出后会进入模型和聊天记录。API Key 请在「设置」里配置。再发送一次将照常发送。',
+      status: 'info',
+      duration: 10_000,
+      action: { label: '抹掉密钥', onClick: () => setDraft(redactSecrets(draft)) },
+    });
+    return true;
+  }
+
   async function submit() {
     if ((!draft.trim() && !hasAttachments) || disabled || preparing.current || addingFilesRef.current > 0) return;
-    if (blockedByPlaceholders()) return;
+    if (blockedByPlaceholders() || blockedBySecret()) return;
     preparing.current = true;
     setSyncingSheet(true);
     try {
@@ -318,7 +334,7 @@ export default function Composer({
   /** Ctrl/Cmd+Enter while a turn is live — the opposite of the busyEnter lane. */
   async function submitNow() {
     if ((!draft.trim() && !hasAttachments) || disabled || !sessionId || preparing.current || addingFilesRef.current > 0) return;
-    if (blockedByPlaceholders()) return;
+    if (blockedByPlaceholders() || blockedBySecret()) return;
     preparing.current = true;
     setSyncingSheet(true);
     try {
