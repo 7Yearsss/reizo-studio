@@ -3,6 +3,7 @@ import { describeActiveWork, hasActiveWork } from '../shared/quitConfirm';
 import { liveTurnCount } from './server/agent/session';
 import { stopAllBackgroundShells } from './backgroundShells';
 import { registerQuickAssistantIpc, toggleQuickAssistant } from './quickAssistant';
+import { deepLinkFromSecondInstance, registerDeepLinks } from './deepLinks';
 import { activeVideoJobCount } from './server/canvas/videoJobRuntime';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -68,8 +69,8 @@ let stopAccount: (() => void) | null = null;
 // Recovery assumes exclusive ownership of this data directory.
 const primaryInstance = !started && app.requestSingleInstanceLock();
 if (!primaryInstance) app.quit();
-app.on('second-instance', () => {
-  if (runningServer) createMainWindow();
+app.on('second-instance', (_event, argv) => {
+  if (runningServer) deepLinkFromSecondInstance(argv);
 });
 
 function devServerOrigin(): string | undefined {
@@ -141,6 +142,7 @@ async function bootstrap(): Promise<void> {
   });
   // A small floating box for a quick question from any app.
   registerQuickAssistantIpc();
+  registerDeepLinks();
   globalShortcut.register('CommandOrControl+Alt+Space', () => { toggleQuickAssistant(); });
   initComputerStopOverlay();
   // Emergency stop for computer control: works from any app, because the agent may be driving the screen.

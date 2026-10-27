@@ -14,6 +14,7 @@ import ToastContainer from '../ui/ToastContainer';
 import GlobalCommandPalette from './GlobalCommandPalette';
 import DiskSpaceMonitor from './DiskSpaceMonitor';
 import TraceDialog from '../chat/TraceDialog';
+import DeepLinkDialog from './DeepLinkDialog';
 import { applyStoredCustomCss } from '../../lib/customCss';
 import SettingsDialog from './SettingsDialog';
 
@@ -50,6 +51,7 @@ export default function MainLayout() {
       <CustomTitleBar />
       <DiskSpaceMonitor />
       <TraceDialog />
+      <DeepLinkDialog />
       <div className="flex min-h-0 flex-1">
         <Sidebar />
         <main

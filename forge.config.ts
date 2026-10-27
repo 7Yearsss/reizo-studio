@@ -40,6 +40,7 @@ const config: ForgeConfig = {
     // Only runtime build output belongs in app.asar; keep private QA fixtures out.
     ignore: (file) => Boolean(file) && file !== '/.vite' && !/^\/\.vite\/(build|renderer)(?:\/|$)/.test(file),
     executableName: 'reizo-studio',
+    protocols: [{ name: 'Reizo Studio', schemes: ['reizo'] }],
     extendInfo: { NSMicrophoneUsageDescription: '将你的语音在本机转为对话草稿。' },
     // Re-sign the entire bundle after Packager changes Info.plist and Electron
     // fuses. Ad-hoc signing restores integrity; it is not Developer ID signing

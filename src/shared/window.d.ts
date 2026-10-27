@@ -1,4 +1,5 @@
 import type { DirEntry } from './workspace';
+import type { DeepLinkAction } from './deepLink';
 import type { PluginPreview, PluginSummary } from './plugins';
 import type {
   DingTalkConnectParams,
@@ -80,6 +81,7 @@ export interface ReizoBridge {
   quickSubmit(text: string): Promise<boolean>;
   quickHide(): Promise<void>;
   onQuickAsk(callback: (text: string) => void): () => void;
+  onDeepLink(callback: (action: DeepLinkAction) => void): () => void;
   onQuickReset(callback: () => void): () => void;
   installPlugin(): Promise<PluginSummary | null>;
   setPluginConfig(id: string, name: string, value: string | null): Promise<void>;

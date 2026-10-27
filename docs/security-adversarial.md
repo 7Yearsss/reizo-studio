@@ -31,6 +31,7 @@
 | 工作区被设成包含应用数据目录的文件夹（如用户主目录），Agent 的 write_file / edit_file 改写数据库、密钥、钩子 | 写入前按绝对路径拒绝，覆盖数据目录整棵树；仅限文件写入工具，run_command 不在此守卫内（见下方未覆盖） | `src/main/workspaceWrite.protected.test.ts :: a workspace that contains the data folder cannot write or edit inside it, but its other files still work` |
 | 提示注入让 Agent 把恶意指令存成技能（长期立足点），或把密钥写进技能 | propose_skill 在 always-ask 名单里，每次都弹确认卡，full 模式也不豁免、allow-session 不形成授权；含密钥形态内容的草稿直接拒绝；只能更新用户自己的技能，内置技能不可改写；frontmatter 字段压成单行，草稿无法夹带 allowed-tools 等字段 | `src/main/server/agent/skillDraftTools.test.ts :: writes nothing until the user approves, even in full mode; approving then saves the skill` |
 | 提示注入让 Agent 借浏览器 / 聊天软件 / 邮件客户端做不可撤回的操作（发消息、提交表单、删邮件） | 这三类应用在前台时，会话内第一个动作被拦下，弹出点名该应用的确认卡（computer_app，在 always-ask 名单里，无「本会话都允许」）；同意后同一会话同一应用不再重复问，换一个应用重新问；探测不到前台应用时照旧放行（不让检测失败废掉功能） | `src/main/server/agent/computerAppApproval.test.ts :: holds the first action on a browser, then lets that app through after approval, and still asks for another app` |
+| 网页上的 `reizo://` 链接诱导安装恶意技能 / 夹带路径或额外参数 | 解析是默认拒绝的白名单：只认 `skill/install`，namespace / slug / version 限定字符集与长度，其余一律丢弃；链接只会弹确认卡并先展示技能全文，用户点「安装」前不写入任何内容，取消即什么都没发生 | `src/shared/deepLink.test.ts :: drops anything it does not recognise` |
 
 ## 未覆盖（没有测试，不能标「已覆盖」）
 

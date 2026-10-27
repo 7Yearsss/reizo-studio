@@ -52,6 +52,8 @@ export const IPC = {
   QUICK_HIDE: 'reizo:quick-hide',
   QUICK_ASK: 'reizo:quick-ask',
   QUICK_RESET: 'reizo:quick-reset',
+  DEEP_LINK: 'reizo:deep-link',
+  DEEP_LINK_TAKE: 'reizo:deep-link-take',
   PLUGIN_SET_CONFIG: 'reizo:plugin-set-config',
   PLUGIN_INSTALL_CONFIRMED: 'reizo:plugin-install-confirmed',
   PLUGIN_SET_ENABLED: 'reizo:plugin-set-enabled',

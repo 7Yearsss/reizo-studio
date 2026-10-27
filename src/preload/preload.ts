@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { IPC } from '../shared/constants';
 import type { DirEntry } from '../shared/workspace';
+import type { DeepLinkAction } from '../shared/deepLink';
 import type { SkillHubInstallRequest, SkillHubSearchQuery } from '../shared/skillhub';
 import type { PluginPreview, PluginSummary } from '../shared/plugins';
 import type {
@@ -82,6 +83,13 @@ contextBridge.exposeInMainWorld('reizo', {
     const listener = (): void => callback();
     ipcRenderer.on(IPC.QUICK_RESET, listener);
     return () => { ipcRenderer.removeListener(IPC.QUICK_RESET, listener); };
+  },
+  /** A `reizo://` link asked for something; the renderer must show a confirmation card. Pending links are replayed on subscribe. */
+  onDeepLink: (callback: (action: DeepLinkAction) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, action: unknown): void => { if (action && typeof action === 'object') callback(action as DeepLinkAction); };
+    ipcRenderer.on(IPC.DEEP_LINK, listener);
+    void (ipcRenderer.invoke(IPC.DEEP_LINK_TAKE) as Promise<DeepLinkAction[]>).then((list) => list.forEach((a): void => callback(a)), (): void => undefined);
+    return () => { ipcRenderer.removeListener(IPC.DEEP_LINK, listener); };
   },
   installPlugin: (): Promise<PluginSummary | null> => ipcRenderer.invoke(IPC.PLUGIN_INSTALL),
   setPluginConfig: (id: string, name: string, value: string | null): Promise<void> => ipcRenderer.invoke(IPC.PLUGIN_SET_CONFIG, id, name, value),
