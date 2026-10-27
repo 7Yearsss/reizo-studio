@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatMs, traceBars } from './traceView';
+import { formatMs, traceBars, turnLanes } from './traceView';
 
 describe('traceBars', () => {
   it('places calls on the timeline, carrying the outcome and error from the tool list', () => {
@@ -25,5 +25,17 @@ describe('traceBars', () => {
     expect(formatMs(250)).toBe('250 ms');
     expect(formatMs(2500)).toBe('2.5 s');
     expect(formatMs(undefined)).toBe('—');
+  });
+});
+
+describe('turnLanes', () => {
+  it('always adds up to the total, counting overlapping tool calls once', () => {
+    const lanes = turnLanes(10_000, [{ startMs: 1000, endMs: 6000 }, { startMs: 2000, endMs: 5000 }, { startMs: 8000, endMs: 9000 }]);
+    expect(lanes).toEqual({ toolMs: 6000, modelMs: 4000 });
+    expect(lanes.toolMs + lanes.modelMs).toBe(10_000);
+  });
+  it('treats a call still running at the end as running to the end, and ignores bad spans', () => {
+    expect(turnLanes(5000, [{ startMs: 4000 }, { startMs: 3000, endMs: 3000 }])).toEqual({ toolMs: 1000, modelMs: 4000 });
+    expect(turnLanes(0, undefined)).toEqual({ toolMs: 0, modelMs: 0 });
   });
 });

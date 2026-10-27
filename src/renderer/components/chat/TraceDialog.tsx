@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactElement } from 'react';
 import { Dialog } from 'radix-ui';
 import { X } from 'lucide-react';
 import type { TurnTrace } from '../../../main/server/agent/turnTrace';
-import { formatMs, traceBars } from '../../../shared/traceView';
+import { formatMs, traceBars, turnLanes } from '../../../shared/traceView';
 import * as api from '../../api';
 import { cn } from '../../lib/cn';
 
@@ -55,6 +55,8 @@ export default function TraceDialog(): ReactElement {
 function TurnRow({ trace }: { trace: TurnTrace }): ReactElement {
   const bars = traceBars(trace.durationMs, trace.toolTimeline, trace.tools);
   const failed = trace.tools.filter((t) => !t.ok);
+  const lanes = turnLanes(trace.durationMs, trace.toolTimeline);
+  const toolShare = trace.durationMs > 0 ? (lanes.toolMs / trace.durationMs) * 100 : 0;
   return (
     <section className="rounded-xl border border-line p-3">
       <header className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted">
@@ -65,6 +67,19 @@ function TurnRow({ trace }: { trace: TurnTrace }): ReactElement {
         <span className={cn(trace.outcome === 'completed' ? 'text-emerald-600' : 'text-danger')}>{trace.outcome}</span>
         {trace.firstEvent?.text !== undefined && <span>首字 {formatMs(trace.firstEvent.text)}</span>}
       </header>
+      {trace.durationMs > 0 && (
+        <div className="mb-2" title="工具时间含等待你审批的时间">
+          <div className="flex h-2 overflow-hidden rounded bg-paper-inset">
+            <span className="bg-accent/70" style={{ width: `${100 - toolShare}%` }} />
+            <span className="bg-ink/50" style={{ width: `${toolShare}%` }} />
+          </div>
+          <div className="mt-1 flex gap-3 text-[11px] text-ink-muted">
+            <span>模型与等待 {formatMs(lanes.modelMs)}</span>
+            <span>工具 {formatMs(lanes.toolMs)}</span>
+            {trace.setupMs !== undefined && <span>准备 {formatMs(trace.setupMs)}</span>}
+          </div>
+        </div>
+      )}
       {bars.length > 0 ? (
         <ul className="space-y-1">
           {bars.map((bar, i) => (

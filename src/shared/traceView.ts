@@ -36,3 +36,28 @@ export function formatMs(ms: number | undefined): string {
   if (ms === undefined) return '—';
   return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
+
+export interface TurnLanes { toolMs: number; modelMs: number }
+
+/**
+ * Split a turn's wall time (from the first event; preparation before it is reported separately) into tool
+ * execution and everything else (model streaming and waiting), so the two always add up to the total. Overlapping tool calls are merged first — two parallel 5 s calls are
+ * 5 s of tool time, not 10. Tool time includes any wait for the user's approval, which the trace does not separate.
+ */
+export function turnLanes(
+  durationMs: number,
+  timeline: ReadonlyArray<{ startMs: number; endMs?: number }> | undefined,
+): TurnLanes {
+  const total = Math.max(0, durationMs);
+  const spans = (timeline ?? [])
+    .map((call) => ({ start: Math.max(0, call.startMs), end: Math.min(total, call.endMs ?? total) }))
+    .filter((span) => span.end > span.start)
+    .sort((a, b) => a.start - b.start);
+  let toolMs = 0;
+  let cursor = 0;
+  for (const span of spans) {
+    const start = Math.max(span.start, cursor);
+    if (span.end > start) { toolMs += span.end - start; cursor = span.end; }
+  }
+  return { toolMs, modelMs: Math.max(0, total - toolMs) };
+}
