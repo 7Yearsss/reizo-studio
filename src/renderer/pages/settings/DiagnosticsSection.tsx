@@ -7,6 +7,8 @@ import { toast } from '../../lib/toast';
 export default function DiagnosticsSection() {
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [update, setUpdate] = useState<api.UpdateStatusDto | null>(null);
+  const [updating, setUpdating] = useState(false);
   const [report, setReport] = useState<api.SelfCheckResult[] | null>(null);
 
   async function runCheck() {
@@ -14,6 +16,13 @@ export default function DiagnosticsSection() {
     try { setReport((await api.runSelfCheck()).results); }
     catch (error) { toast.error('自检失败', error instanceof Error ? error.message : undefined); }
     finally { setChecking(false); }
+  }
+
+  async function checkUpdate() {
+    setUpdating(true);
+    try { setUpdate(await api.checkForUpdates()); }
+    catch (error) { toast.error('检查更新失败', error instanceof Error ? error.message : undefined); }
+    finally { setUpdating(false); }
   }
 
   async function exportBundle() {
@@ -40,6 +49,18 @@ export default function DiagnosticsSection() {
       <div className="flex flex-wrap gap-2">
         <button type="button" onClick={() => void runCheck()} disabled={checking} className="rounded-full bg-ink px-4 py-1.5 text-sm text-paper-raised disabled:opacity-50">{checking ? '检查中…' : '一键自检'}</button>
         <button type="button" onClick={() => void exportBundle()} disabled={busy} className="rounded-full bg-paper-inset px-4 py-1.5 text-sm text-ink disabled:opacity-50">{busy ? '导出中…' : '导出诊断包'}</button>
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
+        <button type="button" onClick={() => void checkUpdate()} disabled={updating} className="rounded-full bg-paper-inset px-4 py-1.5 text-ink disabled:opacity-50">{updating ? '检查中…' : '检查更新'}</button>
+        {update?.status === 'available' && (
+          <span className="text-ink">
+            发现新版本 {update.latest}（当前 {update.current}）
+            <button type="button" onClick={() => void window.reizo.openExternal(update.url)} className="ml-2 text-accent underline">前往下载</button>
+            {update.notes ? <span className="ml-2 text-ink-muted">{update.notes.slice(0, 120)}</span> : null}
+          </span>
+        )}
+        {update?.status === 'latest' && <span className="text-emerald-600">已是最新版本（{update.current}）</span>}
+        {(update?.status === 'disabled' || update?.status === 'error') && <span className={update.status === 'error' ? 'text-danger' : 'text-ink-muted'}>{update.status === 'error' ? '检查失败：' : '未启用：'}{update.reason}</span>}
       </div>
       {report && (
         <ul className="mt-3 space-y-1">

@@ -1409,3 +1409,12 @@ export async function restoreBackup(name: string): Promise<void> {
 export async function saveBackupSettings(patch: Partial<BackupSettings>): Promise<void> {
   await api('/api/backups/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(patch) });
 }
+
+export type UpdateStatusDto =
+  | { status: 'available'; current: string; latest: string; notes?: string; url: string }
+  | { status: 'latest'; current: string; latest: string }
+  | { status: 'disabled' | 'error'; current: string; reason: string };
+
+export async function checkForUpdates(): Promise<UpdateStatusDto> {
+  return (await api('/api/updates/check')).json();
+}
