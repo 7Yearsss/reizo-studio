@@ -283,6 +283,24 @@ export async function saveNetworkSettings(settings: NetworkSettings): Promise<{ 
   return res.json();
 }
 
+export interface EgressSettingsDto { enabled: boolean; allow: string[]; allowPrivate: boolean }
+
+export async function getEgressSettings(): Promise<{ settings: EgressSettingsDto; blocked: Array<{ host: string; at: number }> }> {
+  return (await api('/api/network/egress')).json();
+}
+
+export async function saveEgressSettings(settings: EgressSettingsDto): Promise<EgressSettingsDto> {
+  const res = await api('/api/network/egress', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(settings) });
+  const body = (await res.json()) as { settings?: EgressSettingsDto; error?: string };
+  if (!res.ok || !body.settings) throw new Error(body.error ?? '保存失败');
+  return body.settings;
+}
+
+export async function allowEgressHost(host: string): Promise<EgressSettingsDto> {
+  const res = await api('/api/network/egress/allow', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ host }) });
+  return ((await res.json()) as { settings: EgressSettingsDto }).settings;
+}
+
 export async function testNetwork(): Promise<{ ok: boolean; ms: number; detail: string }> {
   const res = await api('/api/network/test', { method: 'POST' });
   return res.json();

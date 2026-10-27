@@ -2,6 +2,7 @@ import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { RUN_COMMAND_MAX_BUFFER, RUN_COMMAND_TIMEOUT_MS } from '../shared/constants';
 import { plainTextTerminalEnv, stripTerminalControlSequences } from '../shared/terminalOutput';
+import { egressEnv } from './egressControl';
 import { currentProxyEnv } from './proxy';
 
 const clean = (s: string): string => stripTerminalControlSequences(s);
@@ -16,7 +17,8 @@ export interface CommandResult {
   exitCode: number;
 }
 
-export async function runWorkspaceCommand(cwd: string, command: string): Promise<CommandResult> {
+/** `isolate` is for commands the agent chose to run: they go through the network allowlist when the user turned it on. */
+export async function runWorkspaceCommand(cwd: string, command: string, options: { isolate?: boolean } = {}): Promise<CommandResult> {
   const trimmed = command.trim();
   if (!trimmed) throw new Error('command is required');
   try {

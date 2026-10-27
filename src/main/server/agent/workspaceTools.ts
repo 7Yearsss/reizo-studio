@@ -115,7 +115,7 @@ export function createWorkspaceTools(options: {
       switch (name) {
         case 'run_command':
           if (args.background === true) return { result: JSON.stringify({ started: true, ...startBackgroundShell({ sessionId: options.sessionId, cwd: workspacePath, command: String(args.command ?? '') }) }) };
-          return { result: JSON.stringify(await runWorkspaceCommand(workspacePath, String(args.command ?? ''))) };
+          return { result: JSON.stringify(await runWorkspaceCommand(workspacePath, String(args.command ?? ''), { isolate: true })) };
         case 'write_file': {
           const path = String(args.path ?? '');
           const content = String(args.content ?? '');
@@ -328,7 +328,7 @@ function buildTools(options: {
       execute: async (input, toolOptions) => {
         await approve(sessionId, 'run_command', input, permissionMode, toolOptions);
         if (input.background === true) return { started: true, ...startBackgroundShell({ sessionId, cwd: workspacePath, command: input.command }) };
-        return runWorkspaceCommand(workspacePath, input.command);
+        return runWorkspaceCommand(workspacePath, input.command, { isolate: true });
       },
     }),
     read_background: tool({
