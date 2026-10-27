@@ -1,4 +1,5 @@
 import type { ReasoningSegment, ReplyActivity, ToolCallPart } from '../../../shared/chat';
+import { useMonotonicMinHeight } from '../../lib/use-monotonic-min-height';
 import type { TurnOutcome } from '../../../shared/stream';
 import { AgentActivity, type AgentActivityItem } from '../agents/agent-activity';
 import { ThinkingShimmer } from '../agents/loading-states/thinking-shimmer';
@@ -58,6 +59,7 @@ export default function WorkGroupCard({
   turnOutcome?: TurnOutcome | null;
   sessionId?: string;
 }) {
+  const stepsRef = useMonotonicMinHeight<HTMLDivElement>(streaming || reasoningStreaming || parts.some((part) => part.result === undefined && part.error === undefined));
   // ask_user parts are rendered by AskAnswers/the ask card — a turn that only
   // asked questions (e.g. a folded duplicate direction card) shouldn't leave
   // an empty "工作完成" shell behind.
@@ -95,7 +97,7 @@ export default function WorkGroupCard({
       : `工作完成${durationLabel}`;
 
   return (
-    <div className="w-full">
+    <div ref={stepsRef} className="w-full">
       {(items.length > 0 || active) && (
       <AgentActivity
         items={items}
