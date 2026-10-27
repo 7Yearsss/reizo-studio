@@ -9,6 +9,11 @@ describe('looksLikeDeferredWork', () => {
     expect(looksLikeDeferredWork(SCREENSHOT)).toBe(true);
   });
 
+  it('does not flag a finished essay that says "我继续" mid-story', () => {
+    const essay = `傍晚，我沿着河边散步。孩子被家人叫走，我继续往前，脚步却慢了下来。${'风从水面吹来，带着凉意。'.repeat(12)}回家时，心里也松快了许多。`;
+    expect(looksLikeDeferredWork(essay)).toBe(false);
+  });
+
   it('does not flag a finished findings reply', () => {
     expect(
       looksLikeDeferredWork('结论：权限队列在刷新后会丢 in-flight 的 done。建议在 markTurnEnd 里补一次 flush。'),

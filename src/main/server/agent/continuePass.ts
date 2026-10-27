@@ -85,6 +85,9 @@ function asksClarificationQuestion(reply: string): boolean {
   return /[?？]\s*$/.test(trimmed) || /请(?:问|确认|提供|告诉我)|could you (?:clarify|confirm|specify)/i.test(trimmed);
 }
 
+/** How much of the reply's end is searched for a deferral phrase. */
+const DEFERRAL_TAIL_CHARS = 120;
+
 /** The model announced more work instead of doing it. */
 export function looksLikeDeferredWork(text: string): boolean {
   const trimmed = text.trim();
@@ -92,5 +95,7 @@ export function looksLikeDeferredWork(text: string): boolean {
   const defers =
     /我继续|接下来(?:会|我|去)|我再(?:去|核对|检查|看)|初步看|随后会|I(?:'ll| will) (?:continue|check|look|verify|inspect)|let me (?:continue|keep checking|check)/i;
   const concludes = /结论[:：]|总结[:：]|发现如下|修复如下|已完成以下|here's what i found|in conclusion/i;
-  return defers.test(trimmed) && !concludes.test(trimmed);
+  // An announcement of more work closes the message; "我继续往前" mid-story is narrative, not a deferral.
+  const tail = trimmed.slice(-DEFERRAL_TAIL_CHARS);
+  return defers.test(tail) && !concludes.test(trimmed);
 }
