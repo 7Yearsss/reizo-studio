@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { BookOpen, Trash2 } from 'lucide-react';
 import * as api from '../../api';
 import { toast } from '../../lib/toast';
-import { knowledgeFileProblem, looksBinary } from '../../../shared/knowledgeFiles';
+import { knowledgeFileProblem, looksBinary, OFFICE_FILE } from '../../../shared/knowledgeFiles';
 
 /** The user's own reference material: imported text files that the assistant can search and cite by file name. */
 export default function KnowledgeSection() {
@@ -21,9 +21,15 @@ export default function KnowledgeSection() {
       for (const file of Array.from(files)) {
         const problem = knowledgeFileProblem(file);
         if (problem) { toast.error('无法导入', problem); continue; }
-        const text = await file.text();
-        if (looksBinary(text)) { toast.error('无法导入', `「${file.name}」不是文本文件`); continue; }
-        try { await api.addKnowledge(file.name, text); added += 1; }
+        try {
+          if (OFFICE_FILE.test(file.name)) await api.addKnowledgeFile(file);
+          else {
+            const text = await file.text();
+            if (looksBinary(text)) { toast.error('无法导入', `「${file.name}」不是文本文件`); continue; }
+            await api.addKnowledge(file.name, text);
+          }
+          added += 1;
+        }
         catch (error) { toast.error(`「${file.name}」导入失败`, error instanceof Error ? error.message : undefined); }
       }
       if (added > 0) toast.success(`已导入 ${added} 份资料`);
@@ -42,7 +48,7 @@ export default function KnowledgeSection() {
   return (
     <section className="mb-8 max-w-3xl">
       <h2 className="mb-1 flex items-center gap-2 text-base font-semibold"><BookOpen size={16} /> 资料库</h2>
-      <p className="mb-3 text-sm text-ink-muted">把你的政策、产品资料、品牌规范、笔记放进来，助手回答时会先从这里查，并说明出自哪个文件。目前支持文本类文件（.txt、.md、.csv、.json、.html 等）；PDF 和 Word 请先另存为文本。资料保存在本机，被查到的片段会随提问发给你所用的模型服务。</p>
+      <p className="mb-3 text-sm text-ink-muted">把你的政策、产品资料、品牌规范、笔记放进来，助手回答时会先从这里查，并说明出自哪个文件。支持文本类文件（.txt、.md、.csv、.json、.html 等）和 Word（.docx）、Excel（.xlsx）、PowerPoint（.pptx）；PDF 暂不支持，请先另存为文本。资料保存在本机，被查到的片段会随提问发给你所用的模型服务。</p>
       <input ref={input} type="file" multiple className="hidden" onChange={(e) => void importFiles(e.target.files)} />
       <button type="button" disabled={busy} onClick={() => input.current?.click()} className="rounded-full bg-ink px-4 py-1.5 text-sm text-paper-raised disabled:opacity-50">{busy ? '导入中…' : '导入文件'}</button>
       {docs && docs.length > 0 && (

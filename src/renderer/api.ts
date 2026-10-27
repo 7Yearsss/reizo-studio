@@ -1432,6 +1432,13 @@ export async function addKnowledge(name: string, text: string): Promise<Knowledg
   return body.document;
 }
 
+export async function addKnowledgeFile(file: File): Promise<KnowledgeDocDto> {
+  const res = await api(`/api/knowledge/file?name=${encodeURIComponent(file.name)}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: file });
+  const body = (await res.json()) as { document?: KnowledgeDocDto; error?: string };
+  if (!res.ok || !body.document) throw new Error(body.error ?? '导入失败');
+  return body.document;
+}
+
 export async function removeKnowledge(id: string): Promise<void> {
   await api(`/api/knowledge/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
