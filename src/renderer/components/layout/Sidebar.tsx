@@ -109,7 +109,6 @@ async function archiveSession(session: SessionSummary): Promise<void> {
 
 const COLLAPSE_KEY = 'reizo:sidebar-collapsed';
 const FOLDER_FOLD_KEY = 'reizo:sidebar-folders';
-const CHATS_FOLD_KEY = 'reizo:sidebar-chats';
 
 function folderName(path: string): string {
   return path.split(/[/\\]/).filter(Boolean).pop() ?? path;
@@ -150,17 +149,18 @@ function PendingInteractionBadge({ kind }: { kind: 'ask' | 'permission' }) {
   );
 }
 
-/** Fixed 14px status slot: spinner = running, peach = waiting on you, ink = unread, empty otherwise. */
+/** Trailing status: spinner = running, peach = waiting on you, ink = unread; nothing (no reserved slot) otherwise. */
 function SessionStatus({ pending, unread, running }: { pending: boolean; unread: boolean; running: boolean }) {
+  if (!pending && !unread && !running) return null;
   return (
-    <span className="mt-1 flex size-3.5 shrink-0 items-center justify-center self-start" aria-hidden={!pending && !unread && !running}>
+    <span className="flex size-3.5 shrink-0 items-center justify-center">
       {running && !pending ? (
         <span className="size-3 animate-spin rounded-full border-2 border-line border-t-ink" aria-label="运行中" />
       ) : pending ? (
         <span className="size-2 rounded-full bg-[var(--peach-bar)]" />
-      ) : unread ? (
+      ) : (
         <span className="size-1.5 rounded-full bg-ink" aria-label="有新回复" />
-      ) : null}
+      )}
     </span>
   );
 }
@@ -282,7 +282,6 @@ export default function Sidebar() {
   const [trashOpen, setTrashOpen] = useState(false);
   const [archivedOpen, setArchivedOpen] = useState(false);
   const hoverPreview = useSessionHoverPreview();
-  const [chatsOpen, setChatsOpen] = useState(() => localStorage.getItem(CHATS_FOLD_KEY) !== '0');
 
   useEffect(() => {
     document.documentElement.style.setProperty('--sidebar-width', `${collapsed ? 0 : sidebarWidth}px`);
@@ -380,22 +379,14 @@ export default function Sidebar() {
     uiStore.toggleSidebar();
   }
 
-  function toggleChatsOpen() {
-    setChatsOpen((o) => {
-      const next = !o;
-      localStorage.setItem(CHATS_FOLD_KEY, next ? '1' : '0');
-      return next;
-    });
-  }
-
   const navRow = (active: boolean) =>
     cn(
-      'flex min-h-10 w-full items-center gap-3 rounded-[10px] px-3 py-2 text-left text-[14px] leading-5 text-ink/75 outline-none transition-colors duration-150 hover:bg-[var(--sidebar-hover)] hover:text-ink focus-visible:inset-ring-2 focus-visible:inset-ring-ink/30 motion-reduce:transition-none',
+      'flex min-h-9 w-full items-center gap-2.5 rounded-[10px] px-2.5 py-1.5 text-left text-[13.5px] leading-5 text-ink/75 outline-none transition-colors duration-150 hover:bg-[var(--sidebar-hover)] hover:text-ink focus-visible:inset-ring-2 focus-visible:inset-ring-ink/30 motion-reduce:transition-none',
       active && 'bg-[var(--sidebar-selected)] font-medium text-ink shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:bg-[var(--sidebar-selected)]',
     );
 
   const foldRow =
-    'flex min-w-0 shrink-0 items-center gap-1.5 rounded-lg px-3 py-2 text-left text-xs font-medium leading-5 text-ink-muted outline-none transition-colors hover:text-ink focus-visible:inset-ring-2 focus-visible:inset-ring-ink/30';
+    'flex min-w-0 shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-left text-xs font-medium leading-5 text-ink-muted outline-none transition-colors hover:text-ink focus-visible:inset-ring-2 focus-visible:inset-ring-ink/30';
 
   const onPointerDown = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -475,11 +466,10 @@ export default function Sidebar() {
             tabStore.openChatTab(session.id, session.title);
           }}
           className={cn(
-            'group flex w-full items-center gap-2 rounded-[10px] px-3 py-2 text-left text-[13px] leading-5 text-ink/75 outline-none transition-colors focus-visible:inset-ring-2 focus-visible:inset-ring-ink/30 hover:bg-[var(--sidebar-hover)] hover:text-ink',
+            'group flex w-full items-center gap-2 rounded-[10px] px-2.5 py-1.5 text-left text-[13px] leading-5 text-ink/75 outline-none transition-colors focus-visible:inset-ring-2 focus-visible:inset-ring-ink/30 hover:bg-[var(--sidebar-hover)] hover:text-ink',
             active && 'bg-[var(--sidebar-selected)] font-medium text-ink hover:bg-[var(--sidebar-selected)]',
           )}
         >
-          <SessionStatus pending={!!pendingKind} unread={!!unreadBySession[session.id]} running={!!sendingBySession[session.id]} />
           {renamingId === session.id ? (
             <input
               autoFocus
@@ -506,11 +496,9 @@ export default function Sidebar() {
               }}
             >
               <span className="truncate">{session.title}</span>
-              {session.listPreview && (
-                <span className="truncate text-[11px] leading-tight text-ink-muted/80">{session.listPreview}</span>
-              )}
             </span>
           )}
+          <SessionStatus pending={!!pendingKind} unread={!!unreadBySession[session.id]} running={!!sendingBySession[session.id]} />
           {pendingKind && <PendingInteractionBadge kind={pendingKind} />}
           <span
             role="button"
@@ -520,7 +508,7 @@ export default function Sidebar() {
               e.stopPropagation();
               void deleteWithUndo(session.id, session.title);
             }}
-            className="mt-0.5 shrink-0 self-start rounded p-1 text-ink-muted opacity-0 transition-opacity duration-[140ms] hover:bg-paper hover:text-danger group-hover:opacity-100"
+            className="hidden size-5 shrink-0 items-center justify-center rounded text-ink-muted hover:bg-paper hover:text-danger group-hover:flex"
             aria-label="删除会话"
           >
             <Trash2 size={13} />
@@ -544,10 +532,10 @@ export default function Sidebar() {
       style={{ width: collapsed ? 0 : sidebarWidth }}
     >
       <div
-        className="anim-fade flex h-full w-full min-w-0 flex-col overflow-hidden px-3 pb-3 pt-3"
+        className="anim-fade flex h-full w-full min-w-0 flex-col overflow-hidden px-2 pb-2 pt-2"
         style={collapsed ? { display: 'none' } : undefined}
       >
-        <nav className="flex flex-col gap-1" aria-label="Studio 导航">
+        <nav className="flex flex-col gap-0.5" aria-label="Studio 导航">
         <button
           type="button"
           onClick={() => {
@@ -588,41 +576,17 @@ export default function Sidebar() {
         </button>
       </nav>
 
-      <div className="mt-7 flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div className="flex items-center gap-1">
-          <button type="button" onClick={toggleChatsOpen} className={cn(foldRow, 'flex-1')} aria-expanded={chatsOpen}>
-            <ChevronRight
-              size={14}
-              className={cn(
-                'shrink-0 transition-transform duration-150 ease-[var(--ease-out)] motion-reduce:transition-none',
-                chatsOpen && 'rotate-90',
-              )}
-            />
-            对话
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              uiStore.setMode('chat');
-              tabStore.newLauncherTab();
-            }}
-            title="开启新对话"
-            aria-label="开启新对话"
-            className="mr-1 inline-flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-muted outline-none transition-colors hover:bg-[var(--sidebar-hover)] hover:text-ink focus-visible:inset-ring-2 focus-visible:inset-ring-ink/30"
-          >
-            <Plus size={14} />
-          </button>
-        </div>
-        {chatsOpen && (
-          <nav className="anim-fade min-h-0 flex-1 space-y-0.5 overflow-y-auto px-1 pb-2">
+      <div className="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden">
+        {(
+          <nav className="anim-fade min-h-0 flex-1 space-y-px overflow-y-auto pb-2">
             {pinnedVisible.length > 0 && (
               <div className="pb-1">
-                <p className="px-3 pb-0.5 pt-1 text-[11px] text-ink-muted">置顶</p>
+                <p className="px-2.5 pb-0.5 pt-1 text-[11px] text-ink-muted">置顶</p>
                 {pinnedVisible.map(renderSession)}
               </div>
             )}
             {folderGroups.groups.length === 0 && folderGroups.loose.length === 0 && pinnedVisible.length === 0 && !q && (
-              <p className="px-3 py-1.5 text-xs text-ink-muted">暂无会话</p>
+              <p className="px-2.5 py-1.5 text-xs text-ink-muted">暂无会话</p>
             )}
             {folderGroups.groups.map((group) => {
               const key = folderKey(group.path);
@@ -637,7 +601,7 @@ export default function Sidebar() {
                       aria-expanded={open}
                       title={group.path}
                       className={cn(
-                        'flex min-w-0 items-center gap-1 px-3 py-2 text-left text-[13px] leading-5 outline-none transition-colors hover:text-ink focus-visible:text-ink',
+                        'flex min-w-0 items-center gap-1 px-2.5 py-1.5 text-left text-xs leading-5 outline-none transition-colors hover:text-ink focus-visible:text-ink',
                         current ? 'font-medium text-ink' : 'text-ink-muted',
                       )}
                     >
@@ -662,9 +626,9 @@ export default function Sidebar() {
                     </button>
                   </div>
                   {open && (
-                    <div className="space-y-0.5 pl-3">
+                    <div className="space-y-px">
                       {group.visible.length === 0 && (
-                        <p className="px-3 py-1.5 text-xs text-ink-muted">这个文件夹还没有对话</p>
+                        <p className="px-2.5 py-1.5 text-xs text-ink-muted">这个文件夹还没有对话</p>
                       )}
                       {group.visible.map(renderSession)}
                     </div>
@@ -675,7 +639,7 @@ export default function Sidebar() {
             {folderGroups.loose.map(renderSession)}
             {searchOpen && fileHits.length > 0 && (
               <div className="pt-2">
-                <p className="px-3 pb-1 text-[11px] text-ink-muted">文件</p>
+                <p className="px-2.5 pb-1 text-[11px] text-ink-muted">文件</p>
                 {fileHits.map((hit) => (
                   <div key={hit.relativePath} className="truncate px-3 py-1 text-xs text-ink-muted">
                     {hit.relativePath}
@@ -705,7 +669,7 @@ export default function Sidebar() {
         {trashOpen && <div className="max-h-40 overflow-y-auto"><TrashPanel /></div>}
       </div>
 
-      <div className="mt-3 shrink-0 border-t border-[var(--sidebar-line)] pt-3">
+      <div className="mt-2 shrink-0 border-t border-[var(--sidebar-line)] pt-2">
         <AccountControl />
       </div>
       </div>
