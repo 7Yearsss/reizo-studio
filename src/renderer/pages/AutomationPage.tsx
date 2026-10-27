@@ -18,11 +18,13 @@ export default function AutomationPage() {
   const [prompt, setPrompt] = useState('');
   const [thoughtDraft, setThoughtDraft] = useState('');
   const [intervalMs, setIntervalMs] = useState(SCHEDULE_PRESETS[2].intervalMs);
-  const [when, setWhen] = useState<'interval' | ScheduleCadence['kind']>('interval');
+  const [when, setWhen] = useState<'interval' | 'folder' | ScheduleCadence['kind']>('interval');
+  const [watchFolder, setWatchFolder] = useState('');
+  const [watchPattern, setWatchPattern] = useState('');
   const [runPermission, setRunPermission] = useState<RunPermission>('readonly');
   const [clock, setClock] = useState('09:00');
   const [weekday, setWeekday] = useState(1);
-  const cadence: ScheduleCadence | undefined = when === 'interval' ? undefined : {
+  const cadence: ScheduleCadence | undefined = when === 'interval' || when === 'folder' ? undefined : {
     kind: when, hour: Number(clock.split(':')[0]) || 0, minute: Number(clock.split(':')[1]) || 0, ...(when === 'weekly' ? { dayOfWeek: weekday } : {}),
   };
   const skills = useSkillStore().skills;
@@ -173,6 +175,7 @@ export default function AutomationPage() {
               <option value="weekdays">工作日</option>
               <option value="daily">每天</option>
               <option value="weekly">每周</option>
+              <option value="folder">有新文件时</option>
             </select>
             {when === 'weekly' && (
               <select
@@ -184,7 +187,25 @@ export default function AutomationPage() {
                 {['日', '一', '二', '三', '四', '五', '六'].map((name, index) => <option key={index} value={index}>周{name}</option>)}
               </select>
             )}
-            {when !== 'interval' && (
+            {when === 'folder' && (
+              <>
+                <input
+                  aria-label="监听的文件夹（工作区内的相对路径）"
+                  placeholder="文件夹，如 inbox"
+                  value={watchFolder}
+                  onChange={(e) => setWatchFolder(e.target.value)}
+                  className="w-36 rounded-full bg-sidebar px-3 py-1.5 text-xs text-ink outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+                <input
+                  aria-label="只关注这类文件"
+                  placeholder="如 *.pdf（可空）"
+                  value={watchPattern}
+                  onChange={(e) => setWatchPattern(e.target.value)}
+                  className="w-32 rounded-full bg-sidebar px-3 py-1.5 text-xs text-ink outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+              </>
+            )}
+            {when !== 'interval' && when !== 'folder' && (
               <input
                 type="time"
                 aria-label="运行时间"
@@ -232,10 +253,10 @@ export default function AutomationPage() {
             <button
               type="button"
               className="inline-flex items-center gap-1 rounded-full bg-ink px-3 py-1.5 text-xs text-paper-raised"
-              disabled={!prompt.trim() || Boolean(busy)}
+              disabled={!prompt.trim() || Boolean(busy) || (when === 'folder' && !watchFolder.trim())}
               onClick={() => void perform('schedule:create', async () => {
                 if (!prompt.trim()) return;
-                const input = { prompt: prompt.trim(), intervalMs: cadence ? 24 * 60 * 60 * 1000 : intervalMs, skillId: skillId || undefined, runPermission, ...(cadence ? { cadence } : {}) };
+                const input = { prompt: prompt.trim(), intervalMs: cadence ? 24 * 60 * 60 * 1000 : intervalMs, skillId: skillId || undefined, runPermission, ...(cadence ? { cadence } : {}), ...(when === 'folder' ? { watch: { folder: watchFolder.trim(), ...(watchPattern.trim() ? { pattern: watchPattern.trim() } : {}) } } : {}) };
                 const signature = JSON.stringify(input);
                 if (!createAttempt.current || createAttempt.current.signature !== signature) createAttempt.current = { signature, id: nanoid() };
                 const revision = promptRevision.current;
@@ -261,7 +282,7 @@ export default function AutomationPage() {
                   <p className="font-medium text-ink">{schedule.name}</p>
                   <p className="mt-1 text-sm text-ink-muted">{schedule.prompt}</p>
                   <p className="mt-2 text-[11px] text-ink-muted">
-                    {!Number.isSafeInteger(schedule.intervalMs) || schedule.intervalMs < 60_000 ? '配置无效，不会运行' : schedule.activeExecution ? '执行中' : schedule.pendingRun ? '等待手动执行' : schedule.lastOutcome === 'interrupted' && !schedule.enabled ? '已中断并暂停' : schedule.enabled ? '已启用' : '已暂停'}{schedule.enabled && !schedule.activeExecution && !schedule.pendingRun ? ` · 下次 ${new Date(schedule.nextRunAt).toLocaleString()}` : ''} · 已尝试 {schedule.runCount} 次{schedule.cadence ? ` · ${describeCadence(schedule.cadence)}` : ''} · {schedule.runPermission === 'readonly' ? '只读' : schedule.runPermission === 'inherit' ? '沿用全局权限' : '可改工作区文件'}{schedule.once ? ' · 仅运行一次' : ''}
+                    {!Number.isSafeInteger(schedule.intervalMs) || schedule.intervalMs < 60_000 ? '配置无效，不会运行' : schedule.activeExecution ? '执行中' : schedule.pendingRun ? '等待手动执行' : schedule.lastOutcome === 'interrupted' && !schedule.enabled ? '已中断并暂停' : schedule.enabled ? '已启用' : '已暂停'}{schedule.watch ? ` · 监听 ${schedule.watch.folder}${schedule.watch.pattern ? `/${schedule.watch.pattern}` : ''}` : schedule.enabled && !schedule.activeExecution && !schedule.pendingRun ? ` · 下次 ${new Date(schedule.nextRunAt).toLocaleString()}` : ''} · 已尝试 {schedule.runCount} 次{schedule.cadence ? ` · ${describeCadence(schedule.cadence)}` : ''} · {schedule.runPermission === 'readonly' ? '只读' : schedule.runPermission === 'inherit' ? '沿用全局权限' : '可改工作区文件'}{schedule.once ? ' · 仅运行一次' : ''}
                     {schedule.lastError ? ` · 上次失败：${schedule.lastError}` : ''}
                   </p>
                   {(schedule.activeExecution ? schedule.activeExecution.sessionId : schedule.lastSessionId) ? <Button type="button" variant="ghost" size="xs" className="mt-2" onClick={() => { const sessionId = schedule.activeExecution ? schedule.activeExecution.sessionId : schedule.lastSessionId; if (!sessionId) return; uiStore.setMode('chat'); tabStore.openChatTab(sessionId, schedule.name); }}>{schedule.activeExecution ? '查看本次会话' : '查看上次结果'}</Button> : null}

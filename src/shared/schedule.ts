@@ -43,8 +43,10 @@ export interface Schedule {
   /** One-shot schedules pause after one attempt; their result and failures remain visible. */
   once?: boolean;
   createOperationId?: string;
-  pendingRun?: { operationId: string; requestedAt: string };
-  activeExecution?: { id: string; startedAt: string; kind: 'scheduled' | 'manual'; sessionId?: string; operationId?: string };
+  /** Run when files appear in this folder (relative to the workspace) instead of on a timer. */
+  watch?: ScheduleWatch;
+  pendingRun?: { operationId: string; requestedAt: string; /** Files that caused this run (folder triggers). */ files?: string[] };
+  activeExecution?: { id: string; startedAt: string; kind: 'scheduled' | 'manual'; sessionId?: string; operationId?: string; files?: string[] };
   lastExecutionId?: string;
   lastSessionId?: string;
   lastRunOperationId?: string;
@@ -75,6 +77,23 @@ export interface SchedulePatch {
   intervalMs?: number;
   enabled?: boolean;
   nextRunAt?: string;
+}
+
+export interface ScheduleWatch { folder: string; pattern?: string }
+
+/** A workspace-relative folder (no absolute path, no `..`) and an optional file pattern. */
+export function isValidWatch(value: unknown): value is ScheduleWatch {
+  if (!value || typeof value !== 'object') return false;
+  const w = value as Partial<ScheduleWatch>;
+  if (typeof w.folder !== 'string' || w.folder.length === 0 || w.folder.length > 300) return false;
+  if (/^([a-z]:)?[\\/]/i.test(w.folder) || w.folder.split(/[\\/]/).includes('..')) return false;
+  return w.pattern === undefined || (typeof w.pattern === 'string' && w.pattern.length <= 200);
+}
+
+/** The prompt of a folder-triggered run: the saved instruction plus the files that arrived. */
+export function promptWithFiles(prompt: string, files: readonly string[] | undefined): string {
+  if (!files || files.length === 0) return prompt;
+  return `${prompt}\n\n本次触发的文件（相对工作区，共 ${files.length} 个）：\n${files.map((f) => `- ${f}`).join('\n')}`;
 }
 
 /** Wall-clock cadence in the user's local time: "weekdays at 09:00". Overrides the fixed interval for when the next run falls. */

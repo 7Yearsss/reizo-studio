@@ -581,6 +581,7 @@ export async function createSchedule(input: {
   once?: boolean;
   cadence?: import('../shared/schedule').ScheduleCadence;
   runPermission?: import('../shared/schedule').RunPermission;
+  watch?: import('../shared/schedule').ScheduleWatch;
   operationId?: string;
 }): Promise<Schedule> {
   const res = await api('/api/schedules', {

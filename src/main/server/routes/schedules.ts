@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { SCHEDULE_PRESETS, isValidCadence } from '../../../shared/schedule';
+import { SCHEDULE_PRESETS, isValidCadence, isValidWatch } from '../../../shared/schedule';
 import { ScheduleValidationError, validateScheduleInterval, type ScheduleStore } from '../storage/scheduleStore';
 import type { ThoughtStore } from '../storage/thoughtStore';
 
@@ -33,6 +33,7 @@ export function createSchedulesRouter(scheduleStore: ScheduleStore, thoughtStore
     try { validateScheduleInterval(intervalMs); }
     catch (error) { if (error instanceof ScheduleValidationError) return c.json({ error: error.message }, 400); throw error; }
     if (body.cadence !== undefined && !isValidCadence(body.cadence)) return c.json({ error: '运行时间无效' }, 400);
+    if (body.watch !== undefined && !isValidWatch(body.watch)) return c.json({ error: '监听的文件夹必须是工作区内的相对路径' }, 400);
     let schedule;
     try { schedule = await scheduleStore.create({
       name: typeof body.name === 'string' ? body.name : body.prompt.slice(0, 40),
@@ -42,6 +43,7 @@ export function createSchedulesRouter(scheduleStore: ScheduleStore, thoughtStore
       once: body.once === true,
       cadence: body.cadence,
       runPermission: body.runPermission,
+      watch: body.watch,
       operationId: body.operationId,
     }); } catch (error) { if (error instanceof ScheduleValidationError) return c.json({ error: error.message }, error.status); throw error; }
     return c.json({ schedule }, 201);

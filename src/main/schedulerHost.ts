@@ -9,7 +9,8 @@ import { abortChatTurn } from './server/agent/session';
 import type { ScheduleStore } from './server/storage/scheduleStore';
 import type { SettingsStore } from './server/storage/settingsStore';
 import type { UsageStore } from './server/storage/usageStore';
-import type { Schedule } from '../shared/schedule';
+import { promptWithFiles, type Schedule } from '../shared/schedule';
+import { startFolderTriggers } from './folderTriggers';
 import { parseStreamLine } from '../shared/stream';
 
 export class ScheduledRunInterruptedError extends Error { constructor(message: string) { super(message); this.name = 'ScheduledRunInterruptedError'; } }
@@ -61,7 +62,7 @@ export function startScheduler(options: {
         sessionStore,
         settingsStore: options.settingsStore,
         sessionId: session.id,
-        userText: schedule.prompt,
+        userText: promptWithFiles(schedule.prompt, schedule.activeExecution?.files),
         skill,
         scheduleStore: options.scheduleStore,
         dataRoot: options.dataRoot,
@@ -112,11 +113,14 @@ export function startScheduler(options: {
   const timer = setInterval(() => {
     void tick().catch(() => console.warn('[scheduler] schedules could not be read'));
   }, 20_000);
-  const ready = options.scheduleStore.interruptActive().then(() => tick());
+  // Automations that watch a folder: re-check which folders to watch every tick, run when files arrive.
+  const folderTriggers = startFolderTriggers({ scheduleStore: options.scheduleStore, settingsStore: options.settingsStore, onRequested: (): void => { void tick().catch((): void => undefined); } });
+  const syncFolders = (): void => { void folderTriggers.sync().catch(() => console.warn('[scheduler] folder watchers could not be updated')); };
+  const ready = options.scheduleStore.interruptActive().then(() => { syncFolders(); return tick(); });
   void ready.catch(() => console.warn('[scheduler] recovery failed; existing records were retained'));
   return Object.assign(() => {
     if (stopped) return stopped;
-    stopping = true; clearInterval(timer);
+    stopping = true; clearInterval(timer); folderTriggers.stop();
     for (const sessionId of liveSessions) abortChatTurn(sessionId);
     stopped = ready.catch((): void => undefined).then(async () => { await options.scheduleStore.interruptActive('应用退出时执行尚未确认，已暂停；请先查看关联会话，再手动决定是否重试'); });
     return stopped;

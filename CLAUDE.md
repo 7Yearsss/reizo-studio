@@ -98,7 +98,7 @@ Three Electron surfaces, each with its own Vite build (see `forge.config.ts`):
 
 - **Main** (`src/main/`) — Node process. Owns the BrowserWindow, tray, global shortcut,
   IPC handlers (`workspaceIpc`, `skillsIpc`, `pluginsIpc`, `windowIpc`, account IPC), the SQLite
-  handle, the scheduler host, memory jobs, the computer-use driver, and it boots the local HTTP
+  handle, the scheduler host (incl. `folderTriggers.ts`: automations that run when files land in a workspace folder), memory jobs, the computer-use driver, and it boots the local HTTP
   server.
 - **Preload** (`src/preload/preload.ts`) — the only IPC bridge. Exposes `window.reizo.*`
   (typed in `src/shared/window.d.ts`): window controls, workspace fs/git/shell, skill

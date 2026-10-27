@@ -33,6 +33,7 @@
 | 提示注入让 Agent 借浏览器 / 聊天软件 / 邮件客户端做不可撤回的操作（发消息、提交表单、删邮件） | 这三类应用在前台时，会话内第一个动作被拦下，弹出点名该应用的确认卡（computer_app，在 always-ask 名单里，无「本会话都允许」）；同意后同一会话同一应用不再重复问，换一个应用重新问；探测不到前台应用时照旧放行（不让检测失败废掉功能） | `src/main/server/agent/computerAppApproval.test.ts :: holds the first action on a browser, then lets that app through after approval, and still asks for another app` |
 | 网页上的 `reizo://` 链接诱导安装恶意技能 / 夹带路径或额外参数 | 解析是默认拒绝的白名单：只认 `skill/install`，namespace / slug / version 限定字符集与长度，其余一律丢弃；链接只会弹确认卡并先展示技能全文，用户点「安装」前不写入任何内容，取消即什么都没发生 | `src/shared/deepLink.test.ts :: drops anything it does not recognise` |
 | 被注入的指令让 Agent 用 curl / npm 等把数据发往任意域名（开启网络隔离时） | Agent 运行的命令被注入指向本机过滤代理的 HTTP(S)_PROXY，默认拒绝：只放行内置包管理源 / 代码托管与用户加入的主机；按解析后的 IP 判断，私网与回环默认拒绝；被拦返回 403 并记录主机。边界：只约束遵守代理变量的程序，不是系统级沙箱 | `src/main/egressProxy.test.ts :: forwards an allowed host and refuses everything else, naming the host` |
+| 被监听的文件夹被用来越界读取工作区外的文件，或一次投放大量文件造成运行风暴 | 监听目录必须是工作区内的相对路径（拒绝绝对路径与 `..`，运行时再按当前工作区解析并校验包含关系）；无人值守运行沿用 runPermission 上限（新建默认只读，非法值拒绝）；事件先过滤半成品文件再合并为一次运行（最长等待上限，最多列出 200 个），自动化忙碌时文件保留重试而不是并发再起一次 | `src/main/folderTriggers.test.ts :: never watches outside the workspace and does nothing for a disabled automation` |
 
 ## 未覆盖（没有测试，不能标「已覆盖」）
 

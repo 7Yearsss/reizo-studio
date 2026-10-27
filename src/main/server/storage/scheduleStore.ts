@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { nanoid } from 'nanoid';
-import { MAX_CONSECUTIVE_FAILURES, MAX_RUN_HISTORY, isValidCadence, nextCadenceRun, type RunPermission, type ScheduleCadence, type Schedule, type SchedulePatch, type ScheduleRun } from '../../../shared/schedule';
+import { MAX_CONSECUTIVE_FAILURES, MAX_RUN_HISTORY, isValidCadence, isValidWatch, type ScheduleWatch, nextCadenceRun, type RunPermission, type ScheduleCadence, type Schedule, type SchedulePatch, type ScheduleRun } from '../../../shared/schedule';
 import { serializeFileMutation, writeTextAtomic } from './atomicFile';
 
 interface Receipt { operationId: string; kind: 'create' | 'run'; fingerprint: string; scheduleId: string }
@@ -65,12 +65,13 @@ export function createScheduleStore(root: string) {
   }
   return {
     async list(): Promise<Schedule[]> { return (await readDisk()).schedules; },
-    async create(input: { name: string; prompt: string; intervalMs: number; skillId?: string; once?: boolean; operationId?: string; cadence?: ScheduleCadence; runPermission?: RunPermission }): Promise<Schedule> {
+    async create(input: { name: string; prompt: string; intervalMs: number; skillId?: string; once?: boolean; operationId?: string; cadence?: ScheduleCadence; runPermission?: RunPermission; watch?: ScheduleWatch }): Promise<Schedule> {
+      if (input.watch !== undefined && !isValidWatch(input.watch)) throw new ScheduleValidationError('监听的文件夹必须是工作区内的相对路径');
       if (input.runPermission !== undefined && !['readonly', 'workspace', 'inherit'].includes(input.runPermission)) throw new ScheduleValidationError('自动化权限档无效');
       validateScheduleInterval(input.intervalMs);
       if (input.cadence !== undefined && !isValidCadence(input.cadence)) throw new ScheduleValidationError('自动化运行时间无效');
       const id = input.operationId ?? nanoid(); operationId(id);
-      const values = { name: input.name.trim() || input.prompt.slice(0, 40), prompt: input.prompt, intervalMs: input.intervalMs, skillId: input.skillId, once: input.once === true || undefined, cadence: input.cadence, runPermission: input.runPermission ?? 'readonly' };
+      const values = { name: input.name.trim() || input.prompt.slice(0, 40), prompt: input.prompt, intervalMs: input.intervalMs, skillId: input.skillId, once: input.once === true || undefined, cadence: input.cadence, runPermission: input.runPermission ?? 'readonly', ...(input.watch ? { watch: input.watch } : {}) };
       const hash = fingerprint(values);
       return mutate(async (disk) => {
         const previous = replay(disk, id, 'create', hash); if (previous) return previous;
@@ -101,7 +102,7 @@ export function createScheduleStore(root: string) {
         await write(disk); return current;
       });
     },
-    async requestRun(id: string, requestId: string): Promise<Schedule | null> {
+    async requestRun(id: string, requestId: string, files?: string[]): Promise<Schedule | null> {
       operationId(requestId);
       const hash = fingerprint({ scheduleId: id });
       return mutate(async (disk) => {
@@ -109,7 +110,7 @@ export function createScheduleStore(root: string) {
         const current = disk.schedules.find((item) => item.id === id); if (!current) return null;
         validateScheduleInterval(current.intervalMs);
         if (current.activeExecution || current.pendingRun) throw new ScheduleValidationError('自动化已有待执行或执行中的请求，请先查看结果', 409);
-        current.pendingRun = { operationId: requestId, requestedAt: new Date().toISOString() };
+        current.pendingRun = { operationId: requestId, requestedAt: new Date().toISOString(), ...(files?.length ? { files: files.slice(0, 200).map((f) => f.slice(0, 300)) } : {}) };
         current.nextRunAt = new Date().toISOString();
         disk.receipts.push({ operationId: requestId, kind: 'run', fingerprint: hash, scheduleId: id });
         await write(disk); return current;
@@ -126,7 +127,7 @@ export function createScheduleStore(root: string) {
     async due(now = Date.now()): Promise<Schedule[]> {
       return (await readDisk()).schedules.filter((item) => {
         try { validateScheduleInterval(item.intervalMs); } catch { return false; }
-        return (item.enabled || Boolean(item.pendingRun)) && !item.activeExecution && Date.parse(item.nextRunAt) <= now;
+        return (item.watch ? Boolean(item.pendingRun) : item.enabled || Boolean(item.pendingRun)) && !item.activeExecution && Date.parse(item.nextRunAt) <= now;
       });
     },
     async claimRun(id: string, executionId: string): Promise<Schedule | null> {
@@ -135,7 +136,7 @@ export function createScheduleStore(root: string) {
         const current = disk.schedules.find((item) => item.id === id); if (!current) return null;
         validateScheduleInterval(current.intervalMs);
         if (current.activeExecution || !(current.enabled || current.pendingRun) || !Number.isFinite(Date.parse(current.nextRunAt)) || Date.parse(current.nextRunAt) > Date.now()) return null;
-        current.activeExecution = { id: executionId, startedAt: new Date().toISOString(), kind: current.pendingRun ? 'manual' : 'scheduled', ...(current.pendingRun ? { operationId: current.pendingRun.operationId } : {}) };
+        current.activeExecution = { id: executionId, startedAt: new Date().toISOString(), kind: current.pendingRun ? 'manual' : 'scheduled', ...(current.pendingRun ? { operationId: current.pendingRun.operationId } : {}), ...(current.pendingRun?.files ? { files: current.pendingRun.files } : {}) };
         current.lastExecutionId = executionId;
         delete current.lastSessionId;
         delete current.pendingRun;
