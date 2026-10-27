@@ -301,7 +301,7 @@ export function createApp(options: CreateAppOptions) {
     const canvasId = canvasStore.findCanvasBySession(sessionId)?.id;
     if (!canvasId) return;
     return () => { stopCanvasRun(canvasId, canvasStore); };
-  }, rewriteText, activeWindowTokens));
+  }, rewriteText, activeWindowTokens, (sessionId) => canvasStore.usage.lastLlmRequest(sessionId)));
   app.route('/api/sessions', createTranslationsRouter({ dataRoot: options.dataRoot, sessionStore, rewriteText }));
   app.route('/api/sessions', createPresentationsRouter(artifactStore, sessionStore));
   app.route('/api/refs', createRefsRouter(largeValueStore));

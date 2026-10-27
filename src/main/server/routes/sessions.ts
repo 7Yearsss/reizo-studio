@@ -6,13 +6,16 @@ import { pendingInteractionKindForSession } from '../agent/permissions';
 import { isSessionTurnLive } from '../agent/session';
 import { compactSession, estimateSessionTokens, type RewriteText } from '../agent/compaction';
 import { compactLevel, DEFAULT_CONTEXT_WINDOW_TOKENS } from '../../../shared/autoCompact';
+import { contextTokens, type LastRequestUsage } from '../../../shared/contextUsage';
 import { closeSessionMcp } from '../agent/mcpTools';
 import { buildSessionExport, sessionToMarkdown } from '../../../shared/sessionExport';
 
 export function createSessionsRouter(sessionStore: SessionStore, artifactStore?: ArtifactStore,
   prepareRemove?: (sessionId: string) => (() => void) | void, rewriteText?: RewriteText,
   /** Context window of the model the next turn will use, when known; otherwise the default applies. */
-  getWindowTokens?: () => Promise<number | undefined>) {
+  getWindowTokens?: () => Promise<number | undefined>,
+  /** The provider-reported size of a conversation's last request, when the usage ledger has one. */
+  lastRequestUsage?: (sessionId: string) => LastRequestUsage | null) {
   const router = new Hono();
 
   // Retention sweep at boot: trashed sessions past the retention period go for good, artifacts included.
@@ -26,9 +29,9 @@ export function createSessionsRouter(sessionStore: SessionStore, artifactStore?:
   router.get('/:id/context', async (c) => {
     const session = await sessionStore.get(c.req.param('id'));
     if (!session) return c.json({ error: 'Session not found' }, 404);
-    const usedTokens = estimateSessionTokens(session.messages);
+    const { tokens: usedTokens, source } = contextTokens(session.messages, estimateSessionTokens, lastRequestUsage?.(session.id));
     const windowTokens = (await getWindowTokens?.().catch((): undefined => undefined)) ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
-    return c.json({ usedTokens, windowTokens, ratio: usedTokens / windowTokens, level: compactLevel(usedTokens, windowTokens) });
+    return c.json({ usedTokens, source, windowTokens, ratio: usedTokens / windowTokens, level: compactLevel(usedTokens, windowTokens) });
   });
 
   // /compact: replace the older part of the conversation with a model-written summary (the transcript stays).

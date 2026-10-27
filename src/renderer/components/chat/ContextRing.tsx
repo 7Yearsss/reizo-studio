@@ -40,7 +40,7 @@ export default function ContextRing({ sessionId, sending }: { sessionId?: string
     <span
       role="img"
       aria-label={`上下文已用约 ${percent}%`}
-      title={`上下文约 ${percent}%（${usage.usedTokens.toLocaleString()} / ${usage.windowTokens.toLocaleString()} tokens，估算）\n${hint}`}
+      title={`上下文约 ${percent}%（${usage.usedTokens.toLocaleString()} / ${usage.windowTokens.toLocaleString()} tokens，${usage.source === 'reported' ? '按模型上次返回的用量' : '估算，不含系统提示与工具'}）\n${hint}`}
       className={cn('inline-flex size-6 shrink-0 items-center justify-center', tone, usage.level === 'urgent' && 'animate-pulse motion-reduce:animate-none')}
     >
       <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} className="-rotate-90">

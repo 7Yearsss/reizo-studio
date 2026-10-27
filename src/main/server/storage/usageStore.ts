@@ -159,6 +159,17 @@ export function createUsageStore(handle: DbHandle) {
         recompute(executionId); raw.exec('RELEASE SAVEPOINT usage_report');
       } catch (error) { raw.exec('ROLLBACK TO SAVEPOINT usage_report'); raw.exec('RELEASE SAVEPOINT usage_report'); throw error; }
     },
+    /** The newest chat request of a conversation that came back with a token count (what the provider says it received and produced). */
+    lastLlmRequest(sessionId: string): { inputTokens: number; outputTokens: number; at: number } | null {
+      const rows = raw.prepare("SELECT metrics_json, created_at FROM usage_executions WHERE session_id = ? AND category = 'llm' AND metrics_json != '[]' ORDER BY created_at DESC, id DESC LIMIT 5").all(sessionId) as unknown as Array<{ metrics_json: string; created_at: number }>;
+      for (const row of rows) {
+        let metrics: Array<{ metric: string; quantity: number }> = [];
+        try { metrics = JSON.parse(row.metrics_json); } catch { continue; }
+        const input = metrics.find((m) => m.metric === 'input_tokens')?.quantity;
+        if (typeof input === 'number' && input > 0) return { inputTokens: input, outputTokens: metrics.find((m) => m.metric === 'output_tokens')?.quantity ?? 0, at: row.created_at };
+      }
+      return null;
+    },
     get(executionId: string) { const row = find(executionId); return row ? record(row) : null; },
     list(options: UsageQuery & { jobId?: string; limit?: number; cursor?: string } = {}): UsagePage {
       const limit = options.limit ?? 40;
