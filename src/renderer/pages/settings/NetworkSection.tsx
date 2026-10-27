@@ -11,6 +11,22 @@ const MODES: Array<{ id: api.NetworkSettings['mode']; label: string; hint: strin
 ];
 
 /** How the app reaches the internet: direct, the system proxy, or one address. Applies at once; child processes inherit it. */
+function BrowserLoginsBlock() {
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="mt-6 border-t border-line pt-4">
+      <p className="text-sm font-medium">助手的浏览器登录状态</p>
+      <p className="mt-1 text-xs text-ink-muted">需要登录的网站，助手会打开一个浏览器窗口让你自己登录（密码不经过助手）；登录状态保存在本机，之后助手可在你批准时读取这些网站。不想保留时在这里清除。</p>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => { setBusy(true); void api.clearBrowserLogins().then(() => toast.success('已清除浏览器登录状态'), (error) => toast.error('清除失败', error instanceof Error ? error.message : undefined)).finally(() => setBusy(false)); }}
+        className="mt-2 rounded-full bg-paper-inset px-4 py-1.5 text-sm text-ink disabled:opacity-50"
+      >{busy ? '清除中…' : '清除登录状态'}</button>
+    </div>
+  );
+}
+
 function EgressBlock() {
   const [egress, setEgress] = useState<api.EgressSettingsDto | null>(null);
   const [blocked, setBlocked] = useState<Array<{ host: string; at: number }>>([]);
@@ -140,6 +156,7 @@ export default function NetworkSection() {
         {result && <span className={cn('text-sm', result.ok ? 'text-emerald-600' : 'text-danger')}>{result.detail}</span>}
       </div>
       <EgressBlock />
+      <BrowserLoginsBlock />
     </section>
   );
 }

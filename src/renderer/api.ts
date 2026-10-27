@@ -1450,3 +1450,8 @@ export async function extractAttachmentText(file: File): Promise<{ name: string;
   if (!res.ok || body.text === undefined) throw new Error(body.error ?? '读取失败');
   return { name: body.name ?? file.name, text: body.text, truncated: body.truncated === true };
 }
+
+export async function clearBrowserLogins(): Promise<void> {
+  const res = await api('/api/network/browser/clear', { method: 'POST' });
+  if (!res.ok) throw new Error(((await res.json().catch((): null => null)) as { error?: string } | null)?.error ?? '清除失败');
+}

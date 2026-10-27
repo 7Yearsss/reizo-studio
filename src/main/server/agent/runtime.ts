@@ -67,7 +67,7 @@ import { DEFAULT_CONTEXT_WINDOW_TOKENS, nextOutputCap } from '../../../shared/au
 import { chatModelCapabilities } from '../../../shared/chatModelCapabilities';
 import { createSkillDraftTools, PROPOSE_SKILL_TOOL, runApprovedSkillDraft } from './skillDraftTools';
 import { inlineAttachment } from '../../../shared/attachmentText';
-import { BROWSER_READ_TOOL, createWebTools, HTTP_FETCH_TOOL, WEB_SEARCH_TOOL } from './webTools';
+import { BROWSER_OPEN_TOOL, BROWSER_READ_TOOL, createWebTools, HTTP_FETCH_TOOL, WEB_SEARCH_TOOL } from './webTools';
 import { createWebSearchStore } from '../storage/webSearchStore';
 import type { ExpertAgent } from '../../../shared/expertAgent';
 import { parseAllowedTools } from '../../../shared/skillToolPolicy';
@@ -913,7 +913,7 @@ ${expandPromptVars(expert.instructions, promptVarCtx)}`
             ? ((await computerTools?.executeApproved(item.args)) ?? {
                 error: 'Computer control is not enabled for this turn',
               })
-            : item.name === HTTP_FETCH_TOOL || item.name === WEB_SEARCH_TOOL || item.name === BROWSER_READ_TOOL
+            : item.name === HTTP_FETCH_TOOL || item.name === WEB_SEARCH_TOOL || item.name === BROWSER_READ_TOOL || item.name === BROWSER_OPEN_TOOL
               ? ((await webTools?.executeApproved(item.name, item.args)) ?? { error: 'Web access is not available in this turn' })
             : item.name.startsWith('personal_memory_')
               ? ((await personalMemoryTools?.executeApproved(item.name, item.args)) ?? { error: 'Personal memory is not available in this turn' })

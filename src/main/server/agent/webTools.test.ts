@@ -99,3 +99,32 @@ describe('browser_read', () => {
     expect(called).toBe(0);
   });
 });
+
+describe('browser_open and signed-in reads', () => {
+  const rendered = async (url: string) => ({ finalUrl: url, title: '后台', text: '本月订单 128 笔', links: [] as Array<{ text: string; href: string }> });
+
+  it('shows the user a window only after approval, never for private addresses, and tells the model not to ask for passwords', async () => {
+    const opened: string[] = [];
+    const tools = createWebTools({ sessionId: 's', permissionMode: 'full', readPage: rendered, openBrowser: async (u) => { opened.push(u); } }).tools;
+    const out = await (tools.browser_open.execute as any)({ url: 'https://admin.example.com/login' }, { toolCallId: 'o1', messages: [] });
+    expect(opened).toEqual(['https://admin.example.com/login']);
+    expect(String(out)).toContain('Do not ask them to type their password into the chat');
+    expect(String(await (tools.browser_open.execute as any)({ url: 'http://192.168.1.1/' }, { toolCallId: 'o2', messages: [] }))).toContain('Cannot open');
+    expect(opened).toHaveLength(1);
+
+    const asking = createWebTools({ sessionId: 's2', permissionMode: 'ask', readPage: rendered, openBrowser: async (u) => { opened.push(u); } }).tools;
+    await expect((asking.browser_open.execute as any)({ url: 'https://admin.example.com/login' }, { toolCallId: 'o3' })).rejects.toThrow('__REIZO_INTERACTION_REQUIRED__');
+    expect(opened).toHaveLength(1);
+  });
+
+  it('reads with the saved login only when asked to, and still asks first', async () => {
+    const seen: Array<boolean | undefined> = [];
+    const readPage = async (u: string, _s?: AbortSignal, o?: { signedIn?: boolean }) => { seen.push(o?.signedIn); return rendered(u); };
+    const tools = createWebTools({ sessionId: 's', permissionMode: 'full', readPage }).tools;
+    await (tools.browser_read.execute as any)({ url: 'https://admin.example.com/orders' }, { toolCallId: 'r1', messages: [] });
+    await (tools.browser_read.execute as any)({ url: 'https://admin.example.com/orders', signedIn: true }, { toolCallId: 'r2', messages: [] });
+    expect(seen).toEqual([false, true]);
+    const asking = createWebTools({ sessionId: 's3', permissionMode: 'ask', readPage }).tools;
+    await expect((asking.browser_read.execute as any)({ url: 'https://admin.example.com/orders', signedIn: true }, { toolCallId: 'r3' })).rejects.toThrow('__REIZO_INTERACTION_REQUIRED__');
+  });
+});

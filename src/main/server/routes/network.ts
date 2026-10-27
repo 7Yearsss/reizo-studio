@@ -46,6 +46,11 @@ export function createNetworkRouter(options: { dataRoot: string; resolveSystem?:
     try { return c.json({ settings: await saveEgress(normalizeEgress(await c.req.json().catch((): null => null))) }); }
     catch (error) { return c.json({ error: error instanceof Error ? error.message : '无法启动网络隔离' }, 500); }
   });
+  // Forget every login the assistant's browser profile holds (the window opened by browser_open).
+  router.post('/browser/clear', async (c) => {
+    try { await (await import('../../pageReader')).clearBrowserLogins(); return c.json({ ok: true }); }
+    catch (error) { return c.json({ error: error instanceof Error ? error.message : '清除失败' }, 500); }
+  });
   // The "allow this host" button on a blocked command.
   router.post('/egress/allow', async (c) => {
     const body = (await c.req.json().catch((): null => null)) as { host?: unknown } | null;
