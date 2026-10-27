@@ -22,6 +22,7 @@ import BackgroundTasksChip from './BackgroundTasksChip';
 import { isHaltedNotice, LOOP_RECOVERY_MESSAGE } from '../../../shared/loopRecovery';
 import { PLAN_CONFIRM_MESSAGE } from '../../../shared/planMode';
 import { extractSessionQuery, serializeSessionReference } from '../../../shared/sessionReference';
+import { HTML_ANNOTATION_EVENT, MAX_HTML_ANNOTATIONS, sanitizeHtmlAnnotation, serializeHtmlAnnotation, type HtmlAnnotation } from '../../../shared/htmlAnnotation';
 import SlashPalette, { applySlashArgs, buildSlashCommands, extractSlashQuery, type SlashCommand } from './SlashPalette';
 import PendingInteraction from './PendingInteraction';
 import QueuePanel from './QueuePanel';
@@ -201,6 +202,18 @@ export default function Composer({
   const [compareOpen, setCompareOpen] = useState(false);
   const [compareText, setCompareText] = useState('');
   const [sessionRefs, setSessionRefs] = useState<Array<{ id: string; title: string }>>([]);
+  // Elements picked on an HTML preview; they ride along as `html:` mentions and are cleared on send.
+  const [htmlRefs, setHtmlRefs] = useState<HtmlAnnotation[]>([]);
+  useEffect(() => {
+    const onPick = (event: Event): void => {
+      const detail = (event as CustomEvent<{ sessionId?: string; annotation?: unknown }>).detail;
+      if (detail?.sessionId !== sessionId) return;
+      const annotation = sanitizeHtmlAnnotation(detail.annotation);
+      if (annotation) setHtmlRefs((items) => (items.length >= MAX_HTML_ANNOTATIONS ? items : [...items, annotation]));
+    };
+    window.addEventListener(HTML_ANNOTATION_EVENT, onPick);
+    return (): void => window.removeEventListener(HTML_ANNOTATION_EVENT, onPick);
+  }, [sessionId]);
   const slash = extractSlashQuery(draft);
   const slashCommands = buildSlashCommands(skills);
   const activeSkill = skills.find((s) => s.id === skillId);
@@ -250,7 +263,7 @@ export default function Composer({
         : `canvas:${r.id}`,
     );
     return {
-      mentions: [...mentions, ...sessionRefs.map((r) => serializeSessionReference(r.id)), ...refMentions, ...selectionMentions, ...(sessionId ? [...sheetMentions(sessionId, 1 + documentReferences(sessionId).filter((r) => r.selection).length), ...documentMentions(sessionId), ...presentationMentions(sessionId)] : [])],
+      mentions: [...mentions, ...sessionRefs.map((r) => serializeSessionReference(r.id)), ...htmlRefs.map(serializeHtmlAnnotation), ...refMentions, ...selectionMentions, ...(sessionId ? [...sheetMentions(sessionId, 1 + documentReferences(sessionId).filter((r) => r.selection).length), ...documentMentions(sessionId), ...presentationMentions(sessionId)] : [])],
       extra: { skillId, attachments, replaceFromId: replaceFromIdRef.current },
     };
   }
@@ -258,6 +271,7 @@ export default function Composer({
   function resetAfterSubmit() {
     setDraft('');
     setMentions([]);
+    setHtmlRefs([]);
     setSessionRefs([]);
     // skillId intentionally NOT cleared — a pinned skill applies to the whole session
     setAttachments([]);
@@ -670,7 +684,7 @@ export default function Composer({
             {sessionId && <ComposerDock todos={todos} />}
             {syncingSheet && <p role="status" className="mb-2 text-xs text-ink-muted">正在保存工作区内容…</p>}
             {addingFiles > 0 && <p role="status" className="mb-2 text-xs text-ink-muted">正在添加附件…</p>}
-            {(attachments.length > 0 || nodeRefs.length > 0 || mentions.length > 0 || sessionRefs.length > 0 || unpinnedSelectionNodes.length > 0) && (
+            {(attachments.length > 0 || nodeRefs.length > 0 || mentions.length > 0 || sessionRefs.length > 0 || htmlRefs.length > 0 || unpinnedSelectionNodes.length > 0) && (
               <div className={cn("mb-2 flex flex-wrap gap-1.5", compact && "max-h-24 overflow-y-auto pr-0.5")}>
                 {sessionId && unpinnedSelectionNodes.length > 0 && (
                   <div
@@ -750,6 +764,14 @@ export default function Composer({
                   <span key={r.id} className="rounded-full bg-paper-inset px-2 py-0.5 text-[11px] text-ink" title="引用对话（只读）">
                     #{r.title}
                     <button type="button" className="ml-1 text-ink-muted" onClick={() => setSessionRefs((items) => items.filter((item) => item.id !== r.id))}>
+                      ×
+                    </button>
+                  </span>
+                ))}
+                {htmlRefs.map((a, index) => (
+                  <span key={`${a.selector}-${index}`} className="rounded-full bg-paper-inset px-2 py-0.5 text-[11px] text-ink" title={`页面元素 ${a.selector}`}>
+                    [{index + 1}] &lt;{a.tag}&gt;{a.text ? ` ${a.text.slice(0, 16)}` : ''}
+                    <button type="button" className="ml-1 text-ink-muted" onClick={() => setHtmlRefs((items) => items.filter((_, i) => i !== index))}>
                       ×
                     </button>
                   </span>

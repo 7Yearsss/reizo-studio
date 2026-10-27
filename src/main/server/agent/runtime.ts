@@ -87,6 +87,7 @@ import {
 } from '../../memoryJobs';
 import { redactSecrets } from '../../../shared/redactSecrets';
 import { digestSession, parseSessionReferences, wrapSessionContext } from '../../../shared/sessionReference';
+import { parseHtmlAnnotations, wrapHtmlAnnotations } from '../../../shared/htmlAnnotation';
 import { buildSkillsTriggerIndex, type Skill } from '../../skills';
 import type { ChatMessage, SessionStore, ToolCallPart } from '../../../shared/chat';
 import type { SettingsStore } from '../storage/settingsStore';
@@ -306,7 +307,8 @@ export async function runChatTurn(options: {
   const documentRefs = parseDocumentReferences(presentationRefs.rest);
   const sheetRefs = parseSheetReferences(documentRefs.rest);
   const sessionRefs = parseSessionReferences(sheetRefs.rest);
-  const { refs: canvasRefs, paths: pathMentions } = parseCanvasRefs(sessionRefs.rest);
+  const htmlRefs = parseHtmlAnnotations(sessionRefs.rest);
+  const { refs: canvasRefs, paths: pathMentions } = parseCanvasRefs(htmlRefs.rest);
   const sessionRefBlock = await buildSessionRefBlock(sessionStore, sessionId, sessionRefs.ids);
   const canvasRefBlock = buildCanvasRefBlock(canvasStore, sessionId, canvasRefs);
   const sheetRefBlock = await buildSheetContext(artifactStore, sessionId, sheetRefs.refs);
@@ -317,6 +319,7 @@ export async function runChatTurn(options: {
     pathMentions.length > 0 ? `Referenced workspace paths:\n${pathMentions.map((m) => `- ${m}`).join('\n')}` : '',
     canvasRefBlock,
     sessionRefBlock,
+    htmlRefs.annotations.length ? wrapHtmlAnnotations(htmlRefs.annotations) : '',
     sheetRefBlock,
     documentRefs.refs.length ? wrapDocumentContext(documentRefs.refs, documentContext) : '',
     presentationRefs.refs.length ? wrapPresentationContext(presentationRefs.refs, presentationContext) : '',

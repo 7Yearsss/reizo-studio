@@ -17,3 +17,11 @@ it('keeps executable previews opaque and places network/form restrictions before
     expect(source).toContain("connect-src 'none'"); expect(source).toContain("form-action 'none'");
   } finally { await act(async () => root.unmount()); host.remove(); }
 });
+
+it('annotate mode lets only the nonce-tagged inspector run, never the page scripts', () => {
+  const source = htmlPreviewSource('<button onclick="x()">go</button><script>steal()</script>', false, { nonce: 'n0nce', token: 'tok' });
+  expect(source).toContain("script-src 'nonce-n0nce'");
+  expect(source).not.toContain("script-src 'unsafe-inline'");
+  expect(source).toContain('<script nonce="n0nce">');
+  expect(source.indexOf('Content-Security-Policy')).toBeLessThan(source.indexOf('<button'));
+});

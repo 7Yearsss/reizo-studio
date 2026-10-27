@@ -4,6 +4,9 @@ import remarkGfm from 'remark-gfm';
 import { CodeBlock, type CodeBlockProps } from '../agents/code-block';
 import { cn } from '../../lib/cn';
 import HtmlPreview from './HtmlPreview';
+import { activeSessionId } from '../../state/tabStore';
+import { HTML_ANNOTATION_EVENT } from '../../../shared/htmlAnnotation';
+import { toast } from '../../lib/toast';
 import { mermaidMarkdownComponents } from '../markdown/mermaidMarkdown';
 
 export type PreviewKind = 'markdown' | 'html' | 'code';
@@ -38,7 +41,8 @@ export function detectLanguage(path: string): CodeBlockProps['language'] {
 export default function FilePreview({ path, content }: { path: string; content: string }) {
   const kind = previewKind(path);
   const [source, setSource] = useState(false);
-  useEffect(() => setSource(false), [path]);
+  const [annotate, setAnnotate] = useState(false);
+  useEffect(() => { setSource(false); setAnnotate(false); }, [path]);
 
   const code = (
     <CodeBlock
@@ -69,6 +73,16 @@ export default function FilePreview({ path, content }: { path: string; content: 
             {label}
           </button>
         ))}
+        {kind === 'html' && !source && (
+          <button
+            type="button"
+            aria-pressed={annotate}
+            onClick={() => setAnnotate((on) => !on)}
+            className={cn('ml-auto rounded-md px-2 py-0.5 text-xs transition-colors', annotate ? 'bg-ink text-paper-raised' : 'text-ink-muted hover:text-ink')}
+          >
+            {annotate ? '点选页面元素…' : '批注'}
+          </button>
+        )}
       </div>
       {source ? (
         code
@@ -78,7 +92,16 @@ export default function FilePreview({ path, content }: { path: string; content: 
         </div>
       ) : (
         <div className="h-[360px] min-h-0 flex-1 p-2">
-          <HtmlPreview html={content} title={path} />
+          <HtmlPreview
+            html={content}
+            title={path}
+            onPick={annotate ? (annotation) => {
+              const sessionId = activeSessionId();
+              if (!sessionId) { toast.error('请先打开一个会话'); return; }
+              window.dispatchEvent(new CustomEvent(HTML_ANNOTATION_EVENT, { detail: { sessionId, annotation } }));
+              setAnnotate(false);
+            } : undefined}
+          />
         </div>
       )}
     </div>
