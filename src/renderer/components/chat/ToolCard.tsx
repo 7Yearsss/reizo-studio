@@ -8,13 +8,39 @@ import DeliverableCard, { deliverableOf } from './DeliverableCard';
 import ReviewProposalCard, { reviewProposalOf } from './ReviewProposalCard';
 import { useState } from 'react';
 import { Undo2 } from 'lucide-react';
-import { ApiRequestError, rollbackSnapshot } from '../../api';
+import { allowEgressHost, ApiRequestError, rollbackSnapshot } from '../../api';
 import { toast } from '../../lib/toast';
 import { toolDetail, toolDiffPreview, toolLabel, toolTarget } from './toolDisplay';
 
 function snapshotIdOf(result: string | undefined): string | undefined {
   if (!result) return undefined;
   try { const id = (JSON.parse(result) as { snapshotId?: unknown }).snapshotId; return typeof id === 'string' ? id : undefined; } catch { return undefined; }
+}
+
+function blockedHostsOf(result: string | undefined): string[] {
+  if (!result) return [];
+  try { const hosts = (JSON.parse(result) as { networkBlocked?: unknown }).networkBlocked; return Array.isArray(hosts) ? hosts.filter((h): h is string => typeof h === 'string').slice(0, 5) : []; } catch { return []; }
+}
+
+/** Network isolation stopped this command from reaching a host: one click lets it through next time. */
+function AllowHostButtons({ hosts }: { hosts: string[] }) {
+  const [allowed, setAllowed] = useState<string[]>([]);
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
+      <span>网络隔离拦下了：</span>
+      {hosts.map((host) => (
+        <button
+          key={host}
+          type="button"
+          disabled={allowed.includes(host)}
+          onClick={() => void allowEgressHost(host).then(() => { setAllowed((list) => [...list, host]); toast.success('已加入允许列表', `${host}，让助手重试即可`); }, () => toast.error('加入失败'))}
+          className="rounded-full bg-paper-inset px-2 py-0.5 text-ink hover:bg-paper-inset/70 disabled:opacity-60"
+        >
+          {allowed.includes(host) ? `${host} 已允许` : `允许 ${host}`}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 /** "回滚此次修改" under a file diff. Asks first when the file has changed again since. */
@@ -103,6 +129,7 @@ export default function ToolCard({ part, collapsed = false, sessionId, interrupt
   const diffPreview = part.error ? null : toolDiffPreview(part);
   const kind = part.name === 'run_command' ? 'terminal' : part.name === 'edit_file' || part.name === 'write_file' ? 'custom' : 'request';
   const isWrite = part.name === 'edit_file' || part.name === 'write_file' || part.name === 'memory_write';
+  const blockedHosts = part.name === 'run_command' ? blockedHostsOf(part.result) : [];
   const snapshotId = !part.error && (part.name === 'edit_file' || part.name === 'write_file') ? snapshotIdOf(part.result) : undefined;
 
   return (
@@ -111,7 +138,7 @@ export default function ToolCard({ part, collapsed = false, sessionId, interrupt
       title={toolLabel(part.name, part)}
       status={running ? 'running' : part.error ? 'error' : 'success'}
       kind={kind}
-      defaultOpen={!collapsed && (isWrite || Boolean(part.error))}
+      defaultOpen={!collapsed && (isWrite || Boolean(part.error) || blockedHosts.length > 0)}
       collapseOnComplete={!isWrite}
       copyText={detail || undefined}
     >
@@ -125,6 +152,7 @@ export default function ToolCard({ part, collapsed = false, sessionId, interrupt
       ) : (
         '（无输出）'
       )}
+      {blockedHosts.length > 0 ? <AllowHostButtons hosts={blockedHosts} /> : null}
     </ToolResult>
   );
 }

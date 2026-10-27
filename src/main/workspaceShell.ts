@@ -2,7 +2,7 @@ import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { RUN_COMMAND_MAX_BUFFER, RUN_COMMAND_TIMEOUT_MS } from '../shared/constants';
 import { plainTextTerminalEnv, stripTerminalControlSequences } from '../shared/terminalOutput';
-import { egressEnv } from './egressControl';
+import { blockedSince, egressEnv } from './egressControl';
 import { currentProxyEnv } from './proxy';
 
 const clean = (s: string): string => stripTerminalControlSequences(s);

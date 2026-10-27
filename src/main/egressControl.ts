@@ -39,6 +39,11 @@ export function recentlyBlocked(): Array<{ host: string; at: number }> {
   return [...blocked.entries()].map(([host, at]) => ({ host, at })).sort((a, b) => b.at - a.at);
 }
 
+/** Hosts a command tried to reach and was refused, since `since` (ms epoch). */
+export function blockedSince(since: number): string[] {
+  return [...blocked.entries()].filter(([, at]) => at >= since).map(([host]) => host);
+}
+
 export async function stopEgress(): Promise<void> {
   await applyEgress({ ...settings, enabled: false });
 }
