@@ -42,6 +42,7 @@ export default function MessageList({
   compact = false,
   sessionId,
   bottomInset,
+  loading,
   memoryEvents = [],
 }: {
   messages: ChatMessage[];
@@ -61,6 +62,8 @@ export default function MessageList({
   compact?: boolean;
   /** Rendered height of the composer overlay — the viewport pads this much so docked cards (plan/ask/queue) never cover scrolled content. */
   bottomInset?: number;
+  /** History not fetched yet — render nothing rather than flash the empty-chat hints. */
+  loading?: boolean;
 }) {
   const viewportRef = useRef<HTMLElement>(null);
   const [following, setFollowing] = useState(true);
@@ -106,7 +109,7 @@ export default function MessageList({
     if (idx >= 0 && idx < windowStart) setWindowStart(snapWindowStart(items, idx));
   }, [currentMatchId, searchQuery, items, windowStart]);
 
-  const empty = messages.length === 0 && !sending;
+  const empty = messages.length === 0 && !sending && !loading;
   const shown = items.slice(windowStart);
   const hasOlder = windowStart > 0;
 

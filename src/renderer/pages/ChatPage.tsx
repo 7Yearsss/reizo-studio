@@ -30,7 +30,9 @@ function ChatPage({
 }) {
   const session = useChatStore((s) => s.sessions.find((x) => x.id === sessionId));
   const canvasActive = useUiStore((s) => active && s.canvasOpen && (s.mode === 'chat' || s.mode === 'projects'));
-  const messages = useChatStore((s) => s.messagesBySession[sessionId]) ?? [];
+  const loadedMessages = useChatStore((s) => s.messagesBySession[sessionId]);
+  const loading = loadedMessages === undefined;
+  const messages = loadedMessages ?? [];
   const sending = useChatStore((s) => s.sendingBySession[sessionId]) ?? false;
   const error = useChatStore((s) => s.errorBySession[sessionId]) ?? null;
   const loopNotice = useChatStore((s) => s.loopNoticeBySession[sessionId]) ?? null;
@@ -102,6 +104,9 @@ function ChatPage({
     if (!el || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
+        // A background tab is display:none (width 0) — keep the last real layout
+        // so switching back doesn't flash the compact one and re-flow.
+        if (entry.contentRect.width === 0) continue;
         setIsCompact(entry.contentRect.width < 460);
       }
     });
@@ -240,6 +245,7 @@ function ChatPage({
         sessionId={sessionId}
         compact={isCompact}
         sending={sending}
+        loading={loading}
         searchQuery={searchOpen ? searchQuery : ''}
         currentMatchId={searchOpen ? currentMatch?.messageId : null}
         lastUserId={lastUserId}

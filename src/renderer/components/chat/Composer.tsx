@@ -485,8 +485,11 @@ export default function Composer({
   useEffect(() => {
     const el = overlayRef.current;
     if (!el || !onOverlayHeight) return;
-    onOverlayHeight(el.offsetHeight);
-    const observer = new ResizeObserver(() => onOverlayHeight(el.offsetHeight));
+    // Hidden (background tab) reads 0 — keep the last real height so the list's
+    // bottom padding doesn't collapse and then animate back on tab switch.
+    const report = () => { if (el.offsetHeight > 0) onOverlayHeight(el.offsetHeight); };
+    report();
+    const observer = new ResizeObserver(report);
     observer.observe(el);
     return () => observer.disconnect();
   }, [onOverlayHeight]);
