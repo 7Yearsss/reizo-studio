@@ -11,6 +11,11 @@ let tray: Tray | null = null;
  * defensively — some Linux environments have no tray/status-area support,
  * and that should not take the app down.
  */
+/** Words under the tray icon, e.g. which conversation is waiting. */
+export function setTrayTooltip(text: string): void {
+  try { tray?.setToolTip(text); } catch { /* the tray may be gone */ }
+}
+
 export function createTray(): Tray | null {
   if (tray) return tray;
 

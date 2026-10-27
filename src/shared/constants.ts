@@ -53,6 +53,7 @@ export const IPC = {
   QUICK_ASK: 'reizo:quick-ask',
   QUICK_RESET: 'reizo:quick-reset',
   SCREENSHOT_TO_CHAT: 'reizo:screenshot-to-chat',
+  ATTENTION: 'reizo:attention',
   DEEP_LINK: 'reizo:deep-link',
   DEEP_LINK_TAKE: 'reizo:deep-link-take',
   PLUGIN_SET_CONFIG: 'reizo:plugin-set-config',

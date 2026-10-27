@@ -74,6 +74,7 @@ export function ensureReizoBridge(): ReizoBridge {
     onQuickAsk: () => () => undefined,
     onDeepLink: () => () => undefined,
     onScreenshot: () => () => undefined,
+    reportAttention: () => undefined,
     onQuickReset: () => () => undefined,
     installPlugin: async () => null,
     setPluginConfig: async () => undefined,

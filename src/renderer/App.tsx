@@ -8,6 +8,7 @@ import * as tabStore from './state/tabStore';
 import * as uiStore from './state/uiStore';
 import { dispatchChatDrop } from './lib/chatDrop';
 import { toast } from './lib/toast';
+import { summarizeAttention } from '../shared/attention';
 
 export default function App() {
   // A question typed into the floating box opens its own conversation here.

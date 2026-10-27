@@ -84,6 +84,8 @@ contextBridge.exposeInMainWorld('reizo', {
     ipcRenderer.on(IPC.QUICK_RESET, listener);
     return () => { ipcRenderer.removeListener(IPC.QUICK_RESET, listener); };
   },
+  /** Tell the shell which conversations wait for the user (tray tooltip, badge, taskbar flash, notification). */
+  reportAttention: (payload: { ids: string[]; title: string; tooltip: string }): void => { ipcRenderer.send(IPC.ATTENTION, payload); },
   /** The screenshot shortcut produced an image (data URL) or an error message. */
   onScreenshot: (callback: (payload: { dataUrl?: string; error?: string }) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: unknown): void => { if (payload && typeof payload === 'object') callback(payload as { dataUrl?: string; error?: string }); };

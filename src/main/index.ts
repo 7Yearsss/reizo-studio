@@ -5,6 +5,7 @@ import { stopAllBackgroundShells } from './backgroundShells';
 import { registerQuickAssistantIpc, toggleQuickAssistant } from './quickAssistant';
 import { deepLinkFromSecondInstance, registerDeepLinks } from './deepLinks';
 import { screenshotToChat } from './screenshotToChat';
+import { registerAttention } from './attention';
 import { activeVideoJobCount } from './server/canvas/videoJobRuntime';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
