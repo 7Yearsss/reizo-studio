@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import MainLayout from './components/layout/MainLayout';
+import ScreenshotCropDialog, { SCREENSHOT_CAPTURED_EVENT } from './components/layout/ScreenshotCropDialog';
 import * as settingsStore from './state/settingsStore';
 import * as chatStore from './state/chatStore';
 import * as skillStore from './state/skillStore';
@@ -39,28 +40,29 @@ export default function App() {
     return chatStore.subscribe(report);
   }, []);
 
-  // The screenshot shortcut: attach the picture to the open conversation, or start one.
+  // The screenshot shortcut: show the picture for cropping first (ScreenshotCropDialog below).
   useEffect(() => {
     const off = window.reizo?.onScreenshot?.((payload) => {
-      void (async () => {
-        if (!payload.dataUrl) { toast.error(payload.error ?? '截屏失败'); return; }
-        const blob = await (await fetch(payload.dataUrl)).blob();
-        const file = new File([blob], `screenshot-${new Date().toISOString().replace(/[:.]/g, '-')}.png`, { type: 'image/png' });
-        let sessionId = tabStore.activeSessionId();
-        const fresh = !sessionId;
-        if (!sessionId) {
-          const session = await chatStore.createSession('截图');
-          tabStore.openChatTab(session.id, session.title);
-          sessionId = session.id;
-        }
-        uiStore.setMode('chat');
-        // A new tab's composer needs a moment to mount before it can receive the file.
-        const target = sessionId;
-        window.setTimeout(() => dispatchChatDrop(target, [file]), fresh ? 400 : 0);
-      })();
+      if (!payload.dataUrl) { toast.error(payload.error ?? '截屏失败'); return; }
+      window.dispatchEvent(new CustomEvent(SCREENSHOT_CAPTURED_EVENT, { detail: { dataUrl: payload.dataUrl } }));
     });
     return (): void => { off?.(); };
   }, []);
+
+  /** The cropped picture goes to the open conversation, or starts one. */
+  async function attachScreenshot(file: File): Promise<void> {
+    let sessionId = tabStore.activeSessionId();
+    const fresh = !sessionId;
+    if (!sessionId) {
+      const session = await chatStore.createSession('截图');
+      tabStore.openChatTab(session.id, session.title);
+      sessionId = session.id;
+    }
+    uiStore.setMode('chat');
+    // A new tab's composer needs a moment to mount before it can receive the file.
+    const target = sessionId;
+    window.setTimeout(() => dispatchChatDrop(target, [file]), fresh ? 400 : 0);
+  }
 
   useEffect(() => {
     void settingsStore.loadSettings();
@@ -72,5 +74,10 @@ export default function App() {
     }
   }, []);
 
-  return <MainLayout />;
+  return (
+    <>
+      <MainLayout />
+      <ScreenshotCropDialog onDone={(file) => { void attachScreenshot(file); }} />
+    </>
+  );
 }
