@@ -10,9 +10,9 @@ export type UpdateStatus =
   | { status: 'disabled'; current: string; reason: string }
   | { status: 'error'; current: string; reason: string };
 
-function parse(version: string): { nums: number[]; pre: boolean } | null {
-  const m = /^v?(\d+)\.(\d+)\.(\d+)(?:[-+](.+))?$/.exec(version.trim());
-  return m ? { nums: [Number(m[1]), Number(m[2]), Number(m[3])], pre: Boolean(m[4]) } : null;
+function parse(version: string): { nums: number[]; pre: string[] } | null {
+  const m = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+.*)?$/.exec(version.trim());
+  return m ? { nums: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4] ? m[4].split('.') : [] } : null;
 }
 
 /** >0 when `a` is newer than `b`; null when either is not a version. A pre-release is older than its release. */
@@ -21,13 +21,30 @@ export function compareVersions(a: string, b: string): number | null {
   const y = parse(b);
   if (!x || !y) return null;
   for (let i = 0; i < 3; i += 1) if (x.nums[i] !== y.nums[i]) return x.nums[i] - y.nums[i];
-  return x.pre === y.pre ? 0 : x.pre ? -1 : 1;
+  // Same numbers: a release beats any pre-release; two pre-releases compare identifier by identifier (main.9 < main.12).
+  if (x.pre.length === 0 || y.pre.length === 0) return x.pre.length === y.pre.length ? 0 : x.pre.length === 0 ? 1 : -1;
+  for (let i = 0; i < Math.max(x.pre.length, y.pre.length); i += 1) {
+    const p = x.pre[i];
+    const q = y.pre[i];
+    if (p === undefined) return -1;
+    if (q === undefined) return 1;
+    const pn = /^\d+$/.test(p);
+    const qn = /^\d+$/.test(q);
+    if (pn && qn && Number(p) !== Number(q)) return Number(p) - Number(q);
+    if (pn !== qn) return pn ? -1 : 1;
+    if (!(pn && qn) && p !== q) return p < q ? -1 : 1;
+  }
+  return 0;
 }
 
-/** Only https links from the feed are ever offered to open. */
+/** Only https links from the feed are ever offered to open. A GitHub release object is accepted as a feed. */
 export function parseUpdateFeed(raw: unknown): UpdateFeed | null {
   if (!raw || typeof raw !== 'object') return null;
-  const v = raw as Record<string, unknown>;
+  let v = raw as Record<string, unknown>;
+  if (typeof v.tag_name === 'string') {
+    if (v.draft === true || v.prerelease === true) return null;
+    v = { version: v.tag_name.replace(/^v/, ''), url: v.html_url, notes: v.body };
+  }
   if (typeof v.version !== 'string' || !parse(v.version) || typeof v.url !== 'string') return null;
   try { if (new URL(v.url).protocol !== 'https:') return null; } catch { return null; }
   return { version: v.version.trim(), url: v.url, ...(typeof v.notes === 'string' && v.notes.trim() ? { notes: v.notes.trim().slice(0, 2000) } : {}) };

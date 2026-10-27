@@ -94,4 +94,4 @@ export const RUN_COMMAND_MAX_BUFFER = 512_000;
 export const DROPPED_FILE_MAX_BYTES = 200_000;
 
 /** Where the app asks whether a newer version exists (a small JSON file: version, url, notes). Empty = update checks are off. */
-export const UPDATE_FEED_URL = '';
+export const UPDATE_FEED_URL = 'https://api.github.com/repos/7Yearsss/reizo-studio-downloads/releases/latest';

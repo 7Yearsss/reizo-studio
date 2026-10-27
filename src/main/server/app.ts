@@ -277,7 +277,11 @@ export function createApp(options: CreateAppOptions) {
     appVersion: async () => {
       try { return (await import('electron')).app.getVersion(); } catch { return process.env.npm_package_version ?? '0.0.0'; }
     },
-    feedUrl: () => process.env.REIZO_UPDATE_FEED || UPDATE_FEED_URL || undefined,
+    feedUrl: async () => {
+      if (process.env.REIZO_UPDATE_FEED) return process.env.REIZO_UPDATE_FEED;
+      // Only an installed, packaged build checks: a dev run or a fork must say "not enabled", never "up to date".
+      try { return (await import('electron')).app.isPackaged ? UPDATE_FEED_URL : undefined; } catch { return undefined; }
+    },
   }));
   app.route('/api/diagnostics', createDiagnosticsRouter({ dataRoot: options.dataRoot, settingsStore, skillsDirs }));
   if (options.db) app.route('/api/backups', createBackupRouter({ dataRoot: options.dataRoot, db: options.db }));
