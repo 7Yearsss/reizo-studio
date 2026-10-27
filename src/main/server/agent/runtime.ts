@@ -59,6 +59,7 @@ import { readWorkspaceMemory } from '../../workspaceMemory';
 import { formatRules, readRuleSources } from './workspaceRules';
 import { createSkillTools } from './skillTools';
 import { createAttachmentTools } from './attachmentTools';
+import { createFileSnapshotStore } from '../storage/fileSnapshots';
 import { currentDateLine, expandPromptVars } from '../../../shared/promptVars';
 import { DEFAULT_CONTEXT_WINDOW_TOKENS, nextOutputCap } from '../../../shared/autoCompact';
 import { chatModelCapabilities } from '../../../shared/chatModelCapabilities';
@@ -533,6 +534,7 @@ ${expandPromptVars(expert.instructions, promptVarCtx)}`
           }
         },
         todos,
+        onSnapshot: dataRoot ? (snap) => createFileSnapshotStore(dataRoot).save({ sessionId, ...snap }) : undefined,
         onFileWritten: artifactStore
           ? async (relativePath, content) => {
               // Same file rewritten in a later turn → append a version tagged

@@ -6,7 +6,41 @@ import BatchProgress from './BatchProgress';
 import MediaGenerationCard, { isChatMediaTool } from './MediaGenerationCard';
 import DeliverableCard, { deliverableOf } from './DeliverableCard';
 import ReviewProposalCard, { reviewProposalOf } from './ReviewProposalCard';
+import { useState } from 'react';
+import { Undo2 } from 'lucide-react';
+import { ApiRequestError, rollbackSnapshot } from '../../api';
+import { toast } from '../../lib/toast';
 import { toolDetail, toolDiffPreview, toolLabel, toolTarget } from './toolDisplay';
+
+function snapshotIdOf(result: string | undefined): string | undefined {
+  if (!result) return undefined;
+  try { const id = (JSON.parse(result) as { snapshotId?: unknown }).snapshotId; return typeof id === 'string' ? id : undefined; } catch { return undefined; }
+}
+
+/** "回滚此次修改" under a file diff. Asks first when the file has changed again since. */
+function RollbackButton({ sessionId, snapshotId }: { sessionId: string; snapshotId: string }) {
+  const [state, setState] = useState<'idle' | 'busy' | 'done'>('idle');
+  async function run(force: boolean): Promise<void> {
+    setState('busy');
+    try {
+      const out = await rollbackSnapshot(sessionId, snapshotId, force);
+      setState('done');
+      toast.success(out.restored === 'deleted' ? '已删除这次新建的文件' : '已回滚到修改前', out.path);
+    } catch (error) {
+      setState('idle');
+      if (error instanceof ApiRequestError && error.status === 409 && !force) {
+        if (window.confirm(`${error.message}\n\n仍要回滚吗？`)) void run(true);
+        return;
+      }
+      toast.error('回滚失败', error instanceof Error ? error.message : undefined);
+    }
+  }
+  return (
+    <button type="button" disabled={state !== 'idle'} onClick={() => void run(false)} className="mt-2 inline-flex items-center gap-1 text-xs text-ink-muted hover:text-ink disabled:opacity-50">
+      <Undo2 size={12} /> {state === 'done' ? '已回滚' : '回滚此次修改'}
+    </button>
+  );
+}
 
 export default function ToolCard({ part, collapsed = false, sessionId, interrupted = false }: { part: ToolCallPart; collapsed?: boolean; sessionId?: string; interrupted?: boolean }) {
   const running = part.result === undefined && part.error === undefined;
@@ -69,6 +103,7 @@ export default function ToolCard({ part, collapsed = false, sessionId, interrupt
   const diffPreview = part.error ? null : toolDiffPreview(part);
   const kind = part.name === 'run_command' ? 'terminal' : part.name === 'edit_file' || part.name === 'write_file' ? 'custom' : 'request';
   const isWrite = part.name === 'edit_file' || part.name === 'write_file' || part.name === 'memory_write';
+  const snapshotId = !part.error && (part.name === 'edit_file' || part.name === 'write_file') ? snapshotIdOf(part.result) : undefined;
 
   return (
     <ToolResult
@@ -81,7 +116,10 @@ export default function ToolCard({ part, collapsed = false, sessionId, interrupt
       copyText={detail || undefined}
     >
       {diffPreview ? (
-        <DiffView preview={diffPreview} />
+        <>
+          <DiffView preview={diffPreview} />
+          {snapshotId && sessionId ? <RollbackButton sessionId={sessionId} snapshotId={snapshotId} /> : null}
+        </>
       ) : detail ? (
         <ToolResultOutput language={kind === 'terminal' ? 'bash' : 'json'}>{detail}</ToolResultOutput>
       ) : (

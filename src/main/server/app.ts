@@ -12,6 +12,8 @@ import { createSettingsStore } from './storage/settingsStore';
 import { createSessionsRouter } from './routes/sessions';
 import { createAutoCompactor } from './agent/compaction';
 import { createStorageRouter } from './routes/storage';
+import { createSnapshotsRouter } from './routes/snapshots';
+import { createFileSnapshotStore } from './storage/fileSnapshots';
 import { createLocalModelsRouter } from './routes/localModels';
 import { createCompareRouter } from './routes/compare';
 import { createTranslationsRouter } from './routes/translations';
@@ -260,6 +262,7 @@ export function createApp(options: CreateAppOptions) {
   app.route('/api/experts', createExpertsRouter(expertStore));
   setWriteProtectedRoots([options.dataRoot]);
   app.route('/api/storage', createStorageRouter(options.dataRoot));
+  app.route('/api/sessions', createSnapshotsRouter({ snapshots: createFileSnapshotStore(options.dataRoot), getWorkspace: async () => (await settingsStore.get()).workspacePath }));
   app.route('/api/local-models', createLocalModelsRouter({ settingsStore }));
   app.route('/api/network', createNetworkRouter({ dataRoot: options.dataRoot }));
   app.route('/api/tool-approvals', createToolApprovalsRouter(options.dataRoot));

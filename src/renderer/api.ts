@@ -325,6 +325,11 @@ export async function connectLocalModel(providerId: string, model?: string): Pro
   return res.json();
 }
 
+export async function rollbackSnapshot(sessionId: string, snapshotId: string, force = false): Promise<{ path: string; restored: 'content' | 'deleted' }> {
+  const res = await api(`/api/sessions/${sessionId}/snapshots/${snapshotId}/rollback`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ force }) });
+  return res.json();
+}
+
 export async function getDiskSpace(): Promise<{ freeBytes: number | null; totalBytes: number | null }> {
   const res = await api('/api/storage/disk');
   return (await res.json()) as { freeBytes: number | null; totalBytes: number | null };

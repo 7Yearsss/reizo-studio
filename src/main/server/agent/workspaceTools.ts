@@ -102,8 +102,10 @@ export function createWorkspaceTools(options: {
   emit: (event: ChatStreamEvent) => void;
   todos: TodoItem[];
   onFileWritten?: (relativePath: string, content: string) => Promise<void>;
+  /** Keep what a write replaced so it can be undone; returns the snapshot id shown on the tool card. */
+  onSnapshot?: (snapshot: { path: string; existed: boolean; before: string; after: string }) => Promise<string | undefined>;
 }): WorkspaceToolset {
-  const { workspacePath, onFileWritten, emit } = options;
+  const { workspacePath, onFileWritten, emit, onSnapshot } = options;
 
   async function executeApproved(
     name: string,
@@ -117,12 +119,15 @@ export function createWorkspaceTools(options: {
         case 'write_file': {
           const path = String(args.path ?? '');
           const content = String(args.content ?? '');
-          const result = await writeWorkspaceFile(workspacePath, path, content, approvedVersion(args));
+          const version = approvedVersion(args);
+          const result = await writeWorkspaceFile(workspacePath, path, content, version);
           if (onFileWritten) await onFileWritten(path, content);
           const { before, ...rest } = result;
+          const snapshotId = await onSnapshot?.({ path: result.path, existed: version.expectedHash !== null, before, after: content }).catch((): undefined => undefined);
           return {
             result: JSON.stringify({
               ...rest,
+              ...(snapshotId ? { snapshotId } : {}),
               diff: previewDiff(before, content),
               preview: buildFileDiffPreview(result.path, before, content),
             }),
@@ -138,8 +143,10 @@ export function createWorkspaceTools(options: {
             approvedVersion(args),
           );
           if (onFileWritten) await onFileWritten(result.path, result.after);
+          const snapshotId = await onSnapshot?.({ path: result.path, existed: true, before: result.before, after: result.after }).catch((): undefined => undefined);
           return {
             result: JSON.stringify({
+              ...(snapshotId ? { snapshotId } : {}),
               path: result.path,
               replacements: result.replacements,
               diff: previewDiff(result.before, result.after),
@@ -203,8 +210,9 @@ function buildTools(options: {
   emit: (event: ChatStreamEvent) => void;
   todos: TodoItem[];
   onFileWritten?: (relativePath: string, content: string) => Promise<void>;
+  onSnapshot?: (snapshot: { path: string; existed: boolean; before: string; after: string }) => Promise<string | undefined>;
 }) {
-  const { sessionId, workspacePath, permissionMode, emit, todos, onFileWritten } = options;
+  const { sessionId, workspacePath, permissionMode, emit, todos, onFileWritten, onSnapshot } = options;
 
   return {
     list_dir: tool({
@@ -255,8 +263,10 @@ function buildTools(options: {
         const result = await writeWorkspaceFile(workspacePath, input.path, input.content, version);
         if (onFileWritten) await onFileWritten(input.path, input.content);
         const { before, ...rest } = result;
+        const snapshotId = await onSnapshot?.({ path: result.path, existed: version.expectedHash !== null, before, after: input.content }).catch((): undefined => undefined);
         return {
           ...rest,
+          ...(snapshotId ? { snapshotId } : {}),
           diff: previewDiff(before, input.content),
           preview: buildFileDiffPreview(result.path, before, input.content),
         };
@@ -299,7 +309,9 @@ function buildTools(options: {
           version,
         );
         if (onFileWritten) await onFileWritten(input.path, result.after);
+        const snapshotId = await onSnapshot?.({ path: result.path, existed: true, before: result.before, after: result.after }).catch((): undefined => undefined);
         return {
+          ...(snapshotId ? { snapshotId } : {}),
           path: result.path,
           replacements: result.replacements,
           diff: previewDiff(result.before, result.after),
