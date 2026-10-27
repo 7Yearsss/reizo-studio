@@ -147,8 +147,8 @@
   --success-bg: #12301f;
   --danger: #ff7b72;
   --link: #8ab4ff;
-  --chat-user-bg: #ededee;
-  --chat-user-ink: #1c1d1e;
+  --chat-user-bg: #262729;
+  --chat-user-ink: #ececed;
 
   --paper-a0: rgb(15 16 17 / 0);
   --shadow-outline: 0 0 0 1px rgba(255, 255, 255, 0.08);
@@ -320,10 +320,10 @@ pre,
 .chat-user-bubble {
   background: var(--chat-user-bg);
   color: var(--chat-user-ink);
-  border-radius: 20px;
-  padding: 11px 17px;
-  font-size: 15px;
-  line-height: 1.65;
+  border-radius: 18px;
+  padding: 8px 14px;
+  font-size: 14.5px;
+  line-height: 1.6;
   overflow-wrap: anywhere;
   user-select: text;
 }

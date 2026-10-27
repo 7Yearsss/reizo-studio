@@ -1226,6 +1226,13 @@ async function reconcileAfterTurn(sessionId: string, fallbackOutcome?: TurnOutco
   notifyIfHidden(session.title);
 }
 
+/** Mirror the server's `Referenced canvas nodes:` block so the pending bubble already shows its image chips. */
+function withCanvasRefBlock(text: string, mentions: string[]): string {
+  const ids = mentions.filter((m) => m.startsWith('canvas:')).map((m) => m.slice('canvas:'.length).split('@r=')[0]);
+  if (ids.length === 0) return text;
+  return `${text}\n\nReferenced canvas nodes:\n${ids.map((id) => `- ${id} [image]`).join('\n')}`;
+}
+
 async function dispatchTurn(
   sessionId: string,
   text: string,
@@ -1258,7 +1265,7 @@ async function dispatchTurn(
     : {
         id: `local-${Date.now()}`,
         role: 'user',
-        content: text,
+        content: withCanvasRefBlock(text, mentions),
         createdAt: new Date().toISOString(),
       };
   const nextMessages = userMessage ? [...existing, userMessage] : existing;
