@@ -10,7 +10,7 @@ describe('chatModelCapabilities', () => {
   it('specific rules beat general ones', () => {
     expect(chatModelCapabilities('moonshot-v1-32k').contextWindow).toBe(32_000);
     expect(chatModelCapabilities('glm-4.5v').vision).toBe(true);
-    expect(chatModelCapabilities('glm-4.5').vision).toBeUndefined();
+    expect(chatModelCapabilities('glm-4.5').vision).toBe(false);
   });
 
   it('knows nothing about an unknown model instead of guessing', () => {

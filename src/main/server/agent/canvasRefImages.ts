@@ -57,9 +57,9 @@ function mediaTypeOf(rel: string): string {
  */
 export async function inlineCanvasRefImages(
   history: ModelMessage[],
-  options: { canvasStore?: CanvasStore; sessionId: string; dataRoot?: string },
+  options: { canvasStore?: CanvasStore; sessionId: string; dataRoot?: string; /** false = the model is known not to read images */ vision?: boolean },
 ): Promise<void> {
-  const { canvasStore, sessionId, dataRoot } = options;
+  const { canvasStore, sessionId, dataRoot, vision } = options;
   if (!canvasStore || !dataRoot) return;
   let idx = -1;
   for (let i = history.length - 1; i >= 0; i--) {
@@ -74,6 +74,13 @@ export async function inlineCanvasRefImages(
   if (ids.length === 0) return;
   const canvas = canvasStore.findCanvasBySession(sessionId);
   if (!canvas) return;
+
+  if (vision === false) {
+    history[idx] = { role: 'user', content: `${message.content}
+
+[${ids.length} referenced image(s) were NOT sent: the current model cannot read images. Tell the user plainly that you cannot see them and suggest switching to a vision-capable model; do not guess what they show.]` };
+    return;
+  }
 
   const parts: Array<TextPart | FilePart> = [];
   for (const id of ids) {

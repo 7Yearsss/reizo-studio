@@ -61,4 +61,16 @@ describe('inlineCanvasRefImages', () => {
     expect(image?.mediaType).toBe('image/png');
     expect(Array.from(image?.data ?? [])).toEqual([1, 2, 3]);
   });
+
+  it('sends no bytes to a model known not to read images, and tells it so', async () => {
+    const text = `x\n\nReferenced canvas nodes:\n- n1 [image, done] a.png`;
+    const history: ModelMessage[] = [{ role: 'user', content: text }];
+    const handle = openDb(':memory:');
+    const session = await createSqliteSessionStore(handle).create('s', null, null);
+    const canvasStore = createCanvasStore(handle);
+    canvasStore.ensureCanvas(session.id);
+    await inlineCanvasRefImages(history, { canvasStore, sessionId: session.id, dataRoot: os.tmpdir(), vision: false });
+    expect(typeof history[0].content).toBe('string');
+    expect(history[0].content as string).toContain('NOT sent');
+  });
 });

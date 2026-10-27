@@ -23,13 +23,13 @@ const RULES: Rule[] = [
   { match: /^gemini-2\.5/, caps: { contextWindow: 1_000_000, vision: true, reasoning: true } },
   { match: /^gemini-2\.0/, caps: { contextWindow: 1_000_000, vision: true } },
   { match: /^claude-/, caps: { contextWindow: 200_000, vision: true } },
-  { match: /^deepseek-reasoner/, caps: { contextWindow: 128_000, reasoning: true } },
-  { match: /^deepseek-(chat|v3)/, caps: { contextWindow: 128_000 } },
-  { match: /^moonshot-v1-(8k)/, caps: { contextWindow: 8_000 } },
-  { match: /^moonshot-v1-(32k)/, caps: { contextWindow: 32_000 } },
-  { match: /^moonshot-v1-(128k|auto)/, caps: { contextWindow: 128_000 } },
+  { match: /^deepseek-reasoner/, caps: { contextWindow: 128_000, reasoning: true, vision: false } },
+  { match: /^deepseek-(chat|v3)/, caps: { contextWindow: 128_000, vision: false } },
+  { match: /^moonshot-v1-(8k)/, caps: { contextWindow: 8_000, vision: false } },
+  { match: /^moonshot-v1-(32k)/, caps: { contextWindow: 32_000, vision: false } },
+  { match: /^moonshot-v1-(128k|auto)/, caps: { contextWindow: 128_000, vision: false } },
   { match: /^glm-4\.5v/, caps: { contextWindow: 64_000, vision: true } },
-  { match: /^glm-4\.5/, caps: { contextWindow: 128_000, reasoning: true } },
+  { match: /^glm-4\.5/, caps: { contextWindow: 128_000, reasoning: true, vision: false } },
 ];
 
 /** Strip a routing prefix ("openai/gpt-4o" → "gpt-4o"), lower-case. */

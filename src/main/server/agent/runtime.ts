@@ -511,7 +511,7 @@ ${expandPromptVars(expert.instructions, promptVarCtx)}`
       ...assistantTurnToModelMessages(message.content, compactAssistantParts(parts), screenshotCtx),
     );
   }
-  await inlineCanvasRefImages(history, { canvasStore, sessionId, dataRoot });
+  await inlineCanvasRefImages(history, { canvasStore, sessionId, dataRoot, vision: chatModelCapabilities(modelId).vision });
 
   // `emit` is bound to the live stream once `startAgentTurn` opens it; tools
   // created here need the reference up front (todos / permission side-channel).
