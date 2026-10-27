@@ -29,6 +29,24 @@ describe('scheduleTools', () => {
     expect(saved!.once).toBeUndefined();
   });
 
+  it('create_schedule with a weekday cadence lands on a weekday at that local time', async () => {
+    const { scheduleStore, tools } = setup();
+    const out = await (tools.create_schedule.execute as any)({ prompt: '整理未读邮件', cadence: { kind: 'weekdays', hour: 9, minute: 0 } });
+    expect(out.ok).toBe(true);
+    const [saved] = await scheduleStore.list();
+    expect(saved!.cadence).toEqual({ kind: 'weekdays', hour: 9, minute: 0 });
+    const next = new Date(saved!.nextRunAt);
+    expect([next.getHours(), next.getMinutes()]).toEqual([9, 0]);
+    expect([0, 6]).not.toContain(next.getDay());
+  });
+
+  it('rejects a missing schedule, and a weekly cadence without a day', async () => {
+    const { scheduleStore, tools } = setup();
+    expect((await (tools.create_schedule.execute as any)({ prompt: 'x' })).ok).toBe(false);
+    expect((await (tools.create_schedule.execute as any)({ prompt: 'x', cadence: { kind: 'weekly', hour: 8, minute: 30 } })).ok).toBe(false);
+    expect(await scheduleStore.list()).toEqual([]);
+  });
+
   it('clamps intervalMinutes to the minimum interval', async () => {
     const { scheduleStore, tools } = setup();
     await (tools.create_schedule.execute as any)({ prompt: 'x', intervalMinutes: 0.01 });

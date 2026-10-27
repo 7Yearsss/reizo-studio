@@ -106,11 +106,47 @@ exports[`tool contract snapshots > ask_user 1`] = `
 exports[`tool contract snapshots > automations 1`] = `
 {
   "create_schedule": {
-    "description": "Create an automation that runs a prompt as a new session on a timer. Set once:true for a one-shot reminder ("check on this in 30 minutes"); otherwise it recurs every intervalMinutes (min 1). The user can review and delete it under 自动化.",
+    "description": "Create an automation that runs a prompt as a new session on a timer. Set once:true for a one-shot reminder ("check on this in 30 minutes"); otherwise it recurs every intervalMinutes (min 1). For a wall-clock schedule ("every weekday at 9:00", "Mondays at 8:30") pass cadence instead of intervalMinutes; times are in local time. The user can review and delete it under 自动化.",
     "input": {
       "properties": {
+        "cadence": {
+          "additionalProperties": false,
+          "description": "Run at a fixed local time: daily, on weekdays (Mon–Fri) or weekly on one day.",
+          "properties": {
+            "dayOfWeek": {
+              "description": "0 = Sunday … 6 = Saturday; required for weekly.",
+              "maximum": 6,
+              "minimum": 0,
+              "type": "integer",
+            },
+            "hour": {
+              "maximum": 23,
+              "minimum": 0,
+              "type": "integer",
+            },
+            "kind": {
+              "enum": [
+                "daily",
+                "weekdays",
+                "weekly",
+              ],
+              "type": "string",
+            },
+            "minute": {
+              "maximum": 59,
+              "minimum": 0,
+              "type": "integer",
+            },
+          },
+          "required": [
+            "kind",
+            "hour",
+            "minute",
+          ],
+          "type": "object",
+        },
         "intervalMinutes": {
-          "description": "Minutes between runs. For once:true schedules this is the delay before the single run.",
+          "description": "Minutes between runs. For once:true schedules this is the delay before the single run. Omit when cadence is given.",
           "type": "number",
         },
         "name": {
@@ -127,7 +163,6 @@ exports[`tool contract snapshots > automations 1`] = `
         },
       },
       "required": [
-        "intervalMinutes",
         "prompt",
       ],
     },

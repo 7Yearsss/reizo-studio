@@ -1,5 +1,6 @@
 import { tool } from 'ai';
 import { z } from 'zod';
+import { isValidCadence } from '../../../shared/schedule';
 import type { PermissionMode } from '../../../shared/settings';
 import type { ScheduleStore } from '../storage/scheduleStore';
 import { ApprovalRequiredError, requestPermission } from './permissions';
@@ -20,22 +21,35 @@ export function createScheduleTools(options: { scheduleStore: ScheduleStore; ses
   return {
     create_schedule: tool({
       description:
-        'Create an automation that runs a prompt as a new session on a timer. Set once:true for a one-shot reminder ("check on this in 30 minutes"); otherwise it recurs every intervalMinutes (min 1). The user can review and delete it under 自动化.',
+        'Create an automation that runs a prompt as a new session on a timer. Set once:true for a one-shot reminder ("check on this in 30 minutes"); otherwise it recurs every intervalMinutes (min 1). For a wall-clock schedule ("every weekday at 9:00", "Mondays at 8:30") pass cadence instead of intervalMinutes; times are in local time. The user can review and delete it under 自动化.',
       inputSchema: z.object({
         prompt: z.string().describe('The instruction to run when the schedule fires.'),
         intervalMinutes: z
           .number()
-          .describe('Minutes between runs. For once:true schedules this is the delay before the single run.'),
+          .optional()
+          .describe('Minutes between runs. For once:true schedules this is the delay before the single run. Omit when cadence is given.'),
+        cadence: z
+          .object({
+            kind: z.enum(['daily', 'weekdays', 'weekly']),
+            hour: z.number().int().min(0).max(23),
+            minute: z.number().int().min(0).max(59),
+            dayOfWeek: z.number().int().min(0).max(6).optional().describe('0 = Sunday … 6 = Saturday; required for weekly.'),
+          })
+          .optional()
+          .describe('Run at a fixed local time: daily, on weekdays (Mon–Fri) or weekly on one day.'),
         name: z.string().optional().describe('Short label shown in the automation list. Defaults to the prompt start.'),
         once: z.boolean().optional().describe('If true, attempts once then pauses; the result and failure remain in history.'),
       }),
-      execute: async ({ prompt, intervalMinutes, name, once }, toolOptions) => {
-        await confirm('create_schedule', { prompt, intervalMinutes, ...(name ? { name } : {}), ...(once ? { once } : {}) }, toolOptions?.toolCallId);
-        const intervalMs = Math.max(Math.round(intervalMinutes * 60_000), MIN_INTERVAL_MS);
+      execute: async ({ prompt, intervalMinutes, cadence, name, once }, toolOptions) => {
+        if (!cadence && intervalMinutes === undefined) return { ok: false, error: 'Give either intervalMinutes or cadence.' };
+        if (cadence && !isValidCadence(cadence)) return { ok: false, error: 'Invalid cadence (weekly needs dayOfWeek; daily and weekdays must not have one).' };
+        await confirm('create_schedule', { prompt, ...(intervalMinutes !== undefined ? { intervalMinutes } : {}), ...(cadence ? { cadence } : {}), ...(name ? { name } : {}), ...(once ? { once } : {}) }, toolOptions?.toolCallId);
+        const intervalMs = cadence ? 24 * 60 * 60_000 : Math.max(Math.round((intervalMinutes ?? 0) * 60_000), MIN_INTERVAL_MS);
         const schedule = await scheduleStore.create({
           name: (name ?? prompt).slice(0, 60),
           prompt,
           intervalMs,
+          ...(cadence ? { cadence } : {}),
           once: once === true,
           operationId: options.sessionId && toolOptions?.toolCallId ? `schedule-tool:${options.sessionId}:${toolOptions.toolCallId}` : undefined,
         });
