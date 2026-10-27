@@ -145,6 +145,7 @@ async function bootstrap(): Promise<void> {
   // A small floating box for a quick question from any app.
   registerQuickAssistantIpc();
   registerDeepLinks();
+  registerAttention();
   globalShortcut.register('CommandOrControl+Alt+Space', () => { toggleQuickAssistant(); });
   // Screenshot the display under the cursor straight into the current conversation.
   globalShortcut.register('CommandOrControl+Alt+A', () => { void screenshotToChat(); });

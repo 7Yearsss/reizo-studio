@@ -24,6 +24,44 @@ export default function App() {
     return (): void => { off?.(); };
   }, []);
 
+  // Which conversations wait for the user: shown on the tray, badge and taskbar when the window is in the background.
+  useEffect(() => {
+    let last = '';
+    const report = (): void => {
+      const state = chatStore.getSnapshot();
+      const summary = summarizeAttention(state.sessions.map((s) => ({ id: s.id, title: s.title, waiting: Boolean(state.interactionBySession[s.id]) })));
+      const key = JSON.stringify([summary.ids, summary.tooltip]);
+      if (key === last) return;
+      last = key;
+      window.reizo?.reportAttention?.({ ids: summary.ids, title: summary.title, tooltip: summary.tooltip });
+    };
+    report();
+    return chatStore.subscribe(report);
+  }, []);
+
+  // The screenshot shortcut: attach the picture to the open conversation, or start one.
+  useEffect(() => {
+    const off = window.reizo?.onScreenshot?.((payload) => {
+      void (async () => {
+        if (!payload.dataUrl) { toast.error(payload.error ?? '截屏失败'); return; }
+        const blob = await (await fetch(payload.dataUrl)).blob();
+        const file = new File([blob], `screenshot-${new Date().toISOString().replace(/[:.]/g, '-')}.png`, { type: 'image/png' });
+        let sessionId = tabStore.activeSessionId();
+        const fresh = !sessionId;
+        if (!sessionId) {
+          const session = await chatStore.createSession('截图');
+          tabStore.openChatTab(session.id, session.title);
+          sessionId = session.id;
+        }
+        uiStore.setMode('chat');
+        // A new tab's composer needs a moment to mount before it can receive the file.
+        const target = sessionId;
+        window.setTimeout(() => dispatchChatDrop(target, [file]), fresh ? 400 : 0);
+      })();
+    });
+    return (): void => { off?.(); };
+  }, []);
+
   useEffect(() => {
     void settingsStore.loadSettings();
     void chatStore.loadSessions();
