@@ -4,7 +4,7 @@ import type { AskQuestion, ChatStreamEvent, FileDiffPreview } from '../../../sha
 
 export type PermissionDecision = 'allow' | 'deny' | 'allow-session' | 'allow-always';
 
-const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'personal_memory_write', 'personal_memory_delete', 'http_fetch', 'web_search', 'browser_read', 'browser_open']);
+const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'personal_memory_write', 'personal_memory_delete', 'http_fetch', 'web_search', 'browser_read', 'browser_open', 'analyze_video']);
 const SHELL_TOOLS = new Set(['run_command']);
 /**
  * Tools that drive the user's real machine (mouse / keyboard / screen). Always

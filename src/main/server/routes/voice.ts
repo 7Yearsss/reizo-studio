@@ -13,7 +13,7 @@ function runtimeDir() {
 }
 
 export function createVoiceRouter(dataRoot: string) {
-  const store = createVoiceModelStore(dataRoot, fetch, process.env.REIZO_VOICE_RUNTIME ? undefined : path.resolve('.cache/local-asr-models'));
+  const store = createVoiceModelStore(dataRoot, fetch, process.env.REIZO_VOICE_MODEL || (process.env.REIZO_VOICE_RUNTIME ? undefined : path.resolve('.cache/local-asr-models')));
   const router = new Hono();
   router.get('/status', async c => c.json(await store.status()));
   router.post('/prepare', async c => {

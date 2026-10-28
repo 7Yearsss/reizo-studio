@@ -1,5 +1,5 @@
-import type { Session } from 'electron';
 import { browserRequestAllowed, browserUrlProblem } from '../shared/browserUrl';
+import { BROWSER_PARTITION, hardenBrowserSession as harden } from './browserSession';
 
 export interface RenderedPage { finalUrl: string; title: string; text: string; links: Array<{ text: string; href: string }> }
 export interface ReadOptions {
@@ -12,7 +12,7 @@ const LOAD_TIMEOUT_MS = 30_000;
 const SETTLE_MS = 1500;
 const MAX_TEXT = 60_000;
 /** The one profile that keeps logins between runs; only the visible window and `signedIn` reads use it. */
-const PERSISTENT_PARTITION = 'persist:reizo-browser';
+const PERSISTENT_PARTITION = BROWSER_PARTITION;
 
 const EXTRACT = `(() => {
   const clean = (s) => String(s || '').replace(/\\s+/g, ' ').trim();
@@ -21,12 +21,6 @@ const EXTRACT = `(() => {
 })()`;
 
 /** Public web only for every request, no permission prompts, no downloads. */
-function harden(ses: Session): void {
-  ses.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !browserRequestAllowed(details.url) }));
-  ses.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
-  ses.removeAllListeners('will-download');
-  ses.on('will-download', (event) => event.preventDefault());
-}
 
 /**
  * Load a public page the way a browser does (scripts run, so single-page apps and dashboards render) and return its

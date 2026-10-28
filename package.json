@@ -19,6 +19,9 @@
     "test:unit": "vitest run",
     "typecheck": "tsc --noEmit",
     "check:artifact-preview": "node scripts/check-artifact-preview.mjs",
+    "check:video-analysis": "node scripts/verify-video-analysis.mjs",
+    "prepare:voice-model": "node scripts/prepare-voice-model.mjs",
+    "check:voice-model": "node scripts/verify-voice-model.mjs",
     "db:generate": "drizzle-kit generate"
   },
   "keywords": [],

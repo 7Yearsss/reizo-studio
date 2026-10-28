@@ -1,5 +1,5 @@
 import { lstat, mkdir, open, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises';
-import { linkSync, readFileSync, renameSync } from 'node:fs';
+import { linkSync, readFileSync, realpathSync, renameSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { nanoid } from 'nanoid';
@@ -10,7 +10,11 @@ import { isProtectedPath, PROTECTED_WRITE_MESSAGE } from '../shared/protectedPat
 let protectedRoots: string[] = [];
 /** Folders agent write tools must never touch (the app's own data). Set once at startup. */
 export function setWriteProtectedRoots(roots: string[]): void {
-  protectedRoots = roots.filter(Boolean);
+  protectedRoots = roots.filter(Boolean).flatMap(root => {
+    const absolute = path.resolve(root);
+    // Windows short names and filesystem aliases must match the canonical write target too.
+    try { return [absolute, realpathSync.native(absolute)]; } catch { return [absolute]; }
+  });
 }
 function assertWritable(absolute: string): void {
   if (isProtectedPath(absolute, protectedRoots)) throw new Error(PROTECTED_WRITE_MESSAGE);

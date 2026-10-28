@@ -68,6 +68,9 @@ import { chatModelCapabilities } from '../../../shared/chatModelCapabilities';
 import { createSkillDraftTools, PROPOSE_SKILL_TOOL, runApprovedSkillDraft } from './skillDraftTools';
 import { inlineAttachment } from '../../../shared/attachmentText';
 import { BROWSER_OPEN_TOOL, BROWSER_READ_TOOL, createWebTools, HTTP_FETCH_TOOL, WEB_SEARCH_TOOL } from './webTools';
+import { createVideoAnalysisTools } from './videoAnalysisTools';
+import { videoAnalysisModelOutput } from './videoAnalysisStore';
+import { ANALYZE_VIDEO_TOOL, bareVideoLink } from '../../../shared/videoAnalysis';
 import { createWebSearchStore } from '../storage/webSearchStore';
 import type { ExpertAgent } from '../../../shared/expertAgent';
 import { parseAllowedTools } from '../../../shared/skillToolPolicy';
@@ -448,6 +451,7 @@ export async function runChatTurn(options: {
     artifactStore
       ? 'When the user asks for a flowchart, sequence diagram, system architecture diagram, or mind map, call generate_diagram with Mermaid syntax to produce an interactive Excalidraw canvas artifact in the right panel. When the user asks for a spreadsheet, budget, financial report, or table calculation, call generate_sheet with rows, columns, and formulas to render a full-featured Excel sheet artifact in the right panel.'
       : '',
+    'Video links: use analyze_video to inspect actual timestamped video frames and readable subtitle tracks before describing a video or studying its style. A bare video link means analyse it now, without asking what to do. browser_read/http_fetch only return page text; do not mistake a post caption for video evidence or claim that no video analysis is available when analyze_video is offered. If the site requires login, use browser_open for the user to log in themselves, then retry analyze_video with signedIn:true. Do not ask for passwords. Give a concise summary and key timestamps grounded in returned images; state any missing audio/subtitles or unsupported protected/live player. Never infer sounds or full-video coverage from a few stills.',
     computerEnabled
       ? 'Computer control is available via the `computer` tool — you can screenshot the screen and move/click/drag the mouse, scroll, type text, and press keys on THIS machine. ' +
         'Use it only when the task genuinely needs the GUI (a desktop app with no CLI, a visual check). Prefer workspace tools for files, `run_command` for anything a shell can do. ' +
@@ -491,8 +495,9 @@ ${expandPromptVars(expert.instructions, promptVarCtx)}`
   // an image (vs. a one-line text stub). Only the most recent few, so a long
   // GUI session can't blow the context window.
   const screenshotCtx =
-    computerEnabled && dataRoot
-      ? { dataRoot, inlineIds: recentComputerResultIds(session.messages, SCREENSHOT_RETENTION) }
+    dataRoot
+      ? { dataRoot, sessionId, inlineIds: computerEnabled ? recentComputerResultIds(session.messages, SCREENSHOT_RETENTION) : new Set<string>(),
+          videoInlineIds: chatModelCapabilities(modelId).vision === false ? new Set<string>() : recentVideoResultIds(session.messages.flatMap(message => message.parts ?? [])) }
       : undefined;
 
   const history: ModelMessage[] = [];
@@ -598,6 +603,8 @@ ${expandPromptVars(expert.instructions, promptVarCtx)}`
     ? createPersonalMemoryTools({ sessionId, dataRoot, permissionMode: runPermissionMode, emit: (event) => emit(event) })
     : undefined;
   const webTools = runCeiling === 'readonly' ? undefined : createWebTools({ sessionId, permissionMode: runPermissionMode, getSearchConfig: dataRoot ? () => createWebSearchStore(dataRoot).get() : undefined });
+  const videoAnalysisTools = dataRoot && runCeiling !== 'readonly'
+    ? createVideoAnalysisTools({ dataRoot, sessionId, permissionMode: runPermissionMode, vision: chatModelCapabilities(modelId).vision }) : undefined;
   const scheduleTools = scheduleStore ? createScheduleTools({ scheduleStore, sessionId, permissionMode: runPermissionMode }) : undefined;
 
   let currentPresentationRefs = regenerate ? splitPresentationContext(userMessage?.content ?? '').refs : presentationRefs.refs;
@@ -621,6 +628,7 @@ ${expandPromptVars(expert.instructions, promptVarCtx)}`
           ...(scheduleTools ?? {}),
           ...(personalMemoryTools ? personalMemoryTools.tools : {}),
           ...(webTools ? webTools.tools : {}),
+          ...(videoAnalysisTools?.tools ?? {}),
           ...(skill ? {} : createSkillTools({ skills: availableSkills })),
           ...(artifactStore ? createAttachmentTools({ sessionId, artifacts: artifactStore }) : {}),
           ...(dataRoot ? createKnowledgeTools({ store: createKnowledgeStore(dataRoot) }) : {}),
@@ -699,6 +707,8 @@ ${expandPromptVars(expert.instructions, promptVarCtx)}`
   const stepLimit = expert?.maxTurns ?? skill?.maxTurns ?? settings.agentStepLimit ?? MAX_AGENT_STEPS;
   // After a reply is cut off by the provider's output limit, later passes ask for a higher limit and keep it.
   let outputCap: number | undefined;
+  const bareVideoUrl = bareVideoLink(userText);
+  let requestedVideoRead = false;
   const buildStream = (messages: ModelMessage[], signal: AbortSignal) =>
     streamText({
       model,
@@ -796,6 +806,10 @@ ${expandPromptVars(expert.instructions, promptVarCtx)}`
           }
         }
         trace.mark(`step${stepNumber}PrepareDone`);
+        if (!requestedVideoRead && bareVideoUrl && tools?.[ANALYZE_VIDEO_TOOL]) {
+          requestedVideoRead = true;
+          return { messages: compacted, toolChoice: { type: 'tool' as const, toolName: ANALYZE_VIDEO_TOOL } };
+        }
         return { messages: compacted };
       },
     });
@@ -913,6 +927,8 @@ ${expandPromptVars(expert.instructions, promptVarCtx)}`
             ? ((await computerTools?.executeApproved(item.args)) ?? {
                 error: 'Computer control is not enabled for this turn',
               })
+            : item.name === ANALYZE_VIDEO_TOOL
+              ? ((await videoAnalysisTools?.executeApproved(item.args, signal)) ?? { error: '视频分析在当前模式下不可用' })
             : item.name === HTTP_FETCH_TOOL || item.name === WEB_SEARCH_TOOL || item.name === BROWSER_READ_TOOL || item.name === BROWSER_OPEN_TOOL
               ? ((await webTools?.executeApproved(item.name, item.args)) ?? { error: 'Web access is not available in this turn' })
             : item.name.startsWith('personal_memory_')
@@ -950,8 +966,9 @@ ${expandPromptVars(expert.instructions, promptVarCtx)}`
             compactAssistantParts(snap.parts),
             screenshotCtx
               ? {
-                  dataRoot: screenshotCtx.dataRoot,
+                  ...screenshotCtx,
                   inlineIds: recentComputerResultIdsFromParts(snap.parts, SCREENSHOT_RETENTION),
+                  videoInlineIds: recentVideoResultIds(snap.parts),
                 }
               : undefined,
           ),
@@ -984,8 +1001,9 @@ ${expandPromptVars(expert.instructions, promptVarCtx)}`
             compactAssistantParts(snap.parts),
             screenshotCtx
               ? {
-                  dataRoot: screenshotCtx.dataRoot,
+                  ...screenshotCtx,
                   inlineIds: recentComputerResultIdsFromParts(snap.parts, SCREENSHOT_RETENTION),
+                  videoInlineIds: recentVideoResultIds(snap.parts),
                 }
               : undefined,
           ),
@@ -1000,6 +1018,12 @@ ${expandPromptVars(expert.instructions, promptVarCtx)}`
 interface ScreenshotCtx {
   dataRoot: string;
   inlineIds: Set<string>;
+  sessionId?: string;
+  videoInlineIds?: Set<string>;
+}
+
+function recentVideoResultIds(parts: ToolCallPart[]): Set<string> {
+  return new Set(parts.filter(part => part.name === ANALYZE_VIDEO_TOOL && part.result).map(part => part.id).slice(-1));
 }
 
 /** Ids of the last `limit` completed `computer` tool results across all messages. */
@@ -1073,6 +1097,8 @@ function assistantTurnToModelMessages(
         toolCallId: part.id,
         toolName: part.name,
         output:
+          (screenshotCtx?.sessionId && screenshotCtx.videoInlineIds?.has(part.id)
+            && part.name === ANALYZE_VIDEO_TOOL && videoAnalysisModelOutput(screenshotCtx.dataRoot, part.result, screenshotCtx.sessionId)) ||
           (screenshotCtx && computerScreenshotOutput(part, screenshotCtx)) ||
           parseToolOutput(sanitizeToolOutput(part.result ?? part.error ?? '')),
       })),

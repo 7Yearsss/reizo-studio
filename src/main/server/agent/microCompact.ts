@@ -7,6 +7,7 @@ import { READ_TOOL_CLIP } from './readBudget';
  * limits so the context is not overwhelmed with repetitive listings.
  */
 export const TOOL_OUTPUT_BUDGETS: Record<string, number> = {
+  analyze_video: 24_000,
   grep: 3_000,
   find_files: 3_000,
   list_dir: 4_000,

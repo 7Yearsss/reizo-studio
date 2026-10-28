@@ -8,6 +8,8 @@
 
 | 攻击方式 | 期望行为 | 测试 |
 | --- | --- | --- |
+| 视频链接指向本地接口、内网，或域名解析到内网 | 工具在读取前校验地址；浏览器逐请求拒绝内网解析，未批准不读取画面 | `src/main/server/agent/videoAnalysisTools.test.ts :: blocks private URLs and nonvisual models without opening a browser or asking for permission`、`src/main/browserSession.test.ts :: blocks private DNS and every local URL before allowing browser media requests` |
+| 视频分析结果伪造文件路径或引用另一会话画面 | 仅恢复本会话的合法分析 ID 和固定帧文件名；不接受路径穿越 | `src/main/server/agent/videoAnalysisTools.test.ts :: preserves real image content on live output and rejects forged paths or another session on replay` |
 | 无人值守会话里模型请求需审批的操作（如提示注入建定时任务后自动执行） | 权限自动拒绝，回合不挂起 | `src/main/server/agent/permissions.test.ts :: auto-denies permissions in a headless session so the turn never suspends` |
 | 写命令绕过审批 | 记录待审批提示，不放行 | `src/main/server/agent/permissions.test.ts :: records a pending prompt (never blocks) for a writing command` |
 | 提示注入让 Agent 建立/删除定时任务（长期立足点），即使在 full 模式 | 仍弹确认卡；拒绝后不落盘；allow-session 不形成长期授权 | `src/main/server/agent/alwaysAsk.test.ts :: create_schedule in full mode records a pending card and writes nothing; approving then runs it` |

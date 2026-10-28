@@ -11,6 +11,7 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
 import { IPC } from '../shared/constants';
+import { VOICE_REVISION } from '../shared/voiceInput';
 import { startLocalServer, stopLocalServer, type RunningServer } from './server/listen';
 import { openDb, type DbHandle } from './server/db/client';
 import { importLegacySessions } from './server/db/importLegacySessions';
@@ -82,6 +83,7 @@ function devServerOrigin(): string | undefined {
 
 async function bootstrap(): Promise<void> {
   if (app.isPackaged) process.env.REIZO_VOICE_RUNTIME = path.join(process.resourcesPath, 'voice-runtime');
+  if (app.isPackaged) process.env.REIZO_VOICE_MODEL = path.join(process.resourcesPath, 'voice-model', VOICE_REVISION);
   if (app.isPackaged) process.env.REIZO_VIDEO_EDITOR_RUNTIME = path.join(process.resourcesPath, 'video-editor', 'runtime.json');
   const dataRoot = path.join(app.getPath('userData'), 'data');
   mkdirSync(dataRoot, { recursive: true });

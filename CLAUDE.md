@@ -162,6 +162,7 @@ Assembled per turn in `runtime.ts` (each gated by what the session has: stores, 
 | `artifactTools.ts` (incl. `read_sheet` / `generate_sheet`), `documentTools.ts`, `presentationTools.ts` | artifact CRUD and reviewed edits |
 | `videoEditorTools.ts`, `videoSpeechTools.ts` | the embedded video editor |
 | `computerTools.ts` | real-desktop control (setting `computerUse`, default off) |
+| `videoAnalysisTools.ts` | pasted video links → actual sampled frames and available captions (`docs/video-analysis.md`) |
 | `scheduleTools.ts`, `subagentTools.ts`, `mcpTools.ts`, `deliveryTools.ts` | schedules, read-only sub-agents (`sub_agents/` roles), MCP / plugin servers, skill delivery contracts |
 
 User hooks (`agent/hooks.ts`) read `<dataRoot>/hooks.json` only — never from a workspace file —

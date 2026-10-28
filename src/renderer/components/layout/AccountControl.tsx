@@ -135,7 +135,7 @@ export default function AccountControl() {
     <Menu.Root open={menuOpen} onOpenChange={setMenuOpen}>
       <Menu.Trigger asChild>
         <button ref={trigger} type="button" className="group flex w-full items-center gap-3 rounded-xl bg-[var(--sidebar-account)] px-3 py-2.5 text-left outline-none transition-colors hover:bg-[var(--sidebar-hover)] focus-visible:ring-2 focus-visible:ring-accent data-[state=open]:bg-[var(--sidebar-selected)] motion-reduce:transition-none" aria-label="账号菜单">
-          {avatar}<span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-medium leading-5 text-ink">{name}</span><span className="block truncate text-[11px] leading-4 text-ink-muted">{subtitle}</span></span>
+          {avatar}<span className="min-w-0 flex-1 truncate text-[13px] font-medium leading-5 text-ink">{name}</span>
           <ChevronsUpDown size={14} aria-hidden className="shrink-0 text-ink-muted opacity-60 group-hover:opacity-100" />
         </button>
       </Menu.Trigger>
@@ -153,7 +153,7 @@ export default function AccountControl() {
             </Menu.RadioGroup>
           </Menu.SubContent></Menu.Portal>
         </Menu.Sub>
-        <Menu.Item className={item} onSelect={() => openSettings()}><Settings />设置<span className="ml-auto text-xs text-ink-muted">{window.reizo?.platform === 'darwin' ? '⌘' : 'Ctrl'}+,</span></Menu.Item>
+        <Menu.Item className={item} onSelect={() => openSettings()}><Settings />设置<span className="ml-auto text-xs text-ink-muted">{window.reizo?.platform === 'darwin' ? '⌘' : 'Ctrl'},</span></Menu.Item>
         <Menu.Item className={item} onSelect={() => openSettings('about')}><Info />关于 Reizo<span className="ml-auto text-xs tabular-nums text-ink-muted">{APP_VERSION}</span></Menu.Item>
         {user && <><Menu.Separator className="mx-1 my-1 h-px bg-line/70" /><Menu.Item className={item} disabled={busy} onSelect={() => void action('accountLogout')}><LogOut />退出登录</Menu.Item></>}
         {!dialog && error && <p role="status" className="px-2.5 py-2 text-xs text-ink-muted">{error}</p>}

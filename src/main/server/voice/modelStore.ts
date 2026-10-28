@@ -5,7 +5,7 @@ import { VOICE_FILES, VOICE_MODEL, VOICE_REVISION, type VoiceModelStatus } from 
 
 export function createVoiceModelStore(dataRoot: string, fetcher: typeof fetch = fetch, seedRoot?: string, files: readonly (readonly [string, number, string])[] = VOICE_FILES) {
   const root = path.join(dataRoot, 'models', 'voice', VOICE_REVISION);
-  const verified = new Set<string>();
+  const verified = new Map<string, string>();
   let task: Promise<void> | undefined;
   let progress = 0;
   let error: string | undefined;
@@ -13,7 +13,9 @@ export function createVoiceModelStore(dataRoot: string, fetcher: typeof fetch = 
   const valid = (bytes: Buffer, file: readonly [string, number, string]) => bytes.length === file[1] && createHash('sha256').update(bytes).digest('hex') === file[2];
   async function check(file: readonly [string, number, string]) {
     if (verified.has(file[0])) return true;
-    try { if (valid(await readFile(path.join(root, file[0])), file)) { verified.add(file[0]); return true; } } catch { /* missing */ }
+    for (const candidate of [path.join(root, file[0]), ...(seedRoot ? [path.join(seedRoot, VOICE_MODEL, file[0])] : [])]) {
+      try { if (valid(await readFile(candidate), file)) { verified.set(file[0], candidate); return true; } } catch { /* missing */ }
+    }
     return false;
   }
   async function status(): Promise<VoiceModelStatus> {
@@ -53,7 +55,7 @@ export function createVoiceModelStore(dataRoot: string, fetcher: typeof fetch = 
         await mkdir(path.dirname(destination), { recursive: true });
         try { await writeFile(destination + '.partial', bytes); await rename(destination + '.partial', destination); }
         finally { await rm(destination + '.partial', { force: true }); }
-        verified.add(file[0]); progress = 0;
+        verified.set(file[0], destination); progress = 0;
       }
     })().catch((cause) => { error = cause instanceof Error ? cause.message : '语音模型准备失败'; throw cause; })
       .finally(() => { task = undefined; progress = 0; });
@@ -62,7 +64,7 @@ export function createVoiceModelStore(dataRoot: string, fetcher: typeof fetch = 
   async function read(name: string) {
     const file = files.find(entry => entry[0] === name);
     if (!file || !(await check(file))) return null;
-    return readFile(path.join(root, file[0]));
+    return readFile(verified.get(file[0])!);
   }
   return { status, prepare, read };
 }

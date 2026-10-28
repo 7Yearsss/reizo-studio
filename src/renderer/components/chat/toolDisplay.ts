@@ -264,6 +264,7 @@ export function toolLabel(name: string, part?: ToolCallPart): string {
     }
   }
   switch (name) {
+    case 'analyze_video': return '分析视频';
     case 'list_dir': return '读取目录';
     case 'read_file': return '读取文件';
     case 'find_files': return '查找文件';
