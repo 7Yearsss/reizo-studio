@@ -30,6 +30,7 @@ import {
   type ManagedProviderConfig,
   type ProviderCategory,
 } from '../../../shared/providerRegistry';
+import { confirmDialog } from '@/renderer/state/confirmStore';
 
 const runsFromRegistry = (category?: ProviderCategory) => category === 'audio' || category === 'video';
 
@@ -94,7 +95,7 @@ export function AdminProvidersSection({ onOpenSystemProviders }: { onOpenSystemP
   }
 
   async function handleDelete(id: string, name: string) {
-    if (!confirm(`确定要删除服务商 "${name}" 吗？此操作无法撤销。`)) return;
+    if (!(await confirmDialog({ title: `删除服务商 "${name}"？`, description: '此操作无法撤销。', confirmLabel: '删除', destructive: true }))) return;
     try {
       await api.deleteAdminProvider(passkey, id);
       await fetchProviders(passkey);

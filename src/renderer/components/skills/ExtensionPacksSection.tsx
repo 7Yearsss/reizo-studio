@@ -4,6 +4,7 @@ import type { PluginSummary } from '../../../shared/plugins';
 import * as skillStore from '../../state/skillStore';
 import { CatalogIcon } from './CatalogIcon';
 import { previewConfirmText } from '../../../shared/pluginPreviewText';
+import { confirmDialog, noticeDialog } from '@/renderer/state/confirmStore';
 
 export const PACKS_CHANGED = 'reizo:packs-changed';
 
@@ -135,8 +136,8 @@ export default function ExtensionPacksSection() {
   async function importWithPreview() {
     const preview = await window.reizo?.previewPlugin?.();
     if (!preview) return;
-    if (preview.existing?.sameContent) { window.alert(previewConfirmText(preview)); return; }
-    if (!window.confirm(previewConfirmText(preview))) return;
+    if (preview.existing?.sameContent) { await noticeDialog('已安装相同内容', previewConfirmText(preview)); return; }
+    if (!(await confirmDialog({ title: '安装这个扩展包？', description: previewConfirmText(preview), confirmLabel: '安装' }))) return;
     await window.reizo?.installPreviewedPlugin?.(preview.sourceDir, preview.digest);
   }
 
@@ -184,14 +185,19 @@ export default function ExtensionPacksSection() {
               onToggle={() => {
                 if (!pack.enabled) {
                   const text = enableConfirmText(pack);
-                  if (text && !window.confirm(text)) return;
+                  if (text) {
+                    void confirmDialog({ title: `启用「${pack.name}」？`, description: text, confirmLabel: '启用' }).then((ok) => {
+                      if (ok) void act(pack.id, () => (window.reizo?.setPluginEnabled ? window.reizo.setPluginEnabled(pack.id, true) : Promise.resolve()));
+                    });
+                    return;
+                  }
                 }
                 void act(pack.id, () => (window.reizo?.setPluginEnabled ? window.reizo.setPluginEnabled(pack.id, !pack.enabled) : Promise.resolve()));
               }}
               onRemove={() => {
-                if (window.confirm(`卸载「${pack.name}」？它的文件会被删除。`)) {
-                  void act(pack.id, () => (window.reizo?.uninstallPlugin ? window.reizo.uninstallPlugin(pack.id) : Promise.resolve()));
-                }
+                void confirmDialog({ title: `卸载「${pack.name}」？`, description: '它的文件会被删除。', confirmLabel: '卸载', destructive: true }).then((ok) => {
+                  if (ok) void act(pack.id, () => (window.reizo?.uninstallPlugin ? window.reizo.uninstallPlugin(pack.id) : Promise.resolve()));
+                });
               }}
             />
           ))}

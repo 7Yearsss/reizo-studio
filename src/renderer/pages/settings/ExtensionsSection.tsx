@@ -10,6 +10,7 @@ import {
 } from './extensionForm';
 import { CatalogIcon } from '../../components/skills/CatalogIcon';
 import { QuickIntegrationsBlock } from './QuickIntegrationsBlock';
+import { confirmDialog } from '@/renderer/state/confirmStore';
 
 const FIELD = 'w-full rounded-lg border border-line bg-paper-raised px-3 py-1.5 text-sm text-ink outline-none placeholder:text-ink-muted focus:border-accent';
 const LABEL = 'mb-1 block text-xs text-ink-muted';
@@ -230,7 +231,7 @@ function McpBlock() {
                 <ShieldCheck />
               </Button>
               <Button size="icon-xs" variant="ghost" title="编辑" onClick={() => setEditing({ index, entry })}><Pencil /></Button>
-              <Button size="icon-xs" variant="ghost" title="删除" onClick={() => { if (window.confirm(`删除 MCP 服务「${entry.name}」？`)) void persist(list.filter((_, i) => i !== index), '已删除'); }}><Trash2 /></Button>
+              <Button size="icon-xs" variant="ghost" title="删除" onClick={() => { void confirmDialog({ title: `删除 MCP 服务「${entry.name}」？`, confirmLabel: '删除', destructive: true }).then((ok) => { if (ok) void persist(list.filter((_, i) => i !== index), '已删除'); }); }}><Trash2 /></Button>
             </div>
           </div>
         ))}
@@ -324,7 +325,7 @@ function HooksBlock() {
             </div>
             <div className="flex shrink-0 items-center gap-1">
               <Button size="icon-xs" variant="ghost" title="编辑" onClick={() => setEditing({ index, entry: hook })}><Pencil /></Button>
-              <Button size="icon-xs" variant="ghost" title="删除" onClick={() => { if (window.confirm('删除这条 Hook？')) void persist(list.filter((_, i) => i !== index), '已删除'); }}><Trash2 /></Button>
+              <Button size="icon-xs" variant="ghost" title="删除" onClick={() => { void confirmDialog({ title: '删除这条 Hook？', confirmLabel: '删除', destructive: true }).then((ok) => { if (ok) void persist(list.filter((_, i) => i !== index), '已删除'); }); }}><Trash2 /></Button>
             </div>
           </div>
         ))}

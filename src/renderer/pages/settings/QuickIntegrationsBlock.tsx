@@ -20,6 +20,7 @@ import {
   DialogTitle,
 } from '../../components/ui/dialog';
 import { BrandIcon } from '../../components/ui/BrandIcon';
+import { confirmDialog } from '@/renderer/state/confirmStore';
 
 const FIELD =
   'w-full rounded-lg border border-line bg-paper-raised px-3 py-1.5 text-sm text-ink outline-none placeholder:text-ink-muted focus:border-accent';
@@ -1022,7 +1023,7 @@ export function QuickIntegrationsBlock({
   }, [loadStatus]);
 
   const handleDisconnect = async (id: QuickIntegrationId, label: string) => {
-    if (!window.confirm(`确定要断开与「${label}」的连接吗？`)) return;
+    if (!(await confirmDialog({ title: `断开与「${label}」的连接？`, confirmLabel: '断开', destructive: true }))) return;
     setDisconnecting(id);
     try {
       const res = await window.reizo?.disconnectIntegration?.(id);

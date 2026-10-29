@@ -12,6 +12,7 @@ import { collectMessageMatches } from '../lib/highlightText';
 import { useTitleBarSlot } from '../components/layout/titleBarSlots';
 import { dispatchChatDrop } from '../lib/chatDrop';
 import { hasTransferredFiles, transferredFiles } from '../lib/fileTransfer';
+import { confirmDialog } from '@/renderer/state/confirmStore';
 
 // Memoized so MainLayout re-renders (e.g. the right panel opening) don't
 // re-render the whole message list synchronously.
@@ -217,10 +218,11 @@ function ChatPage({
               setRenaming(true);
             }}
             onDelete={() => {
-              if (confirm('确定要删除此对话吗？')) {
+              void confirmDialog({ title: '删除此对话？', confirmLabel: '删除', destructive: true }).then((ok) => {
+                if (!ok) return;
                 tabStore.closeSessionTabs(sessionId);
                 void chatStore.deleteSession(sessionId);
-              }
+              });
             }}
           />,
           titleBarRight,

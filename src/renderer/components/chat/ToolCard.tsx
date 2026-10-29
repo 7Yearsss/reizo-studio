@@ -12,6 +12,7 @@ import { Undo2 } from 'lucide-react';
 import { allowEgressHost, ApiRequestError, rollbackSnapshot } from '../../api';
 import { toast } from '../../lib/toast';
 import { toolDetail, toolDiffPreview, toolLabel, toolTarget } from './toolDisplay';
+import { confirmDialog } from '@/renderer/state/confirmStore';
 
 function snapshotIdOf(result: string | undefined): string | undefined {
   if (!result) return undefined;
@@ -56,7 +57,7 @@ function RollbackButton({ sessionId, snapshotId }: { sessionId: string; snapshot
     } catch (error) {
       setState('idle');
       if (error instanceof ApiRequestError && error.status === 409 && !force) {
-        if (window.confirm(`${error.message}\n\n仍要回滚吗？`)) void run(true);
+        void confirmDialog({ title: '仍要回滚吗？', description: error.message, confirmLabel: '仍要回滚', destructive: true }).then((ok) => { if (ok) void run(true); });
         return;
       }
       toast.error('回滚失败', error instanceof Error ? error.message : undefined);

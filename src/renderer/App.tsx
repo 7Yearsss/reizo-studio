@@ -10,6 +10,7 @@ import * as uiStore from './state/uiStore';
 import { dispatchChatDrop } from './lib/chatDrop';
 import { toast } from './lib/toast';
 import { summarizeAttention } from '../shared/attention';
+import { ConfirmDialog } from '@/renderer/components/ui/ConfirmDialog';
 
 export default function App() {
   // A question typed into the floating box opens its own conversation here.
@@ -77,6 +78,7 @@ export default function App() {
   return (
     <>
       <MainLayout />
+      <ConfirmDialog />
       <ScreenshotCropDialog onDone={(file) => { void attachScreenshot(file); }} />
     </>
   );

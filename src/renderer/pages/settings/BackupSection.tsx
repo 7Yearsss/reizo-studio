@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ArchiveRestore, Download, HardDriveDownload, Upload } from 'lucide-react';
 import * as api from '../../api';
 import { toast } from '../../lib/toast';
+import { confirmDialog } from '@/renderer/state/confirmStore';
 
 function size(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
@@ -26,7 +27,7 @@ export default function BackupSection() {
   }
 
   async function restore(name: string, createdAt: string) {
-    if (!window.confirm(`恢复到 ${new Date(createdAt).toLocaleString()} 的备份？\n\n重启后生效：现在的数据会先被整体移到「restore-undo」文件夹（不会删除），再换上这份备份。恢复中途出问题会自动回滚。`)) return;
+    if (!(await confirmDialog({ title: `恢复到 ${new Date(createdAt).toLocaleString()} 的备份？`, description: '重启后生效：现在的数据会先被整体移到「restore-undo」文件夹（不会删除），再换上这份备份。恢复中途出问题会自动回滚。', confirmLabel: '恢复' }))) return;
     try { await api.restoreBackup(name); setStaged(name); }
     catch (error) { toast.error('无法恢复', error instanceof Error ? error.message : undefined); }
   }
