@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { MotionConfig } from 'motion/react';
 import MainLayout from './components/layout/MainLayout';
 import ScreenshotCropDialog, { SCREENSHOT_CAPTURED_EVENT } from './components/layout/ScreenshotCropDialog';
 import * as settingsStore from './state/settingsStore';
@@ -76,10 +77,11 @@ export default function App() {
   }, []);
 
   return (
-    <>
+    // One switch for every motion component: transforms and layout animation drop out under prefers-reduced-motion.
+    <MotionConfig reducedMotion="user">
       <MainLayout />
       <ConfirmDialog />
       <ScreenshotCropDialog onDone={(file) => { void attachScreenshot(file); }} />
-    </>
+    </MotionConfig>
   );
 }
