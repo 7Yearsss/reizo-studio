@@ -1,4 +1,5 @@
 import { HALTED_PREFIX } from '../../shared/loopRecovery';
+import { moveItem } from '../../shared/reorder';
 import { parseQueues, serializeQueues } from '../../shared/queuePersistence';
 import { newClientTurnId } from '../../shared/clientTurnId';
 import { selectPresentation, refreshPresentationReviews, referencePresentation } from './presentationWorkspace';
@@ -614,6 +615,14 @@ export async function sendMessage(
   await dispatchTurn(sessionId, text, mentions, extra, {
     truncateAfterId: extra.replaceFromId,
   });
+}
+
+/** Shift a queued follow-up earlier (-1) or later (+1); the queue is sent in this order. */
+export function moveQueuedTurn(sessionId: string, id: string, delta: number): void {
+  const current = state.queueBySession[sessionId] ?? [];
+  const next = moveItem(current, current.findIndex((item) => item.id === id), delta);
+  if (next === current) return;
+  setState({ queueBySession: { ...state.queueBySession, [sessionId]: next } });
 }
 
 export function removeQueuedTurn(sessionId: string, id: string): void {

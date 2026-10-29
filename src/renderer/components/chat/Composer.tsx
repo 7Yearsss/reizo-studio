@@ -682,6 +682,7 @@ export default function Composer({
             onRemove={(id) => chatStore.removeQueuedTurn(sessionId, id)}
             onEdit={editQueuedItem}
             onSendNow={(item) => void chatStore.sendQueuedNow(sessionId, item.id)}
+            onMove={(id, delta) => chatStore.moveQueuedTurn(sessionId, id, delta)}
           />
         )}
         {sessionQuery !== null && mentionQuery === null && (

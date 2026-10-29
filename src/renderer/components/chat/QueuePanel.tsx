@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, ListOrdered, MessageSquarePlus, SendHorizontal, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ListOrdered, MessageSquarePlus, SendHorizontal, X } from 'lucide-react';
 import Tooltip from '../ui/Tooltip';
 import type { QueuedTurn } from '../../state/chatStore';
 
@@ -9,6 +9,7 @@ export default function QueuePanel({
   onRemove,
   onEdit,
   onSendNow,
+  onMove,
 }: {
   items: QueuedTurn[];
   /** Steers accepted by the live turn, pending injection at the next step — not editable/removable. */
@@ -18,6 +19,8 @@ export default function QueuePanel({
   onEdit: (item: QueuedTurn) => void;
   /** Interrupt the live turn and send this queued message immediately. */
   onSendNow: (item: QueuedTurn) => void;
+  /** Reorder: -1 sends it earlier, +1 later. */
+  onMove?: (id: string, delta: number) => void;
 }) {
   const total = items.length + steers.length;
   // DSH-style dock: once there are several parked messages, collapse the list
@@ -78,6 +81,12 @@ export default function QueuePanel({
                   {item.text}
                 </button>
               </Tooltip>
+              {onMove && items.length > 1 ? (
+                <span className="flex shrink-0 items-center">
+                  <button type="button" disabled={index === 0} onClick={() => onMove(item.id, -1)} aria-label="提前一位" title="提前一位" className="text-ink-muted hover:text-accent disabled:opacity-30"><ArrowUp size={12} /></button>
+                  <button type="button" disabled={index === items.length - 1} onClick={() => onMove(item.id, 1)} aria-label="延后一位" title="延后一位" className="text-ink-muted hover:text-accent disabled:opacity-30"><ArrowDown size={12} /></button>
+                </span>
+              ) : null}
               <Tooltip content="立即发送（打断当前回复）" side="top" wrapperClassName="inline-flex shrink-0">
                 <button
                   type="button"
