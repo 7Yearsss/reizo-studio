@@ -285,14 +285,17 @@ export function MessageScroller({
     });
   }, [navigation, syncRailItems, updateActiveRailItem]);
 
+  // The question is pinned only while a reply is being written. Once it is finished, "jump to bottom" must reach the real bottom.
+  const anchoring = anchorQuestion && Boolean(busy);
+
   /** Top of the latest user message inside the viewport's scroll space, when the question is anchored. */
   const questionTopOf = useCallback((viewport: HTMLElement): number | undefined => {
-    if (!anchorQuestion) return undefined;
+    if (!anchoring) return undefined;
     const users = viewport.querySelectorAll<HTMLElement>('[data-slot="message"][data-from="user"]');
     const last = users[users.length - 1];
     if (!last) return undefined;
     return last.getBoundingClientRect().top - viewport.getBoundingClientRect().top + viewport.scrollTop;
-  }, [anchorQuestion]);
+  }, [anchoring]);
 
   const scrollToEnd = useCallback((behavior: ScrollBehavior) => {
     const viewport = viewportRef.current;
@@ -300,19 +303,19 @@ export function MessageScroller({
     const maxScroll = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
     const top = followScrollTop({ scrollTop: viewport.scrollTop, maxScroll, questionTop: questionTopOf(viewport) });
     // Anchored: the question is already where it should be, and the view never moves up.
-    if (anchorQuestion && top <= viewport.scrollTop) return;
+    if (anchoring && top <= viewport.scrollTop) return;
 
     programmaticScrollRef.current = true;
     if (typeof viewport.scrollTo === "function") {
-      viewport.scrollTo({ top: anchorQuestion ? top : viewport.scrollHeight, behavior });
+      viewport.scrollTo({ top: anchoring ? top : viewport.scrollHeight, behavior });
     } else {
-      viewport.scrollTop = anchorQuestion ? top : viewport.scrollHeight;
+      viewport.scrollTop = anchoring ? top : viewport.scrollHeight;
     }
     if (scrollTimerRef.current) window.clearTimeout(scrollTimerRef.current);
     scrollTimerRef.current = window.setTimeout(() => {
       programmaticScrollRef.current = false;
     }, behavior === "smooth" ? 320 : 0);
-  }, [anchorQuestion, questionTopOf]);
+  }, [anchoring, questionTopOf]);
 
   const handleScroll = useCallback(() => {
     const viewport = viewportRef.current;
