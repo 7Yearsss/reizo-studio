@@ -8,6 +8,7 @@ import {
   Square,
   X,
 } from 'lucide-react';
+import { SHOW_SHORTCUTS_EVENT } from './ShortcutsDialog';
 import { focusNextRegion } from '../../lib/focusRegions';
 import { useEffect, useState } from 'react';
 import Tooltip from '../ui/Tooltip';
@@ -71,6 +72,12 @@ export default function CustomTitleBar() {
       if ((e.metaKey || e.ctrlKey) && (e.key === 'b' || e.key === 'B')) {
         e.preventDefault();
         uiStore.toggleSidebar();
+        return;
+      }
+
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === '/' || e.code === 'Slash')) {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent(SHOW_SHORTCUTS_EVENT));
         return;
       }
 

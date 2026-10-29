@@ -12,6 +12,7 @@ import { dispatchChatDrop } from './lib/chatDrop';
 import { toast, showToast } from './lib/toast';
 import { backgroundFinished } from '../shared/backgroundFinish';
 import { summarizeAttention } from '../shared/attention';
+import ShortcutsDialog from './components/layout/ShortcutsDialog';
 import { ConfirmDialog } from '@/renderer/components/ui/ConfirmDialog';
 
 export default function App() {
@@ -105,6 +106,7 @@ export default function App() {
     <MotionConfig reducedMotion="user">
       <MainLayout />
       <ConfirmDialog />
+      <ShortcutsDialog />
       <ScreenshotCropDialog onDone={(file) => { void attachScreenshot(file); }} />
     </MotionConfig>
   );
