@@ -205,6 +205,7 @@ export default function Composer({
 
   const planMode = useChatStore((s) => (sessionId ? s.planModeBySession?.[sessionId] === true : false));
   const mentionQuery = extractMentionQuery(draft);
+  const [mentionMenuVisible, setMentionMenuVisible] = useState(false);
   const sessionQuery = extractSessionQuery(draft);
   const allSessions = useChatStore((s) => s.sessions);
   // Referenced conversations are kept apart from file mentions, which are dropped when the draft has no '@'.
@@ -721,6 +722,7 @@ export default function Composer({
         )}
         {mentionQuery !== null && (
           <MentionMenu
+            onVisibleChange={setMentionMenuVisible}
             query={mentionQuery}
             sessionId={sessionId}
             onPickNode={(node) => {
@@ -1010,7 +1012,8 @@ export default function Composer({
                 }
                 onKeyDown={(e, { textBeforeCaret }) => {
                   if (isImeComposingEvent(e)) return;
-                  if ((mentionQuery !== null || slash !== null) && e.key === 'Enter' && !e.shiftKey) {
+                  // Enter belongs to a menu only while one is on screen (the slash palette picks with its own listener).
+                  if (mentionQuery !== null && mentionMenuVisible && e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
                     return;
                   }

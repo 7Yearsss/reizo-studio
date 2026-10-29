@@ -14,7 +14,7 @@ beforeEach(() => {
   document.body.appendChild(host);
   root = createRoot(host);
   // jsdom has no layout; the menu only needs these to exist.
-  window.matchMedia = window.matchMedia ?? (((query: string) => ({ matches: false, media: query, addEventListener() { /* noop */ }, removeEventListener() { /* noop */ }, addListener() { /* noop */ }, removeListener() { /* noop */ }, onchange: null, dispatchEvent: () => false })) as unknown as typeof window.matchMedia);
+  window.matchMedia = window.matchMedia ?? (((query: string) => ({ matches: false, media: query, addEventListener() { /* noop */ }, removeEventListener() { /* noop */ }, addListener() { /* noop */ }, removeListener() { /* noop */ }, onchange: null as MediaQueryList['onchange'], dispatchEvent: () => false })) as unknown as typeof window.matchMedia);
 });
 afterEach(() => {
   act(() => root.unmount());

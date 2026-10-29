@@ -10,7 +10,8 @@ import type { SkillSummary } from '../../state/skillStore';
 import * as canvasStore from '../../state/canvasStore';
 
 export function extractMentionQuery(text: string): string | null {
-  const match = text.match(/@([^\s@]*)$/);
+  // An @ starts a mention only at the beginning or after whitespace: "a@b.com" is an email address, not a reference.
+  const match = text.match(/(?:^|\s)@([^\s@]*)$/);
   return match ? match[1] : null;
 }
 
@@ -22,6 +23,7 @@ export default function MentionMenu({
   onPickSkill,
   onPickExpert,
   expertsEnabled = false,
+  onVisibleChange,
 }: {
   query: string;
   sessionId?: string;
@@ -32,6 +34,8 @@ export default function MentionMenu({
   /** Hand the whole message to a saved expert: only offered when the @ starts the message. */
   onPickExpert?: (expert: api.ExpertItem) => void;
   expertsEnabled?: boolean;
+  /** Reports whether the menu is actually on screen, so the composer only yields Enter while it is. */
+  onVisibleChange?: (visible: boolean) => void;
 }) {
   const [experts, setExperts] = useState<api.ExpertItem[]>([]);
   useEffect(() => {
@@ -80,7 +84,12 @@ export default function MentionMenu({
     })
     .slice(0, 4);
 
-  if (entries.length === 0 && matchedNodes.length === 0 && matchedSkills.length === 0 && matchedExperts.length === 0) return null;
+  const hasResults = entries.length > 0 || matchedNodes.length > 0 || matchedSkills.length > 0 || matchedExperts.length > 0;
+  useEffect(() => {
+    onVisibleChange?.(hasResults);
+    return (): void => onVisibleChange?.(false);
+  }, [hasResults, onVisibleChange]);
+  if (!hasResults) return null;
 
   return (
     <div className="pop-in absolute right-0 bottom-full left-0 mb-2 overflow-hidden rounded-2xl border border-line bg-paper-raised shadow-[0_8px_30px_rgba(28,22,18,0.08)] z-50">
