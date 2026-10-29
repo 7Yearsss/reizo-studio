@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 beforeEach(() => {
+  window.innerWidth = 1800;
   localStorage.clear();
   vi.resetModules();
 });
@@ -50,4 +51,15 @@ it('each editor panel remembers its own width, falling back to the shared editor
   expect(ui.getSnapshot().rightPanelWidth).toBe(640);
   ui.setRightPanelTab('documents');
   expect(ui.getSnapshot().rightPanelWidth).toBe(460);
+});
+
+it('the panel can never squeeze the conversation below its minimum next to the open sidebar', async () => {
+  const ui = await import('./uiStore');
+  expect(ui.rightPanelMaxFor(1024, 248)).toBe(476);
+  expect(ui.rightPanelMaxFor(1024, 0)).toBe(724);
+  expect(ui.rightPanelMaxFor(500, 248)).toBe(320);
+  ui.setRightPanelTab('canvas');
+  ui.setRightPanelWidth(99999);
+  expect(ui.getSnapshot().rightPanelWidth).toBe(ui.getRightPanelMax());
+  expect(ui.getRightPanelMax()).toBe(1800 - ui.getSnapshot().sidebarWidth - 300);
 });

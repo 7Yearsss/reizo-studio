@@ -38,9 +38,14 @@ export const RIGHT_PANEL_DEFAULT = 480;
 export const ARTIFACT_PANEL_DEFAULT = 320;
 export const CHAT_PANEL_MIN = 300;
 
+/** Widest the side panel may be while the conversation keeps its minimum width beside the sidebar. */
+export function rightPanelMaxFor(windowWidth: number, sidebarWidth: number): number {
+  return Math.max(RIGHT_PANEL_MIN, windowWidth - sidebarWidth - CHAT_PANEL_MIN);
+}
+
 export function getRightPanelMax(): number {
   if (typeof window === 'undefined') return 1200;
-  return Math.max(RIGHT_PANEL_MIN, window.innerWidth - CHAT_PANEL_MIN);
+  return rightPanelMaxFor(window.innerWidth, state.sidebarCollapsed ? 0 : state.sidebarWidth);
 }
 
 function readMode(): SidebarMode {
