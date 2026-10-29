@@ -43,6 +43,18 @@ export default function FilePreview({ path, content }: { path: string; content: 
   const [source, setSource] = useState(false);
   const [annotate, setAnnotate] = useState(false);
   useEffect(() => { setSource(false); setAnnotate(false); }, [path]);
+  // Esc peels one layer: while picking page elements it leaves picking and does not also close the preview around it.
+  useEffect(() => {
+    if (!annotate) return undefined;
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || event.isComposing) return;
+      event.stopPropagation();
+      event.preventDefault();
+      setAnnotate(false);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return (): void => window.removeEventListener('keydown', onKey, true);
+  }, [annotate]);
 
   const code = (
     <CodeBlock
