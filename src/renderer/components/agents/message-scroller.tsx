@@ -1,6 +1,7 @@
 "use client";
 // beui.dev/components/agents/message-scroller
 
+import { visibleText } from "../../lib/visibleText";
 import { nextFollowState } from "../../../shared/followState";
 import { useReducedMotion } from "motion/react";
 import {
@@ -35,7 +36,7 @@ function getMessageText(message: HTMLElement) {
     message.querySelector<HTMLElement>('[data-slot="message-bubble-content"]') ??
     message.querySelector<HTMLElement>('[data-slot="message-content"]') ??
     message;
-  return (surface.textContent ?? "").replace(/\s+/g, " ").trim();
+  return visibleText(surface).replace(/\s+/g, " ").trim();
 }
 
 function getMessagePreview(
