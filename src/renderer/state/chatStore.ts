@@ -1,4 +1,5 @@
 import { HALTED_PREFIX } from '../../shared/loopRecovery';
+import { autoRetryLabel } from '../../shared/retryLabel';
 import { moveItem } from '../../shared/reorder';
 import { parseQueues, serializeQueues } from '../../shared/queuePersistence';
 import { newClientTurnId } from '../../shared/clientTurnId';
@@ -1419,7 +1420,7 @@ async function dispatchTurn(
       ) {
         autoRetryBySession.set(sessionId, (autoRetryBySession.get(sessionId) ?? 0) + 1);
         setState({
-          errorBySession: { ...getSnapshot().errorBySession, [sessionId]: '上游超时，正在自动重试…' },
+          errorBySession: { ...getSnapshot().errorBySession, [sessionId]: autoRetryLabel(autoRetryBySession.get(sessionId) ?? 1, AUTO_RETRY_LIMIT) },
         });
         window.setTimeout((): void => void retryInterruptedTurn(sessionId), 1200);
       }
