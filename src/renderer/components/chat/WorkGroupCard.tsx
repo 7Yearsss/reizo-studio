@@ -3,6 +3,7 @@ import { useMonotonicMinHeight } from '../../lib/use-monotonic-min-height';
 import type { TurnOutcome } from '../../../shared/stream';
 import { AgentActivity, type AgentActivityItem } from '../agents/agent-activity';
 import { ThinkingShimmer } from '../agents/loading-states/thinking-shimmer';
+import { workSummaryLabel } from '../../../shared/workSummary';
 import ThinkingCard, { formatThinkingDuration } from './ThinkingCard';
 import ToolCard from './ToolCard';
 import { toolAction, toolLabel, toolTarget } from './toolDisplay';
@@ -87,14 +88,11 @@ export default function WorkGroupCard({
     : runningToolCount > 0
       ? `正在使用工具 · ${runningToolCount} 个`
       : '继续处理中';
-  const durationLabel = durationMs !== undefined && durationMs > 0
-    ? ` · ${formatThinkingDuration(durationMs)}`
-    : '';
-  const doneLabel = turnOutcome === 'error'
-    ? `工作失败${durationLabel}`
-    : turnOutcome === 'interrupted'
-      ? `工作中断${durationLabel}`
-      : `工作完成${durationLabel}`;
+  const doneLabel = workSummaryLabel({
+    outcome: turnOutcome,
+    duration: durationMs !== undefined && durationMs > 0 ? formatThinkingDuration(durationMs) : undefined,
+    steps: visibleParts.length,
+  });
 
   return (
     <div ref={stepsRef} className="w-full">
