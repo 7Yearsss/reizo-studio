@@ -38,6 +38,7 @@ import * as settingsStore from '../../state/settingsStore';
 import { escapeStopStep } from '../../../shared/escapeStop';
 import { replacedMessageCount } from '../../../shared/editReplaceSpan';
 import { appendQuote, formatQuote, QUOTE_SELECTION_EVENT } from '../../../shared/quoteSelection';
+import { userMessageText } from '../../lib/userMessageText';
 import { historyStep } from '../../../shared/sentHistory';
 import { requestPermissionMode } from '../../lib/requestPermissionMode';
 import * as chatStore from '../../state/chatStore';
@@ -393,7 +394,7 @@ export default function Composer({
   function recallSentMessage(direction: 'up' | 'down'): boolean {
     const pristine = (draft === '' || draft === historyShownRef.current) && !draft.includes('\n');
     if (!pristine) return false;
-    const users = (sentHistory ?? []).filter((m) => m.role === 'user').map((m) => m.content);
+    const users = (sentHistory ?? []).filter((m) => m.role === 'user').map((m) => userMessageText(m.content));
     const step = historyStep(users, draft === '' && direction === 'up' ? null : historyCursorRef.current, direction);
     if (step.text === null) return false;
     historyCursorRef.current = step.cursor;

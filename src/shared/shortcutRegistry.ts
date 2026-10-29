@@ -21,7 +21,7 @@ export const SHORTCUTS: readonly ShortcutEntry[] = [
   { id: 'tab-move', keys: 'Alt+Shift+Left/Right', label: '标签获得焦点时左右移动', scope: '标签页' },
   { id: 'tab-close', keys: 'Delete', label: '标签获得焦点时关闭（也可中键点击）', scope: '标签页' },
   { id: 'send', keys: 'Enter', label: '发送；回复进行中则排队', scope: '输入框' },
-  { id: 'steer', keys: 'Mod+Enter', label: '回复进行中：打断并立即发送（引导）', scope: '输入框' },
+  { id: 'steer', keys: 'Mod+Enter', label: '回复进行中：打断并立即发送（引导）；按住 Ctrl/⌘ 时发送键图标随之切换', scope: '输入框' },
   { id: 'history', keys: 'Up / Down', label: '输入框为空时翻查已发送的消息', scope: '输入框' },
   { id: 'recall-queue', keys: 'Up', label: '光标在开头时取回排队中的消息', scope: '输入框' },
   { id: 'stop', keys: 'Esc Esc', label: '回复进行中：连按两次停止', scope: '输入框' },
@@ -29,7 +29,7 @@ export const SHORTCUTS: readonly ShortcutEntry[] = [
   { id: 'inline-edit', keys: 'Mod+J', label: '文档：对选区直接提出修改', scope: '面板' },
   { id: 'splitter', keys: 'Left/Right', label: '分隔条获得焦点时调整右侧面板宽度（Shift 加大步长，Home/End 到极值）', scope: '面板' },
   { id: 'lightbox-zoom', keys: '+ / - / 0', label: '图片预览：缩放 / 复位（也可滚轮、双击）', scope: '面板' },
-  { id: 'approve', keys: 'Enter', label: '审批卡：允许一次（Mod+Enter：本会话都允许；Esc：拒绝）', scope: '对话' },
+  { id: 'approve', keys: 'Enter', label: '审批卡：允许一次（Ctrl/⌘+Enter：本会话都允许；Esc：拒绝）', scope: '对话' },
 ];
 
 /** Render a registry key string for the platform: Mod → ⌘ / Ctrl, and macOS symbols for the rest. */
