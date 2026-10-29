@@ -35,6 +35,7 @@ import { useSkillStore } from '../../state/useSkillStore';
 import { useChatStore } from '../../state/useChatStore';
 import { useCanvasStore, useCanvasStoreEq, sameNodesIgnoringGeometry } from '../../state/useCanvasStore';
 import * as settingsStore from '../../state/settingsStore';
+import { requestPermissionMode } from '../../lib/requestPermissionMode';
 import * as chatStore from '../../state/chatStore';
 import * as canvasStore from '../../state/canvasStore';
 import { getCanvasNodeThumbnail } from '../canvas/canvasThumbnail';
@@ -986,9 +987,7 @@ export default function Composer({
                           label: mode === 'full' ? '允许' : mode === 'workspace' ? '工作区' : '询问',
                           hint: MODE_LABEL[mode],
                         }))}
-                        onChange={(mode) =>
-                          void settingsStore.patchSettings({ permissionMode: mode as PermissionMode })
-                        }
+                        onChange={(mode) => void requestPermissionMode(permissionMode, mode as PermissionMode)}
                         className="max-w-[76px] px-1.5 py-1 text-[11px]"
                       />
                     ) : (
@@ -999,9 +998,7 @@ export default function Composer({
                           value: mode,
                           label: MODE_LABEL[mode],
                         }))}
-                        onChange={(mode) =>
-                          void settingsStore.patchSettings({ permissionMode: mode as PermissionMode })
-                        }
+                        onChange={(mode) => void requestPermissionMode(permissionMode, mode as PermissionMode)}
                         className="max-w-[120px]"
                       />
                     )}

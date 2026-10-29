@@ -7,6 +7,7 @@ import { SEARCH_PROVIDERS } from '../../shared/webSearch';
 import { AGENT_STEP_LIMIT_OPTIONS, type Appearance, type BusyEnterBehavior, type PermissionMode, type ReasoningEffort } from '../../shared/settings';
 import { useSettingsStore } from '../state/useSettingsStore';
 import * as settingsStore from '../state/settingsStore';
+import { requestPermissionMode } from '../lib/requestPermissionMode';
 import * as api from '../api';
 import * as uiStore from '../state/uiStore';
 import { useUiStore } from '../state/useUiStore';
@@ -256,7 +257,7 @@ function GeneralSection() {
           return (
             <button
               key={id}
-              onClick={() => void settingsStore.patchSettings({ permissionMode: id })}
+              onClick={() => void requestPermissionMode(settings.permissionMode, id)}
               className={cn(
                 'relative rounded-full px-4 py-1.5 text-sm transition-colors duration-150',
                 active ? 'font-medium text-paper-raised' : 'text-ink hover:bg-paper-inset/80',

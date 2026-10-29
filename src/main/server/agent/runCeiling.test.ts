@@ -23,3 +23,14 @@ describe('run ceiling', () => {
     expect(effectiveRunMode('full', undefined)).toBe('full');
   });
 });
+
+describe('effectiveRunMode never loosens the global mode', () => {
+  const rank = { ask: 0, workspace: 1, full: 2 } as const;
+  for (const global of ['ask', 'workspace', 'full'] as const) {
+    for (const ceiling of ['readonly', 'workspace', 'inherit', undefined] as const) {
+      it(`${global} + ${String(ceiling)}`, () => {
+        expect(rank[effectiveRunMode(global, ceiling)]).toBeLessThanOrEqual(rank[global]);
+      });
+    }
+  }
+});
