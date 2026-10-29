@@ -9,7 +9,8 @@ import * as projectStore from './state/projectStore';
 import * as tabStore from './state/tabStore';
 import * as uiStore from './state/uiStore';
 import { dispatchChatDrop } from './lib/chatDrop';
-import { toast } from './lib/toast';
+import { toast, showToast } from './lib/toast';
+import { backgroundFinished } from '../shared/backgroundFinish';
 import { summarizeAttention } from '../shared/attention';
 import { ConfirmDialog } from '@/renderer/components/ui/ConfirmDialog';
 
@@ -40,6 +41,29 @@ export default function App() {
     };
     report();
     return chatStore.subscribe(report);
+  }, []);
+
+  // A reply that finishes in a conversation the user is not looking at: say so, with a way back to it.
+  useEffect(() => {
+    let previous = { ...chatStore.getSnapshot().sendingBySession };
+    return chatStore.subscribe(() => {
+      const state = chatStore.getSnapshot();
+      const next = state.sendingBySession;
+      if (next === previous) return;
+      const visible = uiStore.getSnapshot().mode === 'chat' ? tabStore.activeSessionId() : undefined;
+      const interrupted = new Set(Object.entries(state.turnOutcomeBySession).filter(([, outcome]) => outcome === 'interrupted').map(([id]) => id));
+      for (const id of backgroundFinished({ previous, next, visibleSessionId: visible, interrupted })) {
+        const title = state.sessions.find((s) => s.id === id)?.title ?? '对话';
+        const failed = state.turnOutcomeBySession[id] === 'error';
+        showToast({
+          title: failed ? `「${title}」出错了` : `「${title}」已完成`,
+          status: failed ? 'error' : 'success',
+          duration: 8000,
+          action: { label: '查看', onClick: () => { uiStore.setMode('chat'); tabStore.openChatTab(id, title); } },
+        });
+      }
+      previous = { ...next };
+    });
   }, []);
 
   // The screenshot shortcut: show the picture for cropping first (ScreenshotCropDialog below).
