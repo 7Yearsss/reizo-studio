@@ -1,4 +1,5 @@
 import { HALTED_PREFIX } from '../../shared/loopRecovery';
+import { parseQueues, serializeQueues } from '../../shared/queuePersistence';
 import { newClientTurnId } from '../../shared/clientTurnId';
 import { selectPresentation, refreshPresentationReviews, referencePresentation } from './presentationWorkspace';
 import { splitPresentationContext } from '../../shared/presentationReferences';
@@ -140,7 +141,7 @@ let state: ChatState = {
   todosBySession: {},
   loopNoticeBySession: {},
   batchRowsById: {},
-  queueBySession: {},
+  queueBySession: loadQueues(),
   steerPendingBySession: {},
   composerSeedBySession: {},
   skillBySession: {},
@@ -254,7 +255,9 @@ function resetReveals(sessionId: string): void {
 }
 
 function setState(patch: Partial<ChatState>): void {
+  const queueChanged = patch.queueBySession !== undefined && patch.queueBySession !== state.queueBySession;
   state = { ...state, ...patch };
+  if (queueChanged) saveQueues(state.queueBySession);
   listeners.forEach((l) => l());
 }
 
@@ -549,6 +552,15 @@ export function seedComposer(
       },
     },
   });
+}
+
+const QUEUE_KEY = 'reizo:queued-turns';
+/** Queued follow-ups survive a restart; they wait in the queue panel and are never auto-sent. */
+function loadQueues(): Record<string, QueuedTurn[]> {
+  try { return parseQueues(localStorage.getItem(QUEUE_KEY)); } catch { return {}; }
+}
+function saveQueues(queues: Record<string, QueuedTurn[] | undefined>): void {
+  try { localStorage.setItem(QUEUE_KEY, serializeQueues(queues)); } catch { /* per-viewer convenience */ }
 }
 
 const PLAN_MODE_KEY = 'reizo:plan-mode';
