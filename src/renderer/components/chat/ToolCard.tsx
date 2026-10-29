@@ -11,7 +11,7 @@ import { useState } from 'react';
 import { Undo2 } from 'lucide-react';
 import { allowEgressHost, ApiRequestError, rollbackSnapshot } from '../../api';
 import { toast } from '../../lib/toast';
-import { toolDetail, toolDiffPreview, toolLabel, toolTarget } from './toolDisplay';
+import { toolDetail, toolDiffPreview, toolLabel, toolTarget, toolTitle } from './toolDisplay';
 import { confirmDialog } from '@/renderer/state/confirmStore';
 
 function snapshotIdOf(result: string | undefined): string | undefined {
@@ -99,7 +99,7 @@ export default function ToolCard({ part, collapsed = false, sessionId, interrupt
     return (
       <ToolResult
         tool={summary}
-        title={toolLabel('computer', part)}
+        title={toolTitle('computer', part, running)}
         status={running ? 'running' : part.error ? 'error' : 'success'}
         kind="request"
         defaultOpen={!collapsed}
@@ -138,7 +138,7 @@ export default function ToolCard({ part, collapsed = false, sessionId, interrupt
   return (
     <ToolResult
       tool={target}
-      title={toolLabel(part.name, part)}
+      title={toolTitle(part.name, part, running)}
       status={running ? 'running' : part.error ? 'error' : 'success'}
       kind={kind}
       defaultOpen={!collapsed && (isWrite || Boolean(part.error) || blockedHosts.length > 0)}

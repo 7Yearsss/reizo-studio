@@ -307,6 +307,13 @@ export function toolLabel(name: string, part?: ToolCallPart): string {
   }
 }
 
+/** Progressive form while the call runs ("正在读取文件"); the plain label once it has finished. */
+export function toolTitle(name: string, part: ToolCallPart | undefined, running: boolean): string {
+  const label = toolLabel(name, part);
+  if (!running || /^(正在|等待)/.test(label)) return label;
+  return `正在${label}`;
+}
+
 export function toolAction(name: string, part?: ToolCallPart): string {
   if (name === 'run_command' && part?.args) {
     const command =

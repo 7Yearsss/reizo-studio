@@ -6,6 +6,7 @@ import {
   toolLabel,
   toolAction,
   toolTarget,
+  toolTitle,
 } from './toolDisplay';
 import type { ToolCallPart } from '../../../shared/chat';
 
@@ -152,5 +153,15 @@ describe('toolLabel, toolAction, toolTarget with sniffed commands', () => {
     const p = part({ command: 'echo "hello"' }, 'run_command');
     expect(toolAction('run_command', p)).toBe('run');
     expect(toolLabel('run_command', p)).toBe('运行命令');
+  });
+});
+
+describe('toolTitle', () => {
+  it('uses the progressive form only while running', () => {
+    expect(toolTitle('read_file', undefined, true)).toBe('正在读取文件');
+    expect(toolTitle('read_file', undefined, false)).toBe('读取文件');
+  });
+  it('does not double-prefix labels that already read as a state', () => {
+    expect(toolTitle('ask_user', undefined, true)).toBe('等待你的回答');
   });
 });
