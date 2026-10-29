@@ -1,6 +1,7 @@
 "use client";
 // beui.dev/components/agents/message-scroller
 
+import { nextFollowState } from "../../../shared/followState";
 import { useReducedMotion } from "motion/react";
 import {
   type ComponentPropsWithRef,
@@ -163,6 +164,9 @@ export function MessageScroller({
     [externalViewportRef],
   );
 
+  const userIntentAtRef = useRef(0);
+  const pointerHeldRef = useRef(false);
+
   const setFollowing = useCallback(
     (next: boolean) => {
       if (followingRef.current === next) return;
@@ -309,11 +313,18 @@ export function MessageScroller({
 
     const distance =
       viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
-    setFollowing(distance <= followThreshold);
+    // Only the user leaves the live edge; a scroll event from content reflowing under a still reader does not.
+    setFollowing(nextFollowState({
+      following: followingRef.current,
+      distanceFromEnd: distance,
+      threshold: followThreshold,
+      msSinceUserIntent: pointerHeldRef.current ? 0 : Date.now() - userIntentAtRef.current,
+    }));
     updateActiveRailItem();
   }, [followThreshold, questionTopOf, setFollowing, updateActiveRailItem]);
 
   const leaveLiveEdge = useCallback(() => {
+    userIntentAtRef.current = Date.now();
     programmaticScrollRef.current = false;
   }, []);
 
@@ -453,6 +464,15 @@ export function MessageScroller({
       onScroll={(event) => {
         handleScroll();
         onViewportScroll?.(event);
+      }}
+      onPointerDown={(event) => {
+        // A press on the scrollbar (or a drag-select) counts as the user steering the view.
+        pointerHeldRef.current = true;
+        leaveLiveEdge();
+        const release = () => { pointerHeldRef.current = false; userIntentAtRef.current = Date.now(); window.removeEventListener('pointerup', release); window.removeEventListener('pointercancel', release); };
+        window.addEventListener('pointerup', release);
+        window.addEventListener('pointercancel', release);
+        restViewportProps.onPointerDown?.(event);
       }}
       onWheel={(event) => {
         leaveLiveEdge();
