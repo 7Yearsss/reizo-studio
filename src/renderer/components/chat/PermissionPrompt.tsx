@@ -3,6 +3,14 @@ import { CANVAS_BUDGET_TOOL } from '../../../shared/stream';
 import type { PendingPermission } from '../../state/chatStore';
 import { ToolApproval } from '../agents/tool-approval';
 import DiffView from './LazyDiffView';
+import { assessRisk, hasHiddenChars, revealHiddenChars, RISK_LABEL } from '../../../shared/permissionRisk';
+
+/** Enter must not approve while the user is typing somewhere (the composer, a rename box). */
+function isTypingTarget(target: EventTarget | null): boolean {
+  const el = target instanceof HTMLElement ? target : null;
+  if (!el) return false;
+  return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable || el.getAttribute('role') === 'textbox';
+}
 
 /** Params whose value is already shown by the diff view — hide them from the list. */
 const DIFF_REDUNDANT_KEYS = new Set(['content', 'oldString', 'newString', 'path']);
@@ -16,6 +24,8 @@ export default function PermissionPrompt({
 }) {
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
+      if (event.defaultPrevented || event.isComposing) return;
+      if (event.key !== 'Escape' && isTypingTarget(event.target)) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         onRespond('deny');
@@ -43,8 +53,10 @@ export default function PermissionPrompt({
     .map(([key, value]) => ({
       id: key,
       label: key,
-      value: typeof value === 'string' ? value : JSON.stringify(value),
+      value: revealHiddenChars(typeof value === 'string' ? value : JSON.stringify(value)),
     }));
+  const risks = assessRisk(permission.name, permission.args);
+  const hidden = Object.values(permission.args).some((value) => typeof value === 'string' && hasHiddenChars(value));
 
   const isComputer = permission.name === 'computer';
   const isCanvasBudget = permission.name === CANVAS_BUDGET_TOOL;
@@ -93,6 +105,14 @@ export default function PermissionPrompt({
   return (
     <div className="rise-in space-y-2">
       {preview ? <DiffView preview={preview} /> : null}
+      {risks.length || hidden ? (
+        <div className="flex flex-wrap gap-1.5 px-1" aria-label="风险提示">
+          {risks.map((tag) => (
+            <span key={tag} className="rounded-full bg-paper-inset px-2 py-0.5 text-[11px] text-ink">{RISK_LABEL[tag]}</span>
+          ))}
+          {hidden ? <span className="rounded-full bg-paper-inset px-2 py-0.5 text-[11px] text-danger">含不可见字符，已显示为 &lt;U+XXXX&gt;</span> : null}
+        </div>
+      ) : null}
       {mcp && (
         <button type="button" onClick={() => onRespond('allow-always')} className="px-1 text-xs text-ink-muted underline-offset-2 hover:text-ink hover:underline">
           以后一律允许这个工具（可在设置里撤销）
