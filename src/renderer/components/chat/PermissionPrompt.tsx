@@ -1,4 +1,5 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { CANVAS_BUDGET_TOOL } from '../../../shared/stream';
 import type { PendingPermission } from '../../state/chatStore';
 import { ToolApproval } from '../agents/tool-approval';
@@ -40,6 +41,10 @@ export default function PermissionPrompt({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onRespond]);
+
+  // A long approval can cover the conversation it is asking about: fold it to one line, keep it answerable.
+  const [minimized, setMinimized] = useState(false);
+  useEffect(() => { setMinimized(false); }, [permission.id]);
 
   const preview = permission.preview ?? null;
 
@@ -102,8 +107,20 @@ export default function PermissionPrompt({
       ? '画布生成有每轮配额。允许一次会再放行一批；本会话都允许则本轮内不再询问。'
       : '高风险动作会先问你，再动文件或命令。';
 
+  if (minimized) {
+    return (
+      <div className="flex items-center gap-2 rounded-xl border border-line bg-paper-raised px-3 py-1.5 text-[12px]" role="group" aria-label="待批准的操作（已折叠）">
+        <span className="min-w-0 flex-1 truncate text-ink" title={title}>{title}</span>
+        <button type="button" onClick={() => setMinimized(false)} className="inline-flex items-center gap-1 text-ink-muted hover:text-ink"><ChevronUp size={12} />展开</button>
+        <button type="button" onClick={() => onRespond('deny')} className="rounded-full border border-line px-2.5 py-0.5 text-ink hover:bg-paper-inset">拒绝</button>
+        <button type="button" onClick={() => onRespond('allow')} className="rounded-full bg-ink px-2.5 py-0.5 text-paper-raised hover:opacity-85">允许</button>
+      </div>
+    );
+  }
+
   return (
     <div className="rise-in space-y-2">
+      <button type="button" onClick={() => setMinimized(true)} className="ml-auto flex items-center gap-1 px-1 text-[11px] text-ink-muted hover:text-ink" aria-label="折叠审批卡片"><ChevronDown size={12} />折叠</button>
       {preview ? <DiffView preview={preview} /> : null}
       {risks.length || hidden ? (
         <div className="flex flex-wrap gap-1.5 px-1" aria-label="风险提示">
