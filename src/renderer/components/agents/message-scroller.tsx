@@ -164,6 +164,7 @@ export function MessageScroller({
     [externalViewportRef],
   );
 
+  const railPreviewRef = useRef(new WeakMap<HTMLElement, ReturnType<typeof getMessagePreview>>());
   const userIntentAtRef = useRef(0);
   const pointerHeldRef = useRef(false);
 
@@ -226,6 +227,13 @@ export function MessageScroller({
       content.querySelectorAll<HTMLElement>('[data-slot="message"]'),
     );
     const targets = new Map<string, HTMLElement>();
+    // The next assistant reply for each message, found in one backward pass (was a rescan per user message).
+    const nextAssistant: (HTMLElement | undefined)[] = new Array(messages.length);
+    let seenAssistant: HTMLElement | undefined;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      nextAssistant[i] = seenAssistant;
+      if (messages[i].dataset.from === "assistant") seenAssistant = messages[i];
+    }
     const nextItems = messages.map((message, index) => {
       let id = railIdRef.current.get(message);
       if (!id) {
@@ -235,13 +243,12 @@ export function MessageScroller({
       }
       targets.set(id, message);
       const sender = message.dataset.from ?? "conversation";
-      const assistantResponse =
-        sender === "user"
-          ? messages
-              .slice(index + 1)
-              .find((candidate) => candidate.dataset.from === "assistant")
-          : undefined;
-      const preview = getMessagePreview(message, assistantResponse);
+      const assistantResponse = sender === "user" ? nextAssistant[index] : undefined;
+      // Streaming only ever changes the tail: earlier messages keep their cached preview instead of being re-read every frame.
+      const settled = index < messages.length - 3;
+      const cached = settled ? railPreviewRef.current.get(message) : undefined;
+      const preview = cached ?? getMessagePreview(message, assistantResponse);
+      railPreviewRef.current.set(message, preview);
 
       return {
         id,
