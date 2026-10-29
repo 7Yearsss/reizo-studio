@@ -54,6 +54,19 @@ export default function TabBar() {
                       uiStore.setMode('chat');
                       tabStore.selectTab(tab.id);
                     }}
+                    // Middle-click closes, like a browser tab.
+                    onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); tabStore.closeTab(tab.id); } }}
+                    onKeyDown={(e) => {
+                      // Alt+Shift+←/→ reorders; Delete closes — the keyboard route to the × control.
+                      if (e.altKey && e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+                        e.preventDefault();
+                        tabStore.moveTab(tab.id, e.key === 'ArrowLeft' ? -1 : 1);
+                      } else if (e.key === 'Delete' && !e.altKey && !e.ctrlKey && !e.metaKey) {
+                        e.preventDefault();
+                        tabStore.closeTab(tab.id);
+                      }
+                    }}
+                    aria-keyshortcuts="Alt+Shift+ArrowLeft Alt+Shift+ArrowRight Delete"
                     className={cn(
                       'titlebar-no-drag group relative flex h-8 max-w-[200px] min-w-[120px] items-center gap-1.5 rounded-[9px] px-3 text-[13px] transition-colors duration-150',
                       active ? 'text-ink font-medium' : 'text-ink-muted hover:text-ink',

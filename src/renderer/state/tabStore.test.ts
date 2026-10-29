@@ -6,6 +6,7 @@ import {
   openChatTab,
   selectTab,
   reopenClosedTab,
+  moveTab,
   closeSessionTabs,
   resetClosedTabsForTest,
 } from './tabStore';
@@ -49,5 +50,18 @@ describe('reopen closed tab', () => {
     closeTab(c.id);
     closeSessionTabs('rc-c');
     expect(reopenClosedTab()).toBeUndefined();
+  });
+});
+
+describe('moveTab', () => {
+  it('reorders tabs and keeps the active one', () => {
+    const a = openChatTab('mv-a', 'A');
+    const b = openChatTab('mv-b', 'B');
+    const before = getSnapshot().tabs.map((t) => t.id);
+    moveTab(b.id, -1);
+    const after = getSnapshot().tabs.map((t) => t.id);
+    expect(after.indexOf(b.id)).toBe(before.indexOf(b.id) - 1);
+    expect(after.indexOf(a.id)).toBe(before.indexOf(a.id) + 1);
+    expect(getSnapshot().activeTabId).toBe(b.id);
   });
 });

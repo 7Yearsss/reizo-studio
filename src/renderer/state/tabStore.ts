@@ -1,4 +1,5 @@
 import { nanoid } from 'nanoid';
+import { moveItem } from '../../shared/reorder';
 
 export type TabKind = 'launcher' | 'chat';
 
@@ -143,6 +144,13 @@ export function openChatTab(sessionId: string, title: string, replaceActiveLaunc
   const tab: AppTab = { id: nanoid(), kind: 'chat', sessionId, title };
   select([...state.tabs, tab], tab.id);
   return tab;
+}
+
+/** Shift a tab left (-1) or right (+1) in the bar. */
+export function moveTab(id: string, delta: number): void {
+  const index = state.tabs.findIndex((t) => t.id === id);
+  const tabs = moveItem(state.tabs, index, delta);
+  if (tabs !== state.tabs) setState({ tabs });
 }
 
 export function selectTab(id: string): void {
