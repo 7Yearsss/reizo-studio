@@ -4,14 +4,8 @@ import { CANVAS_BUDGET_TOOL } from '../../../shared/stream';
 import type { PendingPermission } from '../../state/chatStore';
 import { ToolApproval } from '../agents/tool-approval';
 import DiffView from './LazyDiffView';
+import { approvalKeyAction } from '../../../shared/approvalKeys';
 import { assessRisk, hasHiddenChars, revealHiddenChars, RISK_LABEL } from '../../../shared/permissionRisk';
-
-/** Enter must not approve while the user is typing somewhere (the composer, a rename box). */
-function isTypingTarget(target: EventTarget | null): boolean {
-  const el = target instanceof HTMLElement ? target : null;
-  if (!el) return false;
-  return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable || el.getAttribute('role') === 'textbox';
-}
 
 /** Params whose value is already shown by the diff view — hide them from the list. */
 const DIFF_REDUNDANT_KEYS = new Set(['content', 'oldString', 'newString', 'path']);
@@ -25,18 +19,18 @@ export default function PermissionPrompt({
 }) {
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if (event.defaultPrevented || event.isComposing) return;
-      if (event.key !== 'Escape' && isTypingTarget(event.target)) return;
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onRespond('deny');
-      } else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
-        event.preventDefault();
-        onRespond('allow-session');
-      } else if (event.key === 'Enter') {
-        event.preventDefault();
-        onRespond('allow');
-      }
+      const el = event.target instanceof HTMLElement ? event.target : null;
+      const action = approvalKeyAction({
+        key: event.key,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        isComposing: event.isComposing,
+        defaultPrevented: event.defaultPrevented,
+        target: el ? { tag: el.tagName, role: el.getAttribute('role'), editable: el.isContentEditable } : null,
+      });
+      if (!action) return;
+      event.preventDefault();
+      onRespond(action);
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
