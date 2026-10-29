@@ -110,7 +110,8 @@ export default function WorkGroupCard({
               ? Math.round(reasoningMs / 1000)
               : undefined
         }
-        collapseOnComplete
+        // A failed or interrupted run stays open: that is exactly the moment the steps are worth reading.
+        collapseOnComplete={turnOutcome !== 'error' && turnOutcome !== 'interrupted'}
         activeLabel={liveLabel}
         summary={doneLabel}
         renderWorkingStatus={({ label }) => <ThinkingShimmer>{label}</ThinkingShimmer>}
