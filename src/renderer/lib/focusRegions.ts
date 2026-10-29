@@ -17,9 +17,12 @@ export function focusNextRegion(reverse: boolean): boolean {
   const current = regions.findIndex((el) => active !== null && el.contains(active));
   const next = regions[nextRegionIndex(regions.length, current, reverse)];
   if (!next) return false;
+  // The conversation lands on its scrolling viewport (arrow keys then scroll it), not on the first button inside it.
   const target = next.matches('[data-ui="chat.composer"]')
     ? next.querySelector<HTMLElement>('[contenteditable="true"], textarea') ?? next
-    : next.querySelector<HTMLElement>(FOCUSABLE) ?? next;
+    : next.matches('[role="log"]')
+      ? next.closest<HTMLElement>('section') ?? next
+      : next.querySelector<HTMLElement>(FOCUSABLE) ?? next;
   if (!target.hasAttribute('tabindex') && !target.matches(FOCUSABLE)) target.setAttribute('tabindex', '-1');
   target.focus({ preventScroll: false });
   return document.activeElement === target;
