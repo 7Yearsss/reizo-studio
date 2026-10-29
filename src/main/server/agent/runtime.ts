@@ -885,11 +885,13 @@ ${expandPromptVars(expert.instructions, promptVarCtx)}`
         },
       });
     },
-    onAwaitingInteraction: async ({ sessionId: sid, signal, emitToolResult, getAssistant }) => {
+    onAwaitingInteraction: async ({ sessionId: sid, signal, emitToolResult, getAssistant, noteWaited }) => {
       // Suspended: no provider connection is open. Wait for every pending
       // permission / question, run whatever was approved, then resume with a
       // fresh provider pass whose history already has the tool results.
+      const waitStartedAt = Date.now();
       await waitForInteractions(sid, signal);
+      noteWaited(Date.now() - waitStartedAt);
       if (signal.aborted) return null;
       for (const item of consumeInteractions(sid)) {
         if (item.kind === 'ask') {

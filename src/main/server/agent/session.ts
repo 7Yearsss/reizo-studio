@@ -65,6 +65,8 @@ export interface AwaitingInteractionContext {
     error?: string;
   }) => void;
   getAssistant: () => { text: string; parts: ToolCallPart[] };
+  /** Report time spent waiting on the user so the turn's duration excludes it. */
+  noteWaited: (ms: number) => void;
 }
 
 export interface StartTurnOptions {
@@ -474,6 +476,7 @@ class AgentSession {
                 pending: awaiting,
                 emitToolResult,
                 getAssistant: () => persister.snapshot(),
+                noteWaited: (ms) => persister.addWaitedMs(ms),
               });
             } catch (err) {
               terminalError = err instanceof Error ? err.message : String(err);

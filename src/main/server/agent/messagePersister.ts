@@ -28,12 +28,19 @@ export function spillField(store: LargeValueStore | undefined, value: string): s
 
 const commitChains = new Map<string, Promise<unknown>>();
 
+/** Elapsed turn time minus the time the user held it up; never negative. */
+export function workDuration(elapsedMs: number, waitedMs: number): number {
+  return Math.max(0, Math.round(elapsedMs - waitedMs));
+}
+
 export interface TurnPersister {
   readonly clientId: string;
   onText(delta: string): void;
   onReasoning(delta: string): void;
   onToolPart(part: ToolCallPart): void;
   hasContent(): boolean;
+  /** Time spent waiting on the user (approvals / questions); excluded from the turn's reported duration. */
+  addWaitedMs(ms: number): void;
   /** Assistant text + tool parts accumulated so far (defensive copies). */
   snapshot(): { text: string; parts: ToolCallPart[] };
   /** Serialized append of the assistant row. No-op when aborted / empty. */
@@ -67,6 +74,7 @@ export function createTurnPersister(deps: {
   let segmentOpen = false;
   let segmentStartedAt = 0;
   const turnStartedAt = Date.now();
+  let waitedMs = 0;
   const parts: ToolCallPart[] = [];
 
   function closeReasoningSegment(): void {
@@ -121,7 +129,7 @@ export function createTurnPersister(deps: {
         ? { reasoning, reasoningMs: Math.max(0, reasoningEndedAt - reasoningStartedAt) }
         : {}),
       ...(reasoningSegments.length ? { reasoningSegments } : {}),
-      durationMs: Math.max(0, Date.now() - turnStartedAt),
+      durationMs: workDuration(Date.now() - turnStartedAt, waitedMs),
       ...(outcome ? { turnOutcome: outcome } : {}),
       createdAt: new Date().toISOString(),
       turnId,
@@ -135,6 +143,7 @@ export function createTurnPersister(deps: {
 
   return {
     clientId,
+    addWaitedMs: (ms) => { if (Number.isFinite(ms) && ms > 0) waitedMs += ms; },
     snapshot: () => ({ text, parts: parts.map((p) => ({ ...p })) }),
     onText: (delta) => {
       closeReasoningSegment();
