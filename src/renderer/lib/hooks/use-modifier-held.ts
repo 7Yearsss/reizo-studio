@@ -31,3 +31,22 @@ export function useModifierHeld(): boolean {
   }, []);
   return held;
 }
+
+/** True the instant Ctrl (Cmd on macOS) goes down and until it comes up — for UI that flips with the modifier, no hint delay. */
+export function useModifierDown(): boolean {
+  const [down, setDown] = useState(false);
+  useEffect(() => {
+    const isMac = /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent);
+    const sync = (e: KeyboardEvent): void => setDown(isMac ? e.metaKey : e.ctrlKey);
+    const clear = (): void => setDown(false);
+    window.addEventListener('keydown', sync);
+    window.addEventListener('keyup', sync);
+    window.addEventListener('blur', clear);
+    return (): void => {
+      window.removeEventListener('keydown', sync);
+      window.removeEventListener('keyup', sync);
+      window.removeEventListener('blur', clear);
+    };
+  }, []);
+  return down;
+}

@@ -989,6 +989,7 @@ export default function Composer({
                 onStop={sending ? onStop : undefined}
                 onSendNow={() => submitNow()}
                 onEmptySendNow={queue.length > 0 ? steerAllQueued : undefined}
+                busyLane={busyEnter === 'steer' ? 'steer' : 'queue'}
                 busySendTitle={
                   busyEnter === 'steer'
                     ? 'Enter 插话（本轮生效）· Ctrl+Enter 排队'

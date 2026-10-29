@@ -1,7 +1,9 @@
 "use client";
 // beui.dev/components/agents/prompt-input
 
-import { ArrowUp, ListPlus, Plus, Square } from "lucide-react";
+import { ArrowUp, ListPlus, Plus, SendHorizontal, Square } from "lucide-react";
+import { useModifierDown } from "@/renderer/lib/hooks/use-modifier-held";
+import { activeBusyLane, type BusyLane } from "../../../shared/busyLane";
 import VoiceInputButton from '../chat/VoiceInputButton';
 import { appendVoiceText } from '../../../shared/voiceInput';
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
@@ -76,6 +78,8 @@ export interface PromptInputProps extends Omit<
   onEmptySendNow?: () => void;
   /** Tooltip tail for the send button while a run is live (describes the Ctrl+Enter lane). */
   busySendTitle?: string;
+  /** What plain Enter does while a run is live; holding Ctrl/Cmd flips the send button to the other lane. */
+  busyLane?: BusyLane;
   /** Attachments can be sent without an accompanying text draft. */
   allowEmptySubmit?: boolean;
   minRows?: number;
@@ -104,6 +108,7 @@ export function PromptInput({
   onSendNow,
   onEmptySendNow,
   busySendTitle,
+  busyLane = "queue",
   allowEmptySubmit = false,
   minRows = 2,
   maxRows = 8,
@@ -136,6 +141,8 @@ export function PromptInput({
   );
   const hasDraft = Boolean(currentValue.trim()) || allowEmptySubmit;
   const canSubmit = hasDraft && !disabled;
+  const modifierDown = useModifierDown();
+  const lane = activeBusyLane(busyLane, loading && modifierDown);
   const sendReason = canSubmit ? undefined : sendDisabledReason({ hasDraft, disabled });
   // Keep one persistent stop control in the footer; a draft gets its own send button.
   const showStop = loading || Boolean(onStop);
@@ -313,7 +320,7 @@ export function PromptInput({
             className="size-8 shrink-0 rounded-full"
           >
             {/* While a turn runs, Enter queues the message — the icon says so instead of promising an instant send. */}
-            {loading ? <ListPlus className="size-4" /> : <ArrowUp className="size-4" />}
+            {loading ? (lane === "steer" ? <SendHorizontal className="size-4" /> : <ListPlus className="size-4" />) : <ArrowUp className="size-4" />}
           </Button>
         )}
         <Button
