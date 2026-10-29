@@ -180,6 +180,7 @@ export default function RightPanel({
   return (
     <motion.aside
       ref={asideRef}
+      data-ui="app.panel"
       aria-label={activeTab === 'canvas' ? '画布工作区' : '工具面板'}
       data-canvas-workspace={activeTab === 'canvas' ? '' : undefined}
       initial={{ width: 0, opacity: 0, x: 24 }}

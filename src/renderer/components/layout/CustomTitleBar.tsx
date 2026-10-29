@@ -8,6 +8,7 @@ import {
   Square,
   X,
 } from 'lucide-react';
+import { focusNextRegion } from '../../lib/focusRegions';
 import { useEffect, useState } from 'react';
 import Tooltip from '../ui/Tooltip';
 import logoUrl from '../../assets/logo.png';
@@ -70,6 +71,12 @@ export default function CustomTitleBar() {
       if ((e.metaKey || e.ctrlKey) && (e.key === 'b' || e.key === 'B')) {
         e.preventDefault();
         uiStore.toggleSidebar();
+        return;
+      }
+
+      // F6 / Shift+F6 hops between the sidebar, conversation, composer and side panel.
+      if (e.key === 'F6' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (focusNextRegion(e.shiftKey)) e.preventDefault();
         return;
       }
 
