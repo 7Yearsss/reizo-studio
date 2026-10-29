@@ -88,7 +88,7 @@ export default function AssistantMessage({
           </span>
         </div>
       ) : null}
-      <ProducedFiles parts={parts} />
+      <ProducedFiles parts={parts} sessionId={sessionId} />
       {sessionId && messageId && !streaming ? <MessageTranslations sessionId={sessionId} messageId={messageId} /> : null}
       {(Boolean(content) || (parts?.length ?? 0) > 0) && !streaming && (
         <div className="flex items-center gap-3">

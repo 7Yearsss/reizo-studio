@@ -3,6 +3,10 @@ import { FileText } from 'lucide-react';
 import type { ToolCallPart } from '../../../shared/chat';
 import WorkspaceFileDialog from '../workspace/WorkspaceFileDialog';
 import { toolDiffPreview } from './toolDisplay';
+import { Undo2 } from 'lucide-react';
+import { ApiRequestError, rollbackSnapshot } from '../../api';
+import { toast } from '../../lib/toast';
+import { confirmDialog } from '../../state/confirmStore';
 import { lineStats, type LineStats } from '../../../shared/lineStats';
 
 export function producedFilePaths(parts: ToolCallPart[] = []): string[] {
@@ -32,7 +36,46 @@ export function producedFileStats(parts: ToolCallPart[] = []): Map<string, LineS
   return new Map([...span].map(([path, { before, after }]) => [path, lineStats(before, after)]));
 }
 
-export default function ProducedFiles({ parts }: { parts?: ToolCallPart[] }) {
+/** Snapshot ids of this turn's successful file edits, newest first — the order they must be undone in. */
+export function turnSnapshotIds(parts: ToolCallPart[] = []): string[] {
+  const ids: string[] = [];
+  for (const part of parts) {
+    if (!['write_file', 'edit_file'].includes(part.name) || part.error || !part.result) continue;
+    try {
+      const id = (JSON.parse(part.result) as { snapshotId?: unknown }).snapshotId;
+      if (typeof id === 'string') ids.push(id);
+    } catch { /* not a structured result */ }
+  }
+  return ids.reverse();
+}
+
+export default function ProducedFiles({ parts, sessionId }: { parts?: ToolCallPart[]; sessionId?: string }) {
+  const [undoing, setUndoing] = useState(false);
+  const snapshotIds = useMemo(() => turnSnapshotIds(parts), [parts]);
+  async function undoTurn() {
+    if (!sessionId || snapshotIds.length === 0) return;
+    const ok = await confirmDialog({
+      title: '撤销本轮的全部文件改动？',
+      description: `将按相反顺序回滚 ${snapshotIds.length} 次修改；某个文件在这之后又被改过时会停下，不会覆盖。`,
+      confirmLabel: '撤销',
+      destructive: true,
+    });
+    if (!ok) return;
+    setUndoing(true);
+    let restored = 0;
+    try {
+      for (const id of snapshotIds) {
+        await rollbackSnapshot(sessionId, id, false);
+        restored++;
+      }
+      toast.success('已撤销本轮改动', `${restored} 次修改已回滚`);
+    } catch (error) {
+      const stale = error instanceof ApiRequestError && error.status === 409;
+      toast.error(stale ? '已停下：有文件在这之后又被改过' : '撤销失败', `已回滚 ${restored}/${snapshotIds.length} 次；${error instanceof Error ? error.message : ''}`);
+    } finally {
+      setUndoing(false);
+    }
+  }
   const paths = useMemo(() => producedFilePaths(parts), [parts]);
   const stats = useMemo(() => producedFileStats(parts), [parts]);
   const [previewPath, setPreviewPath] = useState<string | null>(null);
@@ -44,6 +87,7 @@ export default function ProducedFiles({ parts }: { parts?: ToolCallPart[] }) {
       <FileText size={14} className="shrink-0" /><span className="truncate">{path.split(/[/\\]/).pop()}</span>
       {stats.get(path) ? <span className="shrink-0 text-[11px] text-ink-muted tabular-nums">+{stats.get(path)?.added} −{stats.get(path)?.removed}</span> : null}
     </button>)}
+    {sessionId && snapshotIds.length > 0 ? <button type="button" disabled={undoing} onClick={() => void undoTurn()} className="inline-flex items-center gap-1 text-[12px] text-ink-muted hover:text-ink disabled:opacity-50"><Undo2 size={12} />{undoing ? '正在撤销' : '撤销本轮改动'}</button> : null}
     {previewPath && <WorkspaceFileDialog path={previewPath} onClose={() => setPreviewPath(null)} />}
   </div>;
 }
