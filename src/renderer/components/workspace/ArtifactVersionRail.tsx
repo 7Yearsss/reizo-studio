@@ -100,7 +100,7 @@ export default function ArtifactVersionRail({
                   <span className="truncate text-[11px] text-ink-muted">{v.label}</span>
                   {isActive && <Check size={11} className="ml-auto text-accent" />}
                 </div>
-                <div className="relative z-10 mt-0.5 truncate text-[11px] text-ink-muted/80">
+                <div className="relative z-10 mt-0.5 truncate text-[11px] text-ink-muted">
                   {relTime(v.createdAt)}
                 </div>
                 </button>

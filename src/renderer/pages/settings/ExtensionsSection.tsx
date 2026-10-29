@@ -208,7 +208,7 @@ function McpBlock() {
               </div>
               <p className="mt-1 break-all font-mono text-xs text-ink-muted">{describeMcpEntry(entry)}</p>
               {entry.env || entry.headers ? (
-                <p className="mt-1 break-all font-mono text-[11px] text-ink-muted/80">
+                <p className="mt-1 break-all font-mono text-[11px] text-ink-muted">
                   {Object.entries(maskSecrets(entry.env ?? entry.headers) ?? {}).map(([k, v]) => `${k}=${v}`).join('  ')}
                 </p>
               ) : null}
