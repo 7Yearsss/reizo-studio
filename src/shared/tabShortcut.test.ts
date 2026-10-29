@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { tabIndexForShortcut, type ShortcutKeyEvent } from './tabShortcut';
+import { isReopenClosedTabShortcut, tabIndexForShortcut, type ShortcutKeyEvent } from './tabShortcut';
 
 const ev = (over: Partial<ShortcutKeyEvent>): ShortcutKeyEvent => ({ key: '1', code: 'Digit1', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false, ...over });
 
@@ -36,5 +36,15 @@ describe('shortcutDigitForTab', () => {
         expect(tabIndexForShortcut({ key: String(digit), ctrlKey: true, metaKey: false, altKey: false, shiftKey: false }, count)).toBe(i);
       }
     }
+  });
+});
+
+describe('isReopenClosedTabShortcut', () => {
+  const base = { key: 'T', ctrlKey: true, metaKey: false, altKey: false, shiftKey: true };
+  it('is Mod+Shift+T only', () => {
+    expect(isReopenClosedTabShortcut(base)).toBe(true);
+    expect(isReopenClosedTabShortcut({ ...base, shiftKey: false })).toBe(false);
+    expect(isReopenClosedTabShortcut({ ...base, ctrlKey: false })).toBe(false);
+    expect(isReopenClosedTabShortcut({ ...base, isComposing: true })).toBe(false);
   });
 });

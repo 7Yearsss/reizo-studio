@@ -15,7 +15,7 @@ import { useUiStore } from '../../state/useUiStore';
 import { useTabStore } from '../../state/useTabStore';
 import * as uiStore from '../../state/uiStore';
 import * as tabStore from '../../state/tabStore';
-import { tabIndexForShortcut } from '../../../shared/tabShortcut';
+import { isReopenClosedTabShortcut, tabIndexForShortcut } from '../../../shared/tabShortcut';
 import {
   goBack,
   goForward,
@@ -70,6 +70,12 @@ export default function CustomTitleBar() {
       if ((e.metaKey || e.ctrlKey) && (e.key === 'b' || e.key === 'B')) {
         e.preventDefault();
         uiStore.toggleSidebar();
+        return;
+      }
+
+      if (isReopenClosedTabShortcut(e)) {
+        e.preventDefault();
+        if (tabStore.reopenClosedTab()) uiStore.setMode('chat');
         return;
       }
 

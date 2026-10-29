@@ -5,6 +5,9 @@ import {
   newLauncherTab,
   openChatTab,
   selectTab,
+  reopenClosedTab,
+  closeSessionTabs,
+  resetClosedTabsForTest,
 } from './tabStore';
 
 describe('launcher tab navigation', () => {
@@ -28,5 +31,23 @@ describe('launcher tab navigation', () => {
 
     selectTab(freshLauncher.id);
     expect(newLauncherTab().id).toBe(freshLauncher.id);
+  });
+});
+
+describe('reopen closed tab', () => {
+  it('restores the last closed chat tab, skips open and deleted sessions', () => {
+    resetClosedTabsForTest();
+    const a = openChatTab('rc-a', 'A');
+    const b = openChatTab('rc-b', 'B');
+    closeTab(a.id);
+    closeTab(b.id);
+    expect(reopenClosedTab()?.sessionId).toBe('rc-b');
+    expect(reopenClosedTab()?.sessionId).toBe('rc-a');
+    expect(reopenClosedTab()).toBeUndefined();
+
+    const c = openChatTab('rc-c', 'C');
+    closeTab(c.id);
+    closeSessionTabs('rc-c');
+    expect(reopenClosedTab()).toBeUndefined();
   });
 });

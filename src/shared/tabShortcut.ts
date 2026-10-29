@@ -29,3 +29,9 @@ export function shortcutDigitForTab(index: number, tabCount: number): number | n
 
 /** How long the modifier must be held before the numbers appear, so a quick Ctrl+C never flashes them. */
 export const SHORTCUT_HINT_DELAY_MS = 400;
+
+/** Mod+Shift+T — bring back the tab that was closed last. */
+export function isReopenClosedTabShortcut(e: ShortcutKeyEvent): boolean {
+  if (e.isComposing || e.altKey || !e.shiftKey || !(e.ctrlKey || e.metaKey)) return false;
+  return e.code === 'KeyT' || e.key.toLowerCase() === 't';
+}

@@ -155,9 +155,36 @@ export function renameChatTab(sessionId: string, title: string): void {
   });
 }
 
+const CLOSED_LIMIT = 10;
+let closedStack: { sessionId: string; title: string }[] = [];
+
+/** The most recently closed chat tab that is not currently open again, or undefined. */
+export function peekClosedTab(): { sessionId: string; title: string } | undefined {
+  return closedStack[closedStack.length - 1];
+}
+
+/** Reopen the chat tab closed last (Ctrl/Cmd+Shift+T). Launcher tabs and deleted sessions are never offered. */
+export function reopenClosedTab(): AppTab | undefined {
+  while (closedStack.length > 0) {
+    const entry = closedStack.pop();
+    if (!entry) break;
+    if (state.tabs.some((t) => t.sessionId === entry.sessionId)) continue;
+    return openChatTab(entry.sessionId, entry.title);
+  }
+  return undefined;
+}
+
+export function resetClosedTabsForTest(): void {
+  closedStack = [];
+}
+
 export function closeTab(id: string): void {
   const index = state.tabs.findIndex((t) => t.id === id);
   if (index < 0) return;
+  const closing = state.tabs[index];
+  if (closing.kind === 'chat' && closing.sessionId) {
+    closedStack = [...closedStack.filter((e) => e.sessionId !== closing.sessionId), { sessionId: closing.sessionId, title: closing.title }].slice(-CLOSED_LIMIT);
+  }
 
   if (state.tabs.length === 1) {
     const tab = makeLauncher();
@@ -171,6 +198,8 @@ export function closeTab(id: string): void {
 }
 
 export function closeSessionTabs(sessionId: string): void {
+  // The session itself is gone (deleted), so it must not be offered for reopening.
+  closedStack = closedStack.filter((e) => e.sessionId !== sessionId);
   const remaining = state.tabs.filter((t) => t.sessionId !== sessionId);
   if (remaining.length === state.tabs.length) return;
   if (remaining.length === 0) {
