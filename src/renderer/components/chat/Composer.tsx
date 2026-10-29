@@ -372,8 +372,7 @@ export default function Composer({
   const historyShownRef = useRef('');
   const sentHistory = useChatStore((s) => (sessionId ? s.messagesBySession[sessionId] : undefined));
   function recallSentMessage(direction: 'up' | 'down'): boolean {
-    const pristine = (draft === '' || draft === historyShownRef.current) && !draft.includes('
-');
+    const pristine = (draft === '' || draft === historyShownRef.current) && !draft.includes('\n');
     if (!pristine) return false;
     const users = (sentHistory ?? []).filter((m) => m.role === 'user').map((m) => m.content);
     const step = historyStep(users, draft === '' && direction === 'up' ? null : historyCursorRef.current, direction);
