@@ -17,6 +17,7 @@ import { useChatStore } from '../../state/useChatStore';
 import ErrorBoundary from '../ErrorBoundary';
 import UserMessage from './UserMessage';
 import AssistantMessage from './AssistantMessage';
+import { parseAnchors, pickAnchor, withAnchor, type ReadingAnchor } from '../../../shared/readingAnchor';
 import { unseenCount, unseenLabel } from '../../../shared/unseenCount';
 import { isSteeredMessage } from '../../../shared/steerMessage';
 import EmptyChatHints from './EmptyChatHints';
@@ -83,7 +84,10 @@ export default function MessageList({
   // Reset the window on a session switch (the first item changes).
   const itemsRef = useRef(items);
   itemsRef.current = items;
+  // Set when a saved reading position was just restored, so the reset below does not drag the reader back to the end.
+  const heldByRestore = useRef(false);
   useEffect(() => {
+    if (heldByRestore.current) { heldByRestore.current = false; return; }
     setWindowStart(initialWindowStart(itemsRef.current));
     setFollowing(true);
   }, [firstKey]);
@@ -101,6 +105,60 @@ export default function MessageList({
     }
   }, [windowStart]);
 
+  // Reading position: remember where in the history the reader is (per conversation) and put them back after a reload.
+  const ANCHOR_KEY = 'reizo:reading-anchors';
+  const restoredFor = useRef<string | undefined>(undefined);
+  const saveTimer = useRef<number | undefined>(undefined);
+  const followingRef = useRef(following);
+  followingRef.current = following;
+
+  const saveAnchor = () => {
+    const el = viewportRef.current;
+    if (!el || !sessionId) return;
+    const top = el.getBoundingClientRect().top;
+    const rects = [...el.querySelectorAll<HTMLElement>('[data-message-id]')].map((m) => {
+      const r = m.getBoundingClientRect();
+      return { id: m.dataset.messageId ?? '', top: r.top, bottom: r.bottom };
+    });
+    const anchor = pickAnchor(rects, top, followingRef.current);
+    try {
+      localStorage.setItem(ANCHOR_KEY, JSON.stringify(withAnchor(parseAnchors(localStorage.getItem(ANCHOR_KEY)), sessionId, anchor)));
+    } catch { /* per-viewer convenience */ }
+  };
+  const scheduleSaveAnchor = () => {
+    window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(saveAnchor, 250);
+  };
+  const restoreRaf = useRef(0);
+  useEffect(() => () => { window.clearTimeout(saveTimer.current); cancelAnimationFrame(restoreRaf.current); }, []);
+
+  useEffect(() => {
+    if (!sessionId || loading || items.length === 0 || restoredFor.current === sessionId) return;
+    restoredFor.current = sessionId;
+    let anchor: ReadingAnchor | undefined;
+    try { anchor = parseAnchors(localStorage.getItem(ANCHOR_KEY))[sessionId]; } catch { anchor = undefined; }
+    if (!anchor) return;
+    const index = items.findIndex((it) => it.key === anchor.messageId);
+    if (index < 0) return;
+    if (index < windowStart) setWindowStart(snapWindowStart(items, index));
+    heldByRestore.current = true;
+    setFollowing(false);
+    // Rows lay out lazily (content-visibility), so settle over a few frames instead of trusting one measurement.
+    let frames = 0;
+    const place = () => {
+      const el = viewportRef.current;
+      const target = el?.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(anchor.messageId)}"]`);
+      if (el && target) {
+        el.scrollTop += target.getBoundingClientRect().top - el.getBoundingClientRect().top - anchor.offset;
+      }
+      if (frames++ < 8) { restoreRaf.current = requestAnimationFrame(place); return; }
+      // Intermediate frames ran on estimated row heights and can look "close to the end", which turns following back on;
+      // once the position has settled, a reader who is clearly mid-history stays off the live edge.
+      if (el && el.scrollHeight - el.scrollTop - el.clientHeight > 80) setFollowing(false);
+    };
+    restoreRaf.current = requestAnimationFrame(place);
+  }, [sessionId, loading, items, windowStart]);
+
   useEffect(() => {
     if (!currentMatchId) return;
     const el = viewportRef.current?.querySelector(`[data-message-id="${CSS.escape(currentMatchId)}"]`);
@@ -114,7 +172,6 @@ export default function MessageList({
     const idx = items.findIndex((it) => it.key === currentMatchId);
     if (idx >= 0 && idx < windowStart) setWindowStart(snapWindowStart(items, idx));
   }, [currentMatchId, searchQuery, items, windowStart]);
-
   const empty = messages.length === 0 && !sending && !loading;
   const shown = items.slice(windowStart);
   const hasOlder = windowStart > 0;
@@ -148,6 +205,7 @@ export default function MessageList({
           },
           onScroll: (event) => {
             const el = event.currentTarget;
+            scheduleSaveAnchor();
             if (el.scrollTop < GROW_TRIGGER_PX && windowStart > 0 && growAnchorRef.current === null) {
               growAnchorRef.current = el.scrollHeight;
               setWindowStart((s) => snapWindowStart(items, s - WINDOW_GROW_ITEMS));
