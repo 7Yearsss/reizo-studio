@@ -525,6 +525,14 @@ function summaryOf(session: {
   };
 }
 
+/** Whether the saved conversation already holds a user message with this content (the send got through). */
+export function wasPersisted(saved: { role: string; content: string }[], content: string): boolean {
+  for (let i = saved.length - 1; i >= 0; i--) {
+    if (saved[i].role === 'user') return saved[i].content === content;
+  }
+  return false;
+}
+
 export function seedComposer(
   sessionId: string,
   text: string,
@@ -1363,6 +1371,10 @@ async function dispatchTurn(
         errorBySession: { ...state.errorBySession, [sessionId]: (err as Error).message },
         turnOutcomeBySession: { ...state.turnOutcomeBySession, [sessionId]: 'error' },
       });
+      // A send the server refused never reached the saved conversation: hand the text back instead of losing it.
+      if (userMessage && !wasPersisted(session.messages, userMessage.content)) {
+        seedComposer(sessionId, text);
+      }
     } catch {
       setState({ errorBySession: { ...state.errorBySession, [sessionId]: (err as Error).message } });
     }

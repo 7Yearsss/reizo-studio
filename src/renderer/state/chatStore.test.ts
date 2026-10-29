@@ -458,3 +458,11 @@ describe('chatStore streaming fold', () => {
     expect(store.getSnapshot().nodeRefsBySession.s1).toHaveLength(0);
   });
 });
+
+describe('wasPersisted', () => {
+  it('is true only when the latest user message matches the sent content', () => {
+    expect(store.wasPersisted([{ role: 'user', content: 'a' }, { role: 'assistant', content: 'b' }], 'a')).toBe(true);
+    expect(store.wasPersisted([{ role: 'user', content: 'a' }], 'new')).toBe(false);
+    expect(store.wasPersisted([], 'new')).toBe(false);
+  });
+});
