@@ -69,6 +69,16 @@ export default function QueuePanel({
           {items.map((item, index) => (
             <div
               key={item.id}
+              draggable={Boolean(onMove) && items.length > 1}
+              onDragStart={(e) => { e.dataTransfer.setData('application/x-reizo-queued', item.id); e.dataTransfer.effectAllowed = 'move'; }}
+              onDragOver={(e) => { if (e.dataTransfer.types.includes('application/x-reizo-queued')) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } }}
+              onDrop={(e) => {
+                const from = e.dataTransfer.getData('application/x-reizo-queued');
+                const fromIndex = items.findIndex((candidate) => candidate.id === from);
+                if (!onMove || fromIndex < 0 || fromIndex === index) return;
+                e.preventDefault();
+                onMove(from, index - fromIndex);
+              }}
               className="rise-in flex items-center gap-2 rounded-2xl border border-line bg-paper-raised px-3 py-2 text-xs text-ink"
             >
               <span className="shrink-0 text-ink-muted">{index === 0 ? '下一条' : `排队 ${index + 1}`}</span>
