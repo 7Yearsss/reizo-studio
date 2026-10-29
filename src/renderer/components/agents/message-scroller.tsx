@@ -480,7 +480,7 @@ export function MessageScroller({
       <div
         ref={contentRef}
         role="log"
-        aria-live="polite"
+        aria-live={busy ? "off" : "polite"}
         aria-relevant="additions text"
         aria-busy={busy}
         className={contentClassName}

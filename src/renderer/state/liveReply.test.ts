@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatTurnElapsed, liveReplyPhase, liveReplySilence, liveReplyWaitLabel } from './liveReply';
+import { formatTurnElapsed, liveReplyPhase, liveReplySilence, liveReplyWaitLabel, reconnectingLabel } from './liveReply';
 
 describe('liveReplyPhase', () => {
   it('is undefined when the turn is not sending', () => {
@@ -54,5 +54,14 @@ describe('liveReplyWaitLabel', () => {
     expect(liveReplyWaitLabel({ silence: 'stale', waitedMs: 166_000 })).toBe(
       '模型还没有返回内容，已等待 2:46',
     );
+  });
+});
+
+describe('reconnectingLabel', () => {
+  it('omits the time when nothing has arrived yet', () => {
+    expect(reconnectingLabel(undefined)).toBe('连接断开，重连中…');
+  });
+  it('shows when the turn was last heard from', () => {
+    expect(reconnectingLabel(new Date(2026, 0, 1, 15, 14).getTime())).toMatch(/^连接断开，重连中 · 上次更新 .*14/);
   });
 });

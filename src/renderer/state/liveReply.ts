@@ -53,3 +53,10 @@ export function formatTurnElapsed(ms: number): string {
   const hours = Math.floor(minutes / 60);
   return `${hours}:${String(minutes % 60).padStart(2, '0')}:${String(rest).padStart(2, '0')}`;
 }
+
+/** "连接断开，重连中 · 上次更新 3:14 PM" — says when we last heard from the turn, if ever. */
+export function reconnectingLabel(lastProgressAt: number | undefined): string {
+  if (!lastProgressAt) return '连接断开，重连中…';
+  const time = new Date(lastProgressAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return `连接断开，重连中 · 上次更新 ${time}`;
+}

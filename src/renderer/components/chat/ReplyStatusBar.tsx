@@ -3,7 +3,7 @@ import { RotateCcw } from 'lucide-react';
 import type { TodoItem } from '../../../shared/stream';
 import type { ReplyPhase } from '../../../shared/stream';
 import type { ChatInteraction } from '../../state/chatStore';
-import { liveReplyPhase, liveReplySilence, liveReplyWaitLabel } from '../../state/liveReply';
+import { liveReplyPhase, liveReplySilence, liveReplyWaitLabel, reconnectingLabel } from '../../state/liveReply';
 import { AgentProgress } from '../agents/loading-states/agent-progress';
 
 export type { ReplyPhase } from '../../../shared/stream';
@@ -74,7 +74,7 @@ export default function ReplyStatusBar({
   const baseLabel = interruptRequested
     ? '正在停止'
     : recovering
-      ? '连接中断，正在恢复…'
+      ? reconnectingLabel(lastProgressAt ?? lastTextAt)
       : interaction
         ? PHASE_LABEL.waiting
         : waitLabel || PHASE_LABEL[phase] || '处理中';
