@@ -1,4 +1,5 @@
 import { Suspense, useEffect, useRef, useState } from 'react';
+import { splitterKeyWidth } from '../../../shared/splitterKeys';
 import { motion, useIsPresent } from 'motion/react';
 import { Maximize2, Minimize2, PanelRightClose } from 'lucide-react';
 import { cn } from '../../lib/cn';
@@ -204,12 +205,26 @@ export default function RightPanel({
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="调整面板宽度"
+        aria-valuemin={uiStore.RIGHT_PANEL_MIN}
+        aria-valuemax={uiStore.getRightPanelMax()}
+        aria-valuenow={storedWidth}
+        tabIndex={maximized ? -1 : 0}
+        onKeyDown={(e) => {
+          if (maximized) return;
+          const next = splitterKeyWidth(storedWidth, e.key, e.shiftKey, uiStore.RIGHT_PANEL_MIN, uiStore.getRightPanelMax());
+          if (next === null) return;
+          e.preventDefault();
+          uiStore.setRightPanelWidth(next);
+        }}
         className="group absolute -left-1.5 top-0 z-30 flex h-full w-3 cursor-col-resize items-center justify-center select-none"
         title={maximized ? '向右拖动还原' : '拖动调整宽度（向左滑到底可最大化）'}
       >
         <span
           className={cn(
-            'h-8 w-1 rounded-full bg-line opacity-0 transition-opacity group-hover:opacity-100',
+            'h-8 w-1 rounded-full bg-line opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 group-focus-visible:bg-accent',
             isDragging && 'opacity-100 bg-accent',
           )}
         />
