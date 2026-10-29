@@ -484,6 +484,8 @@ export default function Composer({
       }
       try {
         const read = await window.reizo.readDroppedFile(file);
+        // A file with no path on disk (pasted text, a drag from a browser) can come back empty: use the fallback below.
+        if (!read.name) throw new Error('empty read');
         next.push({ name: read.name, content: read.content });
       } catch {
         if (/\.pdf$/i.test(file.name)) {
