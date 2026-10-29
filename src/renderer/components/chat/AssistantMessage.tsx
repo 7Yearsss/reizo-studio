@@ -97,7 +97,7 @@ export default function AssistantMessage({
           ) : turnOutcome === 'error' ? (
             <span className="text-[11px] text-danger/80">回复失败{durationMs ? ` · ${formatDuration(durationMs)}` : ''}</span>
           ) : (
-            <span className="text-[11px] text-ink-muted/70">
+            <span className="text-[11px] text-ink-muted">
               已完成{durationMs !== undefined && durationMs > 0 && (parts?.length ?? 0) === 0 ? ` · ${formatDuration(durationMs)}` : ''}
             </span>
           )}
