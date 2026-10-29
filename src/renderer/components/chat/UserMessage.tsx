@@ -32,8 +32,11 @@ export default function UserMessage({
   currentMatch = false,
   canEdit = false,
   onEdit,
+  steered = false,
 }: {
   content: string;
+  /** Sent while the reply was running and injected into it. */
+  steered?: boolean;
   sessionId?: string;
   searchQuery?: string;
   currentMatch?: boolean;
@@ -64,6 +67,7 @@ export default function UserMessage({
       className={`anim-msg group flex justify-end ${currentMatch ? 'chat-search-current' : ''}`}
     >
       <div className="min-w-0 max-w-[85%] sm:max-w-[78%]">
+        {steered ? <p className="mb-0.5 text-right text-[11px] text-ink-muted">插话 · 回复进行中发出</p> : null}
         <div
           data-slot="message-content"
           className="chat-user-bubble whitespace-pre-wrap"

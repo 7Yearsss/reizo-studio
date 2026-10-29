@@ -18,6 +18,7 @@ import ErrorBoundary from '../ErrorBoundary';
 import UserMessage from './UserMessage';
 import AssistantMessage from './AssistantMessage';
 import { unseenCount, unseenLabel } from '../../../shared/unseenCount';
+import { isSteeredMessage } from '../../../shared/steerMessage';
 import EmptyChatHints from './EmptyChatHints';
 import MemoryEventRow from './MemoryEventRow';
 import VideoEditorActivity from './VideoEditorActivity';
@@ -200,6 +201,7 @@ export default function MessageList({
                   currentMatch={currentMatchId === m.id}
                   canEdit={!sending && m.id === lastUserId}
                   onEdit={onEditLastUser}
+                  steered={isSteeredMessage(m.id)}
                 />
               ) : (
                 <AssistantMessage

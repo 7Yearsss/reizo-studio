@@ -1,4 +1,5 @@
 import { HALTED_PREFIX } from '../../shared/loopRecovery';
+import { STEER_ID_PREFIX } from '../../shared/steerMessage';
 import { autoRetryLabel } from '../../shared/retryLabel';
 import { moveItem } from '../../shared/reorder';
 import { parseQueues, serializeQueues } from '../../shared/queuePersistence';
@@ -684,7 +685,7 @@ export async function steerNow(
     await sendMessage(sessionId, text, mentions, extra);
     return;
   }
-  const id = `steer-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const id = `${STEER_ID_PREFIX}${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const pending = { id, text: trimmed };
   setState({
     steerPendingBySession: {
