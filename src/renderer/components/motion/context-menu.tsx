@@ -352,6 +352,15 @@ export function ContextMenuContent({
 
   useEffect(() => setMounted(true), []);
 
+  // Mount the menu only while it is open (plus the time its closing animation needs). A list with hundreds of rows
+  // otherwise keeps hundreds of hidden, animated menus alive in the document.
+  const [present, setPresent] = useState(false);
+  useEffect(() => {
+    if (context.open) { setPresent(true); return; }
+    const timer = window.setTimeout(() => setPresent(false), MORPH_DURATION * 1000 + 80);
+    return (): void => window.clearTimeout(timer);
+  }, [context.open]);
+
   useLayoutEffect(() => {
     if (!context.open) {
       setMorphReady(false);
@@ -408,6 +417,7 @@ export function ContextMenuContent({
     context.invocation,
     context.modality,
     context.reduce,
+    present,
   ]);
 
   useEffect(() => {
@@ -477,7 +487,7 @@ export function ContextMenuContent({
     }
   };
 
-  if (!mounted) return null;
+  if (!mounted || !(context.open || present)) return null;
 
   const visualOpen = context.open && morphReady;
   const clipHidden = collapsedClip(origin, size);
