@@ -36,6 +36,7 @@ import { useChatStore } from '../../state/useChatStore';
 import { useCanvasStore, useCanvasStoreEq, sameNodesIgnoringGeometry } from '../../state/useCanvasStore';
 import * as settingsStore from '../../state/settingsStore';
 import { escapeStopStep } from '../../../shared/escapeStop';
+import { replacedMessageCount } from '../../../shared/editReplaceSpan';
 import { appendQuote, formatQuote, QUOTE_SELECTION_EVENT } from '../../../shared/quoteSelection';
 import { historyStep } from '../../../shared/sentHistory';
 import { requestPermissionMode } from '../../lib/requestPermissionMode';
@@ -160,6 +161,8 @@ export default function Composer({
   const [addingFiles, setAddingFiles] = useState(0);
   const addingFilesRef = useRef(0);
   const replaceFromIdRef = useRef<string | undefined>(undefined);
+  // Mirrors the ref so the editing banner re-renders when a resend-from point is set or cleared.
+  const [replacingFrom, setReplacingFrom] = useState<string | undefined>(undefined);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const workspacePath = useSettingsStore((s) => s.settings.workspacePath);
   const permissionMode = useSettingsStore((s) => s.settings.permissionMode);
@@ -238,6 +241,7 @@ export default function Composer({
     if (!seed) return;
     setDraft(seed.text);
     replaceFromIdRef.current = seed.replaceFromId;
+    setReplacingFrom(seed.replaceFromId);
     // A prefilled template with ${…} slots lands the caret on the first one.
     if (findPlaceholders(seed.text).length) window.setTimeout(() => editorRef.current?.selectPlaceholder(), 0);
   }, [seed?.nonce, seed?.text, seed?.replaceFromId]);
@@ -292,6 +296,7 @@ export default function Composer({
     // skillId intentionally NOT cleared — a pinned skill applies to the whole session
     setAttachments([]);
     replaceFromIdRef.current = undefined;
+    setReplacingFrom(undefined);
     if (sessionId) {
       chatStore.clearComposerSeed(sessionId);
       chatStore.clearNodeRefs(sessionId);
@@ -674,6 +679,21 @@ export default function Composer({
             )}
           </div>
         )}
+        {replacingFrom && (() => {
+          const count = replacedMessageCount(sentHistory ?? [], replacingFrom);
+          return count > 0 ? (
+            <div className="mb-2 flex items-center gap-2 rounded-xl border border-line bg-paper-raised px-3 py-1.5 text-[12px] text-ink-muted" role="status">
+              <span className="min-w-0 flex-1 truncate">正在编辑 · 重新发送将替换这条及其后 {count - 1} 条消息</span>
+              <button
+                type="button"
+                className="shrink-0 text-ink hover:underline"
+                onClick={() => { replaceFromIdRef.current = undefined; setReplacingFrom(undefined); setDraft(''); if (sessionId) chatStore.clearComposerSeed(sessionId); }}
+              >
+                取消编辑
+              </button>
+            </div>
+          ) : null;
+        })()}
         {sessionId && <div className="mb-2"><PendingInteraction sessionId={sessionId} /></div>}
         {sessionId && (
           <QueuePanel
