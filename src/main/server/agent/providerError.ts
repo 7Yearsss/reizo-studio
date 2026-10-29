@@ -3,6 +3,7 @@
  * Gateways such as new-api often wrap a Cloudflare 524 as `{ message: "openai_error" }`.
  */
 
+import { formatWait, retryAfterSeconds } from './retryAfter';
 import { classifyTurnError, presentTurnError, type TurnErrorKind } from '../../../shared/turnError';
 
 /** Kinds whose wording comes from the shared presenter (they used to all read "check your API key"). */
@@ -61,7 +62,10 @@ export function formatProviderError(error: unknown): string {
   if (status === 524 || status === 504 || status === 408) {
     return `上游超时（HTTP ${status}）。网关在等待模型输出时断开了${retryHint}。`;
   }
-  if (status === 429) return '请求过于频繁（HTTP 429）。请稍后再试。';
+  if (status === 429) {
+    const wait = retryAfterSeconds(error, raw);
+    return wait === undefined ? '请求过于频繁（HTTP 429）。请稍后再试。' : `请求过于频繁（HTTP 429）。${formatWait(wait)}后可再试。`;
+  }
   const presented = classifyTurnError({ status, message: providerText(error) });
   if (PRESENTED.has(presented)) {
     const shown = presentTurnError({ status, message: providerText(error) });
