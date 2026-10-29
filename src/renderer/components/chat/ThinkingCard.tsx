@@ -4,6 +4,8 @@ import { cn } from '../../lib/cn';
 import { ReasoningText } from '../agents/loading-states/reasoning-text';
 import { ThinkingOrb } from './ThinkingOrb';
 import { CountingNumber } from './CountingNumber';
+import { lastCompleteSentence } from '../../../shared/thinkingPreview';
+import { useMinimumDisplayValue } from '../../lib/useMinimumDisplayValue';
 
 /** `Xs` for under a minute, `Xm Ys` above. Floors at 1s so it's never "0s". */
 export function formatThinkingDuration(ms: number): string {
@@ -48,6 +50,7 @@ export default function ThinkingCard({
   }, [streaming, startedAt]);
 
   const shownMs = streaming ? elapsed : durationMs ?? (startedAt ? Date.now() - startedAt : 0);
+  const preview = useMinimumDisplayValue(streaming ? lastCompleteSentence(content) : '', 1000);
 
   return (
     <div className="w-full">
@@ -64,12 +67,16 @@ export default function ThinkingCard({
         )}
         {streaming ? (
           <div className="flex items-center gap-2">
-            <ReasoningText
-              phrases={THINKING_PHRASES}
-              variant="swap"
-              interval={2600}
-              className="text-[12px] text-ink"
-            />
+            {preview ? (
+              <span className="min-w-0 max-w-[32rem] truncate text-[12px] text-ink" title={preview}>{preview}</span>
+            ) : (
+              <ReasoningText
+                phrases={THINKING_PHRASES}
+                variant="swap"
+                interval={2600}
+                className="text-[12px] text-ink"
+              />
+            )}
             {startedAt && (
               <span className="font-mono text-[11px] tabular-nums text-ink-muted">
                 <CountingNumber
