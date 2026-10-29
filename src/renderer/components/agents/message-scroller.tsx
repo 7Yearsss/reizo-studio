@@ -465,6 +465,28 @@ export function MessageScroller({
         handleScroll();
         onViewportScroll?.(event);
       }}
+      onClickCapture={(event) => {
+        // Expanding or collapsing a block must not move what the user is looking at: with native scroll
+        // anchoring off, pin the clicked control to the same screen position while the layout settles.
+        const viewport = viewportRef.current;
+        const control = (event.target as HTMLElement | null)?.closest<HTMLElement>('summary, [aria-expanded]');
+        if (viewport && control && viewport.contains(control) && !followingRef.current) {
+          const before = control.getBoundingClientRect().top;
+          const startedAt = performance.now();
+          const settle = () => {
+            if (!control.isConnected) return;
+            const drift = control.getBoundingClientRect().top - before;
+            if (Math.abs(drift) >= 1) {
+              programmaticScrollRef.current = true;
+              viewport.scrollTop += drift;
+              window.setTimeout(() => { programmaticScrollRef.current = false; }, 0);
+            }
+            if (performance.now() - startedAt < 400) requestAnimationFrame(settle);
+          };
+          requestAnimationFrame(settle);
+        }
+        restViewportProps.onClickCapture?.(event);
+      }}
       onPointerDown={(event) => {
         // A press on the scrollbar (or a drag-select) counts as the user steering the view.
         pointerHeldRef.current = true;
