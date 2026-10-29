@@ -1,4 +1,5 @@
 import type { ChatStreamEvent, TurnOutcome } from '../../../shared/stream';
+import { createToolInputStreamer } from './toolInputStream';
 import { encodeLiveEnvelope, type LiveEnvelope } from '../../../shared/liveRevision';
 import {
   type AgentDoneData,
@@ -328,6 +329,7 @@ class AgentSession {
     armHeartbeat();
 
     let aborted = false;
+    const toolInputs = createToolInputStreamer();
 
     const feedPersister = (event: AgentEvent) => {
       if (event.type === 'text') {
@@ -385,6 +387,13 @@ class AgentSession {
             if (isStale()) {
               aborted = true;
               break;
+            }
+            // Tool-call arguments stream for a while before the call completes: that is progress (it must keep the
+            // stall watchdog quiet) and it can fill the row in early.
+            if (typeof chunk.type === 'string' && chunk.type.startsWith('tool-input')) {
+              armStall();
+              const early = toolInputs.feed(chunk);
+              if (early) emit(early);
             }
             const event = translate(chunk);
             if (!event) continue;
