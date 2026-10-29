@@ -17,6 +17,7 @@ import { useChatStore } from '../../state/useChatStore';
 import ErrorBoundary from '../ErrorBoundary';
 import UserMessage from './UserMessage';
 import AssistantMessage from './AssistantMessage';
+import { unseenCount, unseenLabel } from '../../../shared/unseenCount';
 import EmptyChatHints from './EmptyChatHints';
 import MemoryEventRow from './MemoryEventRow';
 import VideoEditorActivity from './VideoEditorActivity';
@@ -67,6 +68,10 @@ export default function MessageList({
 }) {
   const viewportRef = useRef<HTMLElement>(null);
   const [following, setFollowing] = useState(true);
+  // How many messages existed when the reader last had the live edge in view.
+  const seenAtLeave = useRef(messages.length);
+  if (following) seenAtLeave.current = messages.length;
+  const unseen = following ? 0 : unseenCount(messages.length, seenAtLeave.current);
 
   const items = useMemo(() => buildRenderItems(messages), [messages]);
   const firstKey = items[0]?.key;
@@ -234,8 +239,8 @@ export default function MessageList({
             key="jump-to-end"
             type="button"
             onClick={() => setFollowing(true)}
-            aria-label="跳到底部"
-            title="跳到底部"
+            aria-label={unseen > 0 ? `跳到底部，${unseen} 条新消息` : '跳到底部'}
+            title={unseen > 0 ? `${unseen} 条新消息` : '跳到底部'}
             initial={{ opacity: 0, y: 8, scale: 0.85 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 8, scale: 0.85 }}
@@ -251,6 +256,9 @@ export default function MessageList({
             }}
           >
             <ArrowDown size={15} />
+            {unseen > 0 && (
+              <span className="absolute -right-1.5 -top-1.5 min-w-4 rounded-full bg-accent px-1 text-center text-[10px] font-medium leading-4 text-white tabular-nums">{unseenLabel(unseen)}</span>
+            )}
           </motion.button>
         )}
       </AnimatePresence>
