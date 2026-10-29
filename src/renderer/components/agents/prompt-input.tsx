@@ -1,7 +1,7 @@
 "use client";
 // beui.dev/components/agents/prompt-input
 
-import { ArrowUp, Plus, Square } from "lucide-react";
+import { ArrowUp, ListPlus, Plus, Square } from "lucide-react";
 import VoiceInputButton from '../chat/VoiceInputButton';
 import { appendVoiceText } from '../../../shared/voiceInput';
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
@@ -312,7 +312,8 @@ export function PromptInput({
             title={sendReason ?? (loading ? (busySendTitle ?? "Enter 排队发送") : "发送")}
             className="size-8 shrink-0 rounded-full"
           >
-            <ArrowUp className="size-4" />
+            {/* While a turn runs, Enter queues the message — the icon says so instead of promising an instant send. */}
+            {loading ? <ListPlus className="size-4" /> : <ArrowUp className="size-4" />}
           </Button>
         )}
         <Button
