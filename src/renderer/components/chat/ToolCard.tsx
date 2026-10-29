@@ -4,6 +4,7 @@ import { getResolvedApiOrigin } from '../../api';
 import DiffView from './LazyDiffView';
 import BatchProgress from './BatchProgress';
 import MediaGenerationCard, { isChatMediaTool } from './MediaGenerationCard';
+import VideoAnalysisCard from './VideoAnalysisCard';
 import DeliverableCard, { deliverableOf } from './DeliverableCard';
 import ReviewProposalCard, { reviewProposalOf } from './ReviewProposalCard';
 import { useState } from 'react';
@@ -70,6 +71,7 @@ function RollbackButton({ sessionId, snapshotId }: { sessionId: string; snapshot
 
 export default function ToolCard({ part, collapsed = false, sessionId, interrupted = false }: { part: ToolCallPart; collapsed?: boolean; sessionId?: string; interrupted?: boolean }) {
   const running = part.result === undefined && part.error === undefined;
+  if (part.name === 'analyze_video') return <VideoAnalysisCard part={part} interrupted={interrupted} />;
   if (isChatMediaTool(part.name)) return <MediaGenerationCard part={part} sessionId={sessionId} interrupted={interrupted} />;
 
   if (part.name === 'run_batch') {

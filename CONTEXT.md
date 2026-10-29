@@ -72,6 +72,19 @@ The local usage ledger remains separate from the cloud wallet. See
 
 ## Creative Assets
 
+### Video link analysis
+
+`analyze_video` reads actual timestamped frames and available HTML subtitle tracks
+from a public video page or MP4/WebM link. A bare recognised video/post link starts
+this tool before a text response. It uses the same sandboxed Chromium media reader
+on Windows and macOS, independently of the Windows-only video editor. A login wall
+uses the existing `browser_open` flow and explicit `signedIn:true` retry.
+
+Frame files and metadata are saved separately; provider requests contain actual
+images, including on permission resume and later turns. Keep sampled evidence,
+page/post text, inferred events and untranscribed audio distinct. No full audio
+transcription is currently performed by this tool. See `docs/video-analysis.md`.
+
 Standard image and video requests run in the conversation. Show a loading card
 where the request starts, then replace it with an image preview or playable video.
 Keep the result visible while the assistant continues replying. Long-running media

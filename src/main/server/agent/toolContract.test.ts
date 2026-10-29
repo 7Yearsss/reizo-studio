@@ -7,6 +7,7 @@ import type { Skill } from '../../skills';
 import { createAskUserTool, createWorkspaceTools } from './workspaceTools';
 import { createScheduleTools } from './scheduleTools';
 import { createWebTools } from './webTools';
+import { createVideoAnalysisTools } from './videoAnalysisTools';
 import { createPersonalMemoryTools } from './personalMemory';
 import { createSkillTools } from './skillTools';
 import { createBatchTool, createSubagentTool } from './subagentTools';
@@ -51,6 +52,7 @@ describe('tool contract snapshots', () => {
   it('ask_user', () => expect(contract({ ask_user: createAskUserTool('s') })).toMatchSnapshot());
   it('automations', () => expect(contract(createScheduleTools({ scheduleStore: stub, sessionId: 's' }))).toMatchSnapshot());
   it('web', () => expect(contract(createWebTools({ sessionId: 's', permissionMode: 'ask' }).tools)).toMatchSnapshot());
+  it('video analysis', () => expect(contract(createVideoAnalysisTools({ sessionId: 's', dataRoot: os.tmpdir(), permissionMode: 'ask' }).tools)).toMatchSnapshot());
   it('personal memory', () => expect(contract(createPersonalMemoryTools({ sessionId: 's', dataRoot: os.tmpdir(), permissionMode: 'ask', emit: none }).tools)).toMatchSnapshot());
   it('propose_skill', () => expect(contract(createSkillDraftTools({ dataRoot: os.tmpdir(), getSkills: () => [] }))).toMatchSnapshot());
   it('knowledge_search', () => expect(contract(createKnowledgeTools({ store: createKnowledgeStore(os.tmpdir()) }))).toMatchSnapshot());

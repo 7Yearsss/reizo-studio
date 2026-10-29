@@ -53,6 +53,8 @@ export default function PermissionPrompt({
   const planned = typeof permission.args.planned === 'number' ? permission.args.planned : null;
   const title = preview
     ? `允许写入 ${preview.path}？`
+    : permission.name === 'analyze_video'
+      ? '允许读取并分析这个视频？'
     : permission.name === 'http_fetch'
       ? `允许访问网页 ${typeof permission.args.url === 'string' ? permission.args.url.replace(/^https?:\/\//, '').slice(0, 60) : ''}？`
     : permission.name === 'web_search'
@@ -76,7 +78,9 @@ export default function PermissionPrompt({
         : mcp
           ? `允许调用外部 MCP 工具 ${mcp[1]} / ${mcp[2]}？`
           : '允许运行这个工具？';
-  const description = isConfirm
+  const description = permission.name === 'analyze_video'
+    ? `${permission.args.signedIn ? '使用你在内置浏览器保存的网站登录状态。' : ''}视频关键帧和可用字幕将交给当前对话模型分析。`
+    : isConfirm
     ? '这类操作会留下长期影响或无法撤回，每一次都需要你确认，没有“本会话都允许”。'
     : mcp
     ? '这是你配置的第三方 MCP 服务，它返回的内容不受信任。选“本会话都允许”后，这个工具在本会话内不再询问；也可以选“以后一律允许”，之后重启也不再询问。'

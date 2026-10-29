@@ -2,6 +2,10 @@
 
 Rules for AI agents working in this repository. Architecture and commands live in `CLAUDE.md`.
 
+## Release requirement: bundle the voice model
+
+User confirmed on 2026-10-28: Windows and macOS packages must include the pinned local voice recognition model (about 80 MB), so first use does not require a model download. Keep the preparation hook and offline Worker verification in the release process; download only to repair missing or corrupt files. See `docs/voice-input.md`.
+
 ## UI copy: no explanatory text
 
 Keep every screen minimal. Do not add text that explains the UI to the user.

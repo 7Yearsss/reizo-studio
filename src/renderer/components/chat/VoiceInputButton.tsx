@@ -137,10 +137,10 @@ export default function VoiceInputButton({ className, onTranscript, disabled = f
             <button type="button" onClick={cancel} aria-label="取消语音输入" className="rounded-md p-1 text-ink-muted hover:bg-paper-inset focus-visible:outline-2"><X size={14} /></button>
           </div>
           {phase === 'setup' || phase === 'error' ? <>
-            <p role={phase === 'error' ? 'alert' : undefined} className="text-xs leading-5 text-ink-muted">{phase === 'error' ? note : '首次下载约 80 MB 模型。录音在本机识别，不上传；文字填入草稿后由你发送。'}</p>
+            <p role="alert" className="text-xs leading-5 text-ink-muted">{phase === 'error' ? note : '语音模型缺失或损坏，请下载修复。'}</p>
             <div className="mt-3 flex items-center justify-between gap-2">
               <select aria-label="识别语言" value={language} onChange={e => setLanguage(e.target.value as 'zh' | 'en')} className="rounded-lg bg-paper-inset p-2 text-xs text-ink"><option value="zh">中文</option><option value="en">English</option></select>
-              <button type="button" onClick={() => void begin(phase === 'setup')} className="rounded-lg bg-accent px-3 py-2 text-xs text-accent-ink">{phase === 'setup' ? '下载并开始录音' : '重试'}</button>
+              <button type="button" onClick={() => void begin(phase === 'setup')} className="rounded-lg bg-accent px-3 py-2 text-xs text-accent-ink">{phase === 'setup' ? '下载修复并录音' : '重试'}</button>
             </div>
           </> : phase === 'recording' ? <>
             <select aria-label="识别语言" value={language} onChange={e => setLanguage(e.target.value as 'zh' | 'en')} className="rounded-lg bg-paper-inset p-2 text-xs text-ink"><option value="zh">中文</option><option value="en">English</option></select>

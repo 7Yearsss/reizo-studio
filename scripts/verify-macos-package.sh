@@ -12,6 +12,7 @@ while IFS= read -r -d '' archive; do
   while IFS= read -r -d '' app; do
     codesign --verify --deep --strict --verbose=2 "$app"
     codesign --display --verbose=2 "$app"
+    node scripts/verify-voice-model.mjs "$app/Contents/Resources"
     # Hardened runtime (flags=...runtime) enables library validation and makes
     # dyld reject the ad-hoc Electron Framework at launch.
     if codesign --display --verbose=2 "$app" 2>&1 | grep -q 'flags=.*runtime'; then

@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createVoiceModelStore } from './modelStore';
-import { VOICE_MODEL } from '../../../shared/voiceInput';
+import { VOICE_MODEL, VOICE_REVISION } from '../../../shared/voiceInput';
 
 const roots: string[] = [];
 const bytes = Buffer.from('verified model');
@@ -36,4 +36,26 @@ it('reuses only a hash-verified local seed without a network request', async () 
   const fetcher = vi.fn();
   const store = createVoiceModelStore(await root(), fetcher, seed, files);
   await store.prepare(); expect(fetcher).not.toHaveBeenCalled(); expect((await store.status()).ready).toBe(true);
+});
+it('is ready on a fresh offline install and serves the bundled model without copying or downloading', async () => {
+  const seed = await root(), data = await root(); await mkdir(path.join(seed, VOICE_MODEL), { recursive: true });
+  await writeFile(path.join(seed, VOICE_MODEL, 'config.json'), bytes);
+  const fetcher = vi.fn(async () => { throw new Error('offline'); });
+  const store = createVoiceModelStore(data, fetcher, seed, files);
+  expect((await store.status()).ready).toBe(true);
+  expect(await store.read('config.json')).toEqual(bytes);
+  await store.prepare(); expect(fetcher).not.toHaveBeenCalled();
+  expect((await createVoiceModelStore(data, fetcher, seed, files).status()).ready).toBe(true);
+});
+it('repairs a corrupt bundled model into the writable cache and reuses it after restart', async () => {
+  const seed = await root(), data = await root(); await mkdir(path.join(seed, VOICE_MODEL), { recursive: true });
+  await writeFile(path.join(seed, VOICE_MODEL, 'config.json'), Buffer.alloc(bytes.length));
+  const fetcher = vi.fn(async () => new Response(bytes));
+  const store = createVoiceModelStore(data, fetcher, seed, files);
+  expect((await store.status()).ready).toBe(false);
+  await store.prepare(); expect(fetcher).toHaveBeenCalledOnce();
+  expect(await store.read('config.json')).toEqual(bytes);
+  expect((await createVoiceModelStore(data, fetcher, seed, files).status()).ready).toBe(true);
+  await rm(path.join(data, 'models', 'voice', VOICE_REVISION, 'config.json'));
+  expect((await createVoiceModelStore(data, fetcher, seed, files).status()).ready).toBe(false);
 });

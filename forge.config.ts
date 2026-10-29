@@ -21,6 +21,9 @@ const config: ForgeConfig = {
     // Forge also runs generateAssets during `start`. Build video resources only
     // when packaging; development uses the existing editor runtime on demand.
     prePackage: async (_config, platform, arch) => {
+      execFileSync(process.execPath, ['scripts/prepare-voice-model.mjs'], { stdio: 'inherit', windowsHide: true });
+      const voiceResources = _config.packagerConfig?.extraResource;
+      _config.packagerConfig = { ..._config.packagerConfig, extraResource: [...(Array.isArray(voiceResources) ? voiceResources : voiceResources ? [voiceResources] : []), path.resolve('.cache/voice-model')] };
       // The bundled editor runtime is Windows x64 only; other targets ship without the video editor panel.
       if (platform !== 'win32' || arch !== 'x64') return;
       // CI has no prebuilt editor runtime; ship without the editor panel instead of failing.
