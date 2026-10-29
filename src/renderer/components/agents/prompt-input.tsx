@@ -29,6 +29,13 @@ import { SPRING_SWAP } from "@/renderer/lib/ease";
 import { cn } from "@/renderer/lib/cn";
 import { PromptEditor, type ChipInfo, type PromptEditorHandle } from "./prompt-editor";
 
+/** Why the send button is inert, in words; undefined when it is live. */
+export function sendDisabledReason(input: { hasDraft: boolean; disabled?: boolean }): string | undefined {
+  if (input.disabled) return "暂时无法发送";
+  if (!input.hasDraft) return "先输入内容";
+  return undefined;
+}
+
 export interface PromptModel {
   value: string;
   label: ReactNode;
@@ -129,6 +136,7 @@ export function PromptInput({
   );
   const hasDraft = Boolean(currentValue.trim()) || allowEmptySubmit;
   const canSubmit = hasDraft && !disabled;
+  const sendReason = canSubmit ? undefined : sendDisabledReason({ hasDraft, disabled });
   // Keep one persistent stop control in the footer; a draft gets its own send button.
   const showStop = loading || Boolean(onStop);
 
@@ -301,7 +309,7 @@ export function PromptInput({
             size="icon"
             disabled={!canSubmit}
             aria-label={loading ? "Queue message" : "Send prompt"}
-            title={loading ? (busySendTitle ?? "Enter 排队发送") : "发送"}
+            title={sendReason ?? (loading ? (busySendTitle ?? "Enter 排队发送") : "发送")}
             className="size-8 shrink-0 rounded-full"
           >
             <ArrowUp className="size-4" />
@@ -315,9 +323,7 @@ export function PromptInput({
           title={
             showStop
               ? "停止生成"
-              : loading
-                ? (busySendTitle ?? "Enter 排队发送")
-                : "发送"
+              : sendReason ?? (loading ? (busySendTitle ?? "Enter 排队发送") : "发送")
           }
           onClick={showStop ? onStop : undefined}
           className="size-8 shrink-0 rounded-full"

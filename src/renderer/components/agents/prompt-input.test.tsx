@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { PromptInput } from './prompt-input';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { PromptInput, sendDisabledReason } from './prompt-input';
 
 let host: HTMLDivElement;
 let root: Root;
@@ -56,4 +56,12 @@ it('allows an attachment-only message while keeping an ordinary empty draft disa
   expect(submit).toHaveBeenCalledWith('', undefined);
   await act(async () => root.render(<PromptInput value="" onSubmit={submit} />));
   expect(control('Send prompt').disabled).toBe(true);
+});
+
+describe('sendDisabledReason', () => {
+  it('names why send is inert and is silent when live', () => {
+    expect(sendDisabledReason({ hasDraft: false })).toBe('先输入内容');
+    expect(sendDisabledReason({ hasDraft: true, disabled: true })).toBe('暂时无法发送');
+    expect(sendDisabledReason({ hasDraft: true })).toBeUndefined();
+  });
 });
