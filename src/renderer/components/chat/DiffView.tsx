@@ -1,4 +1,5 @@
-import { Component, type ReactNode, useMemo } from 'react';
+import { Component, type ReactNode, useMemo, useState } from 'react';
+import { Columns2, Rows2 } from 'lucide-react';
 // eslint-disable-next-line import/no-unresolved -- package `exports` subpath, same as @tailwindcss/vite
 import { MultiFileDiff } from '@pierre/diffs/react';
 import type { FileDiffPreview } from '../../../shared/stream';
@@ -12,15 +13,32 @@ import { cn } from '../../lib/cn';
  * highlighting matches. Falls back to a plain unified listing if the renderer
  * throws (unknown language, oversized input, …).
  */
+const DIFF_STYLE_KEY = 'reizo:diff-style';
+
+function loadDiffStyle(): 'unified' | 'split' | null {
+  try {
+    const value = localStorage.getItem(DIFF_STYLE_KEY);
+    return value === 'split' || value === 'unified' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function DiffView({
   preview,
   className,
-  diffStyle = 'unified',
+  diffStyle: initialStyle = 'unified',
 }: {
   preview: FileDiffPreview;
   className?: string;
   diffStyle?: 'unified' | 'split';
 }) {
+  // The viewer's last choice wins over the caller's default and carries across diffs.
+  const [diffStyle, setDiffStyle] = useState<'unified' | 'split'>(() => loadDiffStyle() ?? initialStyle);
+  function chooseStyle(next: 'unified' | 'split') {
+    setDiffStyle(next);
+    try { localStorage.setItem(DIFF_STYLE_KEY, next); } catch { /* per-viewer convenience */ }
+  }
   const dark = useIsDark();
   const name = preview.path || 'file';
   const created = preview.before === '' && preview.after !== '';
@@ -38,11 +56,28 @@ export default function DiffView({
 
   return (
     <div className={cn('overflow-hidden rounded-xl border border-line bg-paper text-xs', className)}>
-      <div className="flex items-center justify-between gap-2 border-b border-line px-3 py-1.5 font-mono text-[11px] text-ink-muted">
+      <div className="group/diff flex items-center justify-between gap-2 border-b border-line px-3 py-1.5 font-mono text-[11px] text-ink-muted">
         <span className="truncate">{name}</span>
-        <span className="shrink-0">
-          {created ? '新建' : deleted ? '删除' : '修改'}
-          {preview.truncated ? ' · 已截断' : ''}
+        <span className="flex shrink-0 items-center gap-2">
+          <span role="group" aria-label="差异视图" className="flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/diff:opacity-100">
+            {([['unified', '合并视图', Rows2], ['split', '分栏视图', Columns2]] as const).map(([value, label, Icon]) => (
+              <button
+                key={value}
+                type="button"
+                title={label}
+                aria-label={label}
+                aria-pressed={diffStyle === value}
+                onClick={() => chooseStyle(value)}
+                className={cn('rounded p-0.5 transition-colors hover:text-ink', diffStyle === value && 'bg-paper-inset text-ink')}
+              >
+                <Icon size={12} />
+              </button>
+            ))}
+          </span>
+          <span>
+            {created ? '新建' : deleted ? '删除' : '修改'}
+            {preview.truncated ? ' · 已截断' : ''}
+          </span>
         </span>
       </div>
       <div className="max-h-[420px] overflow-auto">
