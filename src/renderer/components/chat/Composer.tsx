@@ -35,6 +35,7 @@ import { useSkillStore } from '../../state/useSkillStore';
 import { useChatStore } from '../../state/useChatStore';
 import { useCanvasStore, useCanvasStoreEq, sameNodesIgnoringGeometry } from '../../state/useCanvasStore';
 import * as settingsStore from '../../state/settingsStore';
+import { escapeStopStep } from '../../../shared/escapeStop';
 import { historyStep } from '../../../shared/sentHistory';
 import { requestPermissionMode } from '../../lib/requestPermissionMode';
 import * as chatStore from '../../state/chatStore';
@@ -368,6 +369,7 @@ export default function Composer({
   }
 
   /** ↑/↓ on an empty (or just-recalled) draft steps through what was sent earlier in this session. */
+  const escapeArmedRef = useRef<number | null>(null);
   const historyCursorRef = useRef<number | null>(null);
   const historyShownRef = useRef('');
   const sentHistory = useChatStore((s) => (sessionId ? s.messagesBySession[sessionId] : undefined));
@@ -985,6 +987,13 @@ export default function Composer({
                   } else if (e.key === 'Backspace' && draft === '' && sessionId && documentRefs.length) {
                     e.preventDefault();
                     removeDocumentReference(sessionId, documentRefs.length - 1);
+                  }
+                  // Esc twice stops the live turn; menus that consumed the first Esc keep it.
+                  if (e.key === 'Escape' && sending && onStop && !e.defaultPrevented && !interaction) {
+                    const step = escapeStopStep(escapeArmedRef.current, Date.now());
+                    escapeArmedRef.current = step.armedAt;
+                    if (step.stop) onStop();
+                    else toast.info('再按一次 Esc 停止');
                   }
                   // ↑ at the start of the box pulls queued messages back in for editing.
                   if (e.key === 'ArrowUp' && recallQueuedMessages(textBeforeCaret)) {
