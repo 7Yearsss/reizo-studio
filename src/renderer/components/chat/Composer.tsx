@@ -35,6 +35,7 @@ import { useSkillStore } from '../../state/useSkillStore';
 import { useChatStore } from '../../state/useChatStore';
 import { useCanvasStore, useCanvasStoreEq, sameNodesIgnoringGeometry } from '../../state/useCanvasStore';
 import * as settingsStore from '../../state/settingsStore';
+import { historyStep } from '../../../shared/sentHistory';
 import { requestPermissionMode } from '../../lib/requestPermissionMode';
 import * as chatStore from '../../state/chatStore';
 import * as canvasStore from '../../state/canvasStore';
@@ -364,6 +365,23 @@ export default function Composer({
     chatStore.removeQueuedTurn(sessionId, item.id);
     setDraft((prev) => (prev ? `${prev}\n${item.text}` : item.text));
     focusComposer();
+  }
+
+  /** ↑/↓ on an empty (or just-recalled) draft steps through what was sent earlier in this session. */
+  const historyCursorRef = useRef<number | null>(null);
+  const historyShownRef = useRef('');
+  const sentHistory = useChatStore((s) => (sessionId ? s.messagesBySession[sessionId] : undefined));
+  function recallSentMessage(direction: 'up' | 'down'): boolean {
+    const pristine = (draft === '' || draft === historyShownRef.current) && !draft.includes('
+');
+    if (!pristine) return false;
+    const users = (sentHistory ?? []).filter((m) => m.role === 'user').map((m) => m.content);
+    const step = historyStep(users, draft === '' && direction === 'up' ? null : historyCursorRef.current, direction);
+    if (step.text === null) return false;
+    historyCursorRef.current = step.cursor;
+    historyShownRef.current = step.text;
+    setDraft(step.text);
+    return true;
   }
 
   /** ArrowUp at the start of the box recalls every queued message (Claude Code style). */
@@ -971,6 +989,8 @@ export default function Composer({
                   }
                   // ↑ at the start of the box pulls queued messages back in for editing.
                   if (e.key === 'ArrowUp' && recallQueuedMessages(textBeforeCaret)) {
+                    e.preventDefault();
+                  } else if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey && recallSentMessage(e.key === 'ArrowUp' ? 'up' : 'down')) {
                     e.preventDefault();
                   }
                 }}
