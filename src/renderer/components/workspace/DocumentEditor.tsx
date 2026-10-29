@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useScrollMemory } from '../../lib/scrollMemory';
 import { EditorContent, useEditor, useEditorState, type Editor as TiptapEditor } from '@tiptap/react';
 import { Bold, Italic, Underline, Strikethrough, List, ListOrdered, Table, Undo2, Redo2, Quote, History, Sparkles, Info, PenLine, ListChecks, Search, ListTree } from 'lucide-react';
 import type { Artifact, ArtifactWithContent } from '../../../shared/artifact';
@@ -153,6 +154,7 @@ function Editor({ artifact }: { artifact: ArtifactWithContent }) {
   const pointerDown = useRef(false);
   const settleTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const scroller = useRef<HTMLDivElement>(null);
+  useScrollMemory(scroller, `doc:${artifact.id}`);
   const askRef = useRef<() => void>(() => { /* Assigned on every render below. */ });
   const references = useDocumentWorkspace((s) => s.references[artifact.sessionId]);
   // Numbered like the composer chips (labels run across every referenced document).
