@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from 'react';
 import { Copy, MessageSquare, Plus, X, XCircle } from 'lucide-react';
 import { motion } from 'motion/react';
 import { cn } from '../../lib/cn';
@@ -14,9 +15,19 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
 } from '../motion/context-menu';
+import { sessionsWithUnsavedEdits, subscribeEditorState } from '../../state/editorPersistence';
 import { toast } from '../../lib/toast';
 import { useModifierHeld } from '../../lib/hooks/use-modifier-held';
 import { shortcutDigitForTab } from '../../../shared/tabShortcut';
+
+// useSyncExternalStore needs a stable snapshot: only hand out a new Set when its contents change.
+let lastUnsaved: Set<string> = new Set();
+function unsavedSnapshot(): Set<string> {
+  const next = sessionsWithUnsavedEdits();
+  if (next.size === lastUnsaved.size && [...next].every((id) => lastUnsaved.has(id))) return lastUnsaved;
+  lastUnsaved = next;
+  return next;
+}
 
 export default function TabBar() {
   const tabs = useTabStore((s) => s.tabs);
@@ -24,6 +35,8 @@ export default function TabBar() {
   const mode = useUiStore((s) => s.mode);
   const interactionBySession = useChatStore((s) => s.interactionBySession);
   const sessions = useChatStore((s) => s.sessions);
+  // Workspace edits (Doc / Sheet / HTML …) that are mid-save or failed to save, by conversation.
+  const unsavedSessions = useSyncExternalStore(subscribeEditorState, unsavedSnapshot);
 
   // Hold Ctrl/Cmd for a moment and each tab shows the digit that jumps to it.
   const held = useModifierHeld();
@@ -92,6 +105,9 @@ export default function TabBar() {
                     <span className="relative z-10 flex-1 truncate text-left">{tab.title}</span>
                     {held && digitOf(tab) !== null && (
                       <span className="relative z-10 shrink-0 rounded bg-ink px-1.5 text-[10px] font-medium leading-4 text-paper-raised" aria-hidden>{digitOf(tab)}</span>
+                    )}
+                    {tab.sessionId && unsavedSessions.has(tab.sessionId) && (
+                      <span className="relative z-10 size-1.5 shrink-0 rounded-full bg-accent" title="有改动尚未保存" role="img" aria-label="有改动尚未保存" />
                     )}
                     {pendingKind && (
                       <span

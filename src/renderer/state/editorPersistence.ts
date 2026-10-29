@@ -1,9 +1,19 @@
 // Keeps failed/unmounted editor saves recoverable for the lifetime of the app.
 export interface EditorRecovery { sessionId: string; content: string; expectedVersion: number; error?: string }
 const recovery = new Map<string, EditorRecovery>();
+const listeners = new Set<() => void>();
+function notify() { listeners.forEach((fn) => fn()); }
+export function subscribeEditorState(listener: () => void): () => void { listeners.add(listener); return () => { listeners.delete(listener); }; }
 export function getEditorRecovery(id: string) { return recovery.get(id); }
-export function setEditorRecovery(id: string, draft: EditorRecovery) { recovery.set(id, draft); }
-export function clearEditorRecovery(id: string) { recovery.delete(id); }
+export function setEditorRecovery(id: string, draft: EditorRecovery) { recovery.set(id, draft); notify(); }
+export function clearEditorRecovery(id: string) { if (recovery.delete(id)) notify(); }
+/** Sessions holding workspace edits that are not safely saved yet: a write in flight or a save that failed. */
+export function sessionsWithUnsavedEdits(): Set<string> {
+  const ids = new Set<string>();
+  for (const draft of recovery.values()) ids.add(draft.sessionId);
+  for (const sessionId of pending.values()) ids.add(sessionId);
+  return ids;
+}
 
 const flushers = new Map<string, { sessionId: string; flush: () => Promise<void>; discard?: () => Promise<void> }>();
 const pending = new Map<Promise<unknown>, string>();
@@ -19,7 +29,9 @@ export async function discardArtifactEdits(id: string): Promise<void> {
 }
 export function trackEditorWrite<T>(sessionId: string, promise: Promise<T>): Promise<T> {
   pending.set(promise, sessionId);
-  void promise.then(() => pending.delete(promise), () => pending.delete(promise));
+  notify();
+  const done = () => { pending.delete(promise); notify(); };
+  void promise.then(done, done);
   return promise;
 }
 export async function flushEditorEdits(sessionId: string): Promise<void> {
