@@ -36,6 +36,7 @@ import { useChatStore } from '../../state/useChatStore';
 import { useCanvasStore, useCanvasStoreEq, sameNodesIgnoringGeometry } from '../../state/useCanvasStore';
 import * as settingsStore from '../../state/settingsStore';
 import { escapeStopStep } from '../../../shared/escapeStop';
+import { appendQuote, formatQuote, QUOTE_SELECTION_EVENT } from '../../../shared/quoteSelection';
 import { historyStep } from '../../../shared/sentHistory';
 import { requestPermissionMode } from '../../lib/requestPermissionMode';
 import * as chatStore from '../../state/chatStore';
@@ -217,6 +218,17 @@ export default function Composer({
     };
     window.addEventListener(HTML_ANNOTATION_EVENT, onPick);
     return (): void => window.removeEventListener(HTML_ANNOTATION_EVENT, onPick);
+  }, [sessionId]);
+  // "引用" over selected conversation text drops it into the draft as a blockquote.
+  useEffect(() => {
+    const onQuote = (event: Event): void => {
+      const detail = (event as CustomEvent<{ sessionId?: string; text?: string }>).detail;
+      if (detail?.sessionId !== sessionId || !detail.text) return;
+      setDraft((current) => appendQuote(current, formatQuote(detail.text ?? '')));
+      window.setTimeout(() => editorRef.current?.focus?.(), 0);
+    };
+    window.addEventListener(QUOTE_SELECTION_EVENT, onQuote);
+    return (): void => window.removeEventListener(QUOTE_SELECTION_EVENT, onQuote);
   }, [sessionId]);
   const slash = extractSlashQuery(draft);
   const slashCommands = buildSlashCommands(skills);

@@ -5,6 +5,7 @@ import * as tabStore from '../state/tabStore';
 import { useChatStore } from '../state/useChatStore';
 import { useUiStore } from '../state/useUiStore';
 import MessageList from '../components/chat/MessageList';
+import QuoteSelectionButton from '../components/chat/QuoteSelectionButton';
 import Composer from '../components/chat/Composer';
 import ChatSearchPanel from '../components/chat/ChatSearchPanel';
 import TopRightToolbar from '../components/chat/TopRightToolbar';
@@ -241,6 +242,7 @@ function ChatPage({
           }}
         />
       )}
+      <QuoteSelectionButton containerRef={containerRef} sessionId={sessionId} />
       <MessageList
         emptyContext={canvasActive ? 'canvas' : 'chat'}
         messages={messages}
