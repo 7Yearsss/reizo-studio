@@ -33,3 +33,29 @@ export function usageStatus(record: Pick<UsageRecord, 'jobStatus' | 'reportOutco
   if (record.reportOutcomes?.includes('incomplete')) return { label: '报告未完整', tone: 'muted' };
   return { label: record.usageState === 'reported' ? '用量已报告' : record.usageState === 'partial' ? '部分用量' : record.usageState === 'observed' ? '产物统计' : '用量未报告', tone: 'muted' };
 }
+
+/** Failure copy for a usage read: a missing answer is never "zero usage" or "no limit". */
+export function usageLoadFailureText(detail: string): string {
+  const trimmed = detail.trim();
+  return `${trimmed ? `${trimmed}。` : ''}无法加载用量，这不代表没有用量或限额。`;
+}
+
+export type QuotaPace =
+  | { state: 'unknown' }
+  | { state: 'ok' }
+  | { state: 'exhausts'; atMs: number };
+
+/**
+ * Whether the current burn rate would exhaust a window before it resets.
+ * Quiet (`ok`) until 3% of the window has been used — earlier samples are too noisy to project.
+ */
+export function quotaPace(input: { used: number; limit: number; windowStartMs: number; windowEndMs: number; nowMs: number }): QuotaPace {
+  const { used, limit, windowStartMs, windowEndMs, nowMs } = input;
+  if (!(limit > 0) || !Number.isFinite(used) || used < 0 || windowEndMs <= windowStartMs) return { state: 'unknown' };
+  if (used / limit < 0.03) return { state: 'ok' };
+  const elapsed = nowMs - windowStartMs;
+  if (elapsed <= 0) return { state: 'unknown' };
+  if (used >= limit) return { state: 'exhausts', atMs: nowMs };
+  const exhaustAt = windowStartMs + (limit / used) * elapsed;
+  return exhaustAt < windowEndMs ? { state: 'exhausts', atMs: exhaustAt } : { state: 'ok' };
+}

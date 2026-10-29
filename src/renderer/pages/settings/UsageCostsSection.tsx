@@ -5,7 +5,7 @@ import { getUsageSummary, listPricingSnapshots, listUsageRecords } from '../../a
 import { useSettingsStore } from '../../state/useSettingsStore';
 import { categoryLabels, MetricList, metricLabels, money } from '../../components/usage/UsageRecordDetails';
 import UsageExecutionRow from '../../components/usage/UsageExecutionRow';
-import { metricValue } from '../../components/usage/usagePresentation';
+import { metricValue, usageLoadFailureText } from '../../components/usage/usagePresentation';
 import { Alert, AlertDescription, AlertTitle } from '../../components/ui/alert';
 import { Button } from '../../components/ui/button';
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '../../components/ui/empty';
@@ -108,7 +108,7 @@ export default function UsageCostsSection({ onOpenProviders }: { onOpenProviders
           </div>
           <div className="flex flex-wrap items-center gap-1" aria-label="调用类型"><button type="button" aria-pressed={!category} className={`rounded-md px-3 py-1.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring ${!category ? 'bg-ink text-paper' : 'text-ink-muted hover:bg-paper-inset'}`} onClick={() => setCategory('')}>全部</button>{Object.entries(categoryLabels).map(([value, label]) => <button type="button" key={value} aria-pressed={category === value} onClick={() => setCategory(value as UsageCategory)} className={`rounded-md px-3 py-1.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring ${category === value ? 'bg-ink text-paper' : 'text-ink-muted hover:bg-paper-inset'}`}>{label}</button>)}{filtered ? <button type="button" onClick={reset} className="ml-auto rounded px-2 py-1.5 text-xs text-ink-muted underline underline-offset-4 outline-none focus-visible:ring-2 focus-visible:ring-ring">清除筛选</button> : null}</div>
         </div>
-        {error ? <Alert variant="destructive"><AlertTitle>部分用量数据未能更新</AlertTitle><AlertDescription>{error}<Button type="button" variant="ghost" size="xs" disabled={loading} onClick={refresh}>重新读取</Button></AlertDescription></Alert> : null}
+        {error ? <Alert variant="destructive"><AlertTitle>部分用量数据未能更新</AlertTitle><AlertDescription>{usageLoadFailureText(error)}<Button type="button" variant="ghost" size="xs" disabled={loading} onClick={refresh}>重新读取</Button></AlertDescription></Alert> : null}
         {loading ? <div role="status" aria-label="正在读取用量"><Skeleton className="h-40 w-full" /></div> : summary ? <Overview summary={summary} /> : null}
         {summary?.warnings?.length ? <Alert><AlertTitle>部分汇总需要复核</AlertTitle><AlertDescription>{summary.warnings.map(warning => <p key={warning}>{warning}</p>)}</AlertDescription></Alert> : null}
         <section aria-label="执行记录" className="min-w-0"><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-medium">{periodLabels[period]}{category ? ` · ${categoryLabels[category]}` : ''}{summary ? <span className="ml-2 font-normal text-ink-muted">{summary.executionCount} 条</span> : null}</h2><span className="text-xs text-ink-muted">已加载 {page.records.length} 条</span></div>
