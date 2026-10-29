@@ -54,6 +54,15 @@ export default function TabBar() {
                       uiStore.setMode('chat');
                       tabStore.selectTab(tab.id);
                     }}
+                    draggable
+                    onDragStart={(e) => { e.dataTransfer.setData('application/x-reizo-tab', tab.id); e.dataTransfer.effectAllowed = 'move'; }}
+                    onDragOver={(e) => { if (e.dataTransfer.types.includes('application/x-reizo-tab')) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } }}
+                    onDrop={(e) => {
+                      const from = e.dataTransfer.getData('application/x-reizo-tab');
+                      if (!from) return;
+                      e.preventDefault();
+                      tabStore.moveTabBefore(from, tab.id);
+                    }}
                     // Middle-click closes, like a browser tab.
                     onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); tabStore.closeTab(tab.id); } }}
                     onKeyDown={(e) => {

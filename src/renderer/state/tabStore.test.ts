@@ -7,6 +7,7 @@ import {
   selectTab,
   reopenClosedTab,
   moveTab,
+  moveTabBefore,
   closeSessionTabs,
   resetClosedTabsForTest,
 } from './tabStore';
@@ -63,5 +64,18 @@ describe('moveTab', () => {
     expect(after.indexOf(b.id)).toBe(before.indexOf(b.id) - 1);
     expect(after.indexOf(a.id)).toBe(before.indexOf(a.id) + 1);
     expect(getSnapshot().activeTabId).toBe(b.id);
+  });
+});
+
+describe('moveTabBefore', () => {
+  it('drops a tab into the slot of the one it is dragged onto', () => {
+    const a = openChatTab('dd-a', 'A');
+    const b = openChatTab('dd-b', 'B');
+    const c = openChatTab('dd-c', 'C');
+    moveTabBefore(c.id, a.id);
+    const ids = getSnapshot().tabs.map((t) => t.id);
+    expect(ids.indexOf(c.id)).toBe(ids.indexOf(a.id) - 1);
+    expect(ids.indexOf(b.id)).toBeGreaterThan(ids.indexOf(a.id));
+    moveTabBefore(c.id, c.id);
   });
 });

@@ -153,6 +153,14 @@ export function moveTab(id: string, delta: number): void {
   if (tabs !== state.tabs) setState({ tabs });
 }
 
+/** Drop tab `id` into the slot currently held by `targetId` (drag-and-drop reorder). */
+export function moveTabBefore(id: string, targetId: string): void {
+  const from = state.tabs.findIndex((t) => t.id === id);
+  const to = state.tabs.findIndex((t) => t.id === targetId);
+  if (from < 0 || to < 0 || from === to) return;
+  setState({ tabs: moveItem(state.tabs, from, to - from) });
+}
+
 export function selectTab(id: string): void {
   if (state.tabs.some((t) => t.id === id)) setState({ activeTabId: id });
 }
