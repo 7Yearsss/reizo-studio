@@ -37,3 +37,17 @@ it('remembers an explicit artifact resize independently across close, switch and
   expect(restored.getSnapshot().rightPanelWidth).toBe(380);
   expect(localStorage.getItem('reizo:right-panel-width')).toBe('600');
 });
+
+it('each editor panel remembers its own width, falling back to the shared editor width until resized', async () => {
+  const ui = await import('./uiStore');
+  ui.setRightPanelTab('canvas');
+  ui.setRightPanelWidth(640);
+  ui.setRightPanelTab('documents');
+  // Never resized: inherits the shared editor width.
+  expect(ui.getSnapshot().rightPanelWidth).toBe(640);
+  ui.setRightPanelWidth(460);
+  ui.setRightPanelTab('canvas');
+  expect(ui.getSnapshot().rightPanelWidth).toBe(640);
+  ui.setRightPanelTab('documents');
+  expect(ui.getSnapshot().rightPanelWidth).toBe(460);
+});

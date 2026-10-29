@@ -56,10 +56,15 @@ function readMode(): SidebarMode {
   return 'chat';
 }
 
+/** Each panel remembers its own width; a panel never resized falls back to its group's width (artifacts list vs editors). */
+const tabWidthKey = (tab: RightPanelTab): string => `reizo:panel-width:${tab}`;
+
 function readRightWidth(tab: RightPanelTab | null): number {
   const defaultWidth = tab === 'artifacts' ? ARTIFACT_PANEL_DEFAULT : RIGHT_PANEL_DEFAULT;
   const key = tab === 'artifacts' ? ARTIFACT_WIDTH_KEY : RIGHT_WIDTH_KEY;
   if (typeof localStorage === 'undefined') return defaultWidth;
+  const own = tab ? Number(localStorage.getItem(tabWidthKey(tab))) : 0;
+  if (Number.isFinite(own) && own > 0) return Math.max(RIGHT_PANEL_MIN, own);
   const raw = Number(localStorage.getItem(key));
   if (!Number.isFinite(raw) || raw <= 0) return defaultWidth;
   return Math.max(RIGHT_PANEL_MIN, raw);
@@ -127,6 +132,7 @@ function setState(patch: Partial<UiState>): void {
       if ('rightPanelWidth' in patch) {
         const key = state.rightPanelTab === 'artifacts' ? ARTIFACT_WIDTH_KEY : RIGHT_WIDTH_KEY;
         localStorage.setItem(key, String(state.rightPanelWidth));
+        if (state.rightPanelTab) localStorage.setItem(tabWidthKey(state.rightPanelTab), String(state.rightPanelWidth));
       }
       if ('sidebarCollapsed' in patch) localStorage.setItem(SIDEBAR_COLLAPSED_KEY, state.sidebarCollapsed ? '1' : '0');
       if ('sidebarWidth' in patch) localStorage.setItem(SIDEBAR_WIDTH_KEY, String(state.sidebarWidth));
@@ -172,7 +178,7 @@ export function setRightPanelTab(tab: RightPanelTab | null): void {
     rightPanelTab: tab,
     canvasOpen: tab === 'canvas',
     artifactsOpen: tab === 'artifacts',
-    ...(changesWidthGroup ? { rightPanelWidth: readRightWidth(tab), rightPanelMaximized: false } : {}),
+    ...(changesWidthGroup ? { rightPanelWidth: readRightWidth(tab), rightPanelMaximized: false } : tab ? { rightPanelWidth: readRightWidth(tab) } : {}),
   });
 }
 
