@@ -1,4 +1,5 @@
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Notification, powerMonitor, powerSaveBlocker } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Notification, powerMonitor, powerSaveBlocker, shell } from 'electron';
+import { describeStartupFailure } from '../shared/startupFailure';
 import { describeActiveWork, hasActiveWork } from '../shared/quitConfirm';
 import { liveTurnCount } from './server/agent/session';
 import { stopAllBackgroundShells } from './backgroundShells';
@@ -7,7 +8,7 @@ import { deepLinkFromSecondInstance, registerDeepLinks } from './deepLinks';
 import { screenshotToChat } from './screenshotToChat';
 import { registerAttention } from './attention';
 import { activeVideoJobCount } from './server/canvas/videoJobRuntime';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
 import { IPC } from '../shared/constants';
@@ -193,10 +194,29 @@ async function shutdown(): Promise<void> {
   }
 }
 
+/** The app could not start: say why, where the data is and which copies exist, instead of vanishing silently. */
+async function showStartupFailure(err: unknown): Promise<void> {
+  try {
+    const dataRoot = path.join(app.getPath('userData'), 'data');
+    let backups: string[] = [];
+    try { backups = readdirSync(dataRoot).filter((n) => /^reizo\.db\.pre-.*\.bak$/.test(n)).sort(); } catch { /* folder unreadable: list none */ }
+    const view = describeStartupFailure(err, { dataRoot, version: app.getVersion(), backups });
+    for (;;) {
+      const { response } = await dialog.showMessageBox({ type: 'error', title: view.title, message: view.title, detail: [view.message, `错误：${view.detail}`].join(`\n\n`), buttons: ['退出', '打开数据文件夹', '复制诊断信息'], defaultId: 0, cancelId: 0, noLink: true });
+      if (response === 1) await shell.openPath(dataRoot);
+      else if (response === 2) clipboard.writeText(view.report);
+      else return;
+    }
+  } catch (shown) {
+    console.error('[main] could not show the start-up failure', shown);
+  }
+}
+
 app.on('ready', () => {
   if (!primaryInstance) return;
-  bootstrap().catch((err) => {
+  bootstrap().catch(async (err) => {
     console.error('[main] failed to start', err);
+    await showStartupFailure(err);
     app.quit();
   });
 });
