@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { CodeBlock, type CodeBlockProps } from '../agents/code-block';
@@ -7,7 +7,15 @@ import HtmlPreview from './HtmlPreview';
 import { activeSessionId } from '../../state/tabStore';
 import { HTML_ANNOTATION_EVENT } from '../../../shared/htmlAnnotation';
 import { toast } from '../../lib/toast';
+import { useScrollMemory } from '../../lib/scrollMemory';
 import { mermaidMarkdownComponents } from '../markdown/mermaidMarkdown';
+
+/** A scroller that keeps its position across tab / panel switches for the same file. */
+function RememberedScroll({ memoryKey, className, children }: { memoryKey: string; className: string; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useScrollMemory(ref, memoryKey);
+  return <div ref={ref} className={className}>{children}</div>;
+}
 
 export type PreviewKind = 'markdown' | 'html' | 'code';
 
@@ -99,9 +107,9 @@ export default function FilePreview({ path, content }: { path: string; content: 
       {source ? (
         code
       ) : kind === 'markdown' ? (
-        <div className="markdown min-h-0 flex-1 overflow-auto px-4 py-3 text-[14px] leading-[1.75] text-ink">
+        <RememberedScroll memoryKey={`file:${path}`} className="markdown min-h-0 flex-1 overflow-auto px-4 py-3 text-[14px] leading-[1.75] text-ink">
           <ReactMarkdown components={mermaidMarkdownComponents} remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-        </div>
+        </RememberedScroll>
       ) : (
         <div className="h-[360px] min-h-0 flex-1 p-2">
           <HtmlPreview
