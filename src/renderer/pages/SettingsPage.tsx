@@ -26,6 +26,7 @@ import MemorySection from './settings/MemorySection';
 import KnowledgeSection from './settings/KnowledgeSection';
 import ExpertsSection from './settings/ExpertsSection';
 import HarnessLessonsSection from './settings/HarnessLessonsSection';
+import SettingsSearchBox from './settings/SettingsSearchBox';
 import { setAnchorQuestion, useAnchorQuestion } from '../lib/anchorQuestionPref';
 
 type SectionId = uiStore.SettingsSection;
@@ -46,11 +47,31 @@ const SECTIONS: { id: SectionId; label: string; icon: typeof Settings2 }[] = [
 export default function SettingsPage() {
   const section = useUiStore((state) => SECTIONS.some(item => item.id === state.settingsSection) ? state.settingsSection : 'providers');
   const setSection = (next: SectionId) => uiStore.openSettings(next);
+  const anchor = useUiStore((state) => state.settingsAnchor);
+  const body = useRef<HTMLDivElement>(null);
+
+  // Arriving from a search result or a deep link: bring the group into view and flash it for 1.6 s.
+  // A group that is not rendered (yet) simply leaves the section as the landing place.
+  useEffect(() => {
+    if (!anchor) return undefined;
+    const wait = window.setTimeout(() => {
+      const el = body.current?.querySelector<HTMLElement>(`[data-setting-id="${anchor}"]`);
+      if (el) {
+        el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        el.classList.add('ring-2', 'ring-accent/60');
+        // Not tied to this effect: clearing the anchor re-runs it, and the flash must still end on time.
+        window.setTimeout(() => el.classList.remove('ring-2', 'ring-accent/60'), 1600);
+      }
+      uiStore.clearSettingsAnchor();
+    }, 40);
+    return () => clearTimeout(wait);
+  }, [anchor, section]);
 
   return (
     <div className="flex h-full min-w-0 max-sm:flex-col">
       <nav aria-label="设置分类" className="w-44 shrink-0 overflow-y-auto border-r border-line bg-sidebar px-3 py-6 max-sm:w-full max-sm:border-b max-sm:border-r-0 max-sm:py-3">
-        <h2 className="mb-5 px-3 text-sm font-semibold text-ink-muted max-sm:mb-2">设置</h2>
+        <h2 className="mb-3 px-3 text-sm font-semibold text-ink-muted max-sm:mb-2">设置</h2>
+        <SettingsSearchBox />
         <div className="space-y-1 max-sm:flex max-sm:gap-1 max-sm:space-y-0 max-sm:overflow-x-auto">
         {SECTIONS.map(({ id, label, icon: Icon }) => (
           <button
@@ -81,7 +102,7 @@ export default function SettingsPage() {
         ))}
         </div>
       </nav>
-      <div className={cn("min-h-0 min-w-0 flex-1 pl-6 pr-16 pb-5 pt-7 max-sm:px-4 max-sm:pt-4", section === 'providers' ? 'overflow-hidden' : 'overflow-y-auto')}>
+      <div ref={body} className={cn("min-h-0 min-w-0 flex-1 pl-6 pr-16 pb-5 pt-7 max-sm:px-4 max-sm:pt-4", section === 'providers' ? 'overflow-hidden' : 'overflow-y-auto')}>
         {section === 'general' && <GeneralSection />}
         {section === 'providers' && <ProvidersSection />}
         {section === 'network' && <NetworkSection />}
@@ -90,15 +111,15 @@ export default function SettingsPage() {
         {section === 'experts' && <ExpertsSection />}
         {section === 'extensions' && <><ExtensionsSection /><AlwaysAllowedTools /></>}
         {section === 'usage' && <UsageCostsSection onOpenProviders={() => setSection('providers')} />}
-        {section === 'storage' && <><BackupSection /><StorageMaintenanceSection /><DiagnosticsSection /></>}
+        {section === 'storage' && <><div data-setting-id="backup"><BackupSection /></div><div data-setting-id="maintenance"><StorageMaintenanceSection /></div><div data-setting-id="diagnostics"><DiagnosticsSection /></div></>}
         {section === 'about' && <AboutSection />}
       </div>
     </div>
   );
 }
 
-function SettingGroup({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
-  return <section aria-label={title} className="rounded-xl border border-line bg-paper-raised p-4 sm:p-5">
+function SettingGroup({ id, title, description, children }: { id?: string; title: string; description?: string; children: ReactNode }) {
+  return <section aria-label={title} data-setting-id={id} className="rounded-xl border border-line bg-paper-raised p-4 transition-shadow duration-500 sm:p-5">
     <h2 className="text-sm font-medium">{title}</h2>
     {description ? <p className="mt-2 text-xs leading-relaxed text-ink-muted">{description}</p> : null}
     <div className="mt-3">{children}</div>
@@ -178,7 +199,7 @@ function CustomCssGroup() {
     setNotice(removed.length ? '已应用；@import 已被忽略（不加载外部样式）' : next.trim() ? '已应用' : '已清除');
   }
   return (
-    <SettingGroup title="自定义 CSS" description="用 CSS 微调外观，立即生效。样式钩子：[data-ui~='chat.message']、chat.message.user、chat.message.assistant、chat.composer、app.sidebar、app.titlebar、part:message-content。自定义样式优先于应用样式，不需要 !important。">
+    <SettingGroup id="custom-css" title="自定义 CSS" description="用 CSS 微调外观，立即生效。样式钩子：[data-ui~='chat.message']、chat.message.user、chat.message.assistant、chat.composer、app.sidebar、app.titlebar、part:message-content。自定义样式优先于应用样式，不需要 !important。">
       <textarea
         value={css}
         onChange={(e) => setCss(e.target.value)}
@@ -208,7 +229,7 @@ function GeneralSection() {
       </p>
 
       <div className="space-y-4">
-      <SettingGroup title="外观">
+      <SettingGroup id="appearance" title="外观">
       <div className="flex flex-wrap gap-2">
         {([
           ['system', '跟随系统'],
@@ -239,15 +260,15 @@ function GeneralSection() {
       </div>
       </SettingGroup>
 
-      <SettingGroup title="个人偏好" description="语气、称呼、回复风格、你的行业习惯。对所有项目生效，每轮对话都会参考。">
+      <SettingGroup id="personal-rules" title="个人偏好" description="语气、称呼、回复风格、你的行业习惯。对所有项目生效，每轮对话都会参考。">
         <PersonalRulesEditor />
       </SettingGroup>
 
-      <SettingGroup title="联网搜索" description="让 Agent 能搜索网页（再用「访问网页」读取）。搜索词会发给你选的服务。">
+      <SettingGroup id="web-search" title="联网搜索" description="让 Agent 能搜索网页（再用「访问网页」读取）。搜索词会发给你选的服务。">
         <WebSearchEditor />
       </SettingGroup>
 
-      <SettingGroup title="权限" description="写文件和跑命令前要不要先问你。">
+      <SettingGroup id="permissions" title="权限" description="写文件和跑命令前要不要先问你。">
       <div className="flex flex-wrap gap-2">
         {([
           ['ask', '每次询问'],
@@ -281,7 +302,7 @@ function GeneralSection() {
 
       <CustomCssGroup />
 
-      <SettingGroup title="电脑操作 (Computer Use)" description="允许 Agent 截屏并控制这台电脑的鼠标、键盘。仅在需要操作图形界面时使用；每个会话首次操作前会向你确认一次。">
+      <SettingGroup id="computer-use" title="电脑操作 (Computer Use)" description="允许 Agent 截屏并控制这台电脑的鼠标、键盘。仅在需要操作图形界面时使用；每个会话首次操作前会向你确认一次。">
       <div className="flex flex-wrap gap-2">
         {([
           [false, '关闭'],
@@ -311,7 +332,7 @@ function GeneralSection() {
       </div>
       </SettingGroup>
 
-      <SettingGroup title="单次回复步数上限" description="一次回复里 Agent 最多连续调用多少步工具；到上限会停下并提示，点「继续执行」即可接着做。">
+      <SettingGroup id="step-limit" title="单次回复步数上限" description="一次回复里 Agent 最多连续调用多少步工具；到上限会停下并提示，点「继续执行」即可接着做。">
       <div className="flex flex-wrap gap-2">
         {AGENT_STEP_LIMIT_OPTIONS.map((value) => {
           const active = settings.agentStepLimit === value;
@@ -331,7 +352,7 @@ function GeneralSection() {
       </div>
       </SettingGroup>
 
-      <SettingGroup title="对话" description="Agent 回复中按 Enter 时：排队等这条回复完，或直接插话进当前这轮（Ctrl+Enter 始终是另一种）。">
+      <SettingGroup id="busy-enter" title="对话" description="Agent 回复中按 Enter 时：排队等这条回复完，或直接插话进当前这轮（Ctrl+Enter 始终是另一种）。">
       <div className="flex flex-wrap gap-2">
         {([
           ['queue', '排队发送'],
@@ -365,7 +386,7 @@ function GeneralSection() {
       </label>
       </SettingGroup>
 
-      <SettingGroup title="思考力度" description="推理模型回答前“想”多少——低档一句话问题 ~3s 出答，高档适合复杂任务但更慢（默认档最慢可达 90s）。">
+      <SettingGroup id="reasoning" title="思考力度" description="推理模型回答前“想”多少——低档一句话问题 ~3s 出答，高档适合复杂任务但更慢（默认档最慢可达 90s）。">
       <div className="flex flex-wrap gap-2">
         {([
           ['low', '低 · 快'],
@@ -397,7 +418,7 @@ function GeneralSection() {
       </div>
       </SettingGroup>
 
-      <SettingGroup title="工作区">
+      <SettingGroup id="workspace" title="工作区">
       <div className="flex items-center gap-2">
         <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-line bg-paper px-3 py-2.5">
           <FolderOpen size={14} className="shrink-0 text-ink-muted" />

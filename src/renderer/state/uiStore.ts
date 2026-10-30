@@ -1,4 +1,5 @@
 import * as tabStore from './tabStore';
+import { resolveSettingsTarget } from '../../shared/settingsSearch';
 
 export type SidebarMode = 'chat' | 'projects' | 'skills' | 'artifacts' | 'automation' | 'settings';
 export type SettingsSection = 'general' | 'providers' | 'memory' | 'knowledge' | 'experts' | 'extensions' | 'usage' | 'network' | 'storage' | 'about';
@@ -7,6 +8,8 @@ export type RightPanelTab = 'canvas' | 'video' | 'sheets' | 'documents' | 'prese
 export interface UiState {
   mode: SidebarMode;
   settingsSection: SettingsSection;
+  /** A group inside the section to scroll to and flash on arrival (consumed by the settings page). */
+  settingsAnchor: string | null;
   settingsOpen: boolean;
   selectedProjectId: string | null;
   artifactsOpen: boolean;
@@ -103,6 +106,7 @@ const initialTab = readRightTab();
 let state: UiState = {
   mode: readMode(),
   settingsSection: 'providers',
+  settingsAnchor: null,
   settingsOpen: false,
   selectedProjectId: typeof localStorage !== 'undefined' ? localStorage.getItem(PROJECT_KEY) : null,
   artifactsOpen: initialTab === 'artifacts',
@@ -158,7 +162,18 @@ export function getSnapshot(): UiState {
 }
 
 export function openSettings(section: SettingsSection | 'admin' = 'providers'): void {
-  setState({ settingsOpen: true, settingsSection: section === 'admin' ? 'providers' : section });
+  setState({ settingsOpen: true, settingsSection: section === 'admin' ? 'providers' : section, settingsAnchor: null });
+}
+
+/** Deep link: open settings at an entry by id or alias. An unknown id just opens settings at the default section. */
+export function openSettingsTarget(idOrAlias: string): void {
+  const entry = resolveSettingsTarget(idOrAlias);
+  if (!entry) { openSettings(); return; }
+  setState({ settingsOpen: true, settingsSection: entry.section, settingsAnchor: entry.anchor ?? null });
+}
+
+export function clearSettingsAnchor(): void {
+  if (state.settingsAnchor !== null) setState({ settingsAnchor: null });
 }
 
 export function closeSettings(): void {
