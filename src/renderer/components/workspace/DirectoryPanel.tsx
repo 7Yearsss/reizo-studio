@@ -195,7 +195,12 @@ export default function DirectoryPanel({ embedded = false }: { embedded?: boolea
               <X size={12} />
             </button>
           </div>
-          {preview.truncated ? <p role="status" className="px-3 py-2 text-xs text-ink-muted">文件预览已截断，仅显示前段内容。</p> : null}
+          {preview.truncated ? (
+            <p role="status" className="flex items-center gap-2 px-3 py-2 text-xs text-ink-muted">
+              <span className="min-w-0 flex-1">文件太大，只预览了前段内容。</span>
+              <button type="button" className="shrink-0 underline-offset-2 hover:text-ink hover:underline" onClick={() => void window.reizo.revealInFolder(preview.path).catch((error) => setError(error instanceof Error ? error.message : '文件夹未能打开'))}>在文件夹中显示</button>
+            </p>
+          ) : null}
           <div className="min-h-0 flex-1 overflow-auto">
             <FilePreview path={preview.path} content={preview.content} />
           </div>
