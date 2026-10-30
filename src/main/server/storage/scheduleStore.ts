@@ -66,13 +66,14 @@ export function createScheduleStore(root: string) {
   }
   return {
     async list(): Promise<Schedule[]> { return (await readDisk()).schedules; },
-    async create(input: { name: string; prompt: string; intervalMs: number; skillId?: string; once?: boolean; operationId?: string; cadence?: ScheduleCadence; runPermission?: RunPermission; watch?: ScheduleWatch }): Promise<Schedule> {
+    async create(input: { name: string; prompt: string; intervalMs: number; skillId?: string; once?: boolean; operationId?: string; cadence?: ScheduleCadence; runPermission?: RunPermission; runMode?: 'new' | 'persistent'; watch?: ScheduleWatch }): Promise<Schedule> {
       if (input.watch !== undefined && !isValidWatch(input.watch)) throw new ScheduleValidationError('监听的文件夹必须是工作区内的相对路径');
       if (input.runPermission !== undefined && !['readonly', 'workspace', 'inherit'].includes(input.runPermission)) throw new ScheduleValidationError('自动化权限档无效');
+      if (input.runMode !== undefined && !['new', 'persistent'].includes(input.runMode)) throw new ScheduleValidationError('自动化运行方式无效');
       validateScheduleInterval(input.intervalMs);
       if (input.cadence !== undefined && !isValidCadence(input.cadence)) throw new ScheduleValidationError('自动化运行时间无效');
       const id = input.operationId ?? nanoid(); operationId(id);
-      const values = { name: input.name.trim() || input.prompt.slice(0, 40), prompt: input.prompt, intervalMs: input.intervalMs, skillId: input.skillId, once: input.once === true || undefined, cadence: input.cadence, runPermission: input.runPermission ?? 'readonly', ...(input.watch ? { watch: input.watch } : {}) };
+      const values = { name: input.name.trim() || input.prompt.slice(0, 40), prompt: input.prompt, intervalMs: input.intervalMs, skillId: input.skillId, once: input.once === true || undefined, cadence: input.cadence, runPermission: input.runPermission ?? 'readonly', ...(input.runMode === 'persistent' ? { runMode: 'persistent' as const } : {}), ...(input.watch ? { watch: input.watch } : {}) };
       const hash = fingerprint(values);
       return mutate(async (disk) => {
         const previous = replay(disk, id, 'create', hash); if (previous) return previous;
@@ -142,6 +143,15 @@ export function createScheduleStore(root: string) {
         delete current.lastSessionId;
         delete current.pendingRun;
         await write(disk); return current;
+      });
+    },
+    /** Remember the conversation a persistent automation keeps writing to. */
+    bindSession(id: string, sessionId: string | null): Promise<boolean> {
+      return mutate(async (disk) => {
+        const current = disk.schedules.find((item) => item.id === id);
+        if (!current) return false;
+        if (sessionId) current.boundSessionId = sessionId; else delete current.boundSessionId;
+        await write(disk); return true;
       });
     },
     attachSession(id: string, executionId: string, sessionId: string): Promise<boolean> {

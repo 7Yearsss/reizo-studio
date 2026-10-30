@@ -23,6 +23,7 @@ export default function AutomationPage() {
   const [watchFolder, setWatchFolder] = useState('');
   const [watchPattern, setWatchPattern] = useState('');
   const [runPermission, setRunPermission] = useState<RunPermission>('readonly');
+  const [runMode, setRunMode] = useState<'new' | 'persistent'>('new');
   const [clock, setClock] = useState('09:00');
   const [weekday, setWeekday] = useState(1);
   const cadence: ScheduleCadence | undefined = when === 'interval' || when === 'folder' ? undefined : {
@@ -239,6 +240,16 @@ export default function AutomationPage() {
               <option value="inherit">沿用全局权限</option>
             </select>
             <select
+              aria-label="运行方式"
+              value={runMode}
+              onChange={(e) => setRunMode(e.target.value as 'new' | 'persistent')}
+              title="每次新开一个对话，或始终在同一个对话里继续（之前的结果它都看得到）"
+              className="rounded-full bg-sidebar px-3 py-1.5 text-xs text-ink outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <option value="new">每次新对话</option>
+              <option value="persistent">同一个对话里继续</option>
+            </select>
+            <select
               aria-label="自动化使用的技能"
               value={skillId}
               onChange={(e) => setSkillId(e.target.value)}
@@ -257,7 +268,7 @@ export default function AutomationPage() {
               disabled={!prompt.trim() || Boolean(busy) || (when === 'folder' && !watchFolder.trim())}
               onClick={() => void perform('schedule:create', async () => {
                 if (!prompt.trim()) return;
-                const input = { prompt: prompt.trim(), intervalMs: cadence ? 24 * 60 * 60 * 1000 : intervalMs, skillId: skillId || undefined, runPermission, ...(cadence ? { cadence } : {}), ...(when === 'folder' ? { watch: { folder: watchFolder.trim(), ...(watchPattern.trim() ? { pattern: watchPattern.trim() } : {}) } } : {}) };
+                const input = { prompt: prompt.trim(), intervalMs: cadence ? 24 * 60 * 60 * 1000 : intervalMs, skillId: skillId || undefined, runPermission, ...(runMode === 'persistent' ? { runMode } : {}), ...(cadence ? { cadence } : {}), ...(when === 'folder' ? { watch: { folder: watchFolder.trim(), ...(watchPattern.trim() ? { pattern: watchPattern.trim() } : {}) } } : {}) };
                 const signature = JSON.stringify(input);
                 if (!createAttempt.current || createAttempt.current.signature !== signature) createAttempt.current = { signature, id: nanoid() };
                 const revision = promptRevision.current;
@@ -283,7 +294,7 @@ export default function AutomationPage() {
                   <p className="font-medium text-ink">{schedule.name}</p>
                   <p className="mt-1 text-sm text-ink-muted">{schedule.prompt}</p>
                   <p className="mt-2 text-[11px] text-ink-muted">
-                    {!Number.isSafeInteger(schedule.intervalMs) || schedule.intervalMs < 60_000 ? '配置无效，不会运行' : schedule.activeExecution ? '执行中' : schedule.pendingRun ? '等待手动执行' : schedule.lastOutcome === 'interrupted' && !schedule.enabled ? '已中断并暂停' : schedule.enabled ? '已启用' : '已暂停'}{schedule.watch ? ` · 监听 ${schedule.watch.folder}${schedule.watch.pattern ? `/${schedule.watch.pattern}` : ''}` : schedule.enabled && !schedule.activeExecution && !schedule.pendingRun ? ` · 下次 ${new Date(schedule.nextRunAt).toLocaleString()}` : ''} · 已尝试 {schedule.runCount} 次{schedule.cadence ? ` · ${describeCadence(schedule.cadence)}` : ''} · {schedule.runPermission === 'readonly' ? '只读' : schedule.runPermission === 'inherit' ? '沿用全局权限' : '可改工作区文件'}{schedule.once ? ' · 仅运行一次' : ''}
+                    {!Number.isSafeInteger(schedule.intervalMs) || schedule.intervalMs < 60_000 ? '配置无效，不会运行' : schedule.activeExecution ? '执行中' : schedule.pendingRun ? '等待手动执行' : schedule.lastOutcome === 'interrupted' && !schedule.enabled ? '已中断并暂停' : schedule.enabled ? '已启用' : '已暂停'}{schedule.watch ? ` · 监听 ${schedule.watch.folder}${schedule.watch.pattern ? `/${schedule.watch.pattern}` : ''}` : schedule.enabled && !schedule.activeExecution && !schedule.pendingRun ? ` · 下次 ${new Date(schedule.nextRunAt).toLocaleString()}` : ''} · 已尝试 {schedule.runCount} 次{schedule.cadence ? ` · ${describeCadence(schedule.cadence)}` : ''} · {schedule.runPermission === 'readonly' ? '只读' : schedule.runPermission === 'inherit' ? '沿用全局权限' : '可改工作区文件'}{schedule.runMode === 'persistent' ? ' · 同一个对话' : ''}{schedule.once ? ' · 仅运行一次' : ''}
                     {schedule.lastError ? ` · 上次失败：${schedule.lastError}` : ''}
                   </p>
                   {(schedule.activeExecution ? schedule.activeExecution.sessionId : schedule.lastSessionId) ? <Button type="button" variant="ghost" size="xs" className="mt-2" onClick={() => { const sessionId = schedule.activeExecution ? schedule.activeExecution.sessionId : schedule.lastSessionId; if (!sessionId) return; uiStore.setMode('chat'); tabStore.openChatTab(sessionId, schedule.name); }}>{schedule.activeExecution ? '查看本次会话' : '查看上次结果'}</Button> : null}

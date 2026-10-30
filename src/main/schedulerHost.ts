@@ -49,7 +49,10 @@ export function startScheduler(options: {
     try {
       if (stopping) throw new ScheduledRunInterruptedError('应用正在退出，执行已暂停，未自动重提');
       const settings = await options.settingsStore.get();
-      const session = await sessionStore.create(schedule.name, settings.workspacePath);
+      // A persistent automation keeps writing to one conversation; if it was deleted, a new one takes its place.
+      const bound = schedule.runMode === 'persistent' && schedule.boundSessionId ? await sessionStore.get(schedule.boundSessionId) : null;
+      const session = bound ?? await sessionStore.create(schedule.name, settings.workspacePath);
+      if (schedule.runMode === 'persistent' && !bound) await options.scheduleStore.bindSession(schedule.id, session.id);
       sessionId = session.id;
       if (!await options.scheduleStore.attachSession(schedule.id, executionId, session.id)) return;
       liveSessions.add(session.id);

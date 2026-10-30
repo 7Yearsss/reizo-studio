@@ -51,6 +51,34 @@ describe('durable automation execution', () => {
     expect((await store.list())[0].lastOutcome).toBe('interrupted');
   });
 
+  it('a persistent automation keeps writing to one conversation, and opens a new one if that was deleted', async () => {
+    const schedule = await store.create({ name: 'fixture', prompt: 'offline', intervalMs: 60_000, runMode: 'persistent' });
+    const created: string[] = [];
+    const known = new Set<string>();
+    const sessionStore = {
+      create: async () => { const id = `session-${created.length + 1}`; created.push(id); known.add(id); return { id, title: 'fixture' }; },
+      get: async (id: string) => (known.has(id) ? { id } : null),
+    } as unknown as Parameters<typeof startScheduler>[0]['sessionStore'];
+    harness.run.mockImplementation(async () => terminal('completed'));
+    let n = 0;
+    const runOnce = async (): Promise<void> => {
+      await store.requestRun(schedule.id, `manual-${++n}`);
+      const done = deferred<boolean>();
+      const original = store.finishExecution.bind(store);
+      const spy = vi.spyOn(store, 'finishExecution').mockImplementation(async (...args) => { const ok = await original(...args); done.resolve(ok); return ok; });
+      const stop = startScheduler({ ...options(), sessionStore }); stops.push(stop);
+      await done.promise; await stop(); spy.mockRestore();
+    };
+    await runOnce();
+    await runOnce();
+    expect(created).toEqual(['session-1']);
+    expect(harness.run.mock.calls.map((call) => call[0].sessionId)).toEqual(['session-1', 'session-1']);
+    known.clear();
+    await runOnce();
+    expect(created).toEqual(['session-1', 'session-2']);
+    expect((await store.list())[0].boundSessionId).toBe('session-2');
+  });
+
   it('keeps a failed one-shot and accepts only a completed terminal marker', async () => {
     const schedule = await store.create({ name: 'fixture', prompt: 'offline', intervalMs: 60_000, once: true });
     await store.requestRun(schedule.id, 'manual');

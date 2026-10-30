@@ -43,6 +43,7 @@ export function createSchedulesRouter(scheduleStore: ScheduleStore, thoughtStore
       once: body.once === true,
       cadence: body.cadence,
       runPermission: body.runPermission,
+      runMode: body.runMode,
       watch: body.watch,
       operationId: body.operationId,
     }); } catch (error) { if (error instanceof ScheduleValidationError) return c.json({ error: error.message }, error.status); throw error; }

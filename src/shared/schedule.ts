@@ -35,6 +35,9 @@ export interface ScheduleRun {
 export interface Schedule {
   /** Unattended-run ceiling. New automations default to read-only; schedules saved before this existed run as `workspace`. */
   runPermission?: RunPermission;
+  /** `new` (default): every run opens a fresh conversation. `persistent`: runs continue one conversation, kept in `boundSessionId`. */
+  runMode?: 'new' | 'persistent';
+  boundSessionId?: string;
   /** When set, runs fall on this wall-clock time instead of every `intervalMs`. */
   cadence?: ScheduleCadence;
   /** Most recent first, capped at MAX_RUN_HISTORY. */
