@@ -1,3 +1,4 @@
+import PanelErrorBoundary from '../PanelErrorBoundary';
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { splitterKeyWidth } from '../../../shared/splitterKeys';
 import { motion, useIsPresent } from 'motion/react';
@@ -248,6 +249,7 @@ export default function RightPanel({
         </Tooltip>
       </div>
       <div className="min-h-0 flex-1 bg-paper-raised">
+        <PanelErrorBoundary resetKey={`${activeTab}:${sessionId ?? ''}`}>
         {activeTab === 'canvas' &&
           (showContent && sessionId ? (
             <Suspense fallback={<CanvasSkeleton />}>
@@ -275,6 +277,7 @@ export default function RightPanel({
             {activeTab === 'terminal' && <TerminalPanel />}
           </>
         )}
+        </PanelErrorBoundary>
       </div>
       {activeTab === 'canvas' && import.meta.env.DEV && new URLSearchParams(window.location.search).has('canvas-perf') ? <CanvasPerformanceProbe key={sessionId} /> : null}
     </motion.aside>
