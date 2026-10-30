@@ -39,6 +39,34 @@ export async function cropImageBlob(
   return canvasToPngBlob(canvas);
 }
 
+/** Crop `rect` and paint freehand strokes (0–1 relative to the crop) onto it, so the model sees what the user circled. */
+export async function cropImageBlobWithStrokes(
+  src: string,
+  rect: { x: number; y: number; w: number; h: number },
+  strokes: readonly (readonly { x: number; y: number }[])[],
+  color = '#ff3b30',
+): Promise<Blob> {
+  const img = await loadHtmlImage(src);
+  const { sx, sy, sw, sh } = pixelCropRect(img.naturalWidth, img.naturalHeight, rect);
+  const canvas = makeCanvas(sw, sh);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('无法创建画布');
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(3, Math.round(Math.min(sw, sh) * 0.012));
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  for (const stroke of strokes) {
+    if (stroke.length === 0) continue;
+    ctx.beginPath();
+    ctx.moveTo(stroke[0].x * sw, stroke[0].y * sh);
+    if (stroke.length === 1) ctx.lineTo(stroke[0].x * sw + 0.1, stroke[0].y * sh);
+    for (const p of stroke.slice(1)) ctx.lineTo(p.x * sw, p.y * sh);
+    ctx.stroke();
+  }
+  return canvasToPngBlob(canvas);
+}
+
 export async function resizeImageBlob(src: string, targetW: number, targetH: number): Promise<Blob> {
   const img = await loadHtmlImage(src);
   const canvas = makeCanvas(targetW, targetH);
