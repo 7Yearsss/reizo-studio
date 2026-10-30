@@ -1,4 +1,4 @@
-import type { PluginPreview } from './plugins';
+import type { PluginPreview, PluginSummary } from './plugins';
 
 /**
  * What the user reads before a pack is copied in: everything it carries, with the commands and addresses spelled out.
@@ -17,5 +17,16 @@ export function previewConfirmText(preview: PluginPreview): string {
   if (summary.config?.length) lines.push(`• 需要你填写凭据：${summary.config.map((c) => c.name).join('、')}（导入后在卡片里填写，加密保存在本机，不会写进扩展包或任何配置文件）`);
   for (const warning of summary.warnings) lines.push(`• 注意：${warning}`);
   lines.push('', '以上程序和命令要等你启用后才会运行。只导入你信任的来源。继续导入吗？');
+  return lines.join('\n');
+}
+
+/** What goes away when a pack is removed — spelled out so the user is not agreeing to "its files" in the abstract. */
+export function uninstallImpactText(pack: Pick<PluginSummary, 'name' | 'skills' | 'mcpServers' | 'hooks' | 'config' | 'enabled'>): string {
+  const lines: string[] = [`卸载「${pack.name}」会删除它的文件，并带走：`];
+  lines.push(pack.skills.length ? `• ${pack.skills.length} 个技能：${pack.skills.slice(0, 8).join('、')}${pack.skills.length > 8 ? '…' : ''}` : '• 没有技能');
+  if (pack.mcpServers.length) lines.push(`• ${pack.mcpServers.length} 个外部工具服务${pack.enabled ? '（正在运行的会被停掉）' : ''}`);
+  if (pack.hooks.length) lines.push(`• ${pack.hooks.length} 条工具调用前后的命令`);
+  if (pack.config?.some((c) => c.set)) lines.push('• 你为它保存的凭据');
+  lines.push('', '你的对话、画布和其他文件不受影响。');
   return lines.join('\n');
 }

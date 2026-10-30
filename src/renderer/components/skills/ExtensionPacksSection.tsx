@@ -3,7 +3,7 @@ import { Package, Plus, Trash2 } from 'lucide-react';
 import type { PluginSummary } from '../../../shared/plugins';
 import * as skillStore from '../../state/skillStore';
 import { CatalogIcon } from './CatalogIcon';
-import { previewConfirmText } from '../../../shared/pluginPreviewText';
+import { previewConfirmText, uninstallImpactText } from '../../../shared/pluginPreviewText';
 import { confirmDialog, noticeDialog } from '@/renderer/state/confirmStore';
 
 export const PACKS_CHANGED = 'reizo:packs-changed';
@@ -195,7 +195,7 @@ export default function ExtensionPacksSection() {
                 void act(pack.id, () => (window.reizo?.setPluginEnabled ? window.reizo.setPluginEnabled(pack.id, !pack.enabled) : Promise.resolve()));
               }}
               onRemove={() => {
-                void confirmDialog({ title: `卸载「${pack.name}」？`, description: '它的文件会被删除。', confirmLabel: '卸载', destructive: true }).then((ok) => {
+                void confirmDialog({ title: `卸载「${pack.name}」？`, description: uninstallImpactText(pack), confirmLabel: '卸载', destructive: true }).then((ok) => {
                   if (ok) void act(pack.id, () => (window.reizo?.uninstallPlugin ? window.reizo.uninstallPlugin(pack.id) : Promise.resolve()));
                 });
               }}
