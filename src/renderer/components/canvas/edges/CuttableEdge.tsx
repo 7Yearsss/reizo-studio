@@ -9,6 +9,8 @@ export interface CuttableEdgeData extends Record<string, unknown> {
   targetType?: string;
   isRunning?: boolean;
   isRevealed?: boolean;
+  /** The source node changed since it last produced output: the wire is drawn dotted and faint. */
+  stale?: boolean;
   onCutEdge?: (edgeId: string) => void;
   onRerouteEdge?: (edgeId: string, screenPos: { x: number; y: number }) => void;
 }
@@ -72,7 +74,7 @@ function CuttableEdge({
   targetHandleId,
   data,
 }: EdgeProps) {
-  const { sourceType, targetType, isRunning, isRevealed = true, onCutEdge, onRerouteEdge } = (data as CuttableEdgeData) || {};
+  const { sourceType, targetType, isRunning, isRevealed = true, stale = false, onCutEdge, onRerouteEdge } = (data as CuttableEdgeData) || {};
 
   const [armed, setArmed] = useState(false);
   const [badge, setBadge] = useState<{ x: number; y: number } | null>(null);
@@ -196,11 +198,11 @@ function CuttableEdge({
         stroke={baseStroke}
         strokeWidth={active || isRunning ? 2.4 : 1.6}
         strokeLinecap="round"
-        strokeDasharray={dying && pathLength > 0 ? `${pathLength} ${pathLength}` : active ? '6 4' : undefined}
+        strokeDasharray={dying && pathLength > 0 ? `${pathLength} ${pathLength}` : active ? '6 4' : stale ? '2 5' : undefined}
         strokeDashoffset={dying && pathLength > 0 ? pathLength : undefined}
         style={{
           pointerEvents: 'none',
-          opacity: !isRevealed ? 0 : active ? 0.95 : 0.8,
+          opacity: !isRevealed ? 0 : active ? 0.95 : stale ? 0.5 : 0.8,
           transition: dying ? 'stroke-dashoffset 350ms ease-in' : 'stroke-width 150ms ease, opacity 200ms ease',
         }}
       />

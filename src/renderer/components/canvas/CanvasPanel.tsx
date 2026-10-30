@@ -875,6 +875,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
   const edges: Edge[] = useMemo(() => {
     const zIndexes = computeNodeZIndexes(storeNodes, (id) => selectedNodeIds.includes(id));
     const nodeTitles = new Map(storeNodes.map((node) => [node.id, node.title || node.type]));
+    const outdated = new Set(storeNodes.filter((node) => node.dirty && node.runState !== 'running').map((node) => node.id));
     return storeEdges.map((edge) => {
       const sourceMeta = nodeMetaMap.get(edge.sourceId);
       const targetMeta = nodeMetaMap.get(edge.targetId);
@@ -901,6 +902,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
           targetType: targetMeta?.type,
           isRunning,
           isRevealed,
+          stale: outdated.has(edge.sourceId) && !isRunning,
           onCutEdge: handleCutEdge,
           onRerouteEdge: handleRerouteEdge,
         },
