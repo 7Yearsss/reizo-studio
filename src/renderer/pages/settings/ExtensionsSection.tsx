@@ -185,7 +185,7 @@ function McpBlock() {
       <div className="space-y-2">
         {editing && editing.index === -1 ? (
           <McpForm initial={editing.entry} onCancel={() => setEditing(null)}
-            onSave={(entry) => void persist([...list, entry], `已添加 ${entry.name || '服务'}`)} />
+            onSave={(entry) => void persist([...list, { ...entry, disabled: true }], `已添加 ${entry.name || '服务'}，默认停用；确认命令无误后点「启用」`)} />
         ) : null}
         {entries === null ? <p className="text-xs text-ink-muted">加载中…</p> : null}
         {entries !== null && list.length === 0 && !editing ? (
