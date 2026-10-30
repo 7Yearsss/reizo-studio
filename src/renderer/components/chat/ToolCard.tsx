@@ -8,6 +8,7 @@ import VideoAnalysisCard from './VideoAnalysisCard';
 import DeliverableCard, { deliverableOf } from './DeliverableCard';
 import ReviewProposalCard, { reviewProposalOf } from './ReviewProposalCard';
 import { useState } from 'react';
+import HtmlPreview from '../workspace/HtmlPreview';
 import { Undo2 } from 'lucide-react';
 import { allowEgressHost, ApiRequestError, rollbackSnapshot } from '../../api';
 import { toast } from '../../lib/toast';
@@ -127,6 +128,7 @@ export default function ToolCard({ part, collapsed = false, sessionId, interrupt
   const deliverable = deliverableOf(part);
   if (deliverable) return <DeliverableCard part={part} file={deliverable} />;
 
+  const livePage = running ? livePageOf(part) : null;
   const detail = toolDetail(part);
   const target = toolTarget(part);
   const diffPreview = part.error ? null : toolDiffPreview(part);
@@ -141,11 +143,15 @@ export default function ToolCard({ part, collapsed = false, sessionId, interrupt
       title={toolTitle(part.name, part, running)}
       status={running ? 'running' : part.error ? 'error' : 'success'}
       kind={kind}
-      defaultOpen={!collapsed && (isWrite || Boolean(part.error) || blockedHosts.length > 0)}
+      defaultOpen={!collapsed && (isWrite || Boolean(livePage) || Boolean(part.error) || blockedHosts.length > 0)}
       collapseOnComplete={!isWrite}
       copyText={detail || undefined}
     >
-      {diffPreview ? (
+      {livePage ? (
+        <div className="h-72 overflow-hidden rounded-md border border-line">
+          <HtmlPreview html={livePage.html} title={livePage.path} />
+        </div>
+      ) : diffPreview ? (
         <>
           <DiffView preview={diffPreview} />
           {snapshotId && sessionId ? <RollbackButton sessionId={sessionId} snapshotId={snapshotId} /> : null}
@@ -158,4 +164,12 @@ export default function ToolCard({ part, collapsed = false, sessionId, interrupt
       {blockedHosts.length > 0 ? <AllowHostButtons hosts={blockedHosts} /> : null}
     </ToolResult>
   );
+}
+
+/** The page a `write_file` call is still writing: scripts stay off, so it is a picture of the work in progress. */
+function livePageOf(part: ToolCallPart): { path: string; html: string } | null {
+  if (part.name !== 'write_file') return null;
+  const { path, content } = part.args as { path?: unknown; content?: unknown };
+  if (typeof path !== 'string' || typeof content !== 'string' || !/.html?$/i.test(path) || content.length < 40) return null;
+  return { path, html: content };
 }

@@ -32,3 +32,23 @@ describe('ToolCard command details', () => {
     expect(html).toContain('&quot;command&quot;: &quot;npm run typecheck&quot;');
   });
 });
+
+describe('ToolCard live HTML page', () => {
+  const page = '<!doctype html><h1>Landing</h1><p>partial body that is still being written';
+  const card = (over: Record<string, unknown>) =>
+    renderToString(<ToolCard part={{ type: 'tool', id: 'w1', name: 'write_file', args: { path: 'index.html', content: page }, ...over } as never} />);
+
+  it('previews the page while write_file is still running', () => {
+    const html = card({});
+    expect(html).toContain('<iframe');
+    expect(html).toContain('sandbox=""');
+  });
+
+  it('stops previewing once the call has a result', () => {
+    expect(card({ result: '{"ok":true}' })).not.toContain('<iframe');
+  });
+
+  it('does not preview non-HTML files', () => {
+    expect(card({ args: { path: 'a.ts', content: page } })).not.toContain('<iframe');
+  });
+});

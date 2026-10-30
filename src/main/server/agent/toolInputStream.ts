@@ -8,6 +8,10 @@ const SHOWN_KEYS = ['path', 'command', 'query', 'pattern', 'url', 'filename', 'n
 /** Hard cap on text kept per call, and how much new text must arrive before we look again. */
 const MAX_TEXT = 4000;
 const STEP_CHARS = 160;
+/** An HTML page being written is streamed whole (so the preview can follow it) but in coarse steps and under a cap. */
+const HTML_MAX_TEXT = 300_000;
+const HTML_STEP_CHARS = 3000;
+const HTML_PATH = /.html?$/i;
 
 /**
  * Only plain workspace / shell / web tools are shown early. Canvas, artifact and media tools have renderer-side
@@ -15,7 +19,7 @@ const STEP_CHARS = 160;
  */
 const EARLY_TOOLS: ReadonlySet<string> = new Set(['read_file', 'write_file', 'edit_file', 'list_dir', 'find_files', 'grep', 'run_command', 'http_fetch', 'web_search']);
 
-interface Open { name: string; text: string; scannedLen: number; lastArgs: string }
+interface Open { name: string; text: string; scannedLen: number; lastArgs: string; html?: boolean }
 
 /**
  * Turns the provider's streamed tool-call arguments into early, bounded `tool` events: the row appears as soon as the
@@ -41,12 +45,17 @@ export function createToolInputStreamer(): { feed(chunk: Chunk): ChatStreamEvent
       const id = typeof chunk.id === 'string' ? chunk.id : '';
       const delta = typeof chunk.delta === 'string' ? chunk.delta : '';
       const call = open.get(id);
-      if (!call || !delta || call.text.length >= MAX_TEXT) return null;
-      call.text = (call.text + delta).slice(0, MAX_TEXT);
+      if (!call || !delta) return null;
+      const htmlLimit = Boolean(call.html);
+      const limit = htmlLimit ? HTML_MAX_TEXT : MAX_TEXT;
+      if (call.text.length >= limit) return null;
+      call.text = (call.text + delta).slice(0, limit);
       // Look at the text early (the first field usually lands in the first few tokens), then only every STEP_CHARS.
-      if (call.scannedLen > 0 && call.text.length - call.scannedLen < STEP_CHARS) return null;
+      const step = call.html ? HTML_STEP_CHARS : STEP_CHARS;
+      if (call.scannedLen > 0 && call.text.length - call.scannedLen < step) return null;
       call.scannedLen = call.text.length;
-      const args = partialStringFields(call.text, SHOWN_KEYS);
+      const args = partialStringFields(call.text, call.html ? [...SHOWN_KEYS, 'content'] : SHOWN_KEYS);
+      if (!call.html && call.name === 'write_file' && args.path && HTML_PATH.test(args.path)) call.html = true;
       const signature = JSON.stringify(args);
       if (signature === call.lastArgs || Object.keys(args).length === 0) return null;
       call.lastArgs = signature;
