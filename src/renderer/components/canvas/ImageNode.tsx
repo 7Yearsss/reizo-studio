@@ -707,6 +707,7 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
               <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/65 backdrop-blur-[2px] p-4">
                 <ImageGenerationPending
                   mode={edit ? 'edit' : 'generate'}
+                  sampleSrc={assetUrl}
                   compact
                   className="w-full h-full bg-black/40 border-white/10"
                 />

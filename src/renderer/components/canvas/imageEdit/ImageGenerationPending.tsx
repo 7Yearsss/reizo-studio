@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useReducedMotion } from 'motion/react';
 import { DitherField, DitherMark } from '../../agents/image-generation';
 import { cn } from '../../../lib/cn';
+import PixelMosaicField from './PixelMosaicField';
 
 const GENERATE_MESSAGES = [
   '正在解析提示词…',
@@ -24,6 +25,8 @@ export interface ImageGenerationPendingProps {
   label?: string;
   mode?: 'generate' | 'edit';
   compact?: boolean;
+  /** The picture being regenerated or edited: the loading mosaic takes its colours from it. */
+  sampleSrc?: string;
 }
 
 export default function ImageGenerationPending({
@@ -31,6 +34,7 @@ export default function ImageGenerationPending({
   label,
   mode = 'generate',
   compact = false,
+  sampleSrc,
 }: ImageGenerationPendingProps) {
   const reduce = useReducedMotion() ?? false;
   const [tick, setTick] = useState(0);
@@ -53,8 +57,12 @@ export default function ImageGenerationPending({
         className,
       )}
     >
-      {/* Same dither field the chat image-generation card uses. */}
-      <DitherField interactive={false} reduce={reduce} status="generating" />
+      {sampleSrc ? (
+        <PixelMosaicField src={sampleSrc} reduce={reduce} />
+      ) : (
+        /* Same dither field the chat image-generation card uses. */
+        <DitherField interactive={false} reduce={reduce} status="generating" />
+      )}
 
       {/* Small status line — no progress bar, no timer. */}
       <div className="absolute left-3 bottom-3 z-10 flex items-center gap-2 rounded-full bg-background/75 px-2.5 py-1 text-[11px] font-medium text-foreground backdrop-blur-sm">
