@@ -252,7 +252,7 @@ export default function RightPanel({
           (showContent && sessionId ? (
             <Suspense fallback={<CanvasSkeleton />}>
               <div key={sessionId} className="h-full w-full animate-[fade-in_180ms_var(--ease-out)]">
-                <CanvasPanel sessionId={sessionId} />
+                <CanvasPanel key={sessionId} sessionId={sessionId} />
               </div>
             </Suspense>
           ) : (

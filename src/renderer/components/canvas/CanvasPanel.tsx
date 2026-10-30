@@ -1,3 +1,4 @@
+import { parseSavedViewport, type SavedViewport } from '../../../shared/savedViewport';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
@@ -19,7 +20,6 @@ import {
   type Connection,
   type NodeTypes,
   type EdgeTypes,
-  type Viewport,
 } from '@xyflow/react';
 import {
   ImageIcon,
@@ -117,6 +117,9 @@ const NODE_TYPES: NodeTypes = {
 };
 const EDGE_TYPES: EdgeTypes = { cuttable: CuttableEdge, default: CuttableEdge };
 const VIEWPORT_KEY = (sessionId: string) => `reizo:canvas-viewport:${sessionId}`;
+function readSavedViewport(sessionId: string): SavedViewport | null {
+  try { return parseSavedViewport(localStorage.getItem(VIEWPORT_KEY(sessionId))); } catch { return null; }
+}
 
 const MINIMAP_NODE_COLOR = (n: { type?: string }) => {
   if (n.type === 'image') return 'var(--accent, #c26d3a)';
@@ -500,23 +503,18 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     if (justDone.length > 0) canvasStore.spotlight(sessionId, justDone, 'automatic');
   }, [storeNodes, sessionId]);
 
+  // Read once before the first paint so a returning user's canvas mounts where they left it instead of jumping.
+  const [savedViewport] = useState(() => readSavedViewport(sessionId));
   const restoredRef = useRef(false);
   const viewportReady = useStore((s) => Boolean(s.panZoom));
   const nodesReady = useNodesInitialized();
   const restoreViewport = useCallback(() => {
     if (restoredRef.current || !viewportReady) return;
-    try {
-      const raw = localStorage.getItem(VIEWPORT_KEY(sessionId));
-      if (raw) {
-        const v = JSON.parse(raw) as Viewport;
-        if ([v.x, v.y, v.zoom].every(Number.isFinite) && v.zoom > 0) {
-          restoredRef.current = true;
-          void rf.setViewport({ ...v, zoom: Math.min(3, Math.max(0.05, v.zoom)) });
-          return;
-        }
-      }
-    } catch {
-      /* ignore */
+    const saved = readSavedViewport(sessionId);
+    if (saved) {
+      restoredRef.current = true;
+      void rf.setViewport(saved);
+      return;
     }
     // onInit can run before the async snapshot has arrived or nodes are measured.
     if (!loaded || !nodesReady || !storeNodes.length) return;
@@ -1802,6 +1800,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     >
       <ReactFlow
         defaultNodes={initialNodes}
+        defaultViewport={savedViewport ?? undefined}
         edges={edges}
         nodeTypes={NODE_TYPES}
         edgeTypes={EDGE_TYPES}
