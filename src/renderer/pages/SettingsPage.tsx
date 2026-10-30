@@ -21,6 +21,7 @@ import NetworkSection from './settings/NetworkSection';
 import UsageCostsSection from './settings/UsageCostsSection';
 import ExtensionsSection from './settings/ExtensionsSection';
 import AlwaysAllowedTools from './settings/AlwaysAllowedTools';
+import EffectivePermissions from './settings/EffectivePermissions';
 import MemorySection from './settings/MemorySection';
 import KnowledgeSection from './settings/KnowledgeSection';
 import ExpertsSection from './settings/ExpertsSection';
@@ -275,6 +276,7 @@ function GeneralSection() {
           );
         })}
       </div>
+      <EffectivePermissions mode={settings.permissionMode} />
       </SettingGroup>
 
       <CustomCssGroup />

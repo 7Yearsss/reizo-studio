@@ -1,41 +1,18 @@
+import { ALWAYS_ASK_TOOLS, CONTROL_TOOLS, needsApproval } from '../../../shared/permissionRules';
 import type { PermissionMode } from '../../../shared/settings';
 import { CANVAS_BUDGET_TOOL } from '../../../shared/stream';
 import type { AskQuestion, ChatStreamEvent, FileDiffPreview } from '../../../shared/stream';
 
 export type PermissionDecision = 'allow' | 'deny' | 'allow-session' | 'allow-always';
 
-const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'personal_memory_write', 'personal_memory_delete', 'http_fetch', 'web_search', 'browser_read', 'browser_open', 'analyze_video']);
-const SHELL_TOOLS = new Set(['run_command']);
-/**
- * Tools that drive the user's real machine (mouse / keyboard / screen). Always
- * gated on first use regardless of `permissionMode` — even `full` prompts once,
- * then `allow-session` lets the agent run the rest of the turn uninterrupted.
- */
-const CONTROL_TOOLS = new Set(['computer']);
-
-/**
- * Tools that leave durable state behind (an unattended recurring run, a standing instruction). A single
- * injected sentence in a web page or document is enough to plant one, so every call is confirmed on its
- * own: `full` mode does not waive it and an `allow-session` answer is treated as a one-time allow.
- */
 /** Per-action confirmation for consequential computer-use steps (send, pay, delete…). */
 export const COMPUTER_CONFIRM_TOOL = 'computer_confirm';
 
-export const ALWAYS_ASK_TOOLS: ReadonlySet<string> = new Set(['create_schedule', 'delete_schedule', 'computer_confirm', 'propose_skill', 'computer_app']);
+export { ALWAYS_ASK_TOOLS, needsApproval };
 
 /** Git subcommands that only inspect the repo. Mirrors Claude Code's read-only git set, kept tight. */
 const READ_ONLY_GIT = /^(git\s+)(status|diff|log|show|rev-parse|describe|ls-files)(\s|$)/;
 const READ_ONLY_GIT_REMOTE = /^git\s+remote(\s+(-v|--verbose))?\s*$/;
-
-export function needsApproval(mode: PermissionMode, toolName: string): boolean {
-  if (CONTROL_TOOLS.has(toolName) || ALWAYS_ASK_TOOLS.has(toolName)) return true;
-  // Third-party MCP servers: ask (once per tool per session) unless the user chose full access.
-  if (toolName.startsWith('mcp__')) return mode !== 'full';
-  if (mode === 'full') return false;
-  if (WRITE_TOOLS.has(toolName)) return mode === 'ask';
-  if (SHELL_TOOLS.has(toolName)) return true;
-  return false;
-}
 
 export function isReadOnlyShellCommand(command: string): boolean {
   const trimmed = command.trim();
