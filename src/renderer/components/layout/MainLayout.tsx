@@ -4,6 +4,7 @@ import { Suspense, useEffect } from 'react';
 import CustomTitleBar from './CustomTitleBar';
 import Sidebar from './Sidebar';
 import RightPanel from '../workspace/RightPanel';
+import AgentMiniPreview from '../canvas/AgentMiniPreview';
 import { useTabStore } from '../../state/useTabStore';
 import { useUiStore } from '../../state/useUiStore';
 import * as uiStore from '../../state/uiStore';
@@ -66,9 +67,10 @@ export default function MainLayout() {
               return (
                 <div
                   key={tab.id}
-                  className="flex min-h-0 flex-1 flex-col"
+                  className="relative flex min-h-0 flex-1 flex-col"
                   style={active ? undefined : { display: 'none' }}
                 >
+                  {tab.kind === 'chat' && tab.sessionId && active && <AgentMiniPreview sessionId={tab.sessionId} canvasVisible={showRight && rightPanelTab === 'canvas'} />}
                   {tab.kind === 'launcher' && <HomePage active={active} />}
                   {tab.kind === 'chat' && tab.sessionId && (
                     <ChatPage

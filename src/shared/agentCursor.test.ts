@@ -27,3 +27,19 @@ describe('agentCursorTarget', () => {
     expect(agentCursorTarget([], nodes, 0)).toBeNull();
   });
 });
+
+import { agentMiniPreview } from './agentCursor';
+
+describe('agentMiniPreview', () => {
+  it('shows the latest action while the canvas is off screen', () => {
+    const p = agentMiniPreview([entry({ at: 1000, label: '编排 3 个节点', nodeIds: ['a', 'b', 'c'] })], 2000, false);
+    expect(p).toEqual({ label: '编排 3 个节点', working: false, nodeCount: 3 });
+    expect(agentMiniPreview([entry({ status: 'running', at: 0 })], 60_000, false)?.working).toBe(true);
+  });
+  it('stays out of the way when the canvas is visible, idle, past the linger time, or failed', () => {
+    expect(agentMiniPreview([entry({ at: 1000 })], 2000, true)).toBeNull();
+    expect(agentMiniPreview([], 2000, false)).toBeNull();
+    expect(agentMiniPreview([entry({ at: 0 })], 60_000, false)).toBeNull();
+    expect(agentMiniPreview([entry({ status: 'error' })], 1500, false)).toBeNull();
+  });
+});

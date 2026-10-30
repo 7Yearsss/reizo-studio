@@ -26,3 +26,20 @@ export function agentCursorTarget(trail: readonly AgentTrailEntry[], nodes: read
   const node = byId.get(best.nodeIds.find((id) => byId.has(id)) as string) as BoxLike;
   return { nodeId: node.id, x: node.x + node.w / 2, y: node.y + node.h / 2, working: best.status === 'running' };
 }
+
+export interface MiniPreview { label: string; working: boolean; nodeCount: number }
+
+/**
+ * The small "the agent is working on the canvas" card, for when the canvas itself is not on screen: the latest
+ * non-error action while it runs or shortly after. Null when the canvas is visible (the cursor shows it there) or idle.
+ */
+export function agentMiniPreview(trail: readonly AgentTrailEntry[], now: number, canvasVisible: boolean): MiniPreview | null {
+  if (canvasVisible) return null;
+  let best: AgentTrailEntry | null = null;
+  for (const entry of trail) {
+    if (entry.status === 'error') continue;
+    if (now - entry.at > (entry.status === 'running' ? RUNNING_MAX_MS : CURSOR_LINGER_MS)) continue;
+    if (!best || entry.at >= best.at) best = entry;
+  }
+  return best ? { label: best.label, working: best.status === 'running', nodeCount: best.nodeIds.length } : null;
+}
