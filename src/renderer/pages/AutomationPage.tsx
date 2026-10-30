@@ -295,6 +295,7 @@ export default function AutomationPage() {
                           <li key={run.executionId} className="flex items-center gap-2">
                             <span className={runOutcomeDisplay(run.outcome).tone === 'danger' ? 'text-danger' : 'text-ink'}>{runOutcomeDisplay(run.outcome).label}</span>
                             <span>{new Date(run.startedAt).toLocaleString()}{run.kind === 'manual' ? ' · 手动' : ''}</span>
+                            {run.missedDueAt ? <span title="应用当时没有运行，已在启动后补跑">· 错过 {new Date(run.missedDueAt).toLocaleString()}，已补跑</span> : null}
                             {run.error ? <span className="min-w-0 flex-1 truncate" title={run.error}>{run.error}</span> : <span className="flex-1" />}
                             {run.sessionId ? <button type="button" className="shrink-0 underline-offset-2 hover:text-ink hover:underline" onClick={() => { uiStore.setMode('chat'); tabStore.openChatTab(run.sessionId!, schedule.name); }}>查看会话</button> : null}
                           </li>

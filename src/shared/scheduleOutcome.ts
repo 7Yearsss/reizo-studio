@@ -17,3 +17,15 @@ export function pausedRepairHint(lastError: string | null | undefined): string {
   if (/quota|insufficient|balance|余额|额度|429/.test(text)) return '额度不足或被限流，补充额度或稍后再点「启用」。';
   return '先看运行记录排查原因，再点「启用」恢复。';
 }
+
+/** How late a scheduled run may start before it counts as missed: a quarter of the interval, between 5 minutes and 6 hours. */
+export function missedGraceMs(intervalMs: number): number {
+  return Math.min(6 * 3_600_000, Math.max(5 * 60_000, Math.round(intervalMs / 4)));
+}
+
+/** The original due time when a run is starting later than its grace allows (app closed, machine asleep); else undefined. */
+export function missedDueAt(dueAtIso: string, nowMs: number, intervalMs: number): string | undefined {
+  const due = Date.parse(dueAtIso);
+  if (!Number.isFinite(due)) return undefined;
+  return nowMs - due > missedGraceMs(intervalMs) ? dueAtIso : undefined;
+}

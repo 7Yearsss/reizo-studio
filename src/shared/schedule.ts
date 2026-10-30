@@ -26,6 +26,8 @@ export interface ScheduleRun {
   outcome: 'succeeded' | 'failed' | 'interrupted';
   error: string | null;
   sessionId?: string;
+  /** The run was due at this time but the app was not running; it started late instead of being skipped. */
+  missedDueAt?: string;
 }
 
 export interface Schedule {
@@ -46,7 +48,7 @@ export interface Schedule {
   /** Run when files appear in this folder (relative to the workspace) instead of on a timer. */
   watch?: ScheduleWatch;
   pendingRun?: { operationId: string; requestedAt: string; /** Files that caused this run (folder triggers). */ files?: string[] };
-  activeExecution?: { id: string; startedAt: string; kind: 'scheduled' | 'manual'; sessionId?: string; operationId?: string; files?: string[] };
+  activeExecution?: { id: string; startedAt: string; kind: 'scheduled' | 'manual'; missedDueAt?: string; sessionId?: string; operationId?: string; files?: string[] };
   lastExecutionId?: string;
   lastSessionId?: string;
   lastRunOperationId?: string;

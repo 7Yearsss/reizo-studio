@@ -4,6 +4,7 @@ import path from 'node:path';
 import { nanoid } from 'nanoid';
 import { MAX_CONSECUTIVE_FAILURES, MAX_RUN_HISTORY, isValidCadence, isValidWatch, type ScheduleWatch, nextCadenceRun, type RunPermission, type ScheduleCadence, type Schedule, type SchedulePatch, type ScheduleRun } from '../../../shared/schedule';
 import { serializeFileMutation, writeTextAtomic } from './atomicFile';
+import { missedDueAt } from '../../../shared/scheduleOutcome';
 
 interface Receipt { operationId: string; kind: 'create' | 'run'; fingerprint: string; scheduleId: string }
 interface Disk { schedules: Schedule[]; receipts: Receipt[] }
@@ -50,7 +51,7 @@ export function createScheduleStore(root: string) {
     if (current.activeExecution?.sessionId) current.lastSessionId = current.activeExecution.sessionId;
     if (current.activeExecution?.operationId) current.lastRunOperationId = current.activeExecution.operationId;
     if (current.activeExecution) {
-      const run: ScheduleRun = { executionId: current.activeExecution.id, kind: current.activeExecution.kind, startedAt: current.activeExecution.startedAt, endedAt: new Date(now).toISOString(), outcome, error, ...(current.activeExecution.sessionId ? { sessionId: current.activeExecution.sessionId } : {}) };
+      const run: ScheduleRun = { executionId: current.activeExecution.id, kind: current.activeExecution.kind, startedAt: current.activeExecution.startedAt, endedAt: new Date(now).toISOString(), outcome, error, ...(current.activeExecution.missedDueAt ? { missedDueAt: current.activeExecution.missedDueAt } : {}), ...(current.activeExecution.sessionId ? { sessionId: current.activeExecution.sessionId } : {}) };
       current.runs = [run, ...(current.runs ?? [])].slice(0, MAX_RUN_HISTORY);
     }
     delete current.activeExecution;
@@ -136,7 +137,7 @@ export function createScheduleStore(root: string) {
         const current = disk.schedules.find((item) => item.id === id); if (!current) return null;
         validateScheduleInterval(current.intervalMs);
         if (current.activeExecution || !(current.enabled || current.pendingRun) || !Number.isFinite(Date.parse(current.nextRunAt)) || Date.parse(current.nextRunAt) > Date.now()) return null;
-        current.activeExecution = { id: executionId, startedAt: new Date().toISOString(), kind: current.pendingRun ? 'manual' : 'scheduled', ...(current.pendingRun ? { operationId: current.pendingRun.operationId } : {}), ...(current.pendingRun?.files ? { files: current.pendingRun.files } : {}) };
+        current.activeExecution = { id: executionId, startedAt: new Date().toISOString(), kind: current.pendingRun ? 'manual' : 'scheduled', ...(!current.pendingRun && missedDueAt(current.nextRunAt, Date.now(), current.intervalMs) ? { missedDueAt: current.nextRunAt } : {}), ...(current.pendingRun ? { operationId: current.pendingRun.operationId } : {}), ...(current.pendingRun?.files ? { files: current.pendingRun.files } : {}) };
         current.lastExecutionId = executionId;
         delete current.lastSessionId;
         delete current.pendingRun;
