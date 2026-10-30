@@ -255,6 +255,9 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
   const { hovered, hoverProps } = useHoverIntent();
   const size = params.size ?? '1024x1024';
   const running = node.runState === 'running';
+  // A picture that arrives after a run fades in over the loading mosaic; one that was already there just appears.
+  const ranHere = useRef(false);
+  if (running) ranHere.current = true;
   const assets = node.output?.assets ?? [];
   const current = assets[Math.min(assetIdx, assets.length - 1)];
   const assetUrl = useAssetUrl(current);
@@ -632,6 +635,7 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
 
           <div className="group/image relative z-10 h-full w-full select-none">
             <img
+              key={assetUrl!}
               src={assetUrl!}
               alt=""
               loading="lazy"
@@ -639,7 +643,7 @@ export default memo(function ImageNode({ id, data, selected }: NodeProps) {
               draggable={false}
               onLoad={handleImageLoad}
               onDoubleClick={() => setZoom(assetUrl)}
-              className="h-full w-full object-cover pointer-events-auto"
+              className={cn('h-full w-full object-cover pointer-events-auto', ranHere.current && !running && 'anim-fade')}
               title="双击全屏放大，拖拽移动节点"
             />
 
