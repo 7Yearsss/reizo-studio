@@ -1,3 +1,5 @@
+import { copyFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
+import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { drizzle } from 'drizzle-orm/sqlite-proxy';
 import { MIGRATIONS } from './migrations';
@@ -20,6 +22,35 @@ export interface DbHandle {
   db: Db;
   raw: DatabaseSync;
   close(): void;
+}
+
+/** How many pre-migration copies to keep next to the database. */
+const KEEP_PRE_MIGRATION_BACKUPS = 3;
+
+/**
+ * Before an existing database gets new migrations, copy it aside (`<db>.pre-<lastApplied>.bak`). A migration that
+ * goes wrong then never costs the user their data, and the failure is loud: if the copy cannot be made, migrating
+ * does not start. A fresh database (nothing applied yet) and an up-to-date one need no copy.
+ */
+export function backupBeforeMigrating(raw: DatabaseSync, dbPath: string): string | null {
+  if (dbPath === ':memory:' || !existsSync(dbPath)) return null;
+  raw.exec('CREATE TABLE IF NOT EXISTS __migrations (name TEXT PRIMARY KEY NOT NULL, applied_at INTEGER NOT NULL)');
+  const applied = (raw.prepare('SELECT name FROM __migrations ORDER BY name').all() as { name: string }[]).map((r) => r.name);
+  const pending = MIGRATIONS.filter((m) => !applied.includes(m.name));
+  if (applied.length === 0 || pending.length === 0) return null;
+  // Fold the write-ahead log into the main file so one file is a complete copy.
+  raw.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+  const target = `${dbPath}.pre-${applied[applied.length - 1]}.bak`;
+  copyFileSync(dbPath, target);
+  pruneBackups(dbPath);
+  return target;
+}
+
+function pruneBackups(dbPath: string): void {
+  const dir = path.dirname(dbPath);
+  const prefix = `${path.basename(dbPath)}.pre-`;
+  const mine = readdirSync(dir).filter((name) => name.startsWith(prefix) && name.endsWith('.bak')).sort();
+  for (const stale of mine.slice(0, Math.max(0, mine.length - KEEP_PRE_MIGRATION_BACKUPS))) rmSync(path.join(dir, stale), { force: true });
 }
 
 function runMigrations(raw: DatabaseSync): void {
@@ -58,6 +89,7 @@ export function openDb(dbPath: string): DbHandle {
   const raw = new DatabaseSync(dbPath);
   raw.exec('PRAGMA journal_mode = WAL');
   raw.exec('PRAGMA foreign_keys = ON');
+  backupBeforeMigrating(raw, dbPath);
   runMigrations(raw);
 
   const exec = (sql: string, params: unknown[], method: 'run' | 'all' | 'values' | 'get') => {
