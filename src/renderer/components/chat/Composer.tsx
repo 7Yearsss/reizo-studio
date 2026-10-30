@@ -27,6 +27,8 @@ import SlashPalette, { applySlashArgs, buildSlashCommands, extractSlashQuery, ty
 import PendingInteraction from './PendingInteraction';
 import QueuePanel from './QueuePanel';
 import ComposerDock from './ComposerDock';
+import DraftStashMenu from './DraftStashMenu';
+import { draftStash } from '../../state/draftStashStore';
 import WorkspaceRefChip from './WorkspaceRefChip';
 import InterruptedTurnBanner from './InterruptedTurnBanner';
 import SelectField from '../ui/SelectField';
@@ -768,6 +770,7 @@ export default function Composer({
             {sessionId && <BackgroundTasksChip sessionId={sessionId} />}
             {compareOpen && <CompareDialog open onOpenChange={setCompareOpen} initialText={compareText} />}
             {sessionId && <ComposerDock todos={todos} />}
+            <DraftStashMenu onRestore={(text) => { if (draft.trim()) draftStash.push(draft); setDraft(text); window.setTimeout(() => editorRef.current?.focus?.(), 0); }} />
             {syncingSheet && <p role="status" className="mb-2 text-xs text-ink-muted">正在保存工作区内容…</p>}
             {addingFiles > 0 && <p role="status" className="mb-2 text-xs text-ink-muted">正在添加附件…</p>}
             {(attachments.length > 0 || nodeRefs.length > 0 || mentions.length > 0 || sessionRefs.length > 0 || htmlRefs.length > 0 || unpinnedSelectionNodes.length > 0) && (
@@ -932,7 +935,9 @@ export default function Composer({
               </div>
             )}
             <div className={cn(
-              'rounded-3xl border bg-paper-raised p-2 shadow-[var(--shadow-outline),0_12px_32px_rgba(30,55,85,0.05)] transition-colors',
+              // Glass: the conversation scrolls under the composer, so the card is a little translucent and blurs what is behind it.
+              // Where backdrop-filter is missing it falls back to the solid surface.
+              'composer-glass rounded-3xl border bg-paper-raised p-2 shadow-[var(--shadow-outline),0_12px_32px_rgba(30,55,85,0.05)] transition-colors',
               draggingFiles ? 'border-accent ring-2 ring-accent/40' : 'border-transparent',
             )}>
               {activeSkill && (
@@ -1014,6 +1019,12 @@ export default function Composer({
                 }
                 onKeyDown={(e, { textBeforeCaret }) => {
                   if (isImeComposingEvent(e)) return;
+                  // Ctrl/Cmd+Shift+S shelves the draft and clears the box; it comes back from the pill above the composer.
+                  if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 's') {
+                    e.preventDefault();
+                    if (draftStash.push(draft)) { setDraft(''); showToast({ title: '草稿已暂存', description: '点输入框上方的「暂存」取回' }); }
+                    return;
+                  }
                   // Enter belongs to a menu only while one is on screen (the slash palette picks with its own listener).
                   if (mentionQuery !== null && mentionMenuVisible && e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();

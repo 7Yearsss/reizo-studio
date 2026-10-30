@@ -958,3 +958,19 @@ button,
 .animate-pulse-subtle {
   animation: pulse-subtle 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
+
+/* Composer glass. 90% keeps text contrast at AA over any conversation content; no blur support = solid surface. */
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .composer-glass {
+    background-color: color-mix(in srgb, var(--paper-raised) 90%, transparent);
+    -webkit-backdrop-filter: blur(18px) saturate(1.4);
+    backdrop-filter: blur(18px) saturate(1.4);
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .composer-glass {
+    background-color: var(--paper-raised);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}

@@ -5,6 +5,7 @@ import { Plugin, TextSelection } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, type NodeViewProps } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
+import { closeUndoGroup } from '../../lib/undoBoundary';
 import { cn } from '@/renderer/lib/cn';
 import { parseDraft, serializeDraft, type DraftNode } from '@/shared/promptDraft';
 import { nextPlaceholderIndex, PLACEHOLDER_PATTERN } from '@/shared/promptPlaceholders';
@@ -219,6 +220,8 @@ export const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(fu
         'aria-label': ariaLabel,
         class: 'prompt-editor min-h-6 px-2 pt-1.5 text-sm leading-6 text-foreground outline-none whitespace-pre-wrap [overflow-wrap:break-word]',
       },
+      // A paste is one undo step on its own, separate from the typing around it.
+      handlePaste: (view) => { closeUndoGroup(view); return false; },
       handleKeyDown: (view, event) => {
         const { from } = view.state.selection;
         const textBeforeCaret = serializeDraft(view.state.doc.cut(0, from).toJSON() as DraftNode);
@@ -272,8 +275,11 @@ export const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(fu
         const at = editor.isFocused ? editor.state.selection.from : editor.state.doc.content.size - 1;
         const before = at > 1 ? editor.state.doc.textBetween(at - 1, at, '\0', '\0') : '';
         const lead = before && !/\s/.test(before) ? [{ type: 'text', text: ' ' }] : [];
+        // A chip is its own undo step: Ctrl+Z removes it without also eating the sentence typed before it.
+        closeUndoGroup(editor.view);
         const chain = editor.chain();
         (editor.isFocused ? chain : chain.focus('end')).insertContent([...lead, { type: 'referenceChip', attrs: { label } }, { type: 'text', text: ' ' }]).run();
+        closeUndoGroup(editor.view);
       },
     }),
     [editor],

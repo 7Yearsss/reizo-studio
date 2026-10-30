@@ -24,6 +24,7 @@ export const SHORTCUTS: readonly ShortcutEntry[] = [
   { id: 'steer', keys: 'Mod+Enter', label: '回复进行中：打断并立即发送（引导）；按住 Ctrl/⌘ 时发送键图标随之切换', scope: '输入框' },
   { id: 'history', keys: 'Up / Down', label: '输入框为空时翻查已发送的消息', scope: '输入框' },
   { id: 'recall-queue', keys: 'Up', label: '光标在开头时取回排队中的消息', scope: '输入框' },
+  { id: 'stash', keys: 'Mod+Shift+S', label: '暂存当前草稿（从输入框上方的「暂存」取回）', scope: '输入框' },
   { id: 'stop', keys: 'Esc Esc', label: '回复进行中：连按两次停止', scope: '输入框' },
   { id: 'ask-ai', keys: 'Mod+L', label: '文档：把选区交给 AI', scope: '面板' },
   { id: 'inline-edit', keys: 'Mod+J', label: '文档：对选区直接提出修改', scope: '面板' },
