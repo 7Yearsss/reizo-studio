@@ -69,6 +69,8 @@ export function createSettingsStore(root: string, accountModels?: () => AccountM
     await writeTextAtomic(file, JSON.stringify(data, null, 2));
   }
 
+  const presentKeys = (disk: DiskSettings): Set<string> => new Set(OVERRIDABLE.filter((key) => Object.hasOwn(disk, key)));
+
   function hydrate(disk: DiskSettings): { settings: LocalSettings; migrated: boolean } {
     const providers: Record<string, StoredProvider> = {};
     let migrated = false;
@@ -112,7 +114,11 @@ export function createSettingsStore(root: string, accountModels?: () => AccountM
     return { settings, migrated };
   }
 
-  function serialize(settings: LocalSettings): DiskSettings {
+  /** Scalar settings that live on disk only once the user (or a patch) has set them; the rest follow the current defaults. */
+  const OVERRIDABLE = ['appearance', 'permissionMode', 'busyEnter', 'computerUse', 'agentStepLimit', 'autoApplyHarnessLessons', 'reasoningEffort', 'activeProviderId'] as const;
+
+  /** `keep`: overridable keys to write. Anything else stays off disk so a later release can change its default. */
+  function serialize(settings: LocalSettings, keep: ReadonlySet<string> = new Set(OVERRIDABLE)): DiskSettings {
     const providers: DiskSettings['providers'] = {};
     for (const [id, stored] of Object.entries(settings.providers)) {
       providers[id] = {
@@ -121,26 +127,20 @@ export function createSettingsStore(root: string, accountModels?: () => AccountM
         apiKey: stored.apiKey ? safeEncrypt(stored.apiKey) : undefined,
       };
     }
-    return {
-      appearance: settings.appearance,
-      permissionMode: settings.permissionMode,
-      busyEnter: settings.busyEnter,
-      computerUse: settings.computerUse,
-      agentStepLimit: settings.agentStepLimit,
-      autoApplyHarnessLessons: settings.autoApplyHarnessLessons,
+    const out: DiskSettings = {
       mediaModels: settings.mediaModels,
       directorSessions: settings.directorSessions,
-      reasoningEffort: settings.reasoningEffort,
-      activeProviderId: settings.activeProviderId,
       workspacePath: settings.workspacePath,
       providers,
     };
+    for (const key of OVERRIDABLE) if (keep.has(key)) (out as Record<string, unknown>)[key] = settings[key];
+    return out;
   }
 
   async function load(): Promise<LocalSettings> {
     const disk = await readRaw();
     const { settings, migrated } = hydrate(disk);
-    if (migrated) await writeRaw(serialize(settings));
+    if (migrated) await writeRaw(serialize(settings, presentKeys(disk)));
     return settings;
   }
 
@@ -202,7 +202,14 @@ export function createSettingsStore(root: string, accountModels?: () => AccountM
   }
 
   async function applyPatch(patch: SettingsPatch): Promise<PublicSettings> {
+    const onDisk = await readRaw();
     const settings = await load();
+    const keep = presentKeys(onDisk);
+    for (const key of OVERRIDABLE) if ((patch as Record<string, unknown>)[key] !== undefined) keep.add(key);
+    if (patch.provider) {
+      // Picking a provider key can switch the active provider below.
+      if (patch.provider.apiKey) keep.add('activeProviderId');
+    }
 
     if (patch.appearance) settings.appearance = patch.appearance;
     if (patch.permissionMode) settings.permissionMode = patch.permissionMode;
@@ -247,7 +254,8 @@ export function createSettingsStore(root: string, accountModels?: () => AccountM
       }
     }
 
-    await writeRaw(serialize(settings));
+    if (settings.activeProviderId !== (onDisk.activeProviderId ?? DEFAULT_PROVIDER_ID)) keep.add('activeProviderId');
+    await writeRaw(serialize(settings, keep));
     return toPublic(withAccount(settings));
   }
 
