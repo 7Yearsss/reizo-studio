@@ -125,6 +125,7 @@ export function createArtifactsRouter(artifactStore: ArtifactStore) {
     const artifact = await artifactStore.get(c.req.param('id'), version ? Number(version) : undefined);
     if (!artifact) return c.json({ error: 'File not found' }, 404);
     if (!['text', 'markdown', 'html', 'json', 'code'].includes(artifact.kind)) return c.json({ error: '请使用该类型作品的专用导出功能' }, 415);
+    // eslint-disable-next-line no-control-regex -- strips control codes from a download file name
     const filename = artifact.name.replace(/[\x00-\x1f\x7f<>:"/\\|?*]/g, '_');
     const ascii = filename.replace(/[^\x20-\x7e]/g, '_') || 'download.txt';
     const encoded = encodeURIComponent(filename).replace(/['()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);

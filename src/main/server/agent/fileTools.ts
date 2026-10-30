@@ -20,6 +20,7 @@ export function createFileTools({ sessionId, projectId, artifactStore }: {
       }),
       execute: async ({ filename, content }) => {
         const name = filename.trim();
+        // eslint-disable-next-line no-control-regex -- control codes are invalid in file names
         if (!name || /[<>:"/\\|?*\x00-\x1f\x7f]/.test(name) || /[. ]$/.test(name) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name))
           return { ok: false, error: '请使用有效的文件名，不要包含文件夹路径或系统保留名称。' };
         if (!TEXT_EXTENSIONS.test(name)) return { ok: false, error: '本工具只生成文本格式文件。请为 PDF、Word、Excel、PPT、图片和视频使用对应的生成/导出工具。' };

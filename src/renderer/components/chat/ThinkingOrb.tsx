@@ -119,12 +119,12 @@ export const ThinkingOrb = memo(function ThinkingOrb({
 
       const projected = BASE_POINTS.map((pt) => {
         // Rotate around Y
-        let x1 = pt.x * cosY - pt.z * sinY;
-        let z1 = pt.z * cosY + pt.x * sinY;
+        const x1 = pt.x * cosY - pt.z * sinY;
+        const z1 = pt.z * cosY + pt.x * sinY;
 
         // Rotate around X
-        let y2 = pt.y * cosX - z1 * sinX;
-        let z2 = z1 * cosX + pt.y * sinX;
+        const y2 = pt.y * cosX - z1 * sinX;
+        const z2 = z1 * cosX + pt.y * sinX;
 
         const currentRadius = sphereRadius * pulse;
         const x2d = center + x1 * currentRadius * scale;

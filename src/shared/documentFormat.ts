@@ -86,6 +86,7 @@ function numberedLevel(text: string): 1 | 2 | 3 | 4 | null {
   if (new RegExp(`^第[${CN}\\d]+[节条]`).test(t)) return 2;
   if (new RegExp(`^[${CN}]+、`).test(t)) return 1;
   if (new RegExp(`^[（(][${CN}]+[）)]`).test(t)) return 2;
+  // eslint-disable-next-line no-irregular-whitespace -- the full-width space after a heading number is intentional
   const decimal = /^(\d{1,2}(?:\.\d{1,2}){0,3})[\s　]+\S/.exec(t);
   if (decimal) return Math.min(4, decimal[1].split('.').length) as 1 | 2 | 3 | 4;
   if (/^\d{1,2}[.．、]\s*\S/.test(t)) return 3;
