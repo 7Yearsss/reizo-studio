@@ -974,3 +974,11 @@ button,
     backdrop-filter: none;
   }
 }
+
+/* Keyboard focus must never vanish. Some buttons and links drop the browser outline (`outline-none`) without giving
+   a replacement; they get one here. Elements that bring their own focus-visible ring/outline keep theirs, and text
+   inputs are left to their container's focus style. */
+:is(button, a, [role='button'], [role='tab'], [role='menuitem'], [role='option']).outline-none:focus-visible:not([class*='focus-visible:ring']):not([class*='focus-visible:outline']):not([class*='focus-visible:border']) {
+  outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  outline-offset: 2px;
+}
