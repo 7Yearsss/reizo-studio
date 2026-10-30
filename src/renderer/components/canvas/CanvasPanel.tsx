@@ -86,6 +86,8 @@ import AgentActivityStrip from './AgentActivityStrip';
 import LazyStoryboardModal, { preloadStoryboard } from './LazyStoryboardModal';
 import LazyPresentationExportModal, { preloadPresentationExport } from './LazyPresentationExportModal';
 import CuttableEdge from './edges/CuttableEdge';
+import AgentCursor from './AgentCursor';
+import { agentCursorTarget } from '../../../shared/agentCursor';
 import AddNodesModal from './AddNodesModal';
 import CanvasContextMenu from './CanvasContextMenu';
 import HandleDropMenu, { type HandleDropIntent } from './HandleDropMenu';
@@ -549,11 +551,15 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     }
     return out;
   }, [trail, markTick]);
+  const cursorTarget = useMemo(() => {
+    void markTick;
+    return agentCursorTarget(trail ?? [], storeNodes, Date.now());
+  }, [trail, storeNodes, markTick]);
   useEffect(() => {
-    if (agentMarkedIds.size === 0) return;
+    if (agentMarkedIds.size === 0 && !cursorTarget) return;
     const t = setTimeout(() => setMarkTick((n) => n + 1), 1000);
     return () => clearTimeout(t);
-  }, [agentMarkedIds, markTick]);
+  }, [agentMarkedIds, cursorTarget, markTick]);
 
   const isPanningRef = useRef(false);
   // Inertia pan: sample viewport positions while panning, glide with decay on release.
@@ -2002,6 +2008,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
         maxZoom={3.0}
         className="bg-paper"
       >
+        <AgentCursor target={cursorTarget} />
         <Background
           variant={BackgroundVariant.Dots}
           gap={24}
