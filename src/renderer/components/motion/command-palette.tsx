@@ -38,6 +38,8 @@ export interface CommandPaletteProps {
   items: CommandItem[];
   /** Opens with Cmd/Ctrl + this key. Default: "k" */
   shortcut?: string;
+  /** Overrides `shortcut` when the toggle key is user-configurable. */
+  isShortcut?: (e: KeyboardEvent) => boolean;
   placeholder?: string;
   emptyMessage?: string;
   open?: boolean;
@@ -70,6 +72,7 @@ const PANEL_SPRING = {
 export function CommandPalette({
   items,
   shortcut = "k",
+  isShortcut,
   placeholder = "Type a command or search…",
   emptyMessage = "No results found.",
   open: controlledOpen,
@@ -100,8 +103,9 @@ export function CommandPalette({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (
-        (e.metaKey || e.ctrlKey) &&
-        e.key.toLowerCase() === shortcut.toLowerCase()
+        isShortcut
+          ? isShortcut(e)
+          : (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === shortcut.toLowerCase()
       ) {
         e.preventDefault();
         setOpen(!open);
@@ -114,7 +118,7 @@ export function CommandPalette({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, shortcut, setOpen]);
+  }, [open, shortcut, isShortcut, setOpen]);
 
   useEffect(() => {
     if (!open) return;

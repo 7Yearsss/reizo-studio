@@ -60,6 +60,8 @@ async function deleteWithUndo(id: string, title: string): Promise<void> {
   });
 }
 import Tooltip from '../ui/Tooltip';
+import { matchesKeys } from '../../../shared/shortcutBindings';
+import { shortcutStore } from '../../state/shortcutStore';
 
 /** Download a shareable copy of one conversation, then say what was replaced so nothing is a surprise. */
 async function exportSessionFile(session: SessionSummary, detail: 'structure' | 'full'): Promise<void> {
@@ -308,7 +310,8 @@ export default function Sidebar() {
       const target = event.target as HTMLElement | null;
       const typing =
         target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
-      if ((event.key === 'k' || event.key === 'K') && (event.metaKey || event.ctrlKey)) {
+      if (shortcutStore.recording) return;
+      if (matchesKeys(shortcutStore.keysFor('palette'), event)) {
         event.preventDefault();
         openGlobalCommandPalette();
         return;

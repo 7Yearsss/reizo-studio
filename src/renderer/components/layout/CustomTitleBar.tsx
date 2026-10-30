@@ -26,6 +26,8 @@ import {
 } from '../../state/navHistory';
 import { openGlobalCommandPalette } from './GlobalCommandPalette';
 import { cn } from '../../lib/cn';
+import { matchesKeys } from '../../../shared/shortcutBindings';
+import { shortcutStore } from '../../state/shortcutStore';
 import { setTitleBarSlot } from './titleBarSlots';
 
 const isWindows = typeof window !== 'undefined' && window.reizo?.platform === 'win32';
@@ -69,13 +71,14 @@ export default function CustomTitleBar() {
           target.tagName === 'TEXTAREA' ||
           target.isContentEditable);
 
-      if ((e.metaKey || e.ctrlKey) && (e.key === 'b' || e.key === 'B')) {
+      if (shortcutStore.recording) return;
+      if (matchesKeys(shortcutStore.keysFor('sidebar'), e)) {
         e.preventDefault();
         uiStore.toggleSidebar();
         return;
       }
 
-      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === '/' || e.code === 'Slash')) {
+      if (matchesKeys(shortcutStore.keysFor('shortcuts'), e)) {
         e.preventDefault();
         window.dispatchEvent(new CustomEvent(SHOW_SHORTCUTS_EVENT));
         return;

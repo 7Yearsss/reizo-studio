@@ -26,6 +26,12 @@ import { parseRecent, recordRecent, resolveRecent } from '../../../shared/recent
 import * as chatStore from '../../state/chatStore';
 import { useTabStore } from '../../state/useTabStore';
 import { Square, SunMoon, History } from 'lucide-react';
+import { matchesKeys } from '../../../shared/shortcutBindings';
+import { shortcutStore } from '../../state/shortcutStore';
+
+function isPaletteShortcut(e: KeyboardEvent): boolean {
+  return !shortcutStore.recording && matchesKeys(shortcutStore.keysFor('palette'), e);
+}
 
 export function openGlobalCommandPalette() {
   window.dispatchEvent(new CustomEvent('reizo:open-command-palette'));
@@ -221,7 +227,7 @@ export default function GlobalCommandPalette() {
   return (
     <CommandPalette
       items={items}
-      shortcut="k"
+      isShortcut={isPaletteShortcut}
       placeholder="搜索会话、消息内容、文件、技能或操作…"
       emptyMessage="未找到匹配项"
       open={open}
