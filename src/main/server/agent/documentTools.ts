@@ -8,6 +8,7 @@ import { checkDocument } from '../../../shared/documentChecks';
 import { documentEditSchema } from './documentReviewAdapter';
 import { documentFromHtml } from './documentIO';
 import { takeWithinBudget } from './readBudget';
+import { FILE_CONTENT_NOTICE } from '../../../shared/fileContentNotice';
 
 /** One block longer than this is cut and flagged `truncated`; keeps a single page under the read budget. */
 const MAX_BLOCK_TEXT = 5_000;
@@ -30,7 +31,7 @@ export function createDocumentTools(options: { sessionId: string; projectId?: st
           .map((b) => ({ ...b, text: b.text.slice(0, MAX_BLOCK_TEXT), truncated: b.text.length > MAX_BLOCK_TEXT }));
         const shown = takeWithinBudget(page);
         // Small metadata first, bulky blocks last: a clip can then never drop the version/pending info.
-        return { ok: true, artifactId, name: artifact.name, version: artifact.version, selections: references().filter((r) => r.artifactId === artifactId && r.selection).map((r) => ({ ...r.selection, label: r.label })),
+        return { ok: true, contentNotice: FILE_CONTENT_NOTICE, artifactId, name: artifact.name, version: artifact.version, selections: references().filter((r) => r.artifactId === artifactId && r.selection).map((r) => ({ ...r.selection, label: r.label })),
           pendingReviews: reviews.list(artifactId).filter((r) => r.changes.some((c) => c.status === 'pending')).map((r) => ({ id: r.id, stale: r.stale, changes: r.changes.length })),
           totalBlocks: blocks.length, returned: shown.length, nextOffset: !blockId && offset + shown.length < blocks.length ? offset + shown.length : null, blocks: shown };
       },

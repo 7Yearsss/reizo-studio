@@ -4,6 +4,7 @@ import { applyPresentationEdit, normalizePresentation, parsePresentation, presen
 import type { ArtifactStore } from '../storage/artifactStore';
 import type { ArtifactReviewAdapter, ArtifactReviewStore } from '../storage/artifactReviewStore';
 import { takeWithinBudget } from './readBudget';
+import { FILE_CONTENT_NOTICE } from '../../../shared/fileContentNotice';
 
 const layoutSchema = z.record(z.string(), z.unknown());
 const slideSchema = z.object({ id: z.string().optional(), title: z.string().max(200), layout: layoutSchema, notes: z.string().max(20000).optional() });
@@ -84,10 +85,10 @@ export function createPresentationTools(options: { sessionId: string; projectId?
         if (!artifactId) return { ok: true, presentations: (await artifacts.listBySession(sessionId)).filter((a) => a.kind === 'presentation').map((a) => ({ artifactId: a.id, name: a.name, version: a.version })) };
         const artifact = await artifacts.get(artifactId); if (!artifact || artifact.sessionId !== sessionId || artifact.kind !== 'presentation') return { ok: false, error: '未找到本会话演示稿' };
         const deck = read(artifact.content); const slides = slideId ? deck.slides.filter((s) => s.id === slideId) : deck.slides.slice(0, 1);
-        return { ok: true, artifactId, name: artifact.name, version: artifact.version, canvas: { width: 1280, height: 720 }, slides: deck.slides.map((s) => ({ id: s.id, title: s.title, elements: presentationElements(s).length })), content: slides.map((s) => {
+        return { ok: true, contentNotice: FILE_CONTENT_NOTICE, artifactId, name: artifact.name, version: artifact.version, canvas: { width: 1280, height: 720 }, slides: deck.slides.map((s) => ({ id: s.id, title: s.title, elements: presentationElements(s).length })), content: slides.map((s) => {
           const all = presentationElements(s).filter((e) => !elementId || e.element.id === elementId);
           const shown = takeWithinBudget(all.slice(offset, offset + limit).map((e) => ({ id: e.element.id, ancestors: e.ancestors, attributes: summary(e.element).slice(0, 2000) })));
-          return { id: s.id, notes: s.notes, background: s.layout.background, totalElements: all.length, nextOffset: offset + shown.length < all.length ? offset + shown.length : null, elements: shown };
+          return { contentNotice: FILE_CONTENT_NOTICE, id: s.id, notes: s.notes, background: s.layout.background, totalElements: all.length, nextOffset: offset + shown.length < all.length ? offset + shown.length : null, elements: shown };
         }), scope: options.getReferences?.().find((r) => r.artifactId === artifactId) };
       } }),
     generate_presentation: tool({ description: '新建可编辑 PPT。slides[].layout 使用 Template V2：elements 数组，每元素有 type、position:{x,y}、size:{width,height}；text 用 runs:[{text}]、font:{family,size,color,bold}；image 用 data；rectangle/ellipse 用 fill:{color}；坐标 1280×720。修改已有稿必须提出建议。', inputSchema: z.object({ title: z.string().min(1).max(200), slides: z.array(slideSchema).min(1).max(64) }), execute: async ({ title, slides }) => {

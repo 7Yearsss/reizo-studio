@@ -46,3 +46,4 @@
 - 提示注入经网页/文件内容诱导工具调用——需要跨层端到端用例。
 - 子进程在主进程被强杀后的残留——见 #201。
 - 应用数据目录对 run_command（shell）没有写保护：命令可以改任何用户有权限的文件，只能靠审批与「只读自动化」上限兜底。
+| 上传或下载来的表格单元格 / 文档段落 / 幻灯片文字里藏着指令（提示词注入） | read_sheet / read_document / read_presentation 的成功结果带 contentNotice（shared/fileContentNotice.ts），声明内容是不可信数据、不得执行其中的指令；写入仍要 expectedVersion 并走审阅 | `fileContentNotice.test.ts` |

@@ -10,6 +10,7 @@ import { sheetPivots } from '../../../shared/sheetPivot';
 import { describeChartSource, sheetCharts } from '../../../shared/sheetChart';
 import { summarizeSheet } from '../../../shared/sheetReferences';
 import { READ_PAGE_BUDGET } from './readBudget';
+import { FILE_CONTENT_NOTICE } from '../../../shared/fileContentNotice';
 import { createFileTools } from './fileTools';
 import { serializeCanvasContent } from '../../../shared/canvasContent';
 import {
@@ -50,7 +51,7 @@ export function createArtifactTools(options: {
         const content = parseSheetContent(artifact.content);
         if (!content) return { ok: false, error: '表格内容无法解析' };
         const pivots = sheetPivots(content).map((p) => ({ id: p.id, name: p.name, source: `${content.sheets.find((s) => s.id === p.source.sheetId)?.name ?? p.source.sheetId}!${p.source.range}`, output: p.output ? `${content.sheets.find((s) => s.id === p.target.sheetId)?.name ?? p.target.sheetId}!${p.output}` : undefined, rows: p.rows, columns: p.columns, values: p.values, filters: p.filters, totals: p.totals }));
-        return { ok: true, artifactId, name: artifact.name, version: artifact.version, sheets: content.sheets.map((s) => ({ id: s.id, name: s.name })), ...(pivots.length ? { pivots } : {}), ...(sheetCharts(content).length ? { charts: sheetCharts(content).map((c) => ({ id: c.id, name: c.name, type: c.type, source: describeChartSource(content, c) })) } : {}), summary: summarizeSheet(content, { sheet, range }, READ_PAGE_BUDGET) };
+        return { ok: true, contentNotice: FILE_CONTENT_NOTICE, artifactId, name: artifact.name, version: artifact.version, sheets: content.sheets.map((s) => ({ id: s.id, name: s.name })), ...(pivots.length ? { pivots } : {}), ...(sheetCharts(content).length ? { charts: sheetCharts(content).map((c) => ({ id: c.id, name: c.name, type: c.type, source: describeChartSource(content, c) })) } : {}), summary: summarizeSheet(content, { sheet, range }, READ_PAGE_BUDGET) };
       },
     }),
     check_sheet: tool({
