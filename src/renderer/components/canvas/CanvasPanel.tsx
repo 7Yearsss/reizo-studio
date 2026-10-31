@@ -522,8 +522,17 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
     if (!loaded || !nodesReady || !storeNodes.length) return;
     restoredRef.current = true;
     void rf.fitView({ padding: 0.2, maxZoom: 1 });
+    setPlaced(true);
   }, [viewportReady, loaded, nodesReady, storeNodes.length, sessionId, rf]);
   useEffect(() => { restoreViewport(); }, [restoreViewport]);
+  // A first visit has no saved view: stay hidden until the fit lands so the graph never flashes at the origin.
+  const [placed, setPlaced] = useState(Boolean(savedViewport));
+  useEffect(() => {
+    if (placed) return;
+    if (loaded && !storeNodes.length) { setPlaced(true); return; }
+    const t = setTimeout(() => setPlaced(true), 1500);
+    return () => clearTimeout(t);
+  }, [placed, loaded, storeNodes.length]);
 
   /** Nodes sitting inside a *locked* group — pinned in place. */
   const lockedMembers = useMemo(() => {
@@ -1809,6 +1818,7 @@ function CanvasInner({ sessionId }: { sessionId: string }) {
       <ReactFlow
         defaultNodes={initialNodes}
         defaultViewport={savedViewport ?? undefined}
+        style={{ opacity: placed ? 1 : 0, transition: 'opacity 120ms ease-out' }}
         edges={edges}
         nodeTypes={NODE_TYPES}
         edgeTypes={EDGE_TYPES}
