@@ -284,7 +284,7 @@ export default function HomePage({ active = true }: { active?: boolean }) {
               登录 Reizo 即可连接账号模型，也可配置自己的 API Key。
               <button
                 type="button"
-                onClick={() => uiStore.setMode('settings')}
+                onClick={() => uiStore.openSettingsTarget('providers')}
                 className="ml-1 text-accent hover:opacity-80"
               >
                 去设置
