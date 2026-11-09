@@ -1,10 +1,14 @@
 # Desktop wallet and recharge
 
-The signed-in account menu contains **钱包与充值**. The panel reads the current
+The signed-in account menu shows **余额**, opening **钱包与充值**. The panel reads the current
 Reizo workspace, available credits, payment methods, amount presets and recent
 orders from the website. Custom amounts follow the server's integer minimum and
 maximum. The user chooses an amount and payment method, then explicitly clicks
 **去付款** to create an order and open the client's isolated cashier window.
+
+The account menu also reads the available balance when opened. Account settlement
+history and current model prices are described in `docs/account-billing.md`; local
+execution estimates remain a separate diagnostic view.
 
 Recharge belongs to the displayed Reizo workspace. It does not fund manually
 configured third-party API keys. The local usage ledger is a separate view.

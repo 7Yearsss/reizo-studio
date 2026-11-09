@@ -12,6 +12,7 @@ import { toast } from '../../lib/toast';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
 import AccountWalletPanel from '../account/AccountWalletPanel';
 import AccountPasswordForm from '../account/AccountPasswordForm';
+import { creditAmount } from '../../../shared/accountBilling';
 
 const item = 'flex cursor-default select-none items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] outline-none data-[highlighted]:bg-paper-inset data-[disabled]:pointer-events-none data-[disabled]:opacity-40 [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-ink-muted';
 const panel = 'z-50 overflow-y-auto rounded-2xl border border-line/70 bg-paper-raised p-1.5 text-ink shadow-[0_8px_36px_-10px_rgba(0,0,0,0.28)] outline-none';
@@ -25,6 +26,9 @@ export default function AccountControl() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const [menuBalance, setMenuBalance] = useState<number | null>(null);
+  const [balanceOwner, setBalanceOwner] = useState('');
+  const [balanceLoading, setBalanceLoading] = useState(false);
   const previous = useRef<AccountState | null>(null);
   const attempt = useRef(false);
   const epoch = useRef(0);
@@ -32,6 +36,22 @@ export default function AccountControl() {
   const acting = useRef(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const appearance = useSettingsStore((value) => value.settings.appearance);
+  useEffect(() => {
+    let active = true;
+    setMenuBalance(null);
+    setBalanceOwner('');
+    if (!menuOpen || state?.status !== 'authenticated' || !window.reizo?.accountWallet) { setBalanceLoading(false); return; }
+    const read = async () => {
+      setBalanceLoading(true);
+      try {
+        const wallet = await window.reizo.accountWallet(state.models?.organizationId ? { organizationId: state.models.organizationId } : undefined);
+        if (active) { setMenuBalance(wallet.balance.syncStatus === 'ready' ? wallet.balance.availableCredits : null); setBalanceOwner(`${state.user?.id}:${state.models?.organizationId || ''}`); }
+      } catch { if (active) setMenuBalance(null); }
+      finally { if (active) setBalanceLoading(false); }
+    };
+    void read(); const timer = setInterval(() => void read(), 30000);
+    return () => { active = false; clearInterval(timer); };
+  }, [menuOpen, state?.status, state?.user?.id, state?.models?.organizationId]);
   useEffect(() => { setCopiedCode(null); }, [dialog, state?.code]);
   useEffect(() => {
     if (!copiedCode) return;
@@ -142,10 +162,10 @@ export default function AccountControl() {
       <Menu.Portal><Menu.Content side="top" align="start" sideOffset={8} collisionPadding={12} className={`${panel} w-[var(--radix-dropdown-menu-trigger-width)] max-w-[calc(100vw-24px)] max-h-[var(--radix-dropdown-menu-content-available-height)]`} onCloseAutoFocus={(event) => { if (dialog) event.preventDefault(); }}>
         <Menu.Label className="flex items-center gap-2.5 px-2.5 py-3 font-normal">{avatar}<span className="min-w-0"><span className="block truncate text-sm font-medium">{name}</span><span className="block truncate text-xs text-ink-muted">{subtitle}</span></span></Menu.Label>
         <Menu.Separator className="mx-1 my-1 h-px bg-line/70" />
+        {user ? <Menu.Item className={`${item} mx-1 mb-1 border border-line bg-paper-inset/40 py-3`} aria-label="余额与充值" onSelect={() => showDialog('wallet')}><Wallet /><span className="flex-1">余额</span><span className="font-medium tabular-nums">{balanceLoading ? <LoaderCircle size={13} className="animate-spin" aria-label="正在同步余额" /> : `${creditAmount(state?.status === 'authenticated' && balanceOwner === `${user.id}:${state.models?.organizationId || ''}` ? menuBalance : null)} 积分`}</span><ChevronRight className="!size-3" /></Menu.Item> : null}
         {user ? <Menu.Item className={item} onSelect={() => showDialog('account')}><UserRound />账号信息{state?.status === 'offline' && <span className="ml-auto text-xs text-ink-muted">离线</span>}</Menu.Item> :
           <Menu.Item className={item} onSelect={() => showDialog('login')}><LogIn />{pending ? '继续登录' : '登录 Reizo'}</Menu.Item>}
         <Menu.Item className={item} onSelect={() => openSettings('usage')}><Gauge />本机用量</Menu.Item>
-        {user ? <Menu.Item className={item} onSelect={() => showDialog('wallet')}><Wallet />钱包与充值</Menu.Item> : null}
         <Menu.Sub><Menu.SubTrigger className={item}><Palette />外观<span className="ml-auto text-xs text-ink-muted">{themes.find((theme) => theme.value === appearance)?.label}</span><ChevronRight className="!size-3" /></Menu.SubTrigger>
           <Menu.Portal><Menu.SubContent sideOffset={5} collisionPadding={12} className={`${panel} min-w-40`}>
             <Menu.RadioGroup value={appearance} onValueChange={(value) => void changeAppearance(value)}>

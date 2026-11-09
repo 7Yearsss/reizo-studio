@@ -8,6 +8,8 @@
 
 | 攻击方式 | 期望行为 | 测试 |
 | --- | --- | --- |
+| 账户消费响应夹带凭据、返回别的工作区，或退出后迟到 | 主进程校验并剥离字段，绑定工作区和登录代次，拒绝迟到响应 | `src/main/account/wallet.test.ts :: reads validated account charges with the desktop bearer, pins workspace and strips remote credentials`、`src/main/account/wallet.test.ts :: rejects late account charge responses after logout and invalid requests before fetching` |
+| 退出登录时旧消费页面仍收到后台响应 | 立即清除旧账户数据，不能重新展示已退出账号的消费记录 | `src/renderer/components/account/AccountBillingSection.test.tsx :: clears private account data promptly on logout and refuses late replies from an older page` |
 | 视频链接指向本地接口、内网，或域名解析到内网 | 工具在读取前校验地址；浏览器逐请求拒绝内网解析，未批准不读取画面 | `src/main/server/agent/videoAnalysisTools.test.ts :: blocks private URLs and nonvisual models without opening a browser or asking for permission`、`src/main/browserSession.test.ts :: blocks private DNS and every local URL before allowing browser media requests` |
 | 视频分析结果伪造文件路径或引用另一会话画面 | 仅恢复本会话的合法分析 ID 和固定帧文件名；不接受路径穿越 | `src/main/server/agent/videoAnalysisTools.test.ts :: preserves real image content on live output and rejects forged paths or another session on replay` |
 | 无人值守会话里模型请求需审批的操作（如提示注入建定时任务后自动执行） | 权限自动拒绝，回合不挂起 | `src/main/server/agent/permissions.test.ts :: auto-denies permissions in a headless session so the turn never suspends` |

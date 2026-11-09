@@ -83,6 +83,9 @@ function devServerOrigin(): string | undefined {
 }
 
 async function bootstrap(): Promise<void> {
+  const bootStarted = Date.now();
+  const bootPhase = (phase: string) => console.info(`[startup] ${phase} ${Date.now() - bootStarted}ms`);
+  bootPhase('begin');
   if (app.isPackaged) process.env.REIZO_VOICE_RUNTIME = path.join(process.resourcesPath, 'voice-runtime');
   if (app.isPackaged) process.env.REIZO_VOICE_MODEL = path.join(process.resourcesPath, 'voice-model', VOICE_REVISION);
   if (app.isPackaged) process.env.REIZO_VIDEO_EDITOR_RUNTIME = path.join(process.resourcesPath, 'video-editor', 'runtime.json');
@@ -90,16 +93,19 @@ async function bootstrap(): Promise<void> {
   mkdirSync(dataRoot, { recursive: true });
   // A restore queued by the user is applied here, before any store or the database touches the data folder. One interrupted by a crash is rolled back.
   const restore = await applyPendingRestore(dataRoot);
+  bootPhase('restore-ready');
   if (restore.status !== 'none') console.log('[main] restore:', restore.status, 'error' in restore ? restore.error : '');
   const account = createDesktopAccountService(dataRoot);
   const settingsStore = createSettingsStore(dataRoot, () => account.modelCredential());
   const scheduleStore = createScheduleStore(dataRoot);
   const thoughtStore = createThoughtStore(dataRoot);
+  bootPhase('account-ready');
   const skillsDirs = [path.join(process.cwd(), 'skills'), path.join(app.getAppPath(), 'skills'),
     ...(app.isPackaged ? [path.join(process.resourcesPath, 'skills')] : []), path.join(dataRoot, 'skills')];
 
   dbHandle = openDb(path.join(dataRoot, 'reizo.db'));
   const importedCount = importLegacySessions(dataRoot, dbHandle.raw);
+  bootPhase('database-ready');
   if (importedCount > 0) console.log(`[main] imported ${importedCount} legacy session(s) into SQLite`);
   const sessionStore = createSqliteSessionStore(dbHandle);
   freezeTurnMarkers = () => sessionStore.freezeTurnMarkers();
@@ -114,6 +120,7 @@ async function bootstrap(): Promise<void> {
     db: dbHandle,
     devServerOrigin: devServerOrigin(),
   });
+  bootPhase('server-ready');
   stopAutoBackup = startAutoBackup(dataRoot, () => dbHandle);
   ipcMain.handle(IPC.APP_RELAUNCH, () => { app.relaunch(); app.quit(); });
   const scheduler = startScheduler({ dataRoot, scheduleStore, settingsStore, skillsDirs, sessionStore, usageStore: createUsageStore(dbHandle) });
@@ -141,6 +148,7 @@ async function bootstrap(): Promise<void> {
   stopAccount = registerAccountIpc(dataRoot, account);
 
   createMainWindow();
+  bootPhase('window-ready');
   createTray();
   globalShortcut.register('CommandOrControl+Shift+Space', () => {
     createMainWindow();

@@ -13,6 +13,7 @@ import { Input } from '../../components/ui/input';
 import { Skeleton } from '../../components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs';
 import UsagePricingForm from './UsagePricingForm';
+import AccountBillingSection from '../../components/account/AccountBillingSection';
 
 type Period = 'all' | 'today' | 'week' | 'month';
 const periodLabels: Record<Period, string> = { all: '全部时间', today: '今天', week: '最近 7 天', month: '最近 30 天' };
@@ -38,7 +39,7 @@ function Overview({ summary }: { summary: UsageSummary }) {
   </section>;
 }
 
-export default function UsageCostsSection({ onOpenProviders }: { onOpenProviders: () => void }) {
+export function LocalUsageCostsSection({ onOpenProviders, embedded = false }: { onOpenProviders: () => void; embedded?: boolean }) {
   const settings = useSettingsStore(state => state.settings);
   const [tab, setTab] = useState('records');
   const [period, setPeriod] = useState<Period>('all');
@@ -98,8 +99,8 @@ export default function UsageCostsSection({ onOpenProviders }: { onOpenProviders
   const reset = () => { setCategory(''); setCost(''); setSearch(''); setSearchTerm(''); setPeriod('all'); };
 
   return <div className="flex max-w-5xl flex-col gap-5">
-    <header className="flex flex-wrap items-start justify-between gap-3"><div><h1 className="text-xl font-semibold tracking-tight">用量与费用</h1><p className="mt-1.5 text-sm text-ink-muted">查看每次对话与创作的用量、费用和来源。</p></div><div className="flex items-center gap-1"><Button type="button" variant="ghost" size="icon-sm" aria-label="刷新用量与费用" title="刷新用量与费用" disabled={loading} onClick={refresh}>{loading ? <LoaderCircle className="animate-spin motion-reduce:animate-none" /> : <RefreshCw />}</Button><Button type="button" variant="ghost" size="sm" onClick={onOpenProviders}><Settings2 className="size-3.5" />模型设置</Button></div></header>
-    <Tabs value={tab} onValueChange={setTab}><TabsList variant="line"><TabsTrigger value="records">用量记录</TabsTrigger><TabsTrigger value="pricing">价格设置</TabsTrigger></TabsList>
+    <header className="flex flex-wrap items-start justify-between gap-3">{!embedded ? <h1 className="text-xl font-semibold tracking-tight">用量与费用</h1> : null}<div className="ml-auto flex items-center gap-1"><Button type="button" variant="ghost" size="icon-sm" aria-label="刷新用量与费用" title="刷新用量与费用" disabled={loading} onClick={refresh}>{loading ? <LoaderCircle className="animate-spin motion-reduce:animate-none" /> : <RefreshCw />}</Button><Button type="button" variant="ghost" size="sm" onClick={onOpenProviders}><Settings2 className="size-3.5" />模型设置</Button></div></header>
+    <Tabs value={tab} onValueChange={setTab}><TabsList variant="line"><TabsTrigger value="records">用量记录</TabsTrigger><TabsTrigger value="pricing">本机估算单价</TabsTrigger></TabsList>
       <TabsContent value="records" className="flex flex-col gap-5">
         <div className="flex flex-col gap-3" aria-label="用量记录筛选">
           <div className="flex flex-wrap items-center gap-2"><div className="relative min-w-44 flex-1"><Search className="pointer-events-none absolute left-3 top-3 size-3.5 text-ink-muted" /><Input className="pl-9 text-xs" aria-label="搜索用量记录" placeholder="搜索模型、供应商、对话或请求编号" value={search} maxLength={200} onChange={event => setSearch(event.target.value)} /></div>
@@ -119,4 +120,9 @@ export default function UsageCostsSection({ onOpenProviders }: { onOpenProviders
       <TabsContent value="pricing" className="flex flex-col gap-4"><div className="rounded-lg border border-line p-4"><h2 className="text-sm font-medium">为后续调用设置价格依据</h2><p className="mt-2 text-xs leading-relaxed text-ink-muted">价格需有明确来源，按模型与供应商分别记录。新价格只用于后续调用；历史记录保留原有依据，可在记录详情中补充已有账单。录入账单不会发起扣款。</p></div><UsagePricingForm onSaved={snapshot => { ++priceSequence.current; setPricesReadable(true); setPrices(current => [snapshot, ...current.filter(known => known.id !== snapshot.id)]); }} />{prices.map(snapshot => <article key={snapshot.id} className="rounded-xl border border-line p-4"><h3 className="text-sm font-medium [overflow-wrap:anywhere]">{snapshot.providerId} / {snapshot.model}</h3><p className="mt-1 text-xs text-ink-muted">{categoryLabels[snapshot.category]} · {new Date(snapshot.effectiveAt).toLocaleString('zh-CN')}</p><dl className="mt-3 space-y-1">{snapshot.rates.map(rate => <div key={rate.metric} className="flex flex-wrap justify-between gap-2 text-xs"><dt className="text-ink-muted">{metricLabels[rate.metric]}</dt><dd>{money(rate.rate, snapshot.currency)} / {number(rate.perUnits)} 单位</dd></div>)}</dl><p className="mt-3 text-xs text-ink-muted [overflow-wrap:anywhere]">来源：{snapshot.source}</p></article>)}{!prices.length && !loading ? <p className="text-xs text-ink-muted">{pricesReadable ? '尚未设置价格。没有价格依据的调用会显示为未计价。' : '价格暂不可读取，请刷新后重试。'}</p> : null}</TabsContent>
     </Tabs>
   </div>;
+}
+
+export default function UsageCostsSection(props: { onOpenProviders: () => void }) {
+  if (!window.reizo?.accountBilling) return <LocalUsageCostsSection {...props} />;
+  return <div className="flex max-w-5xl flex-col gap-4"><h1 className="text-xl font-semibold">用量与费用</h1><Tabs defaultValue="account"><TabsList variant="line"><TabsTrigger value="account">Reizo 账户</TabsTrigger><TabsTrigger value="local">本机调用明细</TabsTrigger></TabsList><TabsContent value="account"><AccountBillingSection /></TabsContent><TabsContent value="local"><LocalUsageCostsSection {...props} embedded /></TabsContent></Tabs></div>;
 }

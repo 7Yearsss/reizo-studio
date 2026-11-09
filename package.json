@@ -11,6 +11,8 @@
     "build:video-editor": "node scripts/build-openchatcut-runtime.mjs",
     "prestart": "node scripts/dev-kill.mjs",
     "start": "electron-forge start",
+    "desktop:build": "node scripts/build-desktop-preview.mjs",
+    "desktop:open": "node scripts/open-desktop-preview.mjs",
     "package": "node scripts/forge-build.mjs package",
     "make": "node scripts/forge-build.mjs make",
     "publish": "electron-forge publish",

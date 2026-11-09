@@ -50,6 +50,8 @@ vertical rules live in skills and delivery plans.
 
 ```bash
 npm start            # electron-forge start — full app with Vite dev servers (main/preload/renderer)
+npm run desktop:build # build a local snapshot after source changes; see docs/development-desktop.md
+npm run desktop:open  # open the snapshot without development servers
 npm run lint         # eslint --ext .ts,.tsx .
 npm run typecheck    # tsc --noEmit
 npm run test:unit    # vitest run — all src/**/*.test.ts(x)
@@ -83,6 +85,7 @@ Electron GUI click-through in a headless environment).
 | Video editor | `server/videoEditor/`, `agent/videoEditorTools.ts` | `docs/openchatcut-integration.md`, `docs/video-editor-acceptance.md` |
 | Computer use | `src/main/computerUse/`, `agent/computerTools.ts`, `shared/computerUse.ts` | `docs/computer-use-integration.md` |
 | Providers, models, usage, wallet | `shared/providers.ts`, `modelCatalog.ts`, `server/providerResolver.ts`, `routes/usage.ts`, `src/main/account/` | `docs/provider-model-usage.md`, `docs/account-wallet.md`, `docs/account-login.md` |
+| Account settlement and prices | `shared/accountBilling.ts`, `account/wallet.ts`, renderer `AccountBillingSection` | `docs/account-billing.md` |
 | Skills, plugins, MCP | `src/main/skills.ts`, `skillHub.ts`, `server/plugins/`, `server/mcp-builtin/`, `agent/mcpTools.ts` | `docs/handoff-plugins.md` |
 | Memory & Harness evolution | `src/main/memoryJobs.ts`, `workspaceMemoryDir.ts`, `agent/harness*.ts`, `skillRefiner.ts`, `turnTrace.ts` | comments at the top of each file |
 | Voice input | `server/voice/`, renderer `VoiceInputButton` + recognition worker | `docs/voice-input.md` |

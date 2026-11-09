@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('reizo', {
   accountReopen: () => ipcRenderer.invoke(IPC.ACCOUNT_REOPEN),
   accountRefresh: () => ipcRenderer.invoke(IPC.ACCOUNT_REFRESH),
   accountWallet: (input?: { organizationId?: string; order?: string }) => ipcRenderer.invoke(IPC.ACCOUNT_WALLET, input),
+  accountBilling: (input?: import('../shared/accountBilling').AccountBillingQuery) => ipcRenderer.invoke(IPC.ACCOUNT_BILLING, input),
   accountTopup: (input: import('../shared/accountWallet').AccountTopupInput) => ipcRenderer.invoke(IPC.ACCOUNT_TOPUP, input),
   accountTopupOpen: (input: { organizationId: string; order: string }) => ipcRenderer.invoke(IPC.ACCOUNT_TOPUP_OPEN, input),
   platform: process.platform,

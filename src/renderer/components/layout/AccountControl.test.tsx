@@ -16,11 +16,12 @@ const pending: AccountState = { ...signedOut, status: 'pending', code: '1234ABCD
 const authenticated: AccountState = { ...signedOut, status: 'authenticated', user: { id: '1', username: 'admin', displayName: 'Admin', email: null } };
 let root: Root, container: HTMLDivElement;
 let snapshot: AccountState;
-const bridge = { accountStatus: vi.fn(), accountLogin: vi.fn(), accountPasswordLogin: vi.fn(), accountLogout: vi.fn(), accountReopen: vi.fn(), accountRefresh: vi.fn(), platform: 'win32' };
+const bridge = { accountStatus: vi.fn(), accountWallet: vi.fn(), accountLogin: vi.fn(), accountPasswordLogin: vi.fn(), accountLogout: vi.fn(), accountReopen: vi.fn(), accountRefresh: vi.fn(), platform: 'win32' };
 beforeEach(() => {
   vi.clearAllMocks(); vi.useFakeTimers(); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   snapshot = signedOut;
   bridge.accountStatus.mockImplementation(async () => snapshot);
+  bridge.accountWallet.mockResolvedValue({ balance: { availableCredits: 12.345, syncStatus: 'ready' } });
   bridge.accountLogin.mockResolvedValue(pending);
   bridge.accountPasswordLogin.mockResolvedValue(authenticated);
   bridge.accountLogout.mockResolvedValue(signedOut);
@@ -43,6 +44,17 @@ async function select(text: string) {
   await act(async () => target.click());
 }
 async function poll() { await act(async () => { await vi.advanceTimersByTimeAsync(2000); }); }
+
+it('shows the actual balance as soon as the account menu opens', async () => {
+  snapshot = authenticated; await render(); await openMenu();
+  expect(document.querySelector('[aria-label="余额与充值"]')?.textContent).toContain('12.345 积分');
+  expect(bridge.accountWallet).toHaveBeenCalledOnce();
+});
+it('never displays a failed balance sync as zero', async () => {
+  snapshot = authenticated; bridge.accountWallet.mockRejectedValueOnce(new Error('offline'));
+  await render(); await openMenu();
+  expect(document.querySelector('[aria-label="余额与充值"]')?.textContent).toContain('— 积分');
+});
 
 it('opens an anchored menu, routes to real settings sections, and supports the settings shortcut', async () => {
   snapshot = authenticated; await render(); await openMenu();

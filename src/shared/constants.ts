@@ -16,6 +16,7 @@ export const IPC = {
   ACCOUNT_REOPEN: 'reizo:account-reopen',
   ACCOUNT_REFRESH: 'reizo:account-refresh',
   ACCOUNT_WALLET: 'reizo:account-wallet',
+  ACCOUNT_BILLING: 'reizo:account-billing',
   ACCOUNT_TOPUP: 'reizo:account-topup',
   ACCOUNT_TOPUP_OPEN: 'reizo:account-topup-open',
   GET_API_ORIGIN: 'reizo:get-api-origin',

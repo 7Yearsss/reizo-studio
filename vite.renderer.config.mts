@@ -25,6 +25,6 @@ export default defineConfig({
     port: 46173,
     strictPort: true,
     // Editor bundles and QA profiles can contain thousands of directories.
-    watch: { ignored: ['**/.cache/**', '**/.vite/**', '**/out/**', '**/dist/**'] },
+    watch: { ignored: ['**/.cache/**', '**/.vite/**', '**/out/**', '**/dist/**', '**/docs/**', '**/scripts/**', '**/src/main/**', '**/src/preload/**', '**/*.test.ts', '**/*.test.tsx', '**/*.md'] },
   },
 });

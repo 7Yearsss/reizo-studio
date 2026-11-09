@@ -34,6 +34,7 @@ export interface ReizoBridge {
   accountReopen(): Promise<import('./account').AccountState>;
   accountRefresh(): Promise<import('./account').AccountState>;
   accountWallet(input?: { organizationId?: string; order?: string }): Promise<import('./accountWallet').AccountWallet>;
+  accountBilling(input?: import('./accountBilling').AccountBillingQuery): Promise<import('./accountBilling').AccountBilling>;
   accountTopup(input: import('./accountWallet').AccountTopupInput): Promise<import('./accountWallet').AccountCheckout>;
   accountTopupOpen(input: { organizationId: string; order: string }): Promise<import('./accountWallet').AccountCheckout>;
   platform: NodeJS.Platform;

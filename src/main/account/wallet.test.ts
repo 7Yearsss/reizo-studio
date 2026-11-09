@@ -1,6 +1,11 @@
 import { expect, it, vi } from 'vitest';
 import { AccountWalletClient } from './wallet';
 import type { AccountPaymentOrder } from '../../shared/accountWallet';
+import type { AccountBilling } from '../../shared/accountBilling';
+
+const billing: AccountBilling = { organization: { id: '11111111-1111-4111-8111-111111111111', name: 'Workspace' }, balance: { availableCredits: 12, usedCredits: 3 },
+  billing: { creditsPerCny: 1, plan: { status: 'not_configured' }, allowBalanceFallback: true, settlementMode: 'legacy_balance' },
+  usage: { status: 'ready', page: 1, pageSize: 20, total: 0, items: [] }, pricing: { status: 'ready', updatedAt: null, items: [] } };
 
 const organizationId = '11111111-1111-4111-8111-111111111111';
 const token = 't'.repeat(43); const reference = 'RZD1234567890123456789012345678901234567890';
@@ -19,6 +24,23 @@ function fixture() {
   const client = new AccountWalletClient({ origin: 'https://reizo.example', fetch: fetcher, openCashier: open, identity: () => identity });
   return { client, fetcher, open, logout: () => { identity = null; } };
 }
+
+it('reads validated account charges with the desktop bearer, pins workspace and strips remote credentials', async () => {
+  const f = fixture(); f.fetcher.mockImplementation(async () => Response.json({ ...billing, usage: { ...billing.usage, page: 2 }, apiKey: 'sk-private' }));
+  const result = await f.client.billing({ organizationId, page: 2, type: 'error' });
+  expect(JSON.stringify(result)).not.toContain('sk-private');
+  expect(String(f.fetcher.mock.calls[0][0])).toContain('/api/desktop-auth/billing?organizationId=');
+  expect(f.fetcher.mock.calls[0][1]).toMatchObject({ method: 'GET', headers: { Authorization: `Bearer ${token}` } });
+  expect(f.open).not.toHaveBeenCalled();
+  await expect(f.client.billing({ organizationId: '33333333-3333-4333-8333-333333333333' })).rejects.toThrow('工作区');
+});
+it('rejects late account charge responses after logout and invalid requests before fetching', async () => {
+  const f = fixture(); await expect(f.client.billing({ page: -1 })).rejects.toThrow('参数'); expect(f.fetcher).not.toHaveBeenCalled();
+  let finish: (response: Response) => void;
+  f.fetcher.mockReturnValue(new Promise<Response>(resolve => { finish = resolve; }));
+  const pending = f.client.billing(); f.logout(); finish(Response.json(billing));
+  await expect(pending).rejects.toThrow('账号状态已变化');
+});
 
 it('uses desktop authorization and returns public wallet fields without credentials or cashier tickets', async () => {
   const f = fixture(); f.fetcher.mockResolvedValue(Response.json({ ...snapshot, cashierUrl: cashier, apiKey: 'sk-private' }));

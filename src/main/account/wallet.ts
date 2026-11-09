@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { AccountCheckout, AccountTopupInput, AccountWallet } from '../../shared/accountWallet';
 import { isCashierUrl, type CashierPurchase } from './cashierPolicy';
+import { AccountBillingSchema, AccountBillingQuerySchema, type AccountBilling } from '../../shared/accountBilling';
 
 interface Identity { token: string; userId: string; generation: number }
 interface Dependencies { origin: string; fetch: typeof fetch; openCashier: (purchase: CashierPurchase) => Promise<void>; identity: () => Identity | null }
@@ -38,20 +39,20 @@ export class AccountWalletClient {
     const current = this.deps.identity();
     if (!current || current.token !== identity.token || current.userId !== identity.userId || current.generation !== identity.generation) throw new Error('账号状态已变化，请重新打开充值面板。');
   }
-  private async request(identity: Identity, query = '', input?: AccountTopupInput): Promise<Record<string, unknown>> {
+  private async request(identity: Identity, query = '', input?: AccountTopupInput, resource: 'wallet' | 'billing' = 'wallet'): Promise<Record<string, unknown>> {
     let response: Response;
-    try { response = await this.deps.fetch(`${this.deps.origin}/api/desktop-auth/wallet${query}`, {
-      method: input ? 'POST' : 'GET', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(15_000),
+    try { response = await this.deps.fetch(`${this.deps.origin}/api/desktop-auth/${resource}${query}`, {
+      method: input ? 'POST' : 'GET', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(resource === 'billing' ? 25000 : 15000),
       headers: { Authorization: `Bearer ${identity.token}`, ...(input ? { 'Content-Type': 'application/json' } : {}) },
       ...(input ? { body: JSON.stringify(input) } : {}),
-    }); } catch { throw new Error(input ? '订单提交状态未确认，请先刷新充值记录。重试会沿用本次请求编号。' : '暂时无法连接充值服务，请稍后刷新。'); }
+    }); } catch { throw new Error(input ? '订单提交状态未确认，请先刷新充值记录。重试会沿用本次请求编号。' : resource === 'billing' ? '暂时无法连接账户计费服务，请稍后刷新。' : '暂时无法连接充值服务，请稍后刷新。'); }
     this.assertCurrent(identity);
     if (!response.ok) {
       if (response.status === 401) throw new Error('登录已失效，请重新登录 Reizo。');
-      let message = response.status === 404 ? '网页服务尚未启用客户端充值，请更新网页服务。' : response.status === 403 ? '当前账号没有此工作区的充值权限。' : response.status === 429 ? '操作过于频繁，请稍后重试。' : '充值服务暂不可用，请稍后刷新。';
+      let message = response.status === 404 ? resource === 'billing' ? '账户消费接口尚未部署，请更新网页服务。' : '网页服务尚未启用客户端充值，请更新网页服务。' : response.status === 403 ? '当前账号没有此工作区的访问权限。' : response.status === 429 ? '操作过于频繁，请稍后重试。' : '账户服务暂不可用，请稍后刷新。';
       try {
         const body = await response.json();
-        if (typeof body?.code === 'string' && /^(desktop_wallet_error|invalid_topup_amount|invalid_payment_method|topup_|organization_)/.test(body.code) && typeof body.error === 'string') {
+        if (typeof body?.code === 'string' && /^(desktop_wallet_error|desktop_billing_error|invalid_topup_amount|invalid_payment_method|topup_|organization_)/.test(body.code) && typeof body.error === 'string') {
           message = body.error.split(identity.token).join('[已隐藏]').replace(/sk-[A-Za-z0-9_-]+/g, '[已隐藏]').replace(/\p{Cc}/gu, ' ').slice(0, 200);
         }
       } catch { /* Never display raw remote error pages. */ }
@@ -72,6 +73,17 @@ export class AccountWalletClient {
     const wallet = this.parseWallet(await this.request(identity, query.size ? `?${query}` : ''));
     if (parsed.data.organizationId && wallet.organization.id !== parsed.data.organizationId || parsed.data.order && wallet.order?.reference !== parsed.data.order) throw new Error('工作区或订单已变化，请刷新充值信息。');
     return wallet;
+  }
+  async billing(input: unknown = {}): Promise<AccountBilling> {
+    const parsed = AccountBillingQuerySchema.safeParse(input);
+    if (!parsed.success) throw new Error('消费查询参数无效。');
+    const identity = this.current(), query = new URLSearchParams();
+    for (const [key, value] of Object.entries(parsed.data)) query.set(key, String(value));
+    const result = AccountBillingSchema.safeParse(await this.request(identity, query.size ? `?${query}` : '', undefined, 'billing'));
+    if (!result.success) throw new Error('账户消费数据无效，请刷新后重试。');
+    if (parsed.data.organizationId && result.data.organization.id !== parsed.data.organizationId) throw new Error('工作区已变化，请刷新消费记录。');
+    if (result.data.usage.page !== (parsed.data.page ?? 1)) throw new Error('消费页码不匹配，请刷新重试。');
+    return result.data;
   }
   private async checkout(identity: Identity, body: Record<string, unknown>): Promise<AccountCheckout> {
     const order = orderSchema.parse(body.order);

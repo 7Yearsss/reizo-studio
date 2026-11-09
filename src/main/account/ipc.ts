@@ -16,7 +16,7 @@ export function createDesktopAccountService(dataRoot: string) {
 export function registerAccountIpc(dataRoot: string, service = createDesktopAccountService(dataRoot)) {
   let stopped = false;
   const rendererUrl = MAIN_WINDOW_VITE_DEV_SERVER_URL || pathToFileURL(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`)).href;
-  const channels = [IPC.ACCOUNT_STATUS, IPC.ACCOUNT_LOGIN, IPC.ACCOUNT_PASSWORD_LOGIN, IPC.ACCOUNT_LOGOUT, IPC.ACCOUNT_REOPEN, IPC.ACCOUNT_REFRESH, IPC.ACCOUNT_WALLET, IPC.ACCOUNT_TOPUP, IPC.ACCOUNT_TOPUP_OPEN] as const;
+  const channels = [IPC.ACCOUNT_STATUS, IPC.ACCOUNT_LOGIN, IPC.ACCOUNT_PASSWORD_LOGIN, IPC.ACCOUNT_LOGOUT, IPC.ACCOUNT_REOPEN, IPC.ACCOUNT_REFRESH, IPC.ACCOUNT_WALLET, IPC.ACCOUNT_BILLING, IPC.ACCOUNT_TOPUP, IPC.ACCOUNT_TOPUP_OPEN] as const;
   for (const channel of channels) {
     ipcMain.handle(channel, async (event, input?: unknown) => {
       const frame = event.senderFrame;
@@ -29,6 +29,7 @@ export function registerAccountIpc(dataRoot: string, service = createDesktopAcco
       if (channel === IPC.ACCOUNT_REOPEN) { await service.reopen(); return service.snapshot(); }
       if (channel === IPC.ACCOUNT_REFRESH) return service.refresh();
       if (channel === IPC.ACCOUNT_WALLET) return service.wallet.read(input ?? {});
+      if (channel === IPC.ACCOUNT_BILLING) return service.wallet.billing(input ?? {});
       if (channel === IPC.ACCOUNT_TOPUP) return service.wallet.create(input);
       if (channel === IPC.ACCOUNT_TOPUP_OPEN) return service.wallet.open(input);
       return service.snapshot();
