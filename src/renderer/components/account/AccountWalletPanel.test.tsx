@@ -43,7 +43,7 @@ it('keeps pending distinct from credited and refreshes balance after the server 
   await render(); expect(host.textContent).toContain('待支付');
   await act(async () => vi.advanceTimersByTimeAsync(3000)); expect(host.textContent).toContain('到账处理中');
   await act(async () => vi.advanceTimersByTimeAsync(3000)); expect(host.textContent).toContain('已到账');
-  expect(host.querySelector('.text-2xl')?.textContent).toBe('32');
+  expect(host.querySelector('.text-2xl')?.textContent).toBe('9,600');
   expect(mocks.create).not.toHaveBeenCalled();
 });
 
@@ -65,6 +65,35 @@ it('opens an existing pending order without creating another one', async () => {
   await act(async () => continueButton?.click());
   expect(mocks.open).toHaveBeenCalledWith({ organizationId: org, order: order.reference });
   expect(mocks.create).not.toHaveBeenCalled();
+});
+it('creates a plan order only after an explicit selection and reuses its identity after uncertainty',async()=>{
+  mocks.read.mockResolvedValue({...wallet,plans:[{id:'core',name:'基础',price:29,allowance:10000,discount:0.975,period:'month'}],membership:null});
+  mocks.create.mockRejectedValue(new Error('订单未确认'));
+  await render();expect(mocks.create).not.toHaveBeenCalled();
+  const select=()=>host.querySelector<HTMLButtonElement>('section[aria-label="额度套餐"] button')!;
+  await act(async()=>select().click());
+  const first=mocks.create.mock.calls[0][0];
+  expect(first).toEqual({organizationId:org,planId:'core',requestId:expect.any(String)});
+  await act(async()=>vi.advanceTimersByTimeAsync(10000));expect(mocks.create).toHaveBeenCalledTimes(1);
+  await act(async()=>select().click());expect(mocks.create.mock.calls[1][0]).toEqual(first);
+});
+it('shows the discounted payment while keeping the allowance grant at the list amount',async()=>{
+  mocks.read.mockResolvedValue({...wallet,config:{...wallet.config,topupDiscount:0.975},membership:{id:'core',name:'基础',allowance:10000,remainingAllowance:9000,discount:0.975,expiresAt:'2026-12-11T00:00:00Z'}});
+  await render();await button('¥20.00');
+  expect(host.textContent).toContain('¥19.50');expect(host.textContent).toContain('6,000 额度');
+  await act(async()=>host.querySelector<HTMLButtonElement>('button[type="submit"]')!.click());
+  expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({amount:20,expectedPayMoney:'19.50'}));
+});
+it('allows a fresh plan purchase after its previous order settles and membership is absent',async()=>{
+  const plans=[{id:'core',name:'基础',price:29,allowance:10000,discount:0.975,period:'month' as const}];
+  const pending={...order,reference:'RZP'+'a'.repeat(28),amount:29,credits:0,provider:'kyren',paymentMethod:'hosted',planName:'基础',allowance:10000};
+  mocks.read.mockResolvedValue({...wallet,plans,membership:null});mocks.create.mockResolvedValue({order:pending,cashierOpened:true});
+  await render();
+  const select=()=>host.querySelector<HTMLButtonElement>('section[aria-label="额度套餐"] button');
+  await act(async()=>select()?.click());const first=mocks.create.mock.calls[0][0].requestId;
+  mocks.read.mockResolvedValue({...wallet,plans,membership:null,orders:[{...pending,status:'success'}]});
+  await button('刷新');await act(async()=>select()?.click());
+  expect(mocks.create.mock.calls[1][0].requestId).not.toBe(first);
 });
 
 it('allows another recharge of the same amount after the first order settles', async () => {

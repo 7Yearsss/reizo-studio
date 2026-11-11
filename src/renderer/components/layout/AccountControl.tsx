@@ -1,3 +1,4 @@
+import { allowanceAmount } from '../../../shared/allowance';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, ChevronRight, ChevronsUpDown, Copy, Gauge, Info, LoaderCircle, LogIn, LogOut, Monitor, Moon, Palette, RefreshCw, Settings, Sun, UserRound, Wallet } from 'lucide-react';
 import { DropdownMenu as Menu } from 'radix-ui';
@@ -12,7 +13,6 @@ import { toast } from '../../lib/toast';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
 import AccountWalletPanel from '../account/AccountWalletPanel';
 import AccountPasswordForm from '../account/AccountPasswordForm';
-import { creditAmount } from '../../../shared/accountBilling';
 
 const item = 'flex cursor-default select-none items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] outline-none data-[highlighted]:bg-paper-inset data-[disabled]:pointer-events-none data-[disabled]:opacity-40 [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-ink-muted';
 const panel = 'z-50 overflow-y-auto rounded-2xl border border-line/70 bg-paper-raised p-1.5 text-ink shadow-[0_8px_36px_-10px_rgba(0,0,0,0.28)] outline-none';
@@ -162,7 +162,7 @@ export default function AccountControl() {
       <Menu.Portal><Menu.Content side="top" align="start" sideOffset={8} collisionPadding={12} className={`${panel} w-[var(--radix-dropdown-menu-trigger-width)] max-w-[calc(100vw-24px)] max-h-[var(--radix-dropdown-menu-content-available-height)]`} onCloseAutoFocus={(event) => { if (dialog) event.preventDefault(); }}>
         <Menu.Label className="flex items-center gap-2.5 px-2.5 py-3 font-normal">{avatar}<span className="min-w-0"><span className="block truncate text-sm font-medium">{name}</span><span className="block truncate text-xs text-ink-muted">{subtitle}</span></span></Menu.Label>
         <Menu.Separator className="mx-1 my-1 h-px bg-line/70" />
-        {user ? <Menu.Item className={`${item} mx-1 mb-1 border border-line bg-paper-inset/40 py-3`} aria-label="余额与充值" onSelect={() => showDialog('wallet')}><Wallet /><span className="flex-1">余额</span><span className="font-medium tabular-nums">{balanceLoading ? <LoaderCircle size={13} className="animate-spin" aria-label="正在同步余额" /> : `${creditAmount(state?.status === 'authenticated' && balanceOwner === `${user.id}:${state.models?.organizationId || ''}` ? menuBalance : null)} 积分`}</span><ChevronRight className="!size-3" /></Menu.Item> : null}
+        {user ? <Menu.Item className={`${item} mx-1 mb-1 border border-line bg-paper-inset/40 py-3`} aria-label="余额与充值" onSelect={() => showDialog('wallet')}><Wallet /><span className="flex-1">余额</span><span className="font-medium tabular-nums">{balanceLoading ? <LoaderCircle size={13} className="animate-spin" aria-label="正在同步余额" /> : `${allowanceAmount(state?.status === 'authenticated' && balanceOwner === `${user.id}:${state.models?.organizationId || ''}` ? menuBalance : null)} 额度`}</span><ChevronRight className="!size-3" /></Menu.Item> : null}
         {user ? <Menu.Item className={item} onSelect={() => showDialog('account')}><UserRound />账号信息{state?.status === 'offline' && <span className="ml-auto text-xs text-ink-muted">离线</span>}</Menu.Item> :
           <Menu.Item className={item} onSelect={() => showDialog('login')}><LogIn />{pending ? '继续登录' : '登录 Reizo'}</Menu.Item>}
         <Menu.Item className={item} onSelect={() => openSettings('usage')}><Gauge />本机用量</Menu.Item>

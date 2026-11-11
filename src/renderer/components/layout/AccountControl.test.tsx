@@ -47,13 +47,13 @@ async function poll() { await act(async () => { await vi.advanceTimersByTimeAsyn
 
 it('shows the actual balance as soon as the account menu opens', async () => {
   snapshot = authenticated; await render(); await openMenu();
-  expect(document.querySelector('[aria-label="余额与充值"]')?.textContent).toContain('12.345 积分');
+  expect(document.querySelector('[aria-label="余额与充值"]')?.textContent).toContain('3,703.5 额度');
   expect(bridge.accountWallet).toHaveBeenCalledOnce();
 });
 it('never displays a failed balance sync as zero', async () => {
   snapshot = authenticated; bridge.accountWallet.mockRejectedValueOnce(new Error('offline'));
   await render(); await openMenu();
-  expect(document.querySelector('[aria-label="余额与充值"]')?.textContent).toContain('— 积分');
+  expect(document.querySelector('[aria-label="余额与充值"]')?.textContent).toContain('— 额度');
 });
 
 it('opens an anchored menu, routes to real settings sections, and supports the settings shortcut', async () => {

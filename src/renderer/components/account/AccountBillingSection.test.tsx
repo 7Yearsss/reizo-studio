@@ -20,7 +20,7 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 async function render() { await act(async () => root.render(<AccountBillingSection />)); }
 it('shows server-settled charges, small amounts and a genuinely unconfigured plan', async () => {
-  await render(); expect(host.textContent).toContain('12.5'); expect(host.textContent).toContain('¥0.000002'); expect(host.textContent).toContain('待定价');
+  await render(); expect(host.textContent).toContain('3,750'); expect(host.textContent).toContain('¥0.000002'); expect(host.textContent).toContain('未开通');
   expect(host.querySelector('table')?.textContent).toContain('Actual model'); expect(billing).toHaveBeenCalledWith({ page: 1, type: 'consume', organizationId: data.organization.id });
 });
 it('displays unknown charges as unsynced, while a valid zero stays zero', async () => {
@@ -32,7 +32,7 @@ it('shows current model rates separately from settled history without recalculat
   const tab = [...host.querySelectorAll<HTMLElement>('[role="tab"]')].find(element => element.textContent === '模型定价');
   if (!tab) throw new Error('Missing pricing tab');
   await act(async () => { tab.focus(); tab.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
-  expect(host.textContent).toContain('2–4 / 百万 Token'); expect(host.textContent).toContain('当前账户模型费率');
+  expect(host.textContent).toContain('600–1,200 / 百万 Token'); expect(host.textContent).toContain('当前账户模型费率');
   expect(billing).toHaveBeenCalledOnce();
 });
 it('clears private account data promptly on logout and refuses late replies from an older page', async () => {

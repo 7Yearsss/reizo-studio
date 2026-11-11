@@ -25,6 +25,24 @@ function fixture() {
   return { client, fetcher, open, logout: () => { identity = null; } };
 }
 
+it('opens only the matching hosted plan checkout', async () => {
+  const f=fixture(),planOrder={...order,reference:'RZP'+'a'.repeat(28),provider:'kyren',paymentMethod:'hosted',amount:29,credits:0,planName:'基础',allowance:10000};
+  const hosted={mode:'hosted',url:'https://payment.kyren.io/checkout/one-time/cs_test',checkoutId:'cs_test',reference:planOrder.reference,amount:'29.00',currency:'CNY'};
+  f.fetcher.mockImplementation(async url=>String(url).includes('/cashier?')?Response.json(hosted):Response.json({order:planOrder,cashierUrl:cashier}));
+  await expect(f.client.create({organizationId,planId:'core',requestId:input.requestId})).resolves.toMatchObject({cashierOpened:true});
+  expect(f.open).toHaveBeenCalledWith(expect.objectContaining({mode:'hosted',amount:29,params:{}}));
+  f.fetcher.mockImplementation(async url=>String(url).includes('/cashier?')?Response.json({...hosted,url:'https://evil.example/checkout/one-time/cs_test'}):Response.json({order:planOrder,cashierUrl:cashier}));
+  await expect(f.client.create({organizationId,planId:'core',requestId:input.requestId})).rejects.toThrow('不匹配');
+});
+it('rejects a changed discount quote and another plan before opening payment', async () => {
+  const f=fixture();
+  f.fetcher.mockResolvedValue(Response.json({order:{...order,amount:20},cashierUrl:cashier}));
+  await expect(f.client.create({...input,expectedPayMoney:'19.50'})).rejects.toThrow('不符');
+  f.fetcher.mockResolvedValue(Response.json({order:{...order,provider:'kyren',paymentMethod:'hosted',amount:69,planName:'进阶',allowance:25000},cashierUrl:cashier}));
+  await expect(f.client.create({organizationId,planId:'core',requestId:input.requestId})).rejects.toThrow('不符');
+  expect(f.open).not.toHaveBeenCalled();
+});
+
 it('reads validated account charges with the desktop bearer, pins workspace and strips remote credentials', async () => {
   const f = fixture(); f.fetcher.mockImplementation(async () => Response.json({ ...billing, usage: { ...billing.usage, page: 2 }, apiKey: 'sk-private' }));
   const result = await f.client.billing({ organizationId, page: 2, type: 'error' });

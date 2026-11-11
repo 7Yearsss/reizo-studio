@@ -17,4 +17,5 @@ export interface CashierPurchase {
   reference: string;
   amount: number;
   currency: string;
+  mode?: 'hosted';
 }

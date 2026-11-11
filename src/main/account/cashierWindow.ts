@@ -43,7 +43,7 @@ export async function openAccountCashier(purchase: CashierPurchase): Promise<voi
     getMainWindow()?.focus();
   });
   try {
-    await win.loadURL(purchase.url, {
+    await win.loadURL(purchase.url, purchase.mode === 'hosted' ? undefined : {
       postData: [{ type: 'rawData', bytes: Buffer.from(new URLSearchParams(purchase.params).toString(), 'utf8') }],
       extraHeaders: 'Content-Type: application/x-www-form-urlencoded\r\n',
     });

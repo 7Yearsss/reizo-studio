@@ -11,14 +11,16 @@ const method = z.string().regex(/^[a-z0-9_-]{1,32}$/);
 const amount = z.number().finite().min(0).max(1e9);
 const orderSchema = z.object({ id: text, reference, status: z.enum(['pending', 'crediting', 'success', 'failed']),
   amount, currency: z.string().regex(/^[A-Z]{3}$/), credits: amount, provider: text, paymentMethod: method,
-  createdAt: z.string().datetime(), paidAt: z.string().datetime().nullable() }).transform(order => ({ ...order, paidAt: order.paidAt ?? null }));
+  createdAt: z.string().datetime(), paidAt: z.string().datetime().nullable(), planName: text.optional(), allowance: amount.optional() }).transform(order => ({ ...order, paidAt: order.paidAt ?? null }));
 const walletSchema = z.object({ organization: z.object({ id: z.string().uuid(), name: text }),
   balance: z.object({ availableCredits: z.number().finite().min(-1e9).max(1e9), currency: z.string().regex(/^[A-Z]{3}$/), syncStatus: z.enum(['ready', 'unavailable']) }),
   canTopup: z.boolean(), config: z.object({ enabled: z.boolean(), provider: text, currency: z.string().regex(/^[A-Z]{3}$/), creditsPerUnit: z.number().finite().positive().max(1e9),
     minTopup: z.number().int().positive().max(1e9), maxTopup: z.number().int().positive().max(1e9),
-    amountOptions: z.array(z.number().int().positive().max(1e9)).max(50), methods: z.array(z.object({ type: method, name: text })).max(20) }),
+    amountOptions: z.array(z.number().int().positive().max(1e9)).max(50), methods: z.array(z.object({ type: method, name: text })).max(20), topupDiscount:z.number().positive().max(1).optional() }),
+  plans:z.array(z.object({id:z.string(),name:text,productId:text,price:amount,allowance:amount,discount:z.number().positive().max(1),period:z.literal('month')})).max(4).optional(),
+  membership:z.object({id:text,name:text,discount:z.number().positive().max(1),allowance:amount,remainingAllowance:amount,expiresAt:z.string().datetime()}).nullable().optional(),
   orders: z.array(orderSchema).max(50), order: orderSchema.nullable().optional() });
-const inputSchema = z.object({ organizationId: z.string().uuid(), amount: z.number().int().positive().max(1e9), paymentMethod: method, requestId: z.string().uuid() }).strict();
+const inputSchema = z.union([z.object({ organizationId: z.string().uuid(), amount: z.number().int().positive().max(1e9), paymentMethod: method, requestId: z.string().uuid(),expectedPayMoney:z.string().regex(/^\d+\.\d{2}$/).optional() }).strict(),z.object({organizationId:z.string().uuid(),planId:z.enum(['core','plus','pro','max']),requestId:z.string().uuid()}).strict()]);
 const readSchema = z.object({ organizationId: z.string().uuid().optional(), order: reference.optional() }).strict();
 const purchaseSchema = z.object({ url: z.string().max(2048), params: z.object({
   pid: text, type: method, out_trade_no: reference, notify_url: z.string().max(2048), return_url: z.string().max(2048),
@@ -100,7 +102,15 @@ export class AccountWalletClient {
     this.assertCurrent(identity);
     if (!response.ok) throw new Error('收银台链接已失效或服务暂不可用，请在原订单中重新点击继续付款。');
     if (!response.headers.get('content-type')?.includes('application/json')) throw new Error('网页服务尚未启用客户端内置收银台，请更新网页服务。');
-    const parsed = purchaseSchema.safeParse(await response.json());
+    const payload = await response.json();
+    if (payload?.mode === 'hosted' && order.provider === 'kyren') {
+      const hosted=z.object({mode:z.literal('hosted'),url:z.string().url(),checkoutId:z.string().regex(/^cs_[A-Za-z0-9]+$/),reference,amount:z.string().regex(/^\d+\.\d{2}$/),currency:z.literal('CNY')}).parse(payload);
+      const target=new URL(hosted.url);
+      if (!['payment.kyren.io','payment.kyrenpay.com'].includes(target.hostname) || !isCashierUrl(hosted.url) || target.pathname!==`/checkout/one-time/${hosted.checkoutId}` || target.search || target.hash || hosted.reference!==order.reference || Number(hosted.amount)!==order.amount) throw new Error('套餐收银台与订单不匹配。');
+      this.assertCurrent(identity);
+      try { await this.deps.openCashier({...hosted,amount:order.amount,params:{}});return {order,cashierOpened:true}; } catch {return {order,cashierOpened:false};}
+    }
+    const parsed = purchaseSchema.safeParse(payload);
     if (!parsed.success || !isCashierUrl(parsed.data.url)) throw new Error('收银台支付信息无效，请刷新原订单后重试。');
     const purchase = parsed.data;
     const expectedReturn = new URL('/account/wallet', this.deps.origin); expectedReturn.searchParams.set('order', order.reference);
@@ -118,7 +128,8 @@ export class AccountWalletClient {
     const active = this.creating.get(key); if (active) return active;
     const pending = this.request(identity, '', input).then(body => {
       const order = orderSchema.parse(body.order);
-      if (order.amount !== input.amount || order.paymentMethod !== input.paymentMethod) throw new Error('订单金额或支付方式与本次选择不符，请刷新后核对。');
+      const planPrices={core:[29,10000],plus:[69,25000],pro:[129,45000],max:[229,80000]};
+      if ('amount' in input ? order.credits !== input.amount || order.amount > input.amount || input.expectedPayMoney && order.amount !== Number(input.expectedPayMoney) || order.paymentMethod !== input.paymentMethod : order.provider!=='kyren' || !order.planName || order.amount!==planPrices[input.planId][0] || order.allowance!==planPrices[input.planId][1]) throw new Error('订单金额或支付方式与本次选择不符，请刷新后核对。');
       return this.checkout(identity, body);
     }).finally(() => this.creating.delete(key));
     this.creating.set(key, pending); return pending;

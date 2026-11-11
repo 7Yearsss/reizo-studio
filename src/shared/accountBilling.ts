@@ -5,6 +5,7 @@ const credits = z.number().finite().min(0).max(1e12).nullable();
 export const AccountBillingSchema = z.object({
   organization: z.object({ id: z.string().uuid(), name: z.string().max(512) }),
   balance: z.object({ availableCredits: z.number().finite().min(-1e9).max(1e12).nullable(), usedCredits: credits }),
+  membership: z.object({id:z.string(),name:z.string(),discount:z.number().positive().max(1),allowance:z.number().nonnegative(),remainingAllowance:z.number().nonnegative(),expiresAt:z.string().datetime()}).nullable().optional(),
   billing: z.object({ creditsPerCny: z.literal(1), plan: z.object({ status: z.literal('not_configured') }), allowBalanceFallback: z.boolean(), settlementMode: z.enum(['legacy_balance', 'reizo']) }),
   usage: z.object({ status: z.enum(['ready', 'unavailable']), page: z.number().int().positive().max(10000), pageSize: z.literal(20), total: counter,
     items: z.array(z.object({ id: z.string().min(1).max(512), model: z.string().max(512), createdAt: z.string().datetime().nullable(), type: z.enum(['consume', 'error']), credits,

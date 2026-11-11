@@ -14,6 +14,22 @@ Recharge belongs to the displayed Reizo workspace. It does not fund manually
 configured third-party API keys. The local usage ledger is a separate view.
 An unavailable balance is displayed as `—`, never as a zero balance.
 
+## Monthly plans (2026-11-11)
+
+The panel also loads four live Kyren products and current membership. Standard
+topups buy 300 allowance units per CNY; active plans reduce topup payment money
+only. Existing API/database credit fields keep their legacy scale. Display
+conversion lives in `src/shared/allowance.ts`; do not multiply stored quota or
+native recharge grants. Confirmed prices, allowance and expiry rules are in
+`docs/account-billing.md`.
+
+Plan creation explicitly submits `{organizationId, planId, requestId}`. Opening
+the panel never creates a checkout. Hosted Kyren purchases are verified in main
+against the selected plan, amount, allowance, saved checkout ID and exact HTTPS
+checkout URL, then loaded by GET in the existing isolated cashier. Amount
+recharges retain the signed Epay POST flow. Pending orders preserve their
+identity; uncertain creation is never automatically repeated.
+
 ## Payment behavior
 
 - Only an authenticated online desktop grant can read the wallet or create orders.
@@ -50,17 +66,15 @@ precedence over its existing `/api/desktop-auth/[action]` handler:
 | --- | --- | --- |
 | `GET /api/desktop-auth/wallet` | Desktop bearer | Current workspace, balance, config and recent orders |
 | `GET /api/desktop-auth/wallet?organizationId=…&order=…` | Desktop bearer | Same-workspace order status and temporary cashier link |
-| `POST /api/desktop-auth/wallet` | Desktop bearer | Explicit `{organizationId, amount, paymentMethod, requestId}` order creation |
-| `GET /api/desktop-auth/cashier?ticket=…` | Signed short-lived ticket | Revalidate and render the existing signed Epay POST form; `Accept: application/json` returns its signed URL/fields to Electron main |
+| `POST /api/desktop-auth/wallet` | Desktop bearer | Explicit amount or plan order creation; discounted topups pin `expectedPayMoney` |
+| `GET /api/desktop-auth/cashier?ticket=…` | Signed short-lived ticket | Revalidate and return hosted Kyren checkout JSON, or the existing signed Epay POST form/JSON |
 
 The adapter reuses `createConsoleTopupOrder`, the existing Epay configuration,
 payment signatures, notification route and quota-crediting logic. Merchant secrets
-remain on the website. No new schema migration or payment environment variables
-are introduced; the previously deployed desktop-session migration is required.
+remain on the website. Plans additionally require migrations 0016/0017 and private
+Kyren/relay configuration described in the web checkout's `docs/kyren-plans.md`.
 
-The website patch is limited to `desktop-wallet.ts`, its two route handlers,
-`console/topup.ts`, `console/server.ts`, `console/types.ts`, and desktop authorization
-copy. Preserve unrelated changes in the sibling checkout. Deploy these changes
+Preserve unrelated changes in the sibling checkout. Deploy these changes
 against the website's current source baseline before shipping the desktop client.
 Do not publish the sibling checkout's unrelated dirty work as part of this feature.
 
